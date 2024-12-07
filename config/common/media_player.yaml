@@ -24,19 +24,24 @@ fusb302b:
               return id(pd_fusb302b).contract_voltage >= 9;
           then:
             - tas2780.activate:
+speaker:
+  - platform: i2s_audio
+    sample_rate: 48000
+    i2s_clock_mode: external
+    i2s_dout_pin: GPIO9
+    bits_per_sample: 32bit
+    i2s_audio_id: i2s_shared
+    dac_type: external
+    channel: right_left
 
 
 media_player:
-  - platform: satellite1
+  - platform: nabu
     id: nabu_media_player
     name: Sat1 Media Player
-    internal: false
     sample_rate: 48000
-    i2s_dout_pin: GPIO9
-    bits_per_sample: 32bit
-    i2s_clock_mode: external
-    channel: right_left
-    i2s_audio_id: i2s_shared
+    internal: false
+    speaker:
     volume_increment: 0.05
     volume_min: 0.4
     volume_max: 0.85

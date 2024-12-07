@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins
-from esphome.const import CONF_ID, CONF_MODE, CONF_MODEL
+from esphome.const import CONF_ID, CONF_TIMEOUT
 from esphome.components import esp32, speaker
 
 from .. import i2s_settings as i2s
@@ -9,15 +9,13 @@ from .. import i2s_settings as i2s
 from .. import (
     CONF_I2S_AUDIO_ID,
     CONF_I2S_DOUT_PIN,
-    CONF_I2S_DAC,
-    CONFIG_SCHEMA_DAC,
     I2SAudioComponent,
     I2SWriter,
     i2s_audio_ns,
     register_i2s_writer,
 )
 
-CODEOWNERS = ["@jesserockz"]
+CODEOWNERS = ["@gnumpi"]
 DEPENDENCIES = ["i2s_audio"]
 
 I2SAudioSpeaker = i2s_audio_ns.class_(
@@ -50,13 +48,6 @@ def validate_esp32_variant(config):
 CONFIG_SCHEMA = cv.All(
     cv.typed_schema(
         {
-            "internal": speaker.SPEAKER_SCHEMA.extend(
-                {
-                    cv.GenerateID(): cv.declare_id(I2SAudioSpeaker),
-                    cv.GenerateID(CONF_I2S_AUDIO_ID): cv.use_id(I2SAudioComponent),
-                    cv.Required(CONF_MODE): cv.enum(INTERNAL_DAC_OPTIONS, lower=True),
-                }
-            ).extend(cv.COMPONENT_SCHEMA),
             "external": speaker.SPEAKER_SCHEMA.extend(
                 {
                     cv.GenerateID(): cv.declare_id(I2SAudioSpeaker),
@@ -65,13 +56,13 @@ CONFIG_SCHEMA = cv.All(
                         CONF_I2S_DOUT_PIN
                     ): pins.internal_gpio_output_pin_number,
                     cv.Optional(
-                        CONF_I2S_DAC, default={CONF_MODEL: "generic"}
-                    ): CONFIG_SCHEMA_DAC,
+                        CONF_TIMEOUT, default="500ms"
+                    ): cv.positive_time_period_milliseconds,
                 }
             )
             .extend(
                 i2s.get_i2s_config_schema(
-                    default_channel="right", default_rate=16000, default_bits="16bit"
+                    default_channel="right_left", default_rate=48000, default_bits="32bit"
                 )
             )
             .extend(cv.COMPONENT_SCHEMA),
@@ -89,7 +80,5 @@ async def to_code(config):
 
     await cg.register_parented(var, config[CONF_I2S_AUDIO_ID])
 
-    if config[CONF_DAC_TYPE] == "internal":
-        cg.add(var.set_internal_dac_mode(config[CONF_MODE]))
-    else:
-        await register_i2s_writer(var, config)
+    await register_i2s_writer(var, config)
+    cg.add(var.set_timeout(config[CONF_TIMEOUT]))
