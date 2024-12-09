@@ -30,7 +30,17 @@ event:
       - triple_press
       - long_press
 
+
 binary_sensor:
+  - platform: gpio
+    id: line_out_sensor
+    pin:
+      pcm5122: 
+      pin: 4
+      inverted: false
+    name: "line-out jack"
+    icon: "mdi:audio-input-stereo-minijack"
+  
   - platform: gpio
     id: btn_up
     pin:
