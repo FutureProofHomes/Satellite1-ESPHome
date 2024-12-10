@@ -33,6 +33,8 @@ speaker:
     i2s_audio_id: i2s_shared
     dac_type: external
     channel: right_left
+    timeout: never
+    #buffer_duration: 100ms
 
 
 media_player:

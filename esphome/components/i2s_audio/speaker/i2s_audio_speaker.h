@@ -7,11 +7,12 @@
 #include <driver/i2s.h>
 
 #include <freertos/event_groups.h>
-#include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/FreeRTOS.h>
 
 #include "esphome/components/audio/audio.h"
 #include "esphome/components/speaker/speaker.h"
+
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/helpers.h"
@@ -44,12 +45,13 @@ struct DataEvent {
 
 class I2SAudioSpeaker : public Component, public speaker::Speaker, public I2SWriter {
  public:
-  float get_setup_priority() const override { return esphome::setup_priority::LATE; }
+  float get_setup_priority() const override { return esphome::setup_priority::PROCESSOR; }
 
   void setup() override;
   void loop() override;
   void dump_config() override {this->dump_i2s_settings();}
 
+  void set_buffer_duration(uint32_t buffer_duration_ms) { this->buffer_duration_ms_ = buffer_duration_ms; }
   void set_timeout(uint32_t ms) { this->timeout_ = ms; }
 
   void start() override;
@@ -135,10 +137,14 @@ class I2SAudioSpeaker : public Component, public speaker::Speaker, public I2SWri
   TaskHandle_t speaker_task_handle_{nullptr};
   EventGroupHandle_t event_group_{nullptr};
 
-  uint8_t *data_buffer_;
-  std::unique_ptr<RingBuffer> audio_ring_buffer_;
+  QueueHandle_t i2s_event_queue_;
 
-  uint32_t timeout_;
+  uint8_t *data_buffer_;
+  std::shared_ptr<RingBuffer> audio_ring_buffer_;
+
+  uint32_t buffer_duration_ms_;
+
+  optional<uint32_t> timeout_;
 
 
   bool task_created_{false};

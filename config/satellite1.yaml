@@ -76,21 +76,15 @@ dashboard_import:
 
 external_components:
   - source:
-      type: git
-      url: https://github.com/gnumpi/nabu-voice-kit
-      ref: dev
-    components: [ audio_dac, media_player ]
-
-  - source:
       type: local
       path: ../esphome/components
-    components: [ i2s_audio, satellite1, memory_flasher, tas2780, pcm5122, fusb302b ]
+    components: [ i2s_audio, satellite1, memory_flasher, tas2780, pcm5122, fusb302b, nabu ]
   
   - source:
       type: git
       url: https://github.com/esphome/voice-kit
-      ref: 24.10.17
-    components: [ microphone, micro_wake_word, voice_assistant, nabu ]
+      ref: 24.12.3
+    components: [ microphone, micro_wake_word, voice_assistant, media_player ]
 
 
 packages:

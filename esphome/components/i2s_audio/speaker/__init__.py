@@ -21,7 +21,8 @@ DEPENDENCIES = ["i2s_audio"]
 I2SAudioSpeaker = i2s_audio_ns.class_(
     "I2SAudioSpeaker", cg.Component, speaker.Speaker, I2SWriter
 )
-
+CONF_BUFFER_DURATION = "buffer_duration"
+CONF_NEVER = "never"
 i2s_dac_mode_t = cg.global_ns.enum("i2s_dac_mode_t")
 
 CONF_MUTE_PIN = "mute_pin"
@@ -56,8 +57,12 @@ CONFIG_SCHEMA = cv.All(
                         CONF_I2S_DOUT_PIN
                     ): pins.internal_gpio_output_pin_number,
                     cv.Optional(
-                        CONF_TIMEOUT, default="500ms"
-                    ): cv.positive_time_period_milliseconds,
+                CONF_BUFFER_DURATION, default="500ms"
+            ): cv.positive_time_period_milliseconds,
+            cv.Optional(CONF_TIMEOUT, default="500ms"): cv.Any(
+                cv.positive_time_period_milliseconds,
+                cv.one_of(CONF_NEVER, lower=True),
+            ),
                 }
             )
             .extend(
@@ -81,4 +86,6 @@ async def to_code(config):
     await cg.register_parented(var, config[CONF_I2S_AUDIO_ID])
 
     await register_i2s_writer(var, config)
-    cg.add(var.set_timeout(config[CONF_TIMEOUT]))
+    if config[CONF_TIMEOUT] != CONF_NEVER:
+        cg.add(var.set_timeout(config[CONF_TIMEOUT]))
+    cg.add(var.set_buffer_duration(config[CONF_BUFFER_DURATION]))
