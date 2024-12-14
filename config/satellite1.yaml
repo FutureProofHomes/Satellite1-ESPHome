@@ -107,6 +107,7 @@ packages:
   #OPTIONAL COMPONENTS 
   # mmwave_ld2410: !include common/mmwave_ld2410.yaml
   # debug: !include common/debug.yaml
+  # developer: !include common/developer.yaml
 
 ota:
   - platform: esphome
