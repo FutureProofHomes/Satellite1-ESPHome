@@ -12,7 +12,7 @@ substitutions:
   project_name: Satellite1
   component_name: Core
   
-  xmos_fw_version: "v1.0.1-alpha.40"
+  xmos_fw_version: "v1.0.1"
   built_for_core_hw_version: "v1.0.0-beta.1"
   built_for_hat_hw_version: "v1.0.0-beta.1"
 
@@ -63,7 +63,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/FutureProofHomes/home-assistant-voice-pe
-      ref: satellite1
+      ref: 2024.12.3-fph.0
     components: [ microphone, voice_assistant, audio_dac, media_player, nabu, micro_wake_word ]
 
 ota:
