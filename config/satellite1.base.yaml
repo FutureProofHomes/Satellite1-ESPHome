@@ -39,7 +39,7 @@ esphome:
   name: ${node_name}
   name_add_mac_suffix: true
   friendly_name: ${friendly_name}
-  min_version: 2024.11.2
+  min_version: 2024.12.1
   
   on_boot:
     - priority: 375
