@@ -5,6 +5,16 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
+  # Global variable tracking if the jack has been plugged touched.
+  - id: jack_plugged_recently
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # Global variable tracking if the jack has been unplugged touched.
+  - id: jack_unplugged_recently
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
 light:
   # Hardware LED ring. Not used because remapping needed
@@ -520,6 +530,10 @@ script:
             id(control_leds_volume_buttons_touched).execute();
           } else if (id(btn_action).state) {
             id(control_leds_action_button_touched).execute();
+          } else if (id(jack_plugged_recently)) {
+            id(control_leds_jack_plugged_recently).execute();
+          } else if (id(jack_unplugged_recently)) {
+            id(control_leds_jack_unplugged_recently).execute();
           } else if (id(warning)) {
             id(control_leds_warning).execute();
           } else if (id(timer_ringing).state) {

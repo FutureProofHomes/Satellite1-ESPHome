@@ -36,9 +36,11 @@ void PCMGPIOPin::digital_write(bool value) {
 }
 
 bool PCMGPIOPin::digital_read() {
-    uint8_t reg_val = this->parent_->reg(0x77).get();
-    return !!(reg_val & (1 << (this->pin_ - 1))) != this->inverted_;
-
+    optional<uint8_t> read = this->parent_->read_byte(0x77);
+    if( read.has_value() ){
+        this->value_ = !!(read.value() & (1 << (this->pin_ - 1))) != this->inverted_;
+    }
+    return this->value_;
 }
 
 } // namespace pcm5122

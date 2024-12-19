@@ -23,6 +23,7 @@ protected:
   uint8_t pin_;
   bool inverted_;
   gpio::Flags flags_;
+  bool value_{false};
 };
 
 } // namespace pcm5122
