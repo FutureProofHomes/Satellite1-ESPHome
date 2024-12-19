@@ -16,7 +16,7 @@ jobs:
     with:
       files: |
         config/satellite1.factory.yaml
-      esphome-version: 2024.11.2
+      esphome-version: 2024.12.1
       release-summary: develop-branch
       release-url:
       release-version:

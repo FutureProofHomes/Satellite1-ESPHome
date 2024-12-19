@@ -89,7 +89,7 @@ jobs:
     with:
       files: |
         config/satellite1.factory.yaml
-      esphome-version: 2024.11.2
+      esphome-version: 2024.12.1
       release-version: ${{ needs.prepare.outputs.next_tag }}
 
   push-tag:
