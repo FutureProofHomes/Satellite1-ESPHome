@@ -1,9 +1,81 @@
 
 audio_dac:
   - platform: pcm5122
+    id: line_out_dac
     address: 0x4D
   - platform: tas2780
+    id: speaker_dac
     address: 0x3F
+  - platform: satellite1
+    id: dac_proxy
+    speaker_dac: speaker_dac
+    line_out_dac: line_out_dac
+    
+    on_speaker_activated:
+      # if speaker was used previously but is not available try line-out
+      - lambda: |
+          if( id(line_out_sensor).state && id(pd_fusb302b).contract_voltage < 9 ){
+              id(dac_proxy).activate_line_out();
+          }
+    
+    on_line_out_activated:
+        # if line_out was used previously but is not available try speaker
+        - lambda: |
+            if( !id(line_out_sensor).state && id(pd_fusb302b).contract_voltage >= 9 ){
+              id(dac_proxy).activate_speaker();
+            }
+    
+    on_state_change:
+      - media_player.volume_set:
+          volume: !lambda return id(dac_proxy).volume();
+      - lambda: |
+           if( id(dac_proxy).is_muted() ){
+              id(nabu_media_player)->make_call()
+                .set_command(MEDIA_PLAYER_COMMAND_MUTE)
+                .perform();
+           }
+      
+
+binary_sensor:
+  - platform: gpio
+    id: line_out_sensor
+    pin:
+      pcm5122: 
+      pin: 4
+      inverted: false
+    name: "line-out jack"
+    icon: "mdi:audio-input-stereo-minijack"
+    filters:
+      - delayed_on: 200ms
+      - delayed_off: 200ms
+    
+    on_press:
+      - dac_proxy.activate_line_out:
+      - lambda: id(jack_plugged_recently) = true;
+      - script.execute: control_leds
+      - delay: 200ms
+      - script.execute:
+          id: play_sound
+          priority: false
+          sound_file: !lambda return id(jack_connected_sound);
+      - delay: 800ms
+      - lambda: id(jack_plugged_recently) = false;
+      - script.execute: control_leds
+      
+    
+    on_release:
+      - dac_proxy.activate_speaker:
+      - lambda: id(jack_unplugged_recently) = true;
+      - script.execute: control_leds
+      - delay: 200ms
+      - script.execute:
+          id: play_sound
+          priority: false
+          sound_file: !lambda return id(jack_disconnected_sound);
+      - delay: 800ms
+      - lambda: id(jack_unplugged_recently) = false;
+      - script.execute: control_leds
+
 
 fusb302b:
   id: pd_fusb302b
@@ -44,9 +116,10 @@ media_player:
     sample_rate: 48000
     internal: false
     speaker:
+    audio_dac: dac_proxy
     volume_increment: 0.05
-    volume_min: 0.4
-    volume_max: 0.85
+    volume_min: 0.1
+    volume_max: 1.
     on_mute:
       - script.execute: control_leds
     on_unmute:
@@ -92,7 +165,10 @@ media_player:
         file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/timer_finished.flac
       - id: wake_word_triggered_sound
         file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac
-
+      - id: jack_connected_sound
+        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/jack_connected.flac
+      - id: jack_disconnected_sound
+        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/jack_disconnected.flac    
 
 
 script:
