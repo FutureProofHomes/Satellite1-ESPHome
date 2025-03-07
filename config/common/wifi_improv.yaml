@@ -6,6 +6,7 @@ globals:
 
 wifi:
   id: wifi_id
+  use_address: satellite1-926a8c.local
   on_connect:
     - lambda: id(improv_ble_in_progress) = false;
     - script.execute: control_leds
