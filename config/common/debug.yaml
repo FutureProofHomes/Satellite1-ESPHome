@@ -83,6 +83,7 @@ button:
       then:
         - satellite1.xmos_hardware_reset
 
+
   # Flashes Sat1 HAT with specific XMOS firmware
   - platform: template
     id: flash_satellite
@@ -112,3 +113,14 @@ button:
     on_press:
       then:
         - memory_flasher.erase:
+
+  - platform: template
+    id: play_sweep_sound
+    name: "Play Sweep Sound"
+    entity_category: diagnostic
+    on_press:
+      then:
+        - script.execute:
+            id: play_sound
+            priority: false
+            sound_file: !lambda return id(audio_test_sweep);

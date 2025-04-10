@@ -117,7 +117,7 @@ voice_assistant:
   volume_multiplier: 1
   on_client_connected:
     - lambda: id(init_in_progress) = false;
-    - micro_wake_word.start:
+    #- micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_client_disconnected:

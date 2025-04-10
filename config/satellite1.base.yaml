@@ -53,7 +53,7 @@ esphome:
         # Run the script to refresh the LED status
         - script.execute: control_leds
         - delay: 1s
-        
+        - lambda: id(mww).stop();
         # If after 10 minutes, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
         - delay: 10min
         - if:
@@ -99,6 +99,8 @@ packages:
   debug: !include common/debug.yaml
   developer: !include common/developer.yaml
 
+  xmos: !include /Users/mischa/Projects/FutureProofHomes/Satellite1-XMOS-15.3/build/embed_flash_imag.yaml
+
 http_request:
 
 safe_mode:
@@ -132,11 +134,11 @@ satellite1:
 
 memory_flasher:
   - platform: satellite1
-    id: xflash
-    embed_flash_image:
-      image_version: ${xmos_fw_version}
-      image_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
-      md5_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
+    id: !extend xflash
+    #embed_flash_image:
+    #  image_version: ${xmos_fw_version}
+    #  image_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
+    #  md5_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
 
     on_flashing_start:    
       then:

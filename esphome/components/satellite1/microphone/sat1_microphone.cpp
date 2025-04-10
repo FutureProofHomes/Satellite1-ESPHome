@@ -52,12 +52,14 @@ void NabuMicrophoneChannel::setup() {
     this->mark_failed();
     return;
   }
+#if USE_SECOND_MIC_RING_BUFFER  
   this->ring_buffer2_ = RingBuffer::create(ring_buffer_size);
   if (this->ring_buffer2_ == nullptr) {
     ESP_LOGE(TAG, "Could not allocate ring buffer");
     this->mark_failed();
     return;
   }
+#endif
 }
 
 void NabuMicrophoneChannel::loop() {
@@ -171,6 +173,8 @@ void NabuMicrophone::read_task_(void *params) {
       // Note, if we have 16 bit samples incoming, this requires modification
       ExternalRAMAllocator<int32_t> allocator(ExternalRAMAllocator<int32_t>::ALLOW_FAILURE);
       int32_t *buffer = allocator.allocate(SAMPLES_IN_ALL_DMA_BUFFERS);
+      
+    
 
       std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_0_samples;
       std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_1_samples;
@@ -203,12 +207,16 @@ void NabuMicrophone::read_task_(void *params) {
           // TODO: Is this the ideal spot to reset the ring buffers?
           if (this_microphone->channel_0_ != nullptr){
             this_microphone->channel_0_->get_ring_buffer()->reset();
+#if USE_SECOND_MIC_RING_BUFFER            
             this_microphone->channel_0_->get_ring_buffer2()->reset();
+#endif
           }
             
           if (this_microphone->channel_1_ != nullptr){
             this_microphone->channel_1_->get_ring_buffer()->reset();
+#if USE_SECOND_MIC_RING_BUFFER            
             this_microphone->channel_1_->get_ring_buffer2()->reset();
+#endif
           }
             
 
@@ -266,14 +274,18 @@ void NabuMicrophone::read_task_(void *params) {
               if (this_microphone->channel_0_ != nullptr) {
                 this_microphone->channel_0_->get_ring_buffer()->write((void *) channel_0_samples.data(),
                                                                       bytes_to_write);
+#if USE_SECOND_MIC_RING_BUFFER
                 this_microphone->channel_0_->get_ring_buffer2()->write((void *) channel_0_samples.data(),
-                                                                      bytes_to_write);                                                                      
+                                                                      bytes_to_write);
+#endif                                                                      
               }
               if (this_microphone->channel_1_ != nullptr) {
                 this_microphone->channel_1_->get_ring_buffer()->write((void *) channel_1_samples.data(),
                                                                       bytes_to_write);
-                this_microphone->channel_1_->get_ring_buffer2()->write((void *) channel_1_samples.data(),
-                                                                      bytes_to_write);
+#if USE_SECOND_MIC_RING_BUFFER                
+              this_microphone->channel_1_->get_ring_buffer2()->write((void *) channel_1_samples.data(),
+              bytes_to_write);
+#endif
               }
             }
 

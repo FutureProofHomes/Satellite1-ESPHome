@@ -27,11 +27,65 @@ improv_serial:
             - memory_flasher.erase:
 
       - if:
-          condition:
+          condition:                                      
             lambda: return x.get_action() == std::string("FLASH_XMOS_EMBEDDED");
           then:
             - memory_flasher.write_embedded_image:
           
-          
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("PLAY_SWEEP_SOUND");
+          then:
+            - script.execute:
+                id: play_sound
+                priority: false
+                sound_file: !lambda return id(audio_test_sweep);
       
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("ENABLE_SWEEP_DETECTED_LEFT");
+          then:
+            - logger.log: "Starting audio sweep detection on Comm Mic" 
+            - delay: 500ms
+            - lambda: |-
+                if (id(mic_tester).is_running()) {
+                  id(mic_tester).request_stop();  // Stop current stream
+                  delay(500);  // Wait for stream to stop
+                }
+                id(mic_tester).set_microphone(id(comm_mic));  // Set Comm mic
+                id(mic_tester).request_start(true);  // Start stream with Comm mic
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("DISABLE_SWEEP_DETECTED_LEFT");
+          then:
+            - logger.log: "Turning off audio sweep detection on Comm Mic"
+            - lambda: |-
+                if (id(mic_tester).is_running()) {
+                  id(mic_tester).request_stop();  // Stop the stream when Comm mic is turned off
+                }
+                
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("ENABLE_SWEEP_DETECTED_RIGHT");
+          then:
+            - logger.log: "Starting audio sweep detection on ASR Mic" 
+            - delay: 500ms
+            - lambda: |-
+                if (id(mic_tester).is_running()) {
+                  id(mic_tester).request_stop();  // Stop current stream
+                  delay(500);  // Wait for stream to stop
+                }
+                id(mic_tester).set_microphone(id(asr_mic));  // Set ASR mic
+                id(mic_tester).request_start(true);  // Start stream with ASR mic
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("DISABLE_SWEEP_DETECTED_RIGHT");
+          then:
+            - logger.log: "Turning off audio sweep detection on Comm Mic"
+            - lambda: |-
+                if (id(mic_tester).is_running()) {
+                  id(mic_tester).request_stop();  // Stop the stream when Comm mic is turned off
+                }
 

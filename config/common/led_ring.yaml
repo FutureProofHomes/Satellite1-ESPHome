@@ -16,6 +16,16 @@ globals:
     restore_value: no
     initial_value: 'false'
 
+time:
+  - platform: sntp
+    # ...
+    on_time:
+      # Every 5 seconds
+      - seconds: /5
+        then:
+          - script.execute: control_leds
+
+
 light:
   # Hardware LED ring. Not used because remapping needed
   - platform: esp32_rmt_led_strip
@@ -526,15 +536,23 @@ script:
             id(control_leds_init_state).execute();
           } else if (!id(wifi_id).is_connected() || !id(api_id).is_connected()){
             id(control_leds_no_ha_connection_state).execute();
-          } else if (id(volume_buttons_touched)) {
+          } 
+          
+
+          else if (id(volume_buttons_touched)) {
             id(control_leds_volume_buttons_touched).execute();
-          } else if (id(btn_action).state) {
+          } 
+   
+          
+          else if (id(btn_action).state) {
             id(control_leds_action_button_touched).execute();
           } else if (id(jack_plugged_recently)) {
             id(control_leds_jack_plugged_recently).execute();
           } else if (id(jack_unplugged_recently)) {
             id(control_leds_jack_unplugged_recently).execute();
-          } else if (id(warning)) {
+          } 
+          
+          else if (id(warning)) {
             id(control_leds_warning).execute();
           } else if (id(timer_ringing).state) {
             id(control_leds_timer_ringing).execute();
@@ -594,19 +612,19 @@ script:
                 green: 89%
                 blue: 71%
                 id: voice_assistant_leds
-                effect: "none"
+                effect: "Twinkle"
 
   # Script executed when the device has no connection to Home Assistant
   # Red Twinkle (This will be visible during HA updates for example)
   - id: control_leds_no_ha_connection_state
     then:
-      - light.turn_on:
-          brightness: 66%
-          red: 1
-          green: 0
-          blue: 0
-          id: voice_assistant_leds
-          effect: "Twinkle"
+      # - light.turn_on:
+      #     brightness: 66%
+      #     red: 1
+      #     green: 0
+      #     blue: 0
+      #     id: voice_assistant_leds
+      #     effect: "Twinkle"
 
   # Script executed when the voice assistant is idle (waiting for a wake word)
   # Nothing (Either LED ring off or LED ring on if the user decided to turn the user facing LED ring on)

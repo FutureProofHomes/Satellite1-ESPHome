@@ -7,7 +7,7 @@ substitutions:
 
 packages:
   # This is an inline package to prefix the on_client_connected with the wait_until action
-  # It must appear before the actual package so it becomes the orignal config and the
+  # It must appear before the actual package so it becomes the original config and the
   # on_client_connected list from the package config is appended onto this one.
   va_connected_wait_for_ble_and_flasher:
     voice_assistant:
@@ -106,7 +106,7 @@ external_components:
   - source:
       type: local
       path: ../esphome/components
-    components: [ i2s_audio, satellite1, memory_flasher, tas2780, pcm5122, fusb302b, improv_serial ]
+    components: [ i2s_audio, satellite1, memory_flasher, tas2780, pcm5122, fusb302b, improv_serial, online_testing ]
 
 
 logger:
@@ -115,3 +115,15 @@ logger:
   level: debug
 
 
+online_testing:
+  id: mic_tester
+  microphone: asr_mic
+  media_file: audio_test_sweep
+  on_detected:
+    then:
+      - logger.log: "Sweep detected"
+      - improv_serial.send_action_status:
+          action: "SWEEP_DETECTED"
+          status: 0
+      
+    

@@ -169,7 +169,8 @@ media_player:
         file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/jack_connected.flac
       - id: jack_disconnected_sound
         file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/jack_disconnected.flac    
-
+      - id: audio_test_sweep
+        file: ../esphome/components/online_testing/sweep_1024.wav
 
 script:
   # Script executed when we want to play sounds on the device.
