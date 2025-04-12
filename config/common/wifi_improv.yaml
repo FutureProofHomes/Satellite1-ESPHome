@@ -89,3 +89,17 @@ improv_serial:
                   id(mic_tester).request_stop();  // Stop the stream when Comm mic is turned off
                 }
 
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("READ_XMOS_FIRMWARE");
+          then:
+            - logger.log: "Reading XMOS firmware version via SPI"
+            - satellite1.xmos_read_firmware
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("XMOS_SEND_RANDOM");
+          then:
+            - logger.log: "Sending random SPI frame to XMOS"
+            - satellite1.xmos_send_random_frame
+
+            

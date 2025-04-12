@@ -14,6 +14,22 @@ class XMOSHardwareResetAction : public Action<Ts...>, public Parented<Satellite1
   }
 };
 
+template<typename... Ts> 
+class XMOSReadFWAction : public Action<Ts...>, public Parented<Satellite1> {
+ public:
+  void play(Ts... x) override {
+    this->parent_->read_xmos_firmware();
+  }
+};
+
+template<typename... Ts> 
+class XMOSSendRandomAction : public Action<Ts...>, public Parented<Satellite1> {
+ public:
+  void play(Ts... x) override {
+    this->parent_->send_test_frame();
+  }
+};
+
 
 
 template<Satellite1State State> class Satellite1StateTrigger : public Trigger<> {

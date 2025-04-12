@@ -184,6 +184,23 @@ bool Satellite1::check_for_xmos_(){
   return ( memcmp(this->xmos_fw_version, compare_zeros, 5) != 0 );
 }
 
+bool Satellite1::send_test_frame(){
+  
+  uint8_t send_recv_buf[128] = {0};
+  for( int i = 0; i < 128; i++ ){
+      send_recv_buf[i] = rand() % 255;  
+  }
+  this->transfer( rand() % 255, rand() % 255 , send_recv_buf, 128);
+  this->transfer( DC_RESOURCE::DFU_CONTROLLER, rand() % 255 , send_recv_buf, 128);
+  this->transfer( DC_RESOURCE::GPIO_PORT_IN_A, rand() % 255 , send_recv_buf, 128);
+  this->transfer( DC_RESOURCE::GPIO_PORT_IN_B, rand() % 255 , send_recv_buf, 128);
+  this->transfer( DC_RESOURCE::CNTRL_ID, rand() % 255 , send_recv_buf, 128);
+  
+  return true;
+  
+}
+
+
 void Satellite1::xmos_hardware_reset(){
   this->xmos_rst_pin_->digital_write(1);
   delay(100);

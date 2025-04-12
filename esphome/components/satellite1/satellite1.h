@@ -162,7 +162,8 @@ class Satellite1 : public Component,
   }
 
   void xmos_hardware_reset(); 
-
+  void read_xmos_firmware(){ this->dfu_get_fw_version_(); }
+  bool send_test_frame();
 
 protected:
   bool dfu_get_fw_version_();

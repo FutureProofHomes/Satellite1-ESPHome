@@ -15,6 +15,15 @@ XMOSHardwareResetAction = namespace.class_(
     "XMOSHardwareResetAction", automation.Action
 )
 
+XMOSReadFWAction = namespace.class_(
+    "XMOSReadFWAction", automation.Action
+)
+
+XMOSSendRandomAction = namespace.class_(
+    "XMOSSendRandomAction", automation.Action
+)
+
+
 XMOSConnectedStateTrigger = namespace.class_(
     "XMOSConnectedStateTrigger", automation.Trigger
 )
@@ -85,6 +94,14 @@ RESET_XMOS_ACTION_SCHEMA = automation.maybe_simple_id(
 @automation.register_action(
     "satellite1.xmos_hardware_reset", 
     XMOSHardwareResetAction, 
+    RESET_XMOS_ACTION_SCHEMA)
+@automation.register_action(
+    "satellite1.xmos_read_firmware", 
+    XMOSReadFWAction, 
+    RESET_XMOS_ACTION_SCHEMA)
+@automation.register_action(
+    "satellite1.xmos_send_random_frame", 
+    XMOSSendRandomAction, 
     RESET_XMOS_ACTION_SCHEMA)
 async def erase_memory_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
