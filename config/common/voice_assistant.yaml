@@ -37,7 +37,7 @@ microphone:
       amplify_shift: 0
     channel_1:
       id: comm_mic
-      amplify_shift: 6
+      amplify_shift: 4
 
 
 
@@ -46,8 +46,9 @@ micro_wake_word:
   models:
     - model: hey_jarvis
       id: hey_jarvis
-    - model: okay_nabu
-      id: okay_nabu    
+    - model: https://github.com/kahrendt/microWakeWord/releases/download/okay_nabu_20241226.3/okay_nabu.json
+      id: okay_nabu
+      probability_cutoff: 0.8  
     - model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
       id: stop
       internal: true
