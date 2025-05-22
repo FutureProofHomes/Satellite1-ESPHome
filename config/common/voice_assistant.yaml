@@ -47,7 +47,9 @@ micro_wake_word:
     - model: hey_jarvis
       id: hey_jarvis
     - model: okay_nabu
-      id: okay_nabu    
+      id: okay_nabu 
+    - model: https://raw.githubusercontent.com/FutureProofHomes/microWakeWord/refs/heads/main/examples/hey_nexus_v2.json
+      id: hey_nexus
     - model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
       id: stop
       internal: true
