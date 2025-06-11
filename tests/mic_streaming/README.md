@@ -24,10 +24,14 @@ Audio files from the wake-word-benchmark are played on this machine while the mi
     pip install -r tests/mic_streaming/requirements.txt
     ```
 
-5. compile & upload firmware (this will set the udp server ip-address to this machine)
+5. uncomment the developer.yaml include in config/satellite1.base.yaml
+    ```
+    developer: !include common/developer.yaml
+    ```
+6. compile & upload firmware (this will set the udp server ip-address to this machine)
     ```sh
-    esphome compile config/test_stream_mics.yaml
-    esphome upload config/test_stream_mics.yaml
+    esphome compile config/satellite1.yaml
+    esphome upload config/satellite1.yaml
     ```
 
 ### Run Test
