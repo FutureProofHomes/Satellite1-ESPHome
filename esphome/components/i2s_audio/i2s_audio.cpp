@@ -17,7 +17,7 @@ static const size_t DMA_BUFFERS_COUNT = 4;
 static const size_t I2S_EVENT_QUEUE_COUNT = DMA_BUFFERS_COUNT + 1;
 
 
-void I2SAudioComponent::setup() {
+void I2SPortComponent::setup() {
   static i2s_port_t next_port_num = I2S_NUM_0;
 
   if (next_port_num >= I2S_NUM_MAX) {
@@ -32,7 +32,7 @@ void I2SAudioComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up I2S Audio...");
 }
 
-void I2SAudioComponent::dump_config(){
+void I2SPortComponent::dump_config(){
   esph_log_config(TAG, "I2SController:");
   esph_log_config(TAG, "  AccessMode: %s", this->access_mode_ == I2SAccessMode::DUPLEX ? "duplex" : "exclusive" );
   esph_log_config(TAG, "  Port: %d", this->get_port() );
@@ -45,7 +45,7 @@ void I2SAudioComponent::dump_config(){
 }
 
 
-bool I2SAudioComponent::claim_access_(uint8_t access){
+bool I2SPortComponent::claim_access_(uint8_t access){
   bool success = false;
   this->lock();
   if( this->access_mode_ == I2SAccessMode::DUPLEX ){
@@ -62,14 +62,14 @@ bool I2SAudioComponent::claim_access_(uint8_t access){
   return success;
 }
 
-bool I2SAudioComponent::release_access_(uint8_t access){
+bool I2SPortComponent::release_access_(uint8_t access){
   this->lock();
   this->access_state_ = this->access_state_ & (~access);
   this->unlock();
   return true;
 }
 
-bool I2SAudioComponent::install_i2s_driver_(i2s_driver_config_t i2s_cfg, uint8_t access){
+bool I2SPortComponent::install_i2s_driver_(i2s_driver_config_t i2s_cfg, uint8_t access){
   bool success = false;
   this->lock();
   esph_log_d(TAG, "Install driver requested by %s", access == I2SAccess::RX ? "Reader" : "Writer");
@@ -101,6 +101,7 @@ bool I2SAudioComponent::install_i2s_driver_(i2s_driver_config_t i2s_cfg, uint8_t
     }
   } else if (this->access_mode_ == I2SAccessMode::DUPLEX && this->driver_loaded_ ){
     success = this->validate_cfg_for_duplex_(i2s_cfg);
+    ESP_LOGW(TAG, "Driver already loaded, trying to validate duplex mode: %s", success ? "yes" : "no");
     if (!success ){
       ESP_LOGE(TAG, "incompatible i2s settings for duplex mode, access_state: %d", this->access_state_);
     }
@@ -111,7 +112,7 @@ bool I2SAudioComponent::install_i2s_driver_(i2s_driver_config_t i2s_cfg, uint8_t
   return success;
 }
 
-bool I2SAudioComponent::uninstall_i2s_driver_(uint8_t access){
+bool I2SPortComponent::uninstall_i2s_driver_(uint8_t access){
   bool success = false;
   this->lock();
   // check that i2s is not occupied by others
@@ -136,7 +137,7 @@ bool I2SAudioComponent::uninstall_i2s_driver_(uint8_t access){
   return success;
 }
 
-void I2SAudioComponent::process_i2s_events(bool &tx_dma_underflow){
+void I2SPortComponent::process_i2s_events(bool &tx_dma_underflow){
   i2s_event_t i2s_event;
       while (xQueueReceive(this->i2s_event_queue_, &i2s_event, 0)) {
         if (i2s_event.type == I2S_EVENT_TX_Q_OVF) {
@@ -146,7 +147,7 @@ void I2SAudioComponent::process_i2s_events(bool &tx_dma_underflow){
 }
 
 
-bool I2SAudioComponent::validate_cfg_for_duplex_(i2s_driver_config_t& i2s_cfg){
+bool I2SPortComponent::validate_cfg_for_duplex_(i2s_driver_config_t& i2s_cfg){
   i2s_driver_config_t& installed = this->installed_cfg_;
   return (
          installed.sample_rate == i2s_cfg.sample_rate
@@ -155,7 +156,7 @@ bool I2SAudioComponent::validate_cfg_for_duplex_(i2s_driver_config_t& i2s_cfg){
 }
 
 
-void I2SSettings::dump_i2s_settings() const {
+void I2SAudioBase::dump_i2s_settings() const {
   std::string init_str = this->is_fixed_ ? "Fixed-CFG" : "Initial-CFG";
   if( this->i2s_access_ == I2SAccess::RX ){
     esph_log_config(TAG, "I2S-Reader (%s):", init_str.c_str());
@@ -163,15 +164,234 @@ void I2SSettings::dump_i2s_settings() const {
   else{
     esph_log_config(TAG, "I2S-Writer (%s):", init_str.c_str());
   }
-  esph_log_config(TAG, "  clk_mode: %s", this->i2s_clk_mode_ == I2S_MODE_MASTER ? "internal" : "external"  );
+  esph_log_config(TAG, "  clk_mode: %s", this->i2s_mode_ == I2S_MODE_MASTER ? "internal" : "external"  );
   esph_log_config(TAG, "  sample-rate: %d bits_per_sample: %d", this->sample_rate_, this->bits_per_sample_ );
   esph_log_config(TAG, "  channel_fmt: %d channels: %d", this->channel_fmt_, this->num_of_channels() );
-  esph_log_config(TAG, "  use_apll: %s, use_pdm: %s", this->use_apll_ ? "yes": "no", this->pdm_ ? "yes": "no");
+  esph_log_config(TAG, "  use_apll: %s", this->use_apll_ ? "yes": "no");
 }
 
 
-i2s_driver_config_t I2SSettings::get_i2s_cfg() const {
-  uint8_t mode = this->i2s_clk_mode_ | ( this->i2s_access_ == I2SAccess::RX ? I2S_MODE_RX : I2S_MODE_TX);
+bool I2SPortComponent::start_driver_() {
+
+#ifdef USE_I2S_LEGACY
+  return true;
+  
+#else
+  i2s_chan_config_t chan_cfg = {
+      .id = this->parent_->get_port(),
+      .role = this->i2s_role_,
+      .dma_desc_num = this->dma_buffers_count_,
+      .dma_frame_num = this->dma_buffer_length_,
+      .auto_clear = true,
+  };
+  
+  /* Allocate a new TX channel and get the handle of this channel */
+  esp_err_t err = i2s_new_channel(&chan_cfg, &this->tx_handle_, &this->rx_handle_);
+  if (err != ESP_OK) {
+    this->parent_->unlock();
+    return err;
+  }
+
+  i2s_std_config_t std_cfg = this->get_std_config();
+  /* Initialize the channel */
+  
+  err = i2s_channel_init_std_mode(this->tx_handle_, &std_cfg);
+  err = i2s_channel_init_std_mode(this->rx_handle_, &std_cfg);
+
+  if (err != ESP_OK) {
+    i2s_del_channel(this->tx_handle_);
+    this->parent_->unlock();
+    return err;
+  }
+  if (this->i2s_event_queue_ == nullptr) {
+    this->i2s_event_queue_ = xQueueCreate(1, sizeof(bool));
+  }
+  const i2s_event_callbacks_t callbacks = {
+      .on_send_q_ovf = i2s_overflow_cb,
+  };
+
+  i2s_channel_register_event_callback(this->tx_handle_, &callbacks, this);
+
+  /* Before reading data, start the TX channel first */
+  i2s_channel_enable(this->tx_handle_);
+  if (err != ESP_OK) {
+    i2s_del_channel(this->tx_handle_);
+    this->parent_->unlock();
+  }
+
+#endif
+  return true;
+}
+
+bool I2SAudioOut::start_i2s_channel_() {
+#ifdef USE_I2S_LEGACY
+  if (!this->claim_i2s_access()) {
+    return false;
+  }
+
+  i2s_driver_config_t config = this->get_i2s_cfg();
+  if(!this->parent_->install_i2s_driver_(config, I2SAccess::TX))
+  {
+    this->parent_->release_access_(I2SAccess::TX); 
+    return false;
+  }
+#else
+  if( this->parent_tx_handle_ == nullptr ){
+    if( this->parent_->driver_started_ )
+    {
+      ESP_LOGE(TAG, "I2S driver already started, but no TX handle available.");
+      return false;
+    }
+    this->parent_->init_driver_();
+  }
+  if( this->parent_->tx_handle_ == nullptr ){
+    return false;
+  }
+  i2s_chan_info_t chan_info;
+  esp_err_t err = i2s_channel_get_info(this->parent_->tx_handle_, &chan_info);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to get TX channel info: %s", esp_err_to_name(err));
+    return false;
+  }
+  if( chan_info.direction != I2S_CHANNEL_DIR_TX ){
+    ESP_LOGE(TAG, "TX channel is not configured for TX direction");
+    return false;
+  }
+  
+  if( chan_info.total_dma_buf_size == 0){
+     i2s_std_config_t std_cfg = this->get_std_config();
+     err = i2s_channel_init_std_mode(this->tx_handle_, &std_cfg);
+      if (err != ESP_OK) {
+        i2s_del_channel(this->tx_handle_);
+        return false;
+      }
+      const i2s_event_callbacks_t callbacks = {
+        .on_send_q_ovf = this->i2s_overflow_cb,
+      };
+      i2s_channel_register_event_callback(this->tx_handle_, &callbacks, this);
+  }
+  
+  i2s_channel_enable(this->tx_handle_);
+  if (err != ESP_OK) {
+    i2s_del_channel(this->tx_handle_);
+    return false;
+  } 
+#endif
+  return true;
+}
+
+bool I2SAudioOut::stop_i2s_channel_() {
+#ifdef USE_I2S_LEGACY
+  if (!this->parent_->uninstall_i2s_driver_(I2SAccess::TX)) {
+    this->parent_->release_access_(I2SAccess::TX);
+    return false;
+  }
+#else
+  if( this->parent_tx_handle_ == nullptr ){
+    ESP_LOGE(TAG, "Trying to stop I2S-TX channel, but handle is nullptr.");
+    return false;
+  }
+  if( this->parent_->tx_handle_ == nullptr ){
+    return false;
+  }
+  
+  esp_err_t err = i2s_channel_disable(this->tx_handle_);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to disable TX channel: %s", esp_err_to_name(err));
+    return false;
+  }
+#endif
+
+  return true;
+}
+
+
+bool I2SAudioIn::start_i2s_channel_() {
+#ifdef USE_I2S_LEGACY
+  if (!this->claim_i2s_access()) {
+    return false;
+  }
+
+  i2s_driver_config_t config = this->get_i2s_cfg();
+  if(!this->parent_->install_i2s_driver_(config, I2SAccess::RX))
+  {
+    this->parent_->release_access_(I2SAccess::RX); 
+    return false;
+  }
+#else
+  if( this->parent_rx_handle_ == nullptr ){
+    if( this->parent_->driver_started_ )
+    {
+      ESP_LOGE(TAG, "I2S driver already started, but no RX handle available.");
+      return false;
+    }
+    this->parent_->init_driver_();
+  }
+  if( this->parent_->rx_handle_ == nullptr ){
+    return false;
+  }
+  i2s_chan_info_t chan_info;
+  esp_err_t err = i2s_channel_get_info(this->parent_->rx_handle_, &chan_info);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to get RX channel info: %s", esp_err_to_name(err));
+    return false;
+  }
+  if( chan_info.direction != I2S_CHANNEL_DIR_RX ){
+    ESP_LOGE(TAG, "RX channel is not configured for TX direction");
+    return false;
+  }
+  
+  if( chan_info.total_dma_buf_size == 0){
+     i2s_std_config_t std_cfg = this->get_std_config();
+     err = i2s_channel_init_std_mode(this->rx_handle_, &std_cfg);
+      if (err != ESP_OK) {
+        i2s_del_channel(this->rx_handle_);
+        return false;
+      }
+      const i2s_event_callbacks_t callbacks = {
+        .on_send_q_ovf = this->i2s_overflow_cb,
+      };
+      i2s_channel_register_event_callback(this->rx_handle_, &callbacks, this);
+  }
+  
+  i2s_channel_enable(this->rx_handle_);
+  if (err != ESP_OK) {
+    i2s_del_channel(this->rx_handle_);
+    return false;
+  } 
+#endif
+  return true;
+}
+
+bool I2SAudioIn::stop_i2s_channel_() {
+#ifdef USE_I2S_LEGACY
+  if (!this->parent_->uninstall_i2s_driver_(I2SAccess::RX)) {
+    this->parent_->release_access_(I2SAccess::RX);
+    return false;
+  }
+#else
+  if( this->parent_->rx_handle_ == nullptr ){
+    ESP_LOGE(TAG, "Trying to stop I2S-RX channel, but handle is nullptr.");
+    return false;
+  }
+  if( this->parent_->rx_handle_ == nullptr ){
+    return false;
+  }
+  
+  esp_err_t err = i2s_channel_disable(this->tx_handle_);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to disable RX channel: %s", esp_err_to_name(err));
+    return false;
+  }
+#endif
+
+  return true;
+}
+
+
+
+i2s_driver_config_t I2SAudioBase::get_i2s_cfg() const {
+  uint8_t mode = this->i2s_mode_ | ( this->i2s_access_ == I2SAccess::RX ? I2S_MODE_RX : I2S_MODE_TX);
 
   if( this->pdm_){
       mode = (i2s_mode_t) (mode | I2S_MODE_PDM);
