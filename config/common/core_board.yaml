@@ -67,3 +67,4 @@ i2s_audio:
     i2s_bclk_pin: GPIO08
     i2s_mclk_pin: GPIO16
     access_mode: duplex
+    use_legacy: true
