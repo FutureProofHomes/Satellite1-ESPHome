@@ -61,14 +61,6 @@ esphome:
               - lambda: id(init_in_progress) = false;
               - script.execute: control_leds
 
-
-external_components:
-  - source:
-      type: git
-      url: https://github.com/esphome/home-assistant-voice-pe
-      ref: 25.3.4
-    components: [ microphone, voice_assistant, micro_wake_word ]
-
 ota:
   - platform: esphome
     id: ota_esphome
@@ -92,7 +84,7 @@ packages:
   ## OPTIONAL COMPONENTS 
   # mmwave_ld2410: !include common/mmwave_ld2410.yaml
   # mmwave_ld2450: !include common/mmwave_ld2450.yaml
-  # debug: !include common/debug.yaml
+  debug: !include common/debug.yaml
   # developer: !include common/developer.yaml
 
 http_request:

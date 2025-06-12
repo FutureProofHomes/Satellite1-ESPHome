@@ -8,30 +8,16 @@
 #include "esphome/components/i2s_audio/i2s_audio.h"
 #include "esphome/components/microphone/microphone.h"
 #include "esphome/core/component.h"
-#include "esphome/core/ring_buffer.h"
+
+#include <freertos/FreeRTOS.h>
+#include <freertos/event_groups.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
 
 namespace esphome {
-namespace nabu_microphone {
+namespace i2s_audio {
 
-enum class TaskEventType : uint8_t {
-  STARTING = 0,
-  STARTED,
-  RUNNING,
-  IDLE,
-  STOPPING,
-  STOPPED,
-  MUTED,
-  WARNING = 255,
-};
-
-struct TaskEvent {
-  TaskEventType type;
-  esp_err_t err;
-};
-
-class NabuMicrophoneChannel;
-
-class NabuMicrophone : public i2s_audio::I2SReader, public Component {
+class Sat1Microphone : public I2SAudioIn, public microphone::Microphone, public Component {
  public:
   void setup() override;
   void dump_config() override {this->dump_i2s_settings();}
@@ -40,78 +26,37 @@ class NabuMicrophone : public i2s_audio::I2SReader, public Component {
 
   void loop() override;
 
-  void mute();
-  void unmute();
-
-  void set_channel_0(NabuMicrophoneChannel *microphone) { this->channel_0_ = microphone; }
-  void set_channel_1(NabuMicrophoneChannel *microphone) { this->channel_1_ = microphone; }
-
-  NabuMicrophoneChannel *get_channel_0() { return this->channel_0_; }
-  NabuMicrophoneChannel *get_channel_1() { return this->channel_1_; }
-
-  bool is_running() { return this->state_ == microphone::STATE_RUNNING; }
-  uint32_t get_sample_rate() { return this->sample_rate_; }
+  void set_correct_dc_offset(bool correct_dc_offset) { this->correct_dc_offset_ = correct_dc_offset; }
 
  protected:
-  esp_err_t start_i2s_driver_();
+  /// @brief Starts the I2S driver. Updates the ``audio_stream_info_`` member variable with the current setttings.
+  /// @return True if succesful, false otherwise
+  bool start_driver_();
 
-  microphone::State state_{microphone::STATE_STOPPED};
+  /// @brief Stops the I2S driver.
+  bool stop_driver_();
 
-  static void read_task_(void *params);
+  /// @brief Attempts to correct a microphone DC offset; e.g., a microphones silent level is offset from 0. Applies a
+  /// correction offset that is updated using an exponential moving average for all samples away from 0.
+  /// @param data
+  void fix_dc_offset_(std::vector<uint8_t> &data);
 
-  TaskHandle_t read_task_handle_{nullptr};
-  QueueHandle_t event_queue_;
+  size_t read_(uint8_t *buf, size_t len, TickType_t ticks_to_wait);
 
-  NabuMicrophoneChannel *channel_0_{nullptr};
-  NabuMicrophoneChannel *channel_1_{nullptr};
+  /// @brief Sets the Microphone ``audio_stream_info_`` member variable to the configured I2S settings.
+  void configure_stream_settings_();
+
+  static void mic_task(void *params);
+
+  SemaphoreHandle_t active_listeners_semaphore_{nullptr};
+  EventGroupHandle_t event_group_{nullptr};
+  TaskHandle_t task_handle_{nullptr};
+  bool correct_dc_offset_;
+  int32_t dc_offset_{0};
 };
 
-class NabuMicrophoneChannel : public microphone::Microphone, public Component {
- public:
-  void setup() override;
 
-  void start() override {
-    this->parent_->start();
-    this->is_muted_ = false;
-    this->requested_stop_ = false;
-  }
-
-  void set_parent(NabuMicrophone *nabu_microphone) { this->parent_ = nabu_microphone; }
-
-  void stop() override {
-    this->requested_stop_ = true;
-    this->is_muted_ = true;  // Mute until it is actually stopped
-  };
-
-  void loop() override;
-
-  void set_mute_state(bool mute_state) override { this->is_muted_ = mute_state; }
-  bool get_mute_state() { return this->is_muted_; }
-
-  // void set_requested_stop() { this->requested_stop_ = true; }
-  bool get_requested_stop() { return this->requested_stop_; }
-
-  size_t read(int16_t *buf, size_t len, TickType_t ticks_to_wait = 0) override {
-    return this->ring_buffer_->read((void *) buf, len, ticks_to_wait);
-  };
-  size_t read(int16_t *buf, size_t len) override { return this->ring_buffer_->read((void *) buf, len); };
-  void reset() override { this->ring_buffer_->reset(); }
-
-  RingBuffer *get_ring_buffer() { return this->ring_buffer_.get(); }
-
-  void set_amplify_shift(uint8_t amplify_shift) { this->amplify_shift_ = amplify_shift; }
-  uint8_t get_amplify_shift() { return this->amplify_shift_; }
-
- protected:
-  NabuMicrophone *parent_;
-  std::unique_ptr<RingBuffer> ring_buffer_;
-
-  uint8_t amplify_shift_;
-  bool is_muted_;
-  bool requested_stop_;
-};
-
-}  // namespace nabu_microphone
+}  // namespace i2s_audio
 }  // namespace esphome
 
 #endif  // USE_ESP32

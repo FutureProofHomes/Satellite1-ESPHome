@@ -24,21 +24,15 @@ globals:
 
 microphone:
   - platform: satellite1
+    id: sat1_mics
     sample_rate: 48000
     i2s_din_pin: GPIO15
     bits_per_sample: 32bit
-    i2s_clock_mode: external
-    channel: right_left
+    i2s_mode: secondary
+    channel: stereo
     pdm: false
-    
+    adc_type: external
     i2s_audio_id: i2s_shared
-    channel_0:
-      id: asr_mic
-      amplify_shift: 0
-    channel_1:
-      id: comm_mic
-      amplify_shift: 6
-
 
 
 micro_wake_word:
@@ -52,8 +46,11 @@ micro_wake_word:
       id: stop
       internal: true
   vad:
-  microphone: comm_mic
-  
+  microphone:
+    microphone: sat1_mics
+    channels: 1
+    gain_factor: 6
+  stop_after_detection: false
   on_wake_word_detected:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
     - if:
@@ -95,7 +92,10 @@ micro_wake_word:
 
 voice_assistant:
   id: va
-  microphone: asr_mic
+  microphone:
+    microphone: sat1_mics
+    channels: 0
+  
   media_player: external_media_player
   micro_wake_word: mww
   use_wake_word: false

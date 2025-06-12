@@ -3,7 +3,12 @@
 #include "esphome/core/defines.h"
 #ifdef USE_ESP32
 
+#ifdef USE_I2S_LEGACY
 #include <driver/i2s.h>
+#else
+#include <driver/i2s_std.h>
+#endif
+
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 
@@ -19,13 +24,118 @@ public:
 };
 
 
-class I2SReader;
-class I2SWriter;
-class I2SAudioComponent : public Component {
- public:
+class I2SAudioBase {
+public:
+ I2SAudioBase(uint8_t access) : i2s_access_(access) {}
+#ifdef USE_I2S_LEGACY
+  void set_i2s_mode(i2s_mode_t mode) { this->i2s_mode_ = mode; }
+  void set_channel(i2s_channel_fmt_t channel) { this->channel_fmt_ = channel; }
+  void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }
+  void set_bits_per_channel(i2s_bits_per_chan_t bits_per_channel) { this->bits_per_channel_ = bits_per_channel; }
+  i2s_driver_config_t get_i2s_cfg() const;
+  int num_of_channels() const { return (this->channel_fmt_ == I2S_CHANNEL_FMT_ONLY_RIGHT
+   || this->channel_fmt_ == I2S_CHANNEL_FMT_ONLY_LEFT) ? 1 : 2; }
+#else
+  void set_i2s_role(i2s_role_t role) { this->i2s_role_ = role; }
+  void set_slot_mode(i2s_slot_mode_t slot_mode) { this->slot_mode_ = slot_mode; }
+  void set_std_slot_mask(i2s_std_slot_mask_t std_slot_mask) { this->std_slot_mask_ = std_slot_mask; }
+  void set_slot_bit_width(i2s_slot_bit_width_t slot_bit_width) { this->slot_bit_width_ = slot_bit_width; }
+#endif
+  void set_sample_rate(uint32_t sample_rate) { this->sample_rate_ = sample_rate; }
+  void set_use_apll(uint32_t use_apll) { this->use_apll_ = use_apll; }
+  void set_mclk_multiple(i2s_mclk_multiple_t mclk_multiple) { this->mclk_multiple_ = mclk_multiple; }
+  void set_pdm(bool pdm) { this->pdm_ = pdm; }
+
+  void dump_i2s_settings() const;
+  virtual void register_at_parent() = 0;
+  bool validate_for_duplex(I2SAudioBase *other) const {
+    return ( 
+      (this->i2s_access_ == other->i2s_access_) &&
+      (this->sample_rate_ == other->sample_rate_) &&
+      (this->mclk_multiple_ == other->mclk_multiple_) &&
+#ifdef USE_I2S_LEGACY
+      (this->i2s_mode_ == other->i2s_mode_) &&
+      (this->channel_fmt_ == other->channel_fmt_) &&
+      (this->bits_per_sample_ == other->bits_per_sample_) &&
+      (this->bits_per_channel_ == other->bits_per_channel_)
+#else
+      (this->i2s_role_ == other->i2s_role_) &&
+      (this->slot_mode_ == other->slot_mode_) &&
+      (this->std_slot_mask_ == other->std_slot_mask_) &&
+      (this->slot_bit_width_ == other->slot_bit_width_)
+#endif           
+    );
+  }
+
+#ifndef USE_I2S_LEGACY  
+  i2s_std_clk_config_t get_std_clk_cfg() const {
+      return {
+        .sample_rate_hz = this->sample_rate_, 
+        .clk_src = this->use_appll_ ? I2S_CLK_SRC_APLL : I2S_CLK_SRC_DEFAULT,
+        .mclk_multiple = this->mclk_multiple_,
+    };
+  i2s_std_slot_config_t get_std_slot_cfg() const {
+      i2s_slot_mode_t slot_mode = this->slot_mode_;
+      i2s_std_slot_config_t std_slot_cfg;
+      if (this->i2s_comm_fmt_ == "std") {
+         std_slot_cfg =
+            I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG((i2s_data_bit_width_t) this->slot_bit_width_, slot_mode);
+      } else if (this->i2s_comm_fmt_ == "pcm") {
+         std_slot_cfg =
+         I2S_STD_PCM_SLOT_DEFAULT_CONFIG((i2s_data_bit_width_t) this->slot_bit_width_, slot_mode);
+      } else {
+         std_slot_cfg =
+            I2S_STD_MSB_SLOT_DEFAULT_CONFIG((i2s_data_bit_width_t)this->slot_bit_width_, slot_mode);
+      }
+#ifdef USE_ESP32_VARIANT_ESP32
+      // There seems to be a bug on the ESP32 (non-variant) platform where setting the slot bit width higher then the bits
+      // per sample causes the audio to play too fast. Setting the ws_width to the configured slot bit width seems to
+      // make it play at the correct speed while sending more bits per slot.
+      if (this->slot_bit_width_ != I2S_SLOT_BIT_WIDTH_AUTO) {
+         std_slot_cfg.ws_width = static_cast<uint32_t>(this->slot_bit_width_);
+      }
+#else
+      std_slot_cfg.slot_bit_width = this->slot_bit_width_;
+#endif
+      std_slot_cfg.slot_mask = this->slot_mask_;
+      return std_slot_cfg;
+  }
+#endif
+protected:
+   virtual bool start_i2s_channel_() = 0;
+   virtual bool stop_i2s_channel_() = 0;
+
+#ifdef USE_I2S_LEGACY
+  i2s_mode_t i2s_mode_{};
+  i2s_channel_fmt_t channel_fmt_;
+  i2s_bits_per_sample_t bits_per_sample_;
+  i2s_bits_per_chan_t bits_per_channel_;
+#else
+  i2s_role_t i2s_role_{};
+  i2s_slot_mode_t slot_mode_;
+  i2s_std_slot_mask_t std_slot_mask_;
+  i2s_slot_bit_width_t slot_bit_width_;
+#endif
+  uint32_t sample_rate_;
+  bool use_apll_;
+  i2s_mclk_multiple_t mclk_multiple_;
+  uint8_t i2s_access_;
+
+  bool pdm_{false};
+  bool is_fixed_{true};
+};
+
+
+class I2SAudioIn;
+class I2SAudioOut;
+
+
+class I2SPortComponent : public Component {
+public:
   void setup() override;
   void dump_config() override;
 
+#ifdef USE_I2S_LEGACY
   i2s_pin_config_t get_pin_config() const {
     return {
         .mck_io_num = this->mclk_pin_,
@@ -35,6 +145,51 @@ class I2SAudioComponent : public Component {
         .data_in_num = I2S_PIN_NO_CHANGE,
     };
   }
+#else
+  i2s_std_gpio_config_t get_pin_config() const {
+    return {.mclk = (gpio_num_t) this->mclk_pin_,
+            .bclk = (gpio_num_t) this->bclk_pin_,
+            .ws = (gpio_num_t) this->lrclk_pin_,
+            .dout = this->dout_poin_ == I2S_GPIO_UNUSED ? I2S_GPIO_UNUSED : (gpio_num_t) this->dout_pin_,
+            .din = this->din_pin_ == I2S_GPIO_UNUSED ? I2S_GPIO_UNUSED : (gpio_num_t) this->din_pin_,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false,
+            }};
+  }
+    
+  i2s_std_config_t get_std_config() const {
+    i2s_std_gpio_config_t pin_config = this->get_pin_config();
+    
+    
+    i2s_slot_mode_t slot_mode = this->slot_mode_;
+    i2s_std_slot_config_t std_slot_cfg;
+    if (this->i2s_comm_fmt_ == "std") {
+      std_slot_cfg =
+        I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG((i2s_data_bit_width_t) audio_stream_info.get_bits_per_sample(), slot_mode);
+    } else if (this->i2s_comm_fmt_ == "pcm") {
+      std_slot_cfg =
+        I2S_STD_PCM_SLOT_DEFAULT_CONFIG((i2s_data_bit_width_t) audio_stream_info.get_bits_per_sample(), slot_mode);
+    } else {
+      std_slot_cfg =
+        I2S_STD_MSB_SLOT_DEFAULT_CONFIG((i2s_data_bit_width_t) audio_stream_info.get_bits_per_sample(), slot_mode);
+    }
+#ifdef USE_ESP32_VARIANT_ESP32
+    // There seems to be a bug on the ESP32 (non-variant) platform where setting the slot bit width higher then the bits
+    // per sample causes the audio to play too fast. Setting the ws_width to the configured slot bit width seems to
+    // make it play at the correct speed while sending more bits per slot.
+    if (this->slot_bit_width_ != I2S_SLOT_BIT_WIDTH_AUTO) {
+       std_slot_cfg.ws_width = static_cast<uint32_t>(this->slot_bit_width_);
+    }
+#else
+    std_slot_cfg.slot_bit_width = this->slot_bit_width_;
+#endif
+    
+    std_slot_cfg.slot_mask = this->slot_mask_;
+    return {.clk_cfg = clk_cfg, .slot_cfg = std_slot_cfg, .gpio_cfg = pin_config};
+  }
+#endif
 
   void set_mclk_pin(int pin) { this->mclk_pin_ = pin; }
   void set_bclk_pin(int pin) { this->bclk_pin_ = pin; }
@@ -45,17 +200,18 @@ class I2SAudioComponent : public Component {
   void unlock() { this->lock_.unlock(); }
 
   i2s_port_t get_port() const { return this->port_; }
-  void set_audio_in(I2SReader* comp_in){ this->audio_in_ = comp_in;}
-  void set_audio_out(I2SWriter* comp_out){ this->audio_out_ = comp_out;}
+  
+  void set_audio_in(I2SAudioIn* comp_in){ this->audio_in_ = comp_in;}
+  void set_audio_out(I2SAudioOut* comp_out){ this->audio_out_ = comp_out;}
 
   void set_access_mode(I2SAccessMode access_mode){this->access_mode_ = access_mode;}
   bool is_exclusive(){return this->access_mode_ == I2SAccessMode::EXCLUSIVE;}
 
   void process_i2s_events(bool &tx_dma_underflow);
 
- protected:
-  friend I2SReader;
-  friend I2SWriter;
+protected:
+  friend I2SAudioIn;
+  friend I2SAudioOut;
 
   Mutex lock_;
   I2SAccessMode access_mode_{I2SAccessMode::DUPLEX};
@@ -63,110 +219,124 @@ class I2SAudioComponent : public Component {
 
   bool claim_access_(uint8_t access);
   bool release_access_(uint8_t access);
+#ifdef USE_I2S_LEGACY  
   bool install_i2s_driver_(i2s_driver_config_t i2s_cfg, uint8_t access);
   bool uninstall_i2s_driver_(uint8_t access);
   bool validate_cfg_for_duplex_(i2s_driver_config_t& i2s_cfg);
+#endif
+  
+  bool start_driver_();
+  bool stop_driver_();
 
-  I2SReader *audio_in_{nullptr};
-  I2SWriter *audio_out_{nullptr};
-
+  I2SAudioIn *audio_in_{nullptr};
+  I2SAudioOut *audio_out_{nullptr};
+#ifdef USE_I2S_LEGACY
   int mclk_pin_{I2S_PIN_NO_CHANGE};
   int bclk_pin_{I2S_PIN_NO_CHANGE};
+  i2s_driver_config_t installed_cfg_{};
+#else
+  int mclk_pin_{I2S_GPIO_UNUSED};
+  int bclk_pin_{I2S_GPIO_UNUSED};
+  int dout_pin_{I2S_GPIO_UNUSED};
+  int din_pin_{I2S_GPIO_UNUSED};
+  size_t dma_buffer_length_{240};
+  uint8_t dma_buffer_count_{4};
+#endif
   int lrclk_pin_;
   i2s_port_t port_{};
-  i2s_driver_config_t installed_cfg_{};
+  
+  
   QueueHandle_t i2s_event_queue_;
   bool driver_loaded_{false};
 };
 
-class I2SSettings {
+
+class I2SAudioIn : public I2SAudioBase, public Parented<I2SPortComponent> {
 public:
-  I2SSettings() = default;
-  I2SSettings(uint8_t access) : i2s_access_(access) {}
+  I2SAudioIn() : I2SAudioBase( I2SAccess::RX ) {}
 
-  i2s_driver_config_t get_i2s_cfg() const;
-  void dump_i2s_settings() const;
-  
-  void set_clk_mode(i2s_mode_t clk_mode){ this->i2s_clk_mode_ = clk_mode; } 
-  void set_channel(i2s_channel_fmt_t channel_fmt) { this->channel_fmt_ = channel_fmt; }
-  void set_sample_rate(uint32_t sample_rate) { this->sample_rate_ = sample_rate; }
-  void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }
-  void set_bits_per_channel(i2s_bits_per_chan_t bits_per_channel) { this->bits_per_channel_ = bits_per_channel; }
-  void set_use_apll(uint32_t use_apll) { this->use_apll_ = use_apll; }
-  
-  void set_pdm(bool pdm) { this->pdm_ = pdm; }
-  void set_fixed_settings(bool is_fixed){ this->is_fixed_ = is_fixed; }
-  int num_of_channels() const { return (this->channel_fmt_ == I2S_CHANNEL_FMT_ONLY_RIGHT
-   || this->channel_fmt_ == I2S_CHANNEL_FMT_ONLY_LEFT) ? 1 : 2; }
-  
+#ifdef USE_I2S_LEGACY
+  bool install_i2s_driver(i2s_driver_config_t i2s_cfg){
+     return this->parent_->install_i2s_driver_(i2s_cfg, I2SAccess::RX);}
+  bool uninstall_i2s_driver(){ return this->parent_->uninstall_i2s_driver_(I2SAccess::RX);}
+  bool claim_i2s_access(){return this->parent_->claim_access_(I2SAccess::RX);}
+  bool release_i2s_access(){return this->parent_->release_access_(I2SAccess::RX);}
+  bool is_adjustable(){return !this->is_fixed_ && this->parent_->is_exclusive();}
 
-protected:
-   bool use_apll_{false};
-   i2s_bits_per_sample_t bits_per_sample_;
-   i2s_bits_per_chan_t bits_per_channel_;
-   i2s_channel_fmt_t channel_fmt_;
-   i2s_mode_t i2s_clk_mode_{I2S_MODE_MASTER};
-   i2s_mode_t i2s_access_mode_;
-   
-   bool pdm_{false};
-   uint32_t sample_rate_;
-
-   bool is_fixed_{false};
-   uint8_t i2s_access_;
-};
-
-
-class I2SReader : public I2SSettings, public Parented<I2SAudioComponent> {
-public:
-   I2SReader() : I2SSettings( I2SAccess::RX ) {}
-
-   bool install_i2s_driver(i2s_driver_config_t i2s_cfg){
-      return this->parent_->install_i2s_driver_(i2s_cfg, I2SAccess::RX);}
-   bool uninstall_i2s_driver(){ return this->parent_->uninstall_i2s_driver_(I2SAccess::RX);}
-   bool claim_i2s_access(){return this->parent_->claim_access_(I2SAccess::RX);}
-   bool release_i2s_access(){return this->parent_->release_access_(I2SAccess::RX);}
-   bool is_adjustable(){return !this->is_fixed_ && this->parent_->is_exclusive();}
 #if SOC_I2S_SUPPORTS_ADC
   void set_adc_channel(adc1_channel_t channel) {
     this->adc_channel_ = channel;
     this->use_internal_adc_ = true;
   }
 #endif
-   void set_din_pin(int8_t pin) { this->din_pin_ = pin; }
-   int8_t get_din_pin() { return this->din_pin_; }
-
-protected:
-#if SOC_I2S_SUPPORTS_ADC
-   adc1_channel_t adc_channel_{ADC1_CHANNEL_MAX};
-   bool use_internal_adc_{false};
+  void set_din_pin(int8_t pin) { this->din_pin_ = pin; }
+  int8_t get_din_pin() { return this->din_pin_; }
+#else
+  void set_din_pin(int8_t pin) { this->din_pin_ = (gpio_num_t) pin; }
 #endif
-   int8_t din_pin_{I2S_PIN_NO_CHANGE};
+  
+ void register_at_parent() override {
+    this->parent_->set_audio_in(this);
+ }
+protected:
+  bool start_i2s_channel_() override;
+  bool stop_i2s_channel_() override;
+#ifdef USE_I2S_LEGACY
+#if SOC_I2S_SUPPORTS_ADC
+  adc1_channel_t adc_channel_{ADC1_CHANNEL_MAX};
+  bool use_internal_adc_{false};
+#endif
+  int8_t din_pin_{I2S_PIN_NO_CHANGE};
+#else
+  gpio_num_t din_pin_{I2S_GPIO_UNUSED};
+  i2s_chan_handle_t rx_handle_;
+#endif
 };
 
 
-class I2SWriter : public I2SSettings, public Parented<I2SAudioComponent> {
+class I2SAudioOut : public I2SAudioBase, public Parented<I2SPortComponent> {
 public:
-   I2SWriter() : I2SSettings(I2SAccess::TX ) {}
+  I2SAudioOut() : I2SAudioBase(I2SAccess::TX ) {}
 
-   bool install_i2s_driver(i2s_driver_config_t i2s_cfg){
+#ifdef USE_I2S_LEGACY
+  bool install_i2s_driver(i2s_driver_config_t i2s_cfg){
       return this->parent_->install_i2s_driver_(i2s_cfg, I2SAccess::TX); }
-   bool uninstall_i2s_driver(){ return this->parent_->uninstall_i2s_driver_(I2SAccess::TX);}
-   bool claim_i2s_access(){return this->parent_->claim_access_(I2SAccess::TX);}
-   bool release_i2s_access(){return this->parent_->release_access_(I2SAccess::TX);}
-   bool is_adjustable(){return !this->is_fixed_ && this->parent_->is_exclusive();}
+  bool uninstall_i2s_driver(){ return this->parent_->uninstall_i2s_driver_(I2SAccess::TX);}
+  bool claim_i2s_access(){return this->parent_->claim_access_(I2SAccess::TX);}
+  bool release_i2s_access(){return this->parent_->release_access_(I2SAccess::TX);}
+  bool is_adjustable(){return !this->is_fixed_ && this->parent_->is_exclusive();}
 
 #if SOC_I2S_SUPPORTS_DAC
   void set_internal_dac_mode(i2s_dac_mode_t mode) { this->internal_dac_mode_ = mode; }
 #endif
+  void set_dout_pin(int8_t pin) { this->dout_pin_ = pin; }
+  int8_t get_dout_pin() { return this->dout_pin_; }
+  void set_i2s_comm_fmt(i2s_comm_format_t mode) { this->i2s_comm_fmt_ = mode; }
+#else
+  void set_dout_pin(uint8_t pin) { this->dout_pin_ = (gpio_num_t) pin; }
+  void set_i2s_comm_fmt(std::string mode) { this->i2s_comm_fmt_ = std::move(mode); }
+#endif
 
-   void set_dout_pin(int8_t pin) { this->dout_pin_ = pin; }
-   int8_t get_dout_pin() { return this->dout_pin_; }
+ void register_at_parent() override {
+    this->parent_->set_audio_out(this);
+  }
+
+  bool is_adjustable() const { return !this->is_fixed_ && this->parent_->is_exclusive(); }
 
 protected:
+  bool start_i2s_channel_() override;
+  bool stop_i2s_channel_() override;
+#ifdef USE_I2S_LEGACY
 #if SOC_I2S_SUPPORTS_DAC
-   i2s_dac_mode_t internal_dac_mode_{I2S_DAC_CHANNEL_DISABLE};
+  i2s_dac_mode_t internal_dac_mode_{I2S_DAC_CHANNEL_DISABLE};
 #endif
-   int8_t dout_pin_{I2S_PIN_NO_CHANGE};
+  int8_t dout_pin_{I2S_PIN_NO_CHANGE};
+  i2s_comm_format_t i2s_comm_fmt_;
+#else
+  gpio_num_t dout_pin_{I2S_GPIO_UNUSED};
+  std::string i2s_comm_fmt_;
+  i2s_chan_handle_t tx_handle_{nullptr};
+#endif
 };
 
 
