@@ -169,16 +169,20 @@ void Sat1Microphone::configure_stream_settings_() {
 
 
 bool Sat1Microphone::start_driver_() {
-  if (!this->claim_i2s_access()) {
+  if( !this->start_i2s_channel_() ) {
+    ESP_LOGE(TAG, "Failed to start I2S channel");
     return false;
   }
+  // if (!this->claim_i2s_access()) {
+  //   return false;
+  // }
 
-  i2s_driver_config_t config = this->get_i2s_cfg();
-  if(!this->install_i2s_driver(config))
-  {
-    this->release_i2s_access();
-    return false;
-  }
+  // i2s_driver_config_t config = this->get_i2s_cfg();
+  // if(!this->install_i2s_driver(config))
+  // {
+  //   this->release_i2s_access();
+  //   return false;
+  // }
   
   this->configure_stream_settings_();  // redetermine the settings in case some settings were changed after compilation
 
@@ -186,13 +190,14 @@ bool Sat1Microphone::start_driver_() {
 }
 
 bool Sat1Microphone::stop_driver_() {
-  if (!this->uninstall_i2s_driver()) {
-    this->release_i2s_access();
-    return false;
-  }
+  return this->stop_i2s_channel_();
+  // if (!this->uninstall_i2s_driver()) {
+  //   this->release_i2s_access();
+  //   return false;
+  // }
   
-  this->release_i2s_access();
-  return true;
+  // this->release_i2s_access();
+  // return true;
 }
 
 size_t Sat1Microphone::read_(uint8_t *buf, size_t len, TickType_t ticks_to_wait) {

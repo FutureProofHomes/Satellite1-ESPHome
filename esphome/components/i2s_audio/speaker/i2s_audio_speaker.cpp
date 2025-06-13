@@ -2,12 +2,6 @@
 
 #ifdef USE_ESP32
 
-#ifdef USE_I2S_LEGACY
-#include <driver/i2s.h>
-#else
-#include <driver/i2s_std.h>
-#endif
-
 #include "esphome/components/audio/audio.h"
 
 #include "esphome/core/application.h"
@@ -299,9 +293,9 @@ void I2SAudioSpeaker::speaker_task(void *params) {
         // Audio stream info changed, stop the speaker task so it will restart with the proper settings.
         break;
       }
-
+#ifdef USE_I2S_LEGACY
       this_speaker->parent_->process_i2s_events(tx_dma_underflow);
-      
+#endif
 
       if (this_speaker->pause_state_) {
         // Pause state is accessed atomically, so thread safe
@@ -327,7 +321,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
         for (uint32_t i = 0; i < batches; ++i) {
           size_t bytes_written = 0;
           size_t bytes_to_write = std::min(single_dma_buffer_input_size, bytes_read);
-
+#ifdef USE_I2S_LEGACY
         if (audio_stream_info.get_bits_per_sample() == (uint8_t) this_speaker->bits_per_sample_) {
             i2s_write(this_speaker->parent_->get_port(), this_speaker->data_buffer_ + i * single_dma_buffer_input_size,
                       bytes_to_write, &bytes_written, pdMS_TO_TICKS(DMA_BUFFER_DURATION_MS * 5));
@@ -337,7 +331,10 @@ void I2SAudioSpeaker::speaker_task(void *params) {
                            audio_stream_info.get_bits_per_sample(), this_speaker->bits_per_sample_, &bytes_written,
                              pdMS_TO_TICKS(DMA_BUFFER_DURATION_MS * 5));
         }
-
+#else
+        i2s_channel_write(this_speaker->tx_handle_, this_speaker->data_buffer_ + i * single_dma_buffer_input_size,
+                          bytes_to_write, &bytes_written, pdMS_TO_TICKS(DMA_BUFFER_DURATION_MS * 5));
+#endif
           int64_t now = esp_timer_get_time();
 
           if (bytes_written != bytes_to_write) {
@@ -362,8 +359,9 @@ void I2SAudioSpeaker::speaker_task(void *params) {
 
     xEventGroupSetBits(this_speaker->event_group_, SpeakerEventGroupBits::STATE_STOPPING);
 
-    this_speaker->uninstall_i2s_driver();
-    this_speaker->release_i2s_access();
+    //this_speaker->uninstall_i2s_driver();
+    //this_speaker->release_i2s_access();
+    this_speaker->stop_i2s_channel_();
   }
   
   this_speaker->delete_task_(data_buffer_size);
@@ -453,21 +451,25 @@ esp_err_t I2SAudioSpeaker::allocate_buffers_(size_t data_buffer_size, size_t rin
 }
 
 esp_err_t I2SAudioSpeaker::start_i2s_driver_(audio::AudioStreamInfo &audio_stream_info) {
-  if ((this->i2s_mode_ & I2S_MODE_SLAVE) && (this->sample_rate_ != audio_stream_info.get_sample_rate())) {  // NOLINT
+  if (this->has_fixed_rate() && (this->sample_rate_ != audio_stream_info.get_sample_rate())) {  // NOLINT
     // Can't reconfigure I2S bus, so the sample rate must match the configured value
     return ESP_ERR_NOT_SUPPORTED;
   }
-  
-  if (!this->claim_i2s_access()) {
+
+  if( !this->start_i2s_channel_() ){
     return ESP_ERR_INVALID_STATE;
   }
 
-  i2s_driver_config_t config = this->get_i2s_cfg();
-  if(!this->install_i2s_driver(config))
-  {
-    this->release_i2s_access();
-    return ESP_ERR_INVALID_STATE;
-  }
+  // if (!this->claim_i2s_access()) {
+  //   return ESP_ERR_INVALID_STATE;
+  // }
+
+  // i2s_driver_config_t config = this->get_i2s_cfg();
+  // if(!this->install_i2s_driver(config))
+  // {
+  //   this->release_i2s_access();
+  //   return ESP_ERR_INVALID_STATE;
+  // }
   
   return ESP_OK;
 }
