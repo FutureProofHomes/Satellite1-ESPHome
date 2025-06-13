@@ -167,37 +167,17 @@ void Sat1Microphone::configure_stream_settings_() {
 
 
 
-
 bool Sat1Microphone::start_driver_() {
   if( !this->start_i2s_channel_() ) {
     ESP_LOGE(TAG, "Failed to start I2S channel");
     return false;
   }
-  // if (!this->claim_i2s_access()) {
-  //   return false;
-  // }
-
-  // i2s_driver_config_t config = this->get_i2s_cfg();
-  // if(!this->install_i2s_driver(config))
-  // {
-  //   this->release_i2s_access();
-  //   return false;
-  // }
-  
   this->configure_stream_settings_();  // redetermine the settings in case some settings were changed after compilation
-
   return true;
 }
 
 bool Sat1Microphone::stop_driver_() {
   return this->stop_i2s_channel_();
-  // if (!this->uninstall_i2s_driver()) {
-  //   this->release_i2s_access();
-  //   return false;
-  // }
-  
-  // this->release_i2s_access();
-  // return true;
 }
 
 size_t Sat1Microphone::read_(uint8_t *buf, size_t len, TickType_t ticks_to_wait) {
@@ -250,7 +230,6 @@ void Sat1Microphone::fix_dc_offset_(std::vector<uint8_t> &data) {
 }
 
 
-
 void Sat1Microphone::mic_task(void *params) {
   Sat1Microphone *this_microphone = (Sat1Microphone *) params;
   xEventGroupSetBits(this_microphone->event_group_, MicrophoneEventGroupBits::TASK_STARTING);
@@ -287,7 +266,6 @@ void Sat1Microphone::mic_task(void *params) {
     // Continuously delay until the loop method deletes the task
     vTaskDelay(pdMS_TO_TICKS(10));
   }
-  
 }
 
 

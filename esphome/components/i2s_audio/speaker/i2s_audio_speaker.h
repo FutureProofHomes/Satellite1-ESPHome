@@ -107,15 +107,12 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   TaskHandle_t speaker_task_handle_{nullptr};
   EventGroupHandle_t event_group_{nullptr};
 
-  QueueHandle_t i2s_event_queue_;
-
   uint8_t *data_buffer_;
   std::shared_ptr<RingBuffer> audio_ring_buffer_;
 
   uint32_t buffer_duration_ms_;
 
   optional<uint32_t> timeout_;
-
 
   bool task_created_{false};
   bool pause_state_{false};
