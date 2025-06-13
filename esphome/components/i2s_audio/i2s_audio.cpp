@@ -58,7 +58,7 @@ void I2SPortComponent::dump_config(){
 #ifdef USE_I2S_LEGACY  
   ESP_LOGCONFIG(TAG, "  clk_mode: %s", this->i2s_mode_ == I2S_MODE_MASTER ? "internal" : "external"  );
 #else 
-  ESP_LOGCONFIG(TAG, "  role: %s", this->i2s_role_ == I2S_ROLE_MASTER ? "master" : "slave");
+  ESP_LOGCONFIG(TAG, "  role: %s", this->i2s_role_ == I2S_ROLE_MASTER ? "primary" : "secondary");
 #endif
   ESP_LOGCONFIG(TAG, "  AccessMode: %s", this->access_mode_ == I2SAccessMode::DUPLEX ? "duplex" : "exclusive" );
   ESP_LOGCONFIG(TAG, "  Port: %d", this->get_port() );
@@ -219,11 +219,6 @@ void I2SPortComponent::process_i2s_events(bool &tx_dma_underflow){
 
 
 
-
-
-
-
-
 #ifndef USE_I2S_LEGACY
 i2s_std_gpio_config_t I2SPortComponent::get_pin_config() const {
     return {.mclk = (gpio_num_t) this->mclk_pin_,
@@ -237,13 +232,8 @@ i2s_std_gpio_config_t I2SPortComponent::get_pin_config() const {
                 .ws_inv = false,
             }};
 }
-#endif // USE_I2S_LEGACY
 
-
-bool I2SPortComponent::init_driver_() {
-#ifdef USE_I2S_LEGACY
-  return true;
-#else
+bool I2SPortComponent::init_driver_(i2s_std_config_t std_cfg) {
   this->lock();
   i2s_chan_config_t chan_cfg = {
       .id = this->get_port(),
@@ -262,10 +252,29 @@ bool I2SPortComponent::init_driver_() {
     this->unlock();
     return false;
   }
+  
+  if( this->tx_handle_ ){
+    err = i2s_channel_init_std_mode(this->tx_handle_, &std_cfg);
+    if (err != ESP_OK) {
+      i2s_del_channel(this->tx_handle_);
+      this->unlock();
+      return false;
+    }
+  }
+  
+  if( this->rx_handle_ ){
+    err = i2s_channel_init_std_mode(this->rx_handle_, &std_cfg);
+    if (err != ESP_OK) {
+      i2s_del_channel(this->rx_handle_);
+      this->unlock();
+      return false;
+    }
+  }
+  
   this->unlock();
-#endif
   return true;
 }
+#endif
 
 bool I2SAudioOut::start_i2s_channel_() {
 #ifdef USE_I2S_LEGACY
@@ -285,7 +294,12 @@ bool I2SAudioOut::start_i2s_channel_() {
       ESP_LOGE(TAG, "Trying to start I2S-TX channel, but RX handle is available. This is not allowed.");
       return false;
     }
-    if( !this->parent_->init_driver_() ){
+    i2s_std_config_t std_cfg = {
+      .clk_cfg = this->get_std_clk_cfg(),
+      .slot_cfg = this->get_std_slot_cfg(),
+      .gpio_cfg = this->parent_->get_pin_config()
+    };
+    if( !this->parent_->init_driver_(std_cfg) ){
       ESP_LOGE(TAG, "Failed to initialize I2S driver for TX channel.");
       return false;
     }
@@ -293,24 +307,7 @@ bool I2SAudioOut::start_i2s_channel_() {
   
   i2s_chan_info_t chan_info;
   esp_err_t err = i2s_channel_get_info(this->parent_->tx_handle_, &chan_info);
-  if( err == ESP_ERR_INVALID_STATE )
-  {
-    // The channel is not initiated yet, we do now
-     i2s_std_config_t std_cfg = {
-      .clk_cfg = this->get_std_clk_cfg(),
-      .slot_cfg = this->get_std_slot_cfg(),
-      .gpio_cfg = this->parent_->get_pin_config()
-     };
-     err = i2s_channel_init_std_mode(this->parent_->tx_handle_, &std_cfg);
-     if (err != ESP_OK) {
-        i2s_del_channel(this->parent_->tx_handle_);
-        return false;
-     }
-    //  const i2s_event_callbacks_t callbacks = {
-    //     .on_send_q_ovf = this->i2s_overflow_cb,
-    //  };
-    //  i2s_channel_register_event_callback(this->parent_->tx_handle_, &callbacks, this);
-  } else  if (err != ESP_OK) {
+  if (err != ESP_OK) {
     ESP_LOGE(TAG, "Failed to get TX channel info: %s", esp_err_to_name(err));
     return false;
   } else  if( chan_info.dir != I2S_DIR_TX ){
@@ -320,22 +317,9 @@ bool I2SAudioOut::start_i2s_channel_() {
   
   err = i2s_channel_enable(this->parent_->tx_handle_);
   if (err != ESP_OK) {
-    // The channel is not initiated yet, we do now
-     i2s_std_config_t std_cfg = {
-      .clk_cfg = this->get_std_clk_cfg(),
-      .slot_cfg = this->get_std_slot_cfg(),
-      .gpio_cfg = this->parent_->get_pin_config()
-     };
-     err = i2s_channel_init_std_mode(this->parent_->tx_handle_, &std_cfg);
-     if (err != ESP_OK) {
-        i2s_del_channel(this->parent_->tx_handle_);
-        return false;
-     }
-      err = i2s_channel_enable(this->parent_->tx_handle_);
-     if (err != ESP_OK) {
-        i2s_del_channel(this->parent_->tx_handle_);
-        return false;
-     }
+    ESP_LOGE(TAG, "Failed to enable TX channel: %s", esp_err_to_name(err));
+    i2s_del_channel(this->parent_->tx_handle_);
+    return false;
   } 
 #endif
   return true;
@@ -385,57 +369,32 @@ bool I2SAudioIn::start_i2s_channel_() {
       ESP_LOGE(TAG, "Trying to start I2S-RX channel, but TX handle is available. This is not allowed.");
       return false;
     }
-    if( !this->parent_->init_driver_() ){
+    i2s_std_config_t std_cfg = {
+      .clk_cfg = this->get_std_clk_cfg(),
+      .slot_cfg = this->get_std_slot_cfg(),
+      .gpio_cfg = this->parent_->get_pin_config()
+    };
+    if( !this->parent_->init_driver_(std_cfg) ){
       ESP_LOGE(TAG, "Failed to initialize I2S driver for RX channel.");
       return false;
     }
   }
-  
   i2s_chan_info_t chan_info;
   esp_err_t err = i2s_channel_get_info(this->parent_->rx_handle_, &chan_info);
-  if( err == ESP_ERR_INVALID_STATE )
-  {
-    // The channel is not initiated yet, we do now
-     i2s_std_config_t std_cfg = {
-      .clk_cfg = this->get_std_clk_cfg(),
-      .slot_cfg = this->get_std_slot_cfg(),
-      .gpio_cfg = this->parent_->get_pin_config()
-     };
-     err = i2s_channel_init_std_mode(this->parent_->rx_handle_, &std_cfg);
-      if (err != ESP_OK) {
-        i2s_del_channel(this->parent_->rx_handle_);
-        return false;
-      }
-      // const i2s_event_callbacks_t callbacks = {
-      //   .on_send_q_ovf = this->i2s_overflow_cb,
-      // };
-      // i2s_channel_register_event_callback(this->parent_->rx_handle_, &callbacks, this);
-  } else if (err != ESP_OK) {
+  if (err != ESP_OK) {
     ESP_LOGE(TAG, "Failed to get RX channel info: %s", esp_err_to_name(err));
     return false;
-  } else if( chan_info.dir != I2S_DIR_RX ){
+  } 
+  
+  if( chan_info.dir != I2S_DIR_RX ){
     ESP_LOGE(TAG, "RX channel is not configured for RX direction");
     return false;
   }
   
   err = i2s_channel_enable(this->parent_->rx_handle_);
   if (err != ESP_OK) {
-    // The channel is not initiated yet, we do now
-     i2s_std_config_t std_cfg = {
-      .clk_cfg = this->get_std_clk_cfg(),
-      .slot_cfg = this->get_std_slot_cfg(),
-      .gpio_cfg = this->parent_->get_pin_config()
-     };
-     err = i2s_channel_init_std_mode(this->parent_->rx_handle_, &std_cfg);
-     if (err != ESP_OK) {
-        i2s_del_channel(this->parent_->rx_handle_);
-        return false;
-     }
-     err = i2s_channel_enable(this->parent_->rx_handle_);
-     if (err != ESP_OK) {
-        i2s_del_channel(this->parent_->rx_handle_);
-        return false;
-     }
+      i2s_del_channel(this->parent_->rx_handle_);
+      return false;
   } 
 #endif
   return true;
