@@ -240,14 +240,9 @@ i2s_std_gpio_config_t I2SPortComponent::get_pin_config() const {
 #endif // USE_I2S_LEGACY
 
 
-
-
-
 bool I2SPortComponent::init_driver_() {
-
 #ifdef USE_I2S_LEGACY
   return true;
-  
 #else
   this->lock();
   i2s_chan_config_t chan_cfg = {
@@ -268,29 +263,6 @@ bool I2SPortComponent::init_driver_() {
     return false;
   }
   this->unlock();
-/*
-  I2SAudioBase *i2s_component = this->audio_out_ != nullptr ? this->audio_out_ : this->audio_in_;
-
-  i2s_std_config_t std_cfg = {
-      .clk_cfg = i2s_component->get_std_slot_cfg(),
-      .slot_cfg = i2s_component->get_std_slot_cfg(),
-      .gpio_cfg = this->get_pin_config()
-  };
-  
-  err = i2s_channel_init_std_mode(this->tx_handle_, &std_cfg);
-  if (err != ESP_OK) {
-    i2s_del_channel(this->tx_handle_);
-    this->parent_->unlock();
-    return false;
-  }
-  
-  err = i2s_channel_init_std_mode(this->rx_handle_, &std_cfg);
-  if (err != ESP_OK) {
-    i2s_del_channel(this->rx_handle_);
-    this->parent_->unlock();
-    return false;
-  }
-*/
 #endif
   return true;
 }
@@ -346,10 +318,24 @@ bool I2SAudioOut::start_i2s_channel_() {
     return false;
   }
   
-  i2s_channel_enable(this->parent_->tx_handle_);
+  err = i2s_channel_enable(this->parent_->tx_handle_);
   if (err != ESP_OK) {
-    i2s_del_channel(this->parent_->tx_handle_);
-    return false;
+    // The channel is not initiated yet, we do now
+     i2s_std_config_t std_cfg = {
+      .clk_cfg = this->get_std_clk_cfg(),
+      .slot_cfg = this->get_std_slot_cfg(),
+      .gpio_cfg = this->parent_->get_pin_config()
+     };
+     err = i2s_channel_init_std_mode(this->parent_->tx_handle_, &std_cfg);
+     if (err != ESP_OK) {
+        i2s_del_channel(this->parent_->tx_handle_);
+        return false;
+     }
+      err = i2s_channel_enable(this->parent_->tx_handle_);
+     if (err != ESP_OK) {
+        i2s_del_channel(this->parent_->tx_handle_);
+        return false;
+     }
   } 
 #endif
   return true;
@@ -377,7 +363,6 @@ bool I2SAudioOut::stop_i2s_channel_() {
     return false;
   }
 #endif
-
   return true;
 }
 
@@ -433,10 +418,24 @@ bool I2SAudioIn::start_i2s_channel_() {
     return false;
   }
   
-  i2s_channel_enable(this->parent_->rx_handle_);
+  err = i2s_channel_enable(this->parent_->rx_handle_);
   if (err != ESP_OK) {
-    i2s_del_channel(this->parent_->rx_handle_);
-    return false;
+    // The channel is not initiated yet, we do now
+     i2s_std_config_t std_cfg = {
+      .clk_cfg = this->get_std_clk_cfg(),
+      .slot_cfg = this->get_std_slot_cfg(),
+      .gpio_cfg = this->parent_->get_pin_config()
+     };
+     err = i2s_channel_init_std_mode(this->parent_->rx_handle_, &std_cfg);
+     if (err != ESP_OK) {
+        i2s_del_channel(this->parent_->rx_handle_);
+        return false;
+     }
+     err = i2s_channel_enable(this->parent_->rx_handle_);
+     if (err != ESP_OK) {
+        i2s_del_channel(this->parent_->rx_handle_);
+        return false;
+     }
   } 
 #endif
   return true;
@@ -463,10 +462,8 @@ bool I2SAudioIn::stop_i2s_channel_() {
     return false;
   }
 #endif
-
   return true;
 }
-
 
 }  // namespace i2s_audio
 }  // namespace esphome
