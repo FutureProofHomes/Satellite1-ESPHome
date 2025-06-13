@@ -204,7 +204,6 @@ def use_legacy():
     framework_version = CORE.data[KEY_CORE][KEY_FRAMEWORK_VERSION]
     if CORE.using_esp_idf and framework_version >= cv.Version(5, 0, 0):
         if not _use_legacy_driver:
-            print("Using the new I2S driver, set 'use_legacy: true' in your i2s_audio component to use the legacy driver.")
             return False
     return True
 
@@ -222,7 +221,6 @@ async def register_i2s_audio_component(var, config):
                 I2S_BITS_PER_CHANNEL[config[CONF_BITS_PER_CHANNEL]]
             )
         )
-        cg.add(var.register_at_parent())
         cg.add(
                 var.set_i2s_comm_fmt(I2C_COMM_FMT_OPTIONS[config[CONF_I2S_COMM_FMT]])
             )
@@ -246,6 +244,7 @@ async def register_i2s_audio_component(var, config):
     cg.add(var.set_sample_rate(config[CONF_SAMPLE_RATE]))
     cg.add(var.set_use_apll(config[CONF_USE_APLL]))
     cg.add(var.set_mclk_multiple(I2S_MCLK_MULTIPLE[config[CONF_MCLK_MULTIPLE]]))
+    cg.add(var.register_at_parent())
 
 
 def validate_use_legacy(value):
