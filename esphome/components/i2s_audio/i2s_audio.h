@@ -36,10 +36,12 @@ public:
   void set_bits_per_channel(i2s_bits_per_chan_t bits_per_channel) { this->bits_per_channel_ = bits_per_channel; }
   void set_i2s_comm_fmt(i2s_comm_format_t mode) { this->i2s_comm_fmt_ = mode; }
   i2s_driver_config_t get_i2s_cfg(i2s_mode_t i2s_mode) const;
-  int num_of_channels() const { return (this->channel_fmt_ == I2S_CHANNEL_FMT_ONLY_RIGHT
-   || this->channel_fmt_ == I2S_CHANNEL_FMT_ONLY_LEFT) ? 1 : 2; }
-   bool has_fixed_rate() const { return this->is_fixed_; }
-
+  int num_of_channels() const { 
+      return (this->channel_fmt_ == I2S_CHANNEL_FMT_ONLY_RIGHT
+           || this->channel_fmt_ == I2S_CHANNEL_FMT_ONLY_LEFT) ? 1 : 2; 
+  }
+  bool has_fixed_rate() const { return this->is_fixed_; }
+  uint8_t i2s_bits_per_sample() const { return this->bits_per_sample_; }
 #else
   void set_slot_mode(i2s_slot_mode_t slot_mode) { this->slot_mode_ = slot_mode; }
   void set_std_slot_mask(i2s_std_slot_mask_t std_slot_mask) { this->std_slot_mask_ = std_slot_mask; }
@@ -48,7 +50,10 @@ public:
   int num_of_channels() const {
     return (this->std_slot_mask_ == I2S_STD_SLOT_LEFT || this->std_slot_mask_ == I2S_STD_SLOT_RIGHT) ? 1 : 2;
   }
-  bool has_fixed_rate() const { return this->is_fixed_; }
+  uint8_t i2s_bits_per_sample() const { return (uint8_t) this->slot_bit_width_; }
+  bool has_fixed_i2s_rate() const { return this->is_fixed_; }
+  bool has_fixed_i2s_bitdepth() const { return this->is_fixed_; }
+
 #endif
   void set_sample_rate(uint32_t sample_rate) { this->sample_rate_ = sample_rate; }
   void set_use_apll(uint32_t use_apll) { this->use_apll_ = use_apll; }
@@ -183,12 +188,12 @@ public:
   void set_access_mode(I2SAccessMode access_mode){this->access_mode_ = access_mode;}
   bool is_exclusive(){return this->access_mode_ == I2SAccessMode::EXCLUSIVE;}
 
-  
-
 #ifdef USE_I2S_LEGACY  
   void set_i2s_mode(i2s_mode_t mode) { this->i2s_mode_ = mode; }
 #else
   void set_i2s_role(i2s_role_t role) { this->i2s_role_ = role; }
+  i2s_chan_handle_t get_tx_handle() const { return this->tx_handle_; }
+  i2s_chan_handle_t get_rx_handle() const { return this->rx_handle_; }
 #endif
 
 protected:
@@ -225,13 +230,12 @@ protected:
   int bclk_pin_{I2S_GPIO_UNUSED};
   int dout_pin_{I2S_GPIO_UNUSED};
   int din_pin_{I2S_GPIO_UNUSED};
-  size_t dma_buffer_length_{240};
-  uint8_t dma_buffer_count_{4};
 #endif
   int lrclk_pin_;
   i2s_port_t port_{};
-  
-  
+  size_t dma_buffer_length_{240};
+  uint8_t dma_buffer_count_{4};
+
   QueueHandle_t i2s_event_queue_;
   bool driver_loaded_{false};
 };
@@ -276,7 +280,6 @@ protected:
   int8_t din_pin_{I2S_PIN_NO_CHANGE};
 #else
   gpio_num_t din_pin_{I2S_GPIO_UNUSED};
-  i2s_chan_handle_t rx_handle_;
 #endif
 };
 
@@ -303,8 +306,12 @@ public:
   void set_dout_pin(uint8_t pin) { this->dout_pin_ = (gpio_num_t) pin; }
   gpio_num_t get_dout_pin() { return this->dout_pin_; }
 #endif
-
- void register_at_parent() override {
+  size_t get_dma_buffer_size_bytes() const { 
+   return this->parent_->dma_buffer_length_ * this->num_of_channels() * this->i2s_bits_per_sample() / 8;
+  }
+  
+  
+  void register_at_parent() override {
     this->parent_->set_audio_out(this);
   }
 
@@ -321,7 +328,6 @@ protected:
   i2s_comm_format_t i2s_comm_fmt_;
 #else
   gpio_num_t dout_pin_{I2S_GPIO_UNUSED};
-  i2s_chan_handle_t tx_handle_{nullptr};
 #endif
 };
 
