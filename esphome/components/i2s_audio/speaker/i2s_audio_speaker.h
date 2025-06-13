@@ -4,8 +4,6 @@
 
 #include "../i2s_audio.h"
 
-#include <driver/i2s.h>
-
 #include <freertos/event_groups.h>
 #include <freertos/queue.h>
 #include <freertos/FreeRTOS.h>
