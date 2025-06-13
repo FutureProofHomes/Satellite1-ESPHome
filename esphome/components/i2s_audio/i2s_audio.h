@@ -16,8 +16,6 @@
 namespace esphome {
 namespace i2s_audio {
 
-
-
 enum class I2SAccessMode  : uint8_t {EXCLUSIVE, DUPLEX};
 class I2SAccess {
 public:
@@ -40,7 +38,6 @@ public:
       return (this->channel_fmt_ == I2S_CHANNEL_FMT_ONLY_RIGHT
            || this->channel_fmt_ == I2S_CHANNEL_FMT_ONLY_LEFT) ? 1 : 2; 
   }
-  bool has_fixed_rate() const { return this->is_fixed_; }
   uint8_t i2s_bits_per_sample() const { return this->bits_per_sample_; }
 #else
   void set_slot_mode(i2s_slot_mode_t slot_mode) { this->slot_mode_ = slot_mode; }
@@ -51,9 +48,6 @@ public:
     return (this->std_slot_mask_ == I2S_STD_SLOT_LEFT || this->std_slot_mask_ == I2S_STD_SLOT_RIGHT) ? 1 : 2;
   }
   uint8_t i2s_bits_per_sample() const { return (uint8_t) this->slot_bit_width_; }
-  bool has_fixed_i2s_rate() const { return this->is_fixed_; }
-  bool has_fixed_i2s_bitdepth() const { return this->is_fixed_; }
-
 #endif
   void set_sample_rate(uint32_t sample_rate) { this->sample_rate_ = sample_rate; }
   void set_use_apll(uint32_t use_apll) { this->use_apll_ = use_apll; }
@@ -61,6 +55,9 @@ public:
   void set_pdm(bool pdm) { this->pdm_ = pdm; }
 
   void dump_i2s_settings() const;
+  bool has_fixed_i2s_rate() const { return this->is_fixed_; }
+  bool has_fixed_i2s_bitdepth() const { return this->is_fixed_; }
+
   virtual void register_at_parent() = 0;
   bool validate_for_duplex(I2SAudioBase *other) const {
     return ( 
@@ -210,11 +207,11 @@ protected:
   bool install_i2s_driver_(i2s_driver_config_t i2s_cfg, uint8_t access);
   bool uninstall_i2s_driver_(uint8_t access);
   bool validate_cfg_for_duplex_(i2s_driver_config_t& i2s_cfg);
+#else
+  bool init_driver_(i2s_std_config_t std_cfg);
+  bool free_driver_();
 #endif
   
-  bool init_driver_();
-  bool free_driver_();
-
   I2SAudioIn *audio_in_{nullptr};
   I2SAudioOut *audio_out_{nullptr};
 #ifdef USE_I2S_LEGACY
@@ -309,7 +306,7 @@ public:
   size_t get_dma_buffer_size_bytes() const { 
    return this->parent_->dma_buffer_length_ * this->num_of_channels() * this->i2s_bits_per_sample() / 8;
   }
-  
+  uint8_t get_dma_buffer_count() const { return this->parent_->dma_buffer_count_; }
   
   void register_at_parent() override {
     this->parent_->set_audio_out(this);
