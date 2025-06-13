@@ -39,17 +39,23 @@ class UpdateConfigAction : public Action<Ts...> {
   TEMPLATABLE_VALUE(uint8_t, amp_level)
   TEMPLATABLE_VALUE(float, vol_range_min)
   TEMPLATABLE_VALUE(float, vol_range_max)
+  TEMPLATABLE_VALUE(uint8_t, channel)
   
   void play(Ts... x) override { 
     if( this->amp_level_.has_value() ){
       this->parent_->set_amp_level(this->amp_level_.value(x...));
-      this->parent_->update_register();
     }
     if( this->vol_range_min_.has_value() ){
       this->parent_->set_vol_range_min(this->vol_range_min_.value(x...));
     }
     if( this->vol_range_max_.has_value() ){
       this->parent_->set_vol_range_max(this->vol_range_max_.value(x...));
+    }
+    if( this->channel_.has_value() ){
+      this->parent_->set_selected_channel( (ChannelSelect) this->channel_.value(x...));
+    }
+    if(this->amp_level_.has_value() || this->channel_.has_value()){
+      this->parent_->update_register();
     }
   }
 

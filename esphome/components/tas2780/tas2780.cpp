@@ -38,6 +38,8 @@ static const uint8_t TAS2780_TDM_CFG2 = 0x0A; //TDM Configuration 2
 static const uint8_t TAS2780_TDM_CFG2_RX_SCFG_SHIFT = 4;
 static const uint8_t TAS2780_TDM_CFG2_RX_SCFG_MASK = (3 << TAS2780_TDM_CFG2_RX_SCFG_SHIFT);
 static const uint8_t TAS2780_TDM_CFG2_RX_SCFG__STEREO_DWN_MIX = (3 << TAS2780_TDM_CFG2_RX_SCFG_SHIFT);
+static const uint8_t TAS2780_TDM_CFG2_RX_SCFG__MONO_LEFT = (1 << TAS2780_TDM_CFG2_RX_SCFG_SHIFT);
+static const uint8_t TAS2780_TDM_CFG2_RX_SCFG__MONO_RIGHT = (2 << TAS2780_TDM_CFG2_RX_SCFG_SHIFT);
 static const uint8_t TAS2780_TDM_CFG2_RX_WLEN_SHIFT = 2;
 static const uint8_t TAS2780_TDM_CFG2_RX_WLEN_MASK = (3 << TAS2780_TDM_CFG2_RX_WLEN_SHIFT);
 static const uint8_t TAS2780_TDM_CFG2_RX_WLEN__16BIT = (0 << TAS2780_TDM_CFG2_RX_WLEN_SHIFT);
@@ -239,15 +241,26 @@ static const uint8_t TAS2780_INT_LTCH2_IR_LDO_OV = (1 << 2); // Internal VBAT1S 
 static const uint8_t TAS2780_INT_LTCH2_IR_LDO_UV = (1 << 3); // Internal VBAT1S LDO Under Voltage
 
 
-
-
-
 static const uint8_t POWER_MODES[4][2] = {
   {2, 0}, // PWR_MODE0: CDS_MODE=10, VBAT1S_MODE=0
   {0, 0}, // PWR_MODE1: CDS_MODE=00, VBAT1S_MODE=0
   {3, 1}, // PWR_MODE2: CDS_MODE=11, VBAT1S_MODE=1
   {1, 0}, // PWR_MODE3: CDS_MODE=01, VBAT1S_MODE=0
 };
+
+
+uint8_t get_channel_select_reg_val(ChannelSelect channel){
+  switch(channel){
+    case MONO_DWN_MIX:
+      return TAS2780_TDM_CFG2_RX_SCFG__STEREO_DWN_MIX;
+    case LEFT_CHANNEL:
+      return TAS2780_TDM_CFG2_RX_SCFG__MONO_LEFT;
+    case RIGHT_CHANNEL:
+      return TAS2780_TDM_CFG2_RX_SCFG__MONO_RIGHT;
+  }
+
+}
+
 
 void TAS2780::setup(){
   this->init();
@@ -282,12 +295,6 @@ void TAS2780::init(){
   this->reg(TAS2780_PAGE_SELECT) = 0x00;
   this->reg(TAS2780_TDM_CFG5) = 0x44; //TDM tx vsns transmit enable with slot 4
   this->reg(TAS2780_TDM_CFG6) = 0x40; //TDM tx isns transmit enable with slot 0
-
-  this->reg(TAS2780_TDM_CFG2) = (
-      TAS2780_TDM_CFG2_RX_SCFG__STEREO_DWN_MIX |
-      TAS2780_TDM_CFG2_RX_WLEN__32BIT |
-      TAS2780_TDM_CFG2_RX_SLEN__32BIT
-  );  
 
   this->reg(TAS2780_PAGE_SELECT) = 0x01;
   this->reg(TAS2780_LSR) = 0x00; //LSR Mode
@@ -539,11 +546,20 @@ bool TAS2780::write_volume_() {
 }
 
 void TAS2780::update_register(){
+  // AMP_LEVEL
   uint8_t reg_val = this->reg(TAS2780_CHNL_0).get();
   reg_val &= ~TAS2780_CHNL_0_AMP_LEVEL_MASK;
   reg_val |= this->amp_level_ << TAS2780_CHNL_0_AMP_LEVEL_SHIFT;
   this->reg(TAS2780_CHNL_0) = reg_val;
   ESP_LOGD(TAG, "Update amp to level idx: %d", this->amp_level_);
+
+  // CHANNEL_SELECT
+  this->reg(TAS2780_TDM_CFG2) = (
+      get_channel_select_reg_val(this->selected_channel_) |
+      TAS2780_TDM_CFG2_RX_SCFG__MONO_RIGHT |
+      TAS2780_TDM_CFG2_RX_WLEN__32BIT |
+      TAS2780_TDM_CFG2_RX_SLEN__32BIT
+  );  
 }
 
 
