@@ -75,7 +75,7 @@ def _set_num_channels_from_config(config):
 
 
 def _set_stream_limits(config):
-    if config[CONF_I2S_MODE] == CONF_PRIMARY:
+    if False and config[CONF_I2S_MODE] == CONF_PRIMARY:
         # Primary mode has modifiable stream settings
         audio.set_stream_limits(
             min_bits_per_sample=8,

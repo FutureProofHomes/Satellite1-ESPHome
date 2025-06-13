@@ -38,6 +38,7 @@ CONF_PRIMARY = "primary"
 CONF_SECONDARY = "secondary"
 
 CONF_I2S_ACCESS_MODE = "access_mode"
+CONF_I2S_COMM_FMT = "i2s_comm_fmt"
 CONF_PDM = "pdm"
 
 CONF_USE_APLL = "use_apll"
@@ -139,6 +140,21 @@ I2S_MCLK_MULTIPLE = {
     512: i2s_mclk_multiple_t.I2S_MCLK_MULTIPLE_512,
 }
 
+i2s_comm_format_t = cg.global_ns.enum("i2s_comm_format_t")
+I2C_COMM_FMT_OPTIONS = {
+    "stand_i2s": i2s_comm_format_t.I2S_COMM_FORMAT_STAND_I2S,
+    "stand_msb": i2s_comm_format_t.I2S_COMM_FORMAT_STAND_MSB,
+    "stand_pcm_short": i2s_comm_format_t.I2S_COMM_FORMAT_STAND_PCM_SHORT,
+    "stand_pcm_long": i2s_comm_format_t.I2S_COMM_FORMAT_STAND_PCM_LONG,
+    "stand_max": i2s_comm_format_t.I2S_COMM_FORMAT_STAND_MAX,
+    "i2s_msb": i2s_comm_format_t.I2S_COMM_FORMAT_I2S_MSB,
+    "i2s_lsb": i2s_comm_format_t.I2S_COMM_FORMAT_I2S_LSB,
+    "pcm": i2s_comm_format_t.I2S_COMM_FORMAT_PCM,
+    "pcm_short": i2s_comm_format_t.I2S_COMM_FORMAT_PCM_SHORT,
+    "pcm_long": i2s_comm_format_t.I2S_COMM_FORMAT_PCM_LONG,
+}
+
+
 _validate_bits = cv.float_with_unit("bits", "bit")
 
 def validate_mclk_divisible_by_3(config):
@@ -171,15 +187,15 @@ def i2s_audio_component_schema(
             cv.Optional(CONF_BITS_PER_SAMPLE, default=default_bits_per_sample): cv.All(
                 _validate_bits, cv.one_of(*I2S_BITS_PER_SAMPLE)
             ),
-            cv.Optional(CONF_I2S_MODE, default=CONF_PRIMARY): cv.one_of(
-                *I2S_MODE_OPTIONS, lower=True
-            ),
             cv.Optional(CONF_USE_APLL, default=False): cv.boolean,
             cv.Optional(CONF_BITS_PER_CHANNEL, default="default"): cv.All(
                 cv.Any(cv.float_with_unit("bits", "bit"), "default"),
                 cv.one_of(*I2S_BITS_PER_CHANNEL),
             ),
             cv.Optional(CONF_MCLK_MULTIPLE, default=256): cv.one_of(*I2S_MCLK_MULTIPLE),
+            cv.Optional(CONF_I2S_COMM_FMT, default="stand_i2s"): cv.one_of(
+                        *I2C_COMM_FMT_OPTIONS, lower=True
+            ),
         }
     )
 
@@ -196,7 +212,7 @@ def use_legacy():
 async def register_i2s_audio_component(var, config):
     await cg.register_parented(var, config[CONF_I2S_AUDIO_ID])
     if use_legacy():
-        cg.add(var.set_i2s_mode(I2S_MODE_OPTIONS[config[CONF_I2S_MODE]]))
+        #cg.add(var.set_i2s_mode(I2S_MODE_OPTIONS[config[CONF_I2S_MODE]]))
         cg.add(var.set_channel(I2S_CHANNELS[config[CONF_CHANNEL]]))
         cg.add(
             var.set_bits_per_sample(I2S_BITS_PER_SAMPLE[config[CONF_BITS_PER_SAMPLE]])
@@ -207,8 +223,11 @@ async def register_i2s_audio_component(var, config):
             )
         )
         cg.add(var.register_at_parent())
+        cg.add(
+                var.set_i2s_comm_fmt(I2C_COMM_FMT_OPTIONS[config[CONF_I2S_COMM_FMT]])
+            )
     else:
-        cg.add(var.set_i2s_role(I2S_ROLE_OPTIONS[config[CONF_I2S_MODE]]))
+        #cg.add(var.set_i2s_role(I2S_ROLE_OPTIONS[config[CONF_I2S_MODE]]))
         slot_mode = config[CONF_CHANNEL]
         if slot_mode != CONF_STEREO:
             slot_mode = CONF_MONO
@@ -218,6 +237,12 @@ async def register_i2s_audio_component(var, config):
         cg.add(var.set_slot_mode(I2S_SLOT_MODE[slot_mode]))
         cg.add(var.set_std_slot_mask(I2S_STD_SLOT_MASK[slot_mask]))
         cg.add(var.set_slot_bit_width(I2S_SLOT_BIT_WIDTH[config[CONF_BITS_PER_SAMPLE]]))
+        fmt = "std"  # equals stand_i2s, stand_pcm_long, i2s_msb, pcm_long
+        if config[CONF_I2S_COMM_FMT] in ["stand_msb", "i2s_lsb"]:
+            fmt = "msb"
+        elif config[CONF_I2S_COMM_FMT] in ["stand_pcm_short", "pcm_short", "pcm"]:
+            fmt = "pcm"
+        cg.add(var.set_i2s_comm_fmt(fmt))
     cg.add(var.set_sample_rate(config[CONF_SAMPLE_RATE]))
     cg.add(var.set_use_apll(config[CONF_USE_APLL]))
     cg.add(var.set_mclk_multiple(I2S_MCLK_MULTIPLE[config[CONF_MCLK_MULTIPLE]]))
@@ -246,6 +271,9 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_I2S_BCLK_PIN): pins.internal_gpio_output_pin_number,
             cv.Optional(CONF_I2S_MCLK_PIN): pins.internal_gpio_output_pin_number,
             cv.Optional(CONF_I2S_ACCESS_MODE, default="exclusive"): cv.enum(ACCESS_MODES),
+            cv.Optional(CONF_I2S_MODE, default=CONF_PRIMARY): cv.one_of(
+                *I2S_MODE_OPTIONS, lower=True
+            ),
             cv.Optional(CONF_USE_LEGACY): cv.boolean,
         }
     ),
@@ -271,6 +299,9 @@ async def to_code(config):
     await cg.register_component(var, config)
     if use_legacy():
         cg.add_define("USE_I2S_LEGACY")
+        cg.add(var.set_i2s_mode(I2S_MODE_OPTIONS[config[CONF_I2S_MODE]]))
+    else:
+        cg.add(var.set_i2s_role(I2S_ROLE_OPTIONS[config[CONF_I2S_MODE]]))
     cg.add(var.set_lrclk_pin(config[CONF_I2S_LRCLK_PIN]))
     if CONF_I2S_BCLK_PIN in config:
         cg.add(var.set_bclk_pin(config[CONF_I2S_BCLK_PIN]))
