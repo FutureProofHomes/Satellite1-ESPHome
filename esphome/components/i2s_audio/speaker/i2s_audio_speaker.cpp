@@ -338,7 +338,8 @@ void I2SAudioSpeaker::speaker_task(void *params) {
     bool tx_dma_underflow = false;
 
     this_speaker->accumulated_frames_written_ = 0;
-
+    this_speaker->last_dma_write_ = 0;
+    
     // Keep looping if paused, there is no timeout configured, or data was received more recently than the configured
     // timeout
     while (this_speaker->pause_state_ || !this_speaker->timeout_.has_value() ||
@@ -476,7 +477,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
         break;
       }
     }
-
+    this_speaker->last_dma_write_ = 0;
     xEventGroupSetBits(this_speaker->event_group_, SpeakerEventGroupBits::STATE_STOPPING);
 
     this_speaker->stop_i2s_channel_();
@@ -536,7 +537,9 @@ uint32_t I2SAudioSpeaker::get_unwritten_audio_ms() const {
       //pending in write loop
       pending_ms += this->curr_dma_buffer_ * dma_buffer_duration_ms;
       //pending in DMA buffers
-      pending_ms += dma_buffers_count * dma_buffer_duration_ms - (millis() - this->last_dma_write_);
+      if( this->last_dma_write_ ){
+          pending_ms += dma_buffers_count * dma_buffer_duration_ms - (millis() - this->last_dma_write_);
+      }
       xSemaphoreGive(this->lock_);
   }
   return pending_ms;
