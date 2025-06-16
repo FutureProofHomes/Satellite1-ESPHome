@@ -9,9 +9,10 @@ namespace audio {
 
 AudioTransferBuffer::~AudioTransferBuffer() { this->deallocate_buffer_(); };
 
-std::unique_ptr<AudioSinkTransferBuffer> AudioSinkTransferBuffer::create(size_t buffer_size) {
-  std::unique_ptr<AudioSinkTransferBuffer> sink_buffer = make_unique<AudioSinkTransferBuffer>();
-
+std::unique_ptr<AudioSinkTransferBuffer> AudioSinkTransferBuffer::create(size_t buffer_size, std::string name) {
+  std::unique_ptr<AudioSinkTransferBuffer> sink_buffer = make_unique<AudioSinkTransferBuffer>(name);
+  
+  
   if (!sink_buffer->allocate_buffer_(buffer_size)) {
     return nullptr;
   }
@@ -19,9 +20,9 @@ std::unique_ptr<AudioSinkTransferBuffer> AudioSinkTransferBuffer::create(size_t 
   return sink_buffer;
 }
 
-std::unique_ptr<AudioSourceTransferBuffer> AudioSourceTransferBuffer::create(size_t buffer_size) {
-  std::unique_ptr<AudioSourceTransferBuffer> source_buffer = make_unique<AudioSourceTransferBuffer>();
-
+std::unique_ptr<AudioSourceTransferBuffer> AudioSourceTransferBuffer::create(size_t buffer_size, std::string name) {
+  std::unique_ptr<AudioSourceTransferBuffer> source_buffer = make_unique<AudioSourceTransferBuffer>(name);
+  
   if (!source_buffer->allocate_buffer_(buffer_size)) {
     return nullptr;
   }
@@ -168,6 +169,172 @@ bool AudioSinkTransferBuffer::has_buffered_data() const {
   }
   return (this->available() > 0);
 }
+
+
+std::unique_ptr<TimedAudioSourceTransferBuffer> TimedAudioSourceTransferBuffer::create(size_t buffer_size, std::string name) {
+  std::unique_ptr<TimedAudioSourceTransferBuffer> source_buffer = make_unique<TimedAudioSourceTransferBuffer>(name);
+  
+  if (!source_buffer->allocate_buffer_(buffer_size)) {
+    return nullptr;
+  }
+
+  return source_buffer;
+}
+
+
+size_t TimedAudioSourceTransferBuffer::transfer_data_from_source(TickType_t ticks_to_wait, bool pre_shift) {
+  if (pre_shift) {
+    // Shift data in buffer to start
+    if (this->buffer_length_ > 0) {
+      memmove(this->buffer_, this->data_start_, this->buffer_length_);
+    }
+    this->data_start_ = this->buffer_;
+  }
+
+  size_t bytes_to_read = this->free();
+  int32_t bytes_read = 0;
+  if (bytes_to_read > 0) {
+    tv_t new_time_stamp;
+    if (this->ring_buffer_.use_count() > 0) {
+      bytes_read = this->ring_buffer_->read((void *) this->get_buffer_end(), bytes_to_read, new_time_stamp, ticks_to_wait);
+      //printf( "TransferBuffer: free %d, read %d\n", bytes_to_read, bytes_read );
+    } else {
+      printf( "use-count is zero!!\n");
+    }
+    if( bytes_read <= 0 ){
+      return 0;
+    }
+    this->current_time_stamp_ = new_time_stamp;  // Update the current timestamp
+    this->increase_buffer_length(bytes_read);
+  }
+  return bytes_read;
+}
+
+
+
+std::unique_ptr<TimedAudioSinkTransferBuffer> TimedAudioSinkTransferBuffer::create(size_t buffer_size, std::string name) {
+  std::unique_ptr<TimedAudioSinkTransferBuffer> sink_buffer = make_unique<TimedAudioSinkTransferBuffer>(name);
+  
+  if (!sink_buffer->allocate_buffer_(buffer_size)) {
+    return nullptr;
+  }
+
+  return sink_buffer;
+}
+static constexpr uint32_t MAX_CHUNK_SIZE = 9200;  
+
+
+esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_to_wait, bool post_shift) {
+  size_t bytes_written = 0;
+  if (this->available()) {
+#ifdef USE_SPEAKER
+    if (this->speaker_ != nullptr) {
+#if 1      
+      uint32_t playout_in_ms = this->get_unwritten_audio_ms() - this->correction_ms_;
+      if( playout_in_ms > 0 && (this->current_time_stamp_.sec != 0 || this->current_time_stamp_.usec != 0) ){
+        const uint32_t desired_playout_time_ms = this->current_time_stamp_.to_millis();
+        int32_t  delta_ms =  desired_playout_time_ms - (millis() + playout_in_ms);
+        audio::AudioStreamInfo audio_stream_info = this->speaker_->get_audio_stream_info();
+        size_t frame_size = audio_stream_info.frames_to_bytes(1);
+        if( delta_ms > 0 ){
+            // uint32_t to_padd = std::min(audio_stream_info.ms_to_bytes(delta_ms), size_t(this->free()/frame_size) * frame_size);
+            // if( to_padd > 0 ){
+            //   std::memset(this->data_start_ + this->buffer_length_, 0, to_padd);
+            //   this->increase_buffer_length(to_padd);
+            // }
+            printf( "detla_ms %d, padded with %d zeros \n", delta_ms, 0);
+            this->speaker_->play_silence( std::min(delta_ms, (int32_t) 1000) );
+            return 0;  
+        }
+#if 1         
+        else if ( delta_ms < - 10 ){
+            uint32_t drop_frames = audio_stream_info.ms_to_frames( -1 * delta_ms );
+            uint32_t drop_bytes = std::min(audio_stream_info.frames_to_bytes(drop_frames), size_t(this->available()/frame_size) * frame_size);
+            this->buffer_length_ -= drop_bytes;
+            this->correction_ms_ = audio_stream_info.bytes_to_ms(drop_bytes);
+            printf( "detla_ms %d, dropped %d bytes, post-delta: %d \n", delta_ms, drop_bytes, delta_ms + this->correction_ms_);  
+            if( this->available() == 0 ){
+              this->correction_ms_ = 0;
+              return 0;
+            }
+        }
+#endif
+      }
+#endif
+      bytes_written = this->speaker_->play(this->data_start_, this->available(), ticks_to_wait);
+      if( bytes_written != this->available() ){
+        //printf( "%s: speaker wrote %d bytes, remaining %lu\n", this->name_.c_str(), bytes_written, this->available()- bytes_written);
+        //return -1;
+      } else {
+        this->correction_ms_ = 0;
+      }
+
+    } else
+#endif
+    if (this->ring_buffer_.use_count() > 0) {
+      uint32_t to_write = this->available() > MAX_CHUNK_SIZE ? MAX_CHUNK_SIZE : this->available();
+      timed_chunk_t *timed_chunk = nullptr;
+      this->ring_buffer_->acquire_write_chunk(&timed_chunk, sizeof(timed_chunk_t) + to_write, ticks_to_wait); 
+      if (timed_chunk == nullptr) {
+        printf("%s: no ring buffer available to write to\n", this->name_.c_str());
+        return 0;
+      }
+      timed_chunk->stamp = this->current_time_stamp_;  // Set the timestamp for the chunk
+      std::memcpy(timed_chunk->data, this->data_start_, to_write);
+      this->ring_buffer_->release_write_chunk(timed_chunk);
+      bytes_written = to_write;
+    } else {
+      printf("%s: no ring buffer available to write to\n", this->name_.c_str());
+      return 0;
+    }
+    this->decrease_buffer_length(bytes_written);
+  } else {
+    //printf( "no data available\n");
+  }
+
+  if (post_shift) {
+    // Shift unwritten data to the start of the buffer
+    memmove(this->buffer_, this->data_start_, this->buffer_length_);
+    this->data_start_ = this->buffer_;
+  }
+
+  return bytes_written;
+}
+
+uint32_t TimedAudioSinkTransferBuffer::get_unwritten_audio_ms() const {
+  if( this->speaker_ != nullptr ){
+    return this->speaker_->get_unwritten_audio_ms();
+  }
+}
+
+
+
+void TimedAudioSinkTransferBuffer::clear_buffered_data() {
+  this->buffer_length_ = 0;
+  if (this->ring_buffer_.use_count() > 0) {
+    this->ring_buffer_->reset();
+  }
+#ifdef USE_SPEAKER
+  if (this->speaker_ != nullptr) {
+    this->speaker_->stop();
+  }
+#endif
+}
+
+bool TimedAudioSinkTransferBuffer::has_buffered_data() const {
+#ifdef USE_SPEAKER
+  if (this->speaker_ != nullptr) {
+    return (this->speaker_->has_buffered_data() || (this->available() > 0));
+  }
+#endif
+  if (this->ring_buffer_.use_count() > 0) {
+    return ((this->ring_buffer_->chunks_available() > 0) || (this->available() > 0));
+  }
+  return (this->available() > 0);
+}
+
+
+
 
 }  // namespace audio
 }  // namespace esphome

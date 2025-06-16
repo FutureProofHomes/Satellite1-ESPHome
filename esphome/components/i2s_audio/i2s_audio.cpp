@@ -315,12 +315,15 @@ bool I2SAudioOut::start_i2s_channel_() {
     return false;
   }
   
+
   err = i2s_channel_enable(this->parent_->tx_handle_);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "Failed to enable TX channel: %s", esp_err_to_name(err));
     i2s_del_channel(this->parent_->tx_handle_);
     return false;
-  } 
+  }
+  
+  
 #endif
   return true;
 }

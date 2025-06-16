@@ -61,10 +61,12 @@ void SnapcastClient::on_stream_update_msg(const StreamInfo &info){
   if (this->media_player_ != nullptr) {
     if (info.status == "playing" && !this->stream_.is_running()) {
       this->media_player_->play_snapcast_stream("bla");
+      printf("Playing stream: %s\n", info.id.c_str());
     }
     else if ( info.status != "playing" && this->stream_.is_running() ) {
       this->media_player_->make_call().set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP).perform();
       this->stream_.stop_streaming();
+      printf("Stopping steram\n");
     } 
 /*    
     else if (info.status == "paused") {

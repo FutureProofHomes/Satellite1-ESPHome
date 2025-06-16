@@ -38,6 +38,10 @@ class Speaker {
   virtual size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) {
     return this->play(data, length);
   };
+  virtual size_t sync_play(const uint8_t *data, size_t length, audio::tv_t playout_time, TickType_t ticks_to_wait){
+    return this->play(data, length, ticks_to_wait);
+  };
+  virtual size_t play_silence(size_t length_ms){ return 0; } 
 #endif
 
   /// @brief Plays the provided audio data.
@@ -109,8 +113,9 @@ class Speaker {
   void add_audio_output_callback(std::function<void(uint32_t, int64_t)> &&callback) {
     this->audio_output_callback_.add(std::move(callback));
   }
-
- protected:
+  virtual uint32_t get_unwritten_audio_ms() const {return 0; }
+ 
+  protected:
   State state_{STATE_STOPPED};
   audio::AudioStreamInfo audio_stream_info_;
   float volume_{1.0f};

@@ -20,6 +20,14 @@ template<typename... Ts> class PlayOnDeviceMediaAction : public Action<Ts...>, p
   }
 };
 
+template<typename... Ts> class PlaySnapcastStream : public Action<Ts...>, public Parented<SpeakerMediaPlayer> {
+  TEMPLATABLE_VALUE(std::string, snapcast_server)
+  void play(Ts... x) override {
+    this->parent_->play_snapcast_stream(this->snapcast_server_.value(x...));
+  }
+};
+
+
 }  // namespace speaker
 }  // namespace esphome
 

@@ -44,7 +44,7 @@ class SourceSpeaker : public speaker::Speaker, public Component {
 
   size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) override;
   size_t play(const uint8_t *data, size_t length) override { return this->play(data, length, 0); }
-
+  size_t play_silence(size_t length_ms) override; 
   void start() override;
   void stop() override;
   void finish() override;
@@ -77,7 +77,8 @@ class SourceSpeaker : public speaker::Speaker, public Component {
   void set_timeout(uint32_t ms) { this->timeout_ms_ = ms; }
 
   std::weak_ptr<audio::AudioSourceTransferBuffer> get_transfer_buffer() { return this->transfer_buffer_; }
-
+  uint32_t get_unwritten_audio_ms() const;
+ 
  protected:
   friend class MixerSpeaker;
   esp_err_t start_();
@@ -105,6 +106,8 @@ class SourceSpeaker : public speaker::Speaker, public Component {
   uint32_t last_seen_data_ms_{0};
   optional<uint32_t> timeout_ms_;
   bool stop_gracefully_{false};
+  size_t bytes_in_ringbuffer_{0};
+  SemaphoreHandle_t lock_;
 
   bool pause_state_{false};
 
@@ -124,7 +127,7 @@ class MixerSpeaker : public Component {
   void loop() override;
 
   void add_source_speaker(SourceSpeaker *source_speaker) { this->source_speakers_.push_back(source_speaker); }
-
+  size_t play_silence(size_t length_ms){ if(this->output_speaker_) this->output_speaker_->play_silence(length_ms); }
   /// @brief Starts the mixer task. Called by a source speaker giving the current audio stream information
   /// @param stream_info The calling source speakers audio stream information
   /// @return ESP_ERR_NOT_SUPPORTED if the incoming stream is incompatible due to unsupported bits per sample
@@ -142,6 +145,17 @@ class MixerSpeaker : public Component {
   void set_task_stack_in_psram(bool task_stack_in_psram) { this->task_stack_in_psram_ = task_stack_in_psram; }
 
   speaker::Speaker *get_output_speaker() const { return this->output_speaker_; }
+  uint32_t get_unwritten_audio_ms() const {
+    if (this->output_speaker_ == nullptr) {
+      return 0;
+    }
+    uint32_t unwritten_ms = this->output_speaker_->get_unwritten_audio_ms();
+    if (xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10))){
+      unwritten_ms += this->audio_in_process_ms_; 
+      xSemaphoreGive(this->lock_);
+    }
+    return unwritten_ms;
+  }
 
  protected:
   /// @brief Copies audio frames from the input buffer to the output buffer taking into account the number of channels
@@ -197,7 +211,8 @@ class MixerSpeaker : public Component {
   TaskHandle_t task_handle_{nullptr};
   StaticTask_t task_stack_;
   StackType_t *task_stack_buffer_{nullptr};
-
+  uint32_t audio_in_process_ms_{0};
+  SemaphoreHandle_t lock_;
   optional<audio::AudioStreamInfo> audio_stream_info_;
 };
 

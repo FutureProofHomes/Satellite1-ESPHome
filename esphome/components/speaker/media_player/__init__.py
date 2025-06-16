@@ -6,7 +6,7 @@ from pathlib import Path
 
 from esphome import automation, external_files
 import esphome.codegen as cg
-from esphome.components import audio, esp32, media_player, speaker
+from esphome.components import audio, esp32, media_player, speaker, snapcast
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_BUFFER_SIZE,
@@ -50,6 +50,7 @@ CONF_STREAM = "stream"
 CONF_VOLUME_INCREMENT = "volume_increment"
 CONF_VOLUME_MIN = "volume_min"
 CONF_VOLUME_MAX = "volume_max"
+CONF_SNAPCAST_CLIENT = "snapcast"
 
 
 speaker_ns = cg.esphome_ns.namespace("speaker")
@@ -68,6 +69,11 @@ AUDIO_PIPELINE_TYPE_ENUM = {
 
 PlayOnDeviceMediaAction = speaker_ns.class_(
     "PlayOnDeviceMediaAction",
+    automation.Action,
+    cg.Parented.template(SpeakerMediaPlayer),
+)
+PlaySnapcastStreamAction = speaker_ns.class_(
+    "PlaySnapcastStreamAction",
     automation.Action,
     cg.Parented.template(SpeakerMediaPlayer),
 )
@@ -287,6 +293,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_ON_MUTE): automation.validate_automation(single=True),
             cv.Optional(CONF_ON_UNMUTE): automation.validate_automation(single=True),
             cv.Optional(CONF_ON_VOLUME): automation.validate_automation(single=True),
+            cv.Optional(CONF_SNAPCAST_CLIENT): cv.use_id(snapcast.SnapcastClient)
         }
     ),
     cv.only_with_esp_idf,
@@ -380,6 +387,9 @@ async def to_code(config):
                     _get_supported_format_struct(media_pipeline_config, "MEDIA")
                 )
             )
+    if client_id := config.get(CONF_SNAPCAST_CLIENT):
+        snapcast_client = await cg.get_variable(client_id)
+        cg.add( var.set_snapcast_client(snapcast_client))
 
     if on_mute := config.get(CONF_ON_MUTE):
         await automation.build_automation(
@@ -451,4 +461,24 @@ async def play_on_device_media_media_action(config, action_id, template_arg, arg
     cg.add(var.set_audio_file(media_file))
     cg.add(var.set_announcement(announcement))
     cg.add(var.set_enqueue(enqueue))
+    return var
+
+
+
+@automation.register_action(
+    "media_player.speaker.play_snapcast_stream",
+    PlaySnapcastStreamAction,
+    cv.maybe_simple_value(
+        {
+            cv.GenerateID(): cv.use_id(SpeakerMediaPlayer),
+            cv.Required(CONF_URL): cv.use_id(audio.AudioFile),
+        },
+        key=CONF_URL,
+    ),
+)
+async def play_snapcast_stream_action(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    server_url = await cg.get_variable(config[CONF_URL])
+    cg.add(var.set_snapcast_server(server_url))
     return var

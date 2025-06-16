@@ -52,6 +52,7 @@ void SnapcastControlSession::update_from_server_obj_(const JsonObject &server_ob
     if( sInfo.from_streams_json( server_obj["streams"], state.stream_id )){
         printf( "stream: %s state: %s\n", sInfo.id.c_str(), sInfo.status.c_str() );
         if (this->on_stream_update_) {
+            printf( "Calling on_stream_update callback\n" );
             this->on_stream_update_(sInfo);
         }
     }
@@ -93,7 +94,7 @@ void SnapcastControlSession::notification_loop() {
   vTaskDelay(pdMS_TO_TICKS(1000));
   //return;
 
-
+#if 0
   while(true){
     // char chunk[128];  // small read buffer
     // int len = esp_transport_read(this->transport_, chunk, sizeof(chunk), 100);
@@ -113,7 +114,7 @@ void SnapcastControlSession::notification_loop() {
 
   vTaskDelay(pdMS_TO_TICKS(1000));
   return;
-
+#endif
   // Send initial request after connecting
   this->send_rpc_request_("Server.GetStatus",
     [](JsonObject params) {
@@ -152,6 +153,7 @@ void SnapcastControlSession::notification_loop() {
                                 if( sInfo.from_streams_json( root["result"]["server"]["streams"], state.stream_id )){
                                     printf( "stream: %s state: %s\n", sInfo.id.c_str(), sInfo.status.c_str() );
                                 }
+                                this->update_from_server_obj_(root["result"]["server"].as<JsonObject>());
                             }
                             break;
                         default:
@@ -171,7 +173,8 @@ void SnapcastControlSession::notification_loop() {
                                 printf( "stream: %s state: %s\n", sInfo.id.c_str(), sInfo.status.c_str() );
                             }
                             if (this->on_stream_update_) {
-                                 this->on_stream_update_(sInfo);
+                                printf( "Calling on_stream_update callback from OnUpdate message\n" ); 
+                                this->on_stream_update_(sInfo);
                             }
                        } else {
                         printf( "got id: %s, requested: %s\n", params["id"].as<std::string>().c_str(), this->client_state_.stream_id);
@@ -184,6 +187,7 @@ void SnapcastControlSession::notification_loop() {
                                 printf( "stream: %s state: %s\n", sInfo.id.c_str(), sInfo.status.c_str() );
                             }
                             if (this->on_stream_update_) {
+                                printf( "Calling on_stream_update callback from OnProperties message\n" ); 
                                  this->on_stream_update_(sInfo);
                             }
                         }

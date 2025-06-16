@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome/core/defines.h"
+#include "esphome/core/hal.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -76,7 +77,7 @@ class AudioStreamInfo {
 
   /// @brief Computes the duration, in microseconds, the given amount of frames represents.
   /// @param frames Number of audio frames
-  /// @return Duration in microseconds `frames` respresents. May be slightly inaccurate due to integer divison rounding
+  /// @return Duration in microseconds `frames` respresents. May be slightly inaccurate due to integer division rounding
   ///         for certain sample rates.
   uint32_t frames_to_microseconds(uint32_t frames) const;
 
@@ -90,6 +91,12 @@ class AudioStreamInfo {
   // Class comparison operators
   bool operator==(const AudioStreamInfo &rhs) const;
   bool operator!=(const AudioStreamInfo &rhs) const { return !operator==(rhs); }
+
+  void debug_print() const {
+    printf( "AudioStreamInfo: bits_per_sample=%u, channels=%u, sample_rate=%u, bytes_per_sample=%zu",
+             this->bits_per_sample_, this->channels_, this->sample_rate_, this->bytes_per_sample_);
+  }
+  /// @brief Returns the size of a single audio sample in bytes.
 
  protected:
   uint8_t bits_per_sample_;
@@ -182,6 +189,88 @@ inline void pack_q31_as_audio_sample(int32_t sample, uint8_t *data, size_t bytes
     data[3] = static_cast<uint8_t>(sample >> 24);
   }
 }
+
+#pragma pack(push, 1)  // Prevent padding
+/// Time value
+/// Time value
+typedef struct tv
+{
+    /// seconds
+    int32_t sec;
+    /// micro seconds
+    int32_t usec;
+    
+    /// c'tor
+    tv() : sec(0), usec(0) {}
+    /// C'tor, construct from timeval @p tv
+    explicit tv(timeval tv) : sec(tv.tv_sec), usec(tv.tv_usec){};
+    /// C'tor, construct from @p _sec and @p _usec
+    tv(int32_t _sec, int32_t _usec) : sec(_sec), usec(_usec){};
+
+    static tv from_millis(int32_t millis)
+    {
+        tv result;
+        result.sec = millis / 1000;
+        result.usec = (millis % 1000) * 1000;
+        return result;
+    }
+    
+    static tv now()
+    {
+        tv result;
+        uint32_t usec_now = micros();
+        result.sec = usec_now / 1000000;
+        result.usec = usec_now % 1000000;
+        return result;
+    }
+    
+    int32_t to_millis() const
+    {
+        return (sec * 1000) + (usec / 1000);
+    }
+
+    /// add another tv
+    tv operator+(const tv& other) const
+    {
+        tv result(*this);
+        result.sec += other.sec;
+        result.usec += other.usec;
+        if (result.usec > 1000000)
+        {
+            result.sec += result.usec / 1000000;
+            result.usec %= 1000000;
+        }
+        return result;
+    }
+
+    /// subtract another tv
+    tv operator-(const tv& other) const
+    {
+        tv result(*this);
+        result.sec -= other.sec;
+        result.usec -= other.usec;
+        while (result.usec < 0)
+        {
+            result.sec -= 1;
+            result.usec += 1000000;
+        }
+        return result;
+    }
+    tv operator/(int32_t div) const
+    {
+        int64_t total_usec = static_cast<int64_t>(sec) * 1000000 + usec;
+        total_usec /= div;
+        return tv(total_usec / 1000000, total_usec % 1000000);
+    }
+    
+    // Compare two tv_t values
+    bool operator<(const tv& other) const {
+        return (sec < other.sec) || (sec == other.sec && usec < other.usec);
+    }
+} tv_t;
+#pragma pack(pop)
+
+
 
 }  // namespace audio
 }  // namespace esphome

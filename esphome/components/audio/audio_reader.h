@@ -4,14 +4,17 @@
 
 #include "audio.h"
 #include "audio_transfer_buffer.h"
+#include "timed_ring_buffer.h"
 
-#include "esphome/core/ring_buffer.h"
+#include "esphome/components/snapcast/snapcast_stream.h"
+
 
 #include "esp_err.h"
 
 #include <esp_http_client.h>
 
 namespace esphome {
+using namespace snapcast;
 namespace audio {
 
 enum class AudioReaderState : uint8_t {
@@ -33,26 +36,32 @@ class AudioReader {
   AudioReader(size_t buffer_size) : buffer_size_(buffer_size) {}
   ~AudioReader();
 
-  /// @brief Adds a sink ring buffer for audio data. Takes ownership of the ring buffer in a shared_ptr
-  /// @param output_ring_buffer weak_ptr of a shared_ptr of the sink ring buffer to transfer ownership
-  /// @return  ESP_OK if successful, ESP_ERR_INVALID_STATE otherwise
-  esp_err_t add_sink(const std::weak_ptr<RingBuffer> &output_ring_buffer);
-
-  /// @brief Starts reading an audio file from an http source. The transfer buffer is allocated here.
+    /// @brief Starts reading an audio file from an http source. The transfer buffer is allocated here.
   /// @param uri Web url to the http file.
   /// @param file_type AudioFileType variable passed-by-reference indicating the type of file being read.
   /// @return ESP_OK if successful, an ESP_ERR* code otherwise.
-  esp_err_t start(const std::string &uri, AudioFileType &file_type);
+  esp_err_t start(const std::string &uri, AudioFileType &file_type, const std::weak_ptr<TimedRingBuffer> &output_ring_buffer);
 
   /// @brief Starts reading an audio file from flash. No transfer buffer is allocated.
   /// @param audio_file AudioFile struct containing the file.
   /// @param file_type AudioFileType variable passed-by-reference indicating the type of file being read.
   /// @return ESP_OK
-  esp_err_t start(AudioFile *audio_file, AudioFileType &file_type);
+  esp_err_t start(AudioFile *audio_file, AudioFileType &file_type, const std::weak_ptr<TimedRingBuffer> &output_ring_buffer);
+
+   
+  /// @brief Starts reading an audio file from flash. No transfer buffer is allocated.
+  /// @param stream Pointer to a snapcast stream
+  /// @param file_type AudioFileType variable passed-by-reference indicating the type of file being read.
+  /// @return ESP_OK
+  esp_err_t start(SnapcastStream* stream, AudioFileType &file_type, const std::weak_ptr<TimedRingBuffer> &output_ring_buffer);
+  
+
 
   /// @brief Reads new file data from the source and sends to the ring buffer sink.
   /// @return AudioReaderState
   AudioReaderState read();
+
+  esp_err_t stop();
 
  protected:
   /// @brief Monitors the http client events to attempt determining the file type from the Content-Type header
@@ -65,9 +74,11 @@ class AudioReader {
 
   AudioReaderState file_read_();
   AudioReaderState http_read_();
+  AudioReaderState snapcast_read_();
 
-  std::shared_ptr<RingBuffer> file_ring_buffer_;
-  std::unique_ptr<AudioSinkTransferBuffer> output_transfer_buffer_;
+  std::shared_ptr<TimedRingBuffer> output_ring_buffer_;
+  timed_chunk_t *current_timed_chunk_{nullptr};
+  size_t bytes_in_chunk_{0};  // Number of bytes currently in the chunk being read
   void cleanup_connection_();
 
   size_t buffer_size_;
@@ -78,6 +89,8 @@ class AudioReader {
   AudioFile *current_audio_file_{nullptr};
   AudioFileType audio_file_type_{AudioFileType::NONE};
   const uint8_t *file_current_{nullptr};
+
+  SnapcastStream* snapcast_stream_{nullptr};
 };
 }  // namespace audio
 }  // namespace esphome

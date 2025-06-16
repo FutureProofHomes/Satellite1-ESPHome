@@ -2,6 +2,7 @@
 
 #ifdef USE_ESP32
 #include "esphome/core/defines.h"
+#include "timed_ring_buffer.h"
 #include "esphome/core/ring_buffer.h"
 
 #ifdef USE_SPEAKER
@@ -23,6 +24,8 @@ class AudioTransferBuffer {
    *   - The ring buffer is stored in a shared_ptr, so destroying the transfer buffer object will release ownership.
    */
  public:
+  AudioTransferBuffer() = default;
+  AudioTransferBuffer(std::string name) : name_(name) {}
   /// @brief Destructor that deallocates the transfer buffer
   ~AudioTransferBuffer();
 
@@ -52,7 +55,7 @@ class AudioTransferBuffer {
   /// @brief Clears data in the transfer buffer and, if possible, the source/sink.
   virtual void clear_buffered_data();
 
-  /// @brief Tests if there is any data in the tranfer buffer or the source/sink.
+  /// @brief Tests if there is any data in the transfer buffer or the source/sink.
   /// @return True if there is data, false otherwise.
   virtual bool has_buffered_data() const;
 
@@ -75,6 +78,7 @@ class AudioTransferBuffer {
 
   size_t buffer_size_{0};
   size_t buffer_length_{0};
+  std::string name_;  
 };
 
 class AudioSinkTransferBuffer : public AudioTransferBuffer {
@@ -83,10 +87,13 @@ class AudioSinkTransferBuffer : public AudioTransferBuffer {
    * Supports writing processed data in the transfer buffer to a ring buffer or a speaker component.
    */
  public:
+  AudioSinkTransferBuffer() = default;
+  AudioSinkTransferBuffer(std::string name) : AudioTransferBuffer(name) {}
+
   /// @brief Creates a new sink transfer buffer.
   /// @param buffer_size Size of the transfer buffer in bytes.
   /// @return unique_ptr if successfully allocated, nullptr otherwise
-  static std::unique_ptr<AudioSinkTransferBuffer> create(size_t buffer_size);
+  static std::unique_ptr<AudioSinkTransferBuffer> create(size_t buffer_size, std::string name = "AudioSinkTransferBuffer");
 
   /// @brief Writes any available data in the transfer buffer to the sink.
   /// @param ticks_to_wait FreeRTOS ticks to block while waiting for the sink to have enough space
@@ -121,10 +128,13 @@ class AudioSourceTransferBuffer : public AudioTransferBuffer {
    * Supports reading audio data from a ring buffer into the transfer buffer for processing.
    */
  public:
+  AudioSourceTransferBuffer() = default;
+  AudioSourceTransferBuffer(std::string name) : AudioTransferBuffer(name) {}
+  
   /// @brief Creates a new source transfer buffer.
   /// @param buffer_size Size of the transfer buffer in bytes.
   /// @return unique_ptr if successfully allocated, nullptr otherwise
-  static std::unique_ptr<AudioSourceTransferBuffer> create(size_t buffer_size);
+  static std::unique_ptr<AudioSourceTransferBuffer> create(size_t buffer_size, std::string name = "AudioSourceTransferBuffer");
 
   /// @brief Reads any available data from the sink into the transfer buffer.
   /// @param ticks_to_wait FreeRTOS ticks to block while waiting for the source to have enough data
@@ -137,6 +147,88 @@ class AudioSourceTransferBuffer : public AudioTransferBuffer {
   /// @param ring_buffer weak_ptr to the allocated ring buffer
   void set_source(const std::weak_ptr<RingBuffer> &ring_buffer) { this->ring_buffer_ = ring_buffer.lock(); };
 };
+
+
+class TimedAudioSourceTransferBuffer : public AudioTransferBuffer {
+  /*
+   * @brief A class that implements a transfer buffer for audio sources.
+   * Supports reading audio data from a ring buffer into the transfer buffer for processing.
+   */
+ public:
+  TimedAudioSourceTransferBuffer() = default;
+  TimedAudioSourceTransferBuffer(std::string name) : AudioTransferBuffer(name) {}
+  
+  /// @brief Creates a new source transfer buffer.
+  /// @param buffer_size Size of the transfer buffer in bytes.
+  /// @return unique_ptr if successfully allocated, nullptr otherwise
+  static std::unique_ptr<TimedAudioSourceTransferBuffer> create(size_t buffer_size, std::string name = "AudioSourceTransferBuffer");
+
+  /// @brief Reads any available data from the sink into the transfer buffer.
+  /// @param ticks_to_wait FreeRTOS ticks to block while waiting for the source to have enough data
+  /// @param pre_shift If true, any unwritten data is moved to the start of the buffer before transferring from the
+  ///                  source. Defaults to true.
+  /// @return Number of bytes read
+  size_t transfer_data_from_source(TickType_t ticks_to_wait, bool pre_shift = true);
+
+  /// @brief Adds a ring buffer as the transfer buffer's source.
+  /// @param ring_buffer weak_ptr to the allocated ring buffer
+  void set_source(const std::weak_ptr<TimedRingBuffer> &ring_buffer) { this->ring_buffer_ = ring_buffer.lock(); };
+
+  tv_t get_current_time_stamp() const { return this->current_time_stamp_; }
+  void set_current_time_stamp(tv_t time_stamp) { this->current_time_stamp_ = time_stamp; }
+protected:
+  std::shared_ptr<TimedRingBuffer> ring_buffer_;
+  tv current_time_stamp_{0, 0};  // Current timestamp in seconds and microseconds
+};
+
+class TimedAudioSinkTransferBuffer : public AudioTransferBuffer {
+  /*
+   * @brief A class that implements a transfer buffer for audio sinks.
+   * Supports writing processed data in the transfer buffer to a ring buffer or a speaker component.
+   */
+ public:
+  TimedAudioSinkTransferBuffer() = default;
+  TimedAudioSinkTransferBuffer(std::string name) : AudioTransferBuffer(name) {}
+
+  /// @brief Creates a new sink transfer buffer.
+  /// @param buffer_size Size of the transfer buffer in bytes.
+  /// @return unique_ptr if successfully allocated, nullptr otherwise
+  static std::unique_ptr<TimedAudioSinkTransferBuffer> create(size_t buffer_size, std::string name = "TimedAudioSinkTransferBuffer");
+
+  /// @brief Writes any available data in the transfer buffer to the sink.
+  /// @param ticks_to_wait FreeRTOS ticks to block while waiting for the sink to have enough space
+  /// @param post_shift If true, all remaining data is moved to the start of the buffer after transferring to the sink.
+  ///                   Defaults to true.
+  /// @return Number of bytes written
+  esp_err_t transfer_data_to_sink(TickType_t ticks_to_wait, bool post_shift = true);
+
+  /// @brief Adds a ring buffer as the transfer buffer's sink.
+  /// @param ring_buffer weak_ptr to the allocated ring buffer
+  void set_sink(const std::weak_ptr<TimedRingBuffer> &ring_buffer) { this->ring_buffer_ = ring_buffer.lock(); }
+
+#ifdef USE_SPEAKER
+  /// @brief Adds a speaker as the transfer buffer's sink.
+  /// @param speaker Pointer to the speaker component
+  void set_sink(speaker::Speaker *speaker) { this->speaker_ = speaker; }
+#endif
+
+  void clear_buffered_data() override;
+
+  bool has_buffered_data() const override;
+  uint32_t get_unwritten_audio_ms() const;
+  tv_t get_current_time_stamp() const { return this->current_time_stamp_; }
+  void set_current_time_stamp(tv_t time_stamp) { this->current_time_stamp_ = time_stamp; }
+  
+protected:
+  std::shared_ptr<TimedRingBuffer> ring_buffer_;
+  tv current_time_stamp_{0, 0};  // Current timestamp in seconds and microseconds
+  int32_t correction_ms_{0};
+#ifdef USE_SPEAKER
+  speaker::Speaker *speaker_{nullptr};
+#endif
+};
+
+
 
 }  // namespace audio
 }  // namespace esphome

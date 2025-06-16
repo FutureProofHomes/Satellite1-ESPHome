@@ -20,7 +20,7 @@ static const uint32_t CONNECTION_TIMEOUT_MS = 5000;
 // The number of times the http read times out with no data before throwing an error
 static const uint32_t ERROR_COUNT_NO_DATA_READ_TIMEOUT = 100;
 
-static const size_t HTTP_STREAM_BUFFER_SIZE = 2048;
+static const size_t HTTP_STREAM_BUFFER_SIZE = 4096; //2048;
 
 static const uint8_t MAX_REDIRECTION = 5;
 
@@ -54,33 +54,20 @@ enum HttpStatus {
 
 AudioReader::~AudioReader() { this->cleanup_connection_(); }
 
-esp_err_t AudioReader::add_sink(const std::weak_ptr<RingBuffer> &output_ring_buffer) {
-  if (current_audio_file_ != nullptr) {
-    // A transfer buffer isn't ncessary for a local file
-    this->file_ring_buffer_ = output_ring_buffer.lock();
-    return ESP_OK;
-  }
 
-  if (this->output_transfer_buffer_ != nullptr) {
-    this->output_transfer_buffer_->set_sink(output_ring_buffer);
-    return ESP_OK;
-  }
-
-  return ESP_ERR_INVALID_STATE;
-}
-
-esp_err_t AudioReader::start(AudioFile *audio_file, AudioFileType &file_type) {
+esp_err_t AudioReader::start(AudioFile *audio_file, AudioFileType &file_type, const std::weak_ptr<TimedRingBuffer> &output_ring_buffer) {
   file_type = AudioFileType::NONE;
 
   this->current_audio_file_ = audio_file;
-
+  this->output_ring_buffer_ = output_ring_buffer.lock();
+  
   this->file_current_ = audio_file->data;
   file_type = audio_file->file_type;
 
   return ESP_OK;
 }
 
-esp_err_t AudioReader::start(const std::string &uri, AudioFileType &file_type) {
+esp_err_t AudioReader::start(const std::string &uri, AudioFileType &file_type, const std::weak_ptr<TimedRingBuffer> &output_ring_buffer) {
   file_type = AudioFileType::NONE;
 
   this->cleanup_connection_();
@@ -192,12 +179,30 @@ esp_err_t AudioReader::start(const std::string &uri, AudioFileType &file_type) {
   }
 
   this->last_data_read_ms_ = millis();
+  this->output_ring_buffer_ = output_ring_buffer.lock();
+  return ESP_OK;
+}
 
-  this->output_transfer_buffer_ = AudioSinkTransferBuffer::create(this->buffer_size_);
-  if (this->output_transfer_buffer_ == nullptr) {
-    return ESP_ERR_NO_MEM;
+esp_err_t AudioReader::start(SnapcastStream* stream, AudioFileType &file_type, const std::weak_ptr<TimedRingBuffer> &output_ring_buffer){
+  if( this->snapcast_stream_ != nullptr  ){
+    printf( "Snapcast stream already set\n" );
+    return ESP_FAIL;
   }
-
+  if( stream == nullptr ){
+    printf( "Received stream is nullptr\n" );
+    return ESP_FAIL;
+  }
+  
+  this->snapcast_stream_ = stream;
+  this->audio_file_type_ = AudioFileType::FLAC;
+  file_type = AudioFileType::FLAC;
+  
+  if( this->output_ring_buffer_ == nullptr ){
+    this->output_ring_buffer_ = output_ring_buffer.lock();
+  }
+  this->output_ring_buffer_->reset();
+  this->snapcast_stream_->start_with_notify(this->output_ring_buffer_, xTaskGetCurrentTaskHandle());
+  
   return ESP_OK;
 }
 
@@ -206,6 +211,8 @@ AudioReaderState AudioReader::read() {
     return this->http_read_();
   } else if (this->current_audio_file_ != nullptr) {
     return this->file_read_();
+  } else if (this->snapcast_stream_ != nullptr ) {
+    return this->snapcast_read_();
   }
 
   return AudioReaderState::FAILED;
@@ -248,8 +255,15 @@ esp_err_t AudioReader::http_event_handler(esp_http_client_event_t *evt) {
 AudioReaderState AudioReader::file_read_() {
   size_t remaining_bytes = this->current_audio_file_->length - (this->file_current_ - this->current_audio_file_->data);
   if (remaining_bytes > 0) {
-    size_t bytes_written = this->file_ring_buffer_->write_without_replacement(this->file_current_, remaining_bytes,
-                                                                              pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS));
+    if (this->output_ring_buffer_ == nullptr) {
+      printf("AudioReader: No ring buffer set for file reading, can't write data\n");
+      // No ring buffer set, so we can't write the data
+      return AudioReaderState::READING;
+    }
+    size_t bytes_written = this->output_ring_buffer_->write_without_replacement(this->file_current_, remaining_bytes,
+            pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS));
+    printf( "AudioReader: File read %d bytes, current position %d, total length %d\n", bytes_written,
+           this->file_current_ - this->current_audio_file_->data, this->current_audio_file_->length);
     this->file_current_ += bytes_written;
 
     return AudioReaderState::READING;
@@ -259,40 +273,94 @@ AudioReaderState AudioReader::file_read_() {
 }
 
 AudioReaderState AudioReader::http_read_() {
-  this->output_transfer_buffer_->transfer_data_to_sink(pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS), false);
-
-  if (esp_http_client_is_complete_data_received(this->client_)) {
-    if (this->output_transfer_buffer_->available() == 0) {
+  
+  timed_chunk_t *timed_chunk = this->current_timed_chunk_;
+  if( timed_chunk == nullptr ) {
+    if (esp_http_client_is_complete_data_received(this->client_)) {
       this->cleanup_connection_();
       return AudioReaderState::FINISHED;
-    }
-  } else if (this->output_transfer_buffer_->free() > 0) {
-    size_t bytes_to_read = this->output_transfer_buffer_->free();
-    int received_len =
-        esp_http_client_read(this->client_, (char *) this->output_transfer_buffer_->get_buffer_end(), bytes_to_read);
-
-    if (received_len > 0) {
-      this->output_transfer_buffer_->increase_buffer_length(received_len);
-      this->last_data_read_ms_ = millis();
-    } else if (received_len < 0) {
-      // HTTP read error
-      this->cleanup_connection_();
+    } 
+    this->output_ring_buffer_->acquire_write_chunk(
+        &timed_chunk, 
+        sizeof(timed_chunk_t) + HTTP_STREAM_BUFFER_SIZE, 
+        pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS)
+    );
+    if (timed_chunk == nullptr) {
+      printf("Error acquiring write chunk from ring buffer");
       return AudioReaderState::FAILED;
-    } else {
-      if (bytes_to_read > 0) {
-        // Read timed out
-        if ((millis() - this->last_data_read_ms_) > CONNECTION_TIMEOUT_MS) {
-          this->cleanup_connection_();
-          return AudioReaderState::FAILED;
-        }
-
-        delay(READ_WRITE_TIMEOUT_MS);
-      }
     }
+    this->bytes_in_chunk_ = 0;  
+  }
+  
+  size_t bytes_to_read = HTTP_STREAM_BUFFER_SIZE - this->bytes_in_chunk_;
+  int received_len = esp_http_client_read(
+      this->client_, 
+      (char *) timed_chunk->data + this->bytes_in_chunk_, 
+      bytes_to_read
+  );
+  
+  if (received_len < 0 || (received_len == 0 && (millis() - this->last_data_read_ms_) > CONNECTION_TIMEOUT_MS)) {
+    std::memset(timed_chunk->data + this->bytes_in_chunk_, 0, HTTP_STREAM_BUFFER_SIZE - this->bytes_in_chunk_);
+    this->output_ring_buffer_->release_write_chunk(timed_chunk);
+    this->current_timed_chunk_ = nullptr;
+    this->bytes_in_chunk_ = 0;
+    this->cleanup_connection_();
+    return AudioReaderState::FAILED;
   }
 
+  if(received_len == 0){
+    printf("No data received from HTTP client, waiting for more data...\n");
+    delay(READ_WRITE_TIMEOUT_MS);
+    return AudioReaderState::READING;
+  }
+  
+  this->last_data_read_ms_ = millis();
+
+  if(esp_http_client_is_complete_data_received(this->client_)){
+    if( received_len < bytes_to_read ){
+      // Fill the rest of the chunk with zeros to avoid partial data issues
+      std::memset(timed_chunk->data + this->bytes_in_chunk_ + received_len, 0, HTTP_STREAM_BUFFER_SIZE - this->bytes_in_chunk_ - received_len);
+    }
+    this->output_ring_buffer_->release_write_chunk(timed_chunk);
+    this->current_timed_chunk_ = nullptr;  // Reset the chunk for the next read
+    this->bytes_in_chunk_ = 0;  // Reset the bytes in chunk counter
+    return AudioReaderState::FINISHED;
+  }
+
+  if (received_len == bytes_to_read) {
+      this->output_ring_buffer_->release_write_chunk(timed_chunk);
+      this->current_timed_chunk_ = nullptr;  // Reset the chunk for the next read
+      this->bytes_in_chunk_ = 0;  // Reset the bytes in chunk counter
+  } else {
+    // Partial read, update the bytes in chunk counter
+    this->bytes_in_chunk_ += received_len;
+    printf("AudioReader: Read %d bytes, total in chunk %d\n", received_len, this->bytes_in_chunk_);
+  }
+  vTaskDelay(pdMS_TO_TICKS(10));  // Give some time for the next read  
   return AudioReaderState::READING;
 }
+
+AudioReaderState AudioReader::snapcast_read_() {
+  uint32_t state_value;
+  if( xTaskNotifyWait(0, 0, &state_value, pdMS_TO_TICKS(500)) == pdTRUE){
+    StreamState new_state = static_cast<StreamState>(state_value);
+    if( new_state == StreamState::ERROR ){
+      return AudioReaderState::FAILED;
+    }
+    if( new_state == StreamState::CONNECTED_IDLE){
+      return AudioReaderState::FINISHED;
+    }
+  }
+  return AudioReaderState::READING;
+}
+
+esp_err_t AudioReader::stop(){
+  if( this->snapcast_stream_ ){
+    this->snapcast_stream_->stop_streaming();
+  }
+  return ESP_OK;
+}
+
 
 void AudioReader::cleanup_connection_() {
   if (this->client_ != nullptr) {

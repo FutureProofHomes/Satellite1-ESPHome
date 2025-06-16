@@ -27,7 +27,27 @@ audio_dac:
                 .set_command(MEDIA_PLAYER_COMMAND_MUTE)
                 .perform();
            }
-      
+
+select:
+  - platform: template
+    name: TAS2780 Mode Select
+    id: tas_mode_select
+    options:
+     - "Mono"
+     - "Left"
+     - "Right"
+    initial_option: "Mono"
+    optimistic: true
+    on_value:
+      - tas2780.update_config:
+          channel: !lambda |-
+            auto index = id(tas_mode_select).active_index();
+            if (index.has_value()){
+              return index.value();
+            }
+            ESP_LOGI("main", "No channel selected");
+            return 0;
+
 
 binary_sensor:
   - platform: gpio
@@ -123,13 +143,16 @@ speaker:
     output_speaker: announcement_mixing_input
     sample_rate: 48000
     bits_per_sample: 16
-  - platform: resampler
-    id: media_resampling_speaker
-    output_speaker: media_mixing_input
-    sample_rate: 48000
-    bits_per_sample: 16
+  # - platform: resampler
+  #   id: media_resampling_speaker
+  #   output_speaker: media_mixing_input
+  #   sample_rate: 48000
+  #   bits_per_sample: 16
 
-
+snapcast:
+  id: snapcast_client
+  #server_ip: 192.168.178.57
+  #server_ip: 192.168.178.101
 
 media_player:
   - platform: speaker
@@ -139,13 +162,14 @@ media_player:
     volume_increment: 0.05
     volume_min: 0.1
     volume_max: 1.
+    snapcast: snapcast_client
     announcement_pipeline:
       speaker: announcement_resampling_speaker
       format: FLAC     # FLAC is the least processor intensive codec
       num_channels: 1  # Stereo audio is unnecessary for announcements
       sample_rate: 48000
     media_pipeline:
-      speaker: media_resampling_speaker
+      speaker: media_mixing_input
       format: FLAC     # FLAC is the least processor intensive codec
       num_channels: 2
       sample_rate: 48000

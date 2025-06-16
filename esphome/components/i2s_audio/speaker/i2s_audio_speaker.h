@@ -3,7 +3,7 @@
 #ifdef USE_ESP32
 
 #include "../i2s_audio.h"
-
+#include <atomic>
 #include <freertos/event_groups.h>
 #include <freertos/queue.h>
 #include <freertos/FreeRTOS.h>
@@ -45,6 +45,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   /// @return The number of bytes that were actually written to the ring buffer.
   size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) override;
   size_t play(const uint8_t *data, size_t length) override { return play(data, length, 0); }
+  size_t play_silence(size_t length_ms) override;
 
   bool has_buffered_data() const override;
 
@@ -59,6 +60,8 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   /// Q15 fixed-point factor.
   /// @param mute_state true for muting, false for unmuting
   void set_mute_state(bool mute_state) override;
+  
+  uint32_t get_unwritten_audio_ms() const override;
 
  protected:
   /// @brief Function for the FreeRTOS task handling audio output.
@@ -113,6 +116,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   uint32_t buffer_duration_ms_;
 
   optional<uint32_t> timeout_;
+  std::atomic<uint32_t> dma_write_counter_{0};
 
   bool task_created_{false};
   bool pause_state_{false};
@@ -121,6 +125,12 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   
   size_t bytes_written_{0};
   uint32_t accumulated_frames_written_{0};
+  uint32_t last_dma_write_{0};
+  uint8_t curr_dma_buffer_{0};
+  size_t padded_zero_frames_{0};
+  size_t bytes_in_ringbuffer_{0};
+  SemaphoreHandle_t lock_;
+  size_t ringbuffer_size_{0};
 };
 
 }  // namespace i2s_audio
