@@ -230,9 +230,13 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
 #ifdef USE_SPEAKER
     if (this->speaker_ != nullptr) {
 #if 1      
+       
       uint32_t playout_in_ms = this->get_unwritten_audio_ms() - this->correction_ms_;
+      static uint32_t last_playout = playout_in_ms;
       if( playout_in_ms > 0 && (this->current_time_stamp_.sec != 0 || this->current_time_stamp_.usec != 0) ){
         const uint32_t desired_playout_time_ms = this->current_time_stamp_.to_millis();
+        static uint32_t last_desired_time = desired_playout_time_ms;
+        
         int32_t  delta_ms =  desired_playout_time_ms - (millis() + playout_in_ms);
         audio::AudioStreamInfo audio_stream_info = this->speaker_->get_audio_stream_info();
         size_t frame_size = audio_stream_info.frames_to_bytes(1);
@@ -243,6 +247,10 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
             //   this->increase_buffer_length(to_padd);
             // }
             printf( "detla_ms %d, padded with %d zeros \n", delta_ms, 0);
+            printf( "TimeStamp: last: %d, now: %d\n", last_desired_time, desired_playout_time_ms);
+            printf( "playout_in_ms differecnce...: %d\n", playout_in_ms - last_playout );
+            last_desired_time = desired_playout_time_ms;
+            last_playout = playout_in_ms;
             this->speaker_->play_silence( std::min(delta_ms, (int32_t) 1000) );
             return 0;  
         }
@@ -252,7 +260,11 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
             uint32_t drop_bytes = std::min(audio_stream_info.frames_to_bytes(drop_frames), size_t(this->available()/frame_size) * frame_size);
             this->buffer_length_ -= drop_bytes;
             this->correction_ms_ = audio_stream_info.bytes_to_ms(drop_bytes);
-            printf( "detla_ms %d, dropped %d bytes, post-delta: %d \n", delta_ms, drop_bytes, delta_ms + this->correction_ms_);  
+            printf( "detla_ms %d, dropped %d bytes, post-delta: %d \n", delta_ms, drop_bytes, delta_ms + this->correction_ms_);
+            printf( "TimeStamp: last: %d, now: %d\n", last_desired_time, desired_playout_time_ms);
+            printf( "playout_in_ms differecnce...: %d\n", playout_in_ms - last_playout );
+            last_playout = playout_in_ms;
+            last_desired_time = desired_playout_time_ms;  
             if( this->available() == 0 ){
               this->correction_ms_ = 0;
               return 0;
