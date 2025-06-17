@@ -467,7 +467,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
       }
       
       // No data received
-      if ( bytes_read == 0 && stop_gracefully && tx_dma_underflow) {
+      if ( bytes_read == 0 && stop_gracefully) { // && tx_dma_underflow
         break;
       }
     }

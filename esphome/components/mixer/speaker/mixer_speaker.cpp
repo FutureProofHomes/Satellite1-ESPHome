@@ -355,6 +355,9 @@ void MixerSpeaker::loop() {
   }
   if (event_group_bits & MixerEventGroupBits::STATE_STOPPING) {
     ESP_LOGD(TAG, "Stopping speaker mixer");
+    if( this->output_speaker_ != nullptr ){
+      this->output_speaker_->finish();
+    }    
     xEventGroupClearBits(this->event_group_, MixerEventGroupBits::STATE_STOPPING);
   }
   if (event_group_bits & MixerEventGroupBits::STATE_STOPPED) {
@@ -369,7 +372,7 @@ void MixerSpeaker::loop() {
     for (auto &speaker : this->source_speakers_) {
       all_stopped &= speaker->is_stopped();
     }
-
+    
     if (all_stopped) {
       this->stop();
     }
