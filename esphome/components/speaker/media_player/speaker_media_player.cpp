@@ -387,7 +387,12 @@ void SpeakerMediaPlayer::loop() {
           if (!this->media_playlist_.empty()) {
             PlaylistItem playlist_item = this->media_playlist_.front();
             if (playlist_item.url.has_value()) {
-              this->media_pipeline_->start_url(playlist_item.url.value());
+              if( this->snapcast_client_ && this->snapcast_client_->is_snapcast_url(playlist_item.url.value())){
+                 this->snapcast_client_->connect_to_url(playlist_item.url.value());
+                 this->media_pipeline_->start_snapcast( this->snapcast_client_->get_stream() );
+              } else {
+                this->media_pipeline_->start_url(playlist_item.url.value());
+              }
             } else if (playlist_item.file.has_value()) {
               this->media_pipeline_->start_file(playlist_item.file.value());
             }

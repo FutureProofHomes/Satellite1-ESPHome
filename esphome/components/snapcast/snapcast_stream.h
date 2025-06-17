@@ -45,6 +45,11 @@ public:
         return sorted[count / 2];
     }
 
+    void reset() {
+        this->count = 0;
+        this->next_insert = 0;
+    }
+
 private:
     std::array<tv_t, MAX_TIMES> times{};
     size_t count = 0;

@@ -32,6 +32,11 @@ public:
   void report_volume(float volume, bool muted);
   void on_stream_update_msg(const StreamInfo &info);
   void on_stream_state_update(StreamState state, uint8_t volume, bool muted);
+
+  error_t connect_to_url(std::string url){ return ESP_OK; }
+  bool is_snapcast_url(std::string url){ return url.starts_with("snapcast://"); }
+
+  
 protected:
   error_t connect_via_mdns();
   std::string server_ip_;

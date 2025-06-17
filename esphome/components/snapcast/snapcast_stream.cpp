@@ -18,7 +18,6 @@ static uint8_t tx_buffer[1024];
 static uint8_t rx_buffer[4096];
 static uint32_t rx_bufer_length = 0; 
 
-
 static const uint8_t STREAM_TASK_PRIORITY = 5;
 static const uint32_t CONNECTION_TIMEOUT_MS = 2000;
 static const size_t TASK_STACK_SIZE = 4 * 1024;
@@ -32,8 +31,6 @@ enum class StreamCommandBits : uint32_t {
   STOP_STREAM    = 1 << 3,
   SEND_REPORT    = 1 << 4,
 };
-
-
 
 esp_err_t SnapcastStream::connect(std::string server, uint32_t port){
     this->server_ = server;
@@ -147,8 +144,7 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
         if( to_read > 0 ){
             int len = esp_transport_read(this->transport_, (char*) rx_buffer + rx_bufer_length, to_read, timeout_ms);
             if (len <= 0) {
-                //ESP_LOGW(TAG, "Read snapcast message timeout." );
-                return ESP_FAIL;
+                return len == 0 ? ERR_TIMEOUT : ESP_FAIL;
             } else {
                 rx_bufer_length += len;
             }
@@ -162,8 +158,7 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
         if ( to_read > 0 ){
             int len = esp_transport_read(this->transport_, (char*) rx_buffer + rx_bufer_length, to_read, timeout_ms);
             if (len <= 0) {
-               // ESP_LOGW(TAG, "Read snapcast message timeout." );
-                return ESP_FAIL;
+               return len == 0 ? ERR_TIMEOUT : ESP_FAIL;
             } else {
                 rx_bufer_length += len;
             }
@@ -293,8 +288,8 @@ void SnapcastStream::stream_task_(){
             case StreamState::CONNECTED_IDLE:
             case StreamState::STREAMING:
                 this->send_time_sync_();
-                if( this->read_and_process_messages_(100) != ESP_OK){
-                    //this->set_state_(StreamState::ERROR);
+                if( this->read_and_process_messages_(100) == ESP_FAIL){
+                    this->set_state_(StreamState::ERROR);
                 }      
                 break;
             case StreamState::ERROR:
@@ -348,6 +343,7 @@ void SnapcastStream::connect_(){
         this->set_state_(StreamState::ERROR);
         return;
     }
+    this->time_stats_.reset();
     this->send_hello_();
     this->set_state_(StreamState::CONNECTED_IDLE);
 }
