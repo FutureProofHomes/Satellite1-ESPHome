@@ -38,6 +38,7 @@ select:
      - "Right"
     initial_option: "Mono"
     optimistic: true
+    restore_value: true
     on_value:
       - tas2780.update_config:
           channel: !lambda |-
