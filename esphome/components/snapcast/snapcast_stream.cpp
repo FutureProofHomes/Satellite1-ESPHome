@@ -1,3 +1,21 @@
+/*
+ * This file is part of Snapcast integration for ESPHome.
+ *
+ * Copyright (C) 2025 Mischa Siekmann <FutureProofHomes Inc.>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 #include "snapcast_stream.h"
 #include "messages.h"
 
@@ -94,46 +112,6 @@ esp_err_t SnapcastStream::report_volume(uint8_t volume, bool muted){
 
 
 
-void SnapcastStream::send_message_(SnapcastMessage &msg){
-    assert( msg.getMessageSize() <= sizeof(tx_buffer));
-    msg.set_send_time();
-    msg.toBytes(tx_buffer);
-    int bytes_written = esp_transport_write( this->transport_, (char*) tx_buffer, msg.getMessageSize(), 0);
-    printf("Sent:\n");
-    msg.print();
-    if (bytes_written < 0) {
-        ESP_LOGE(TAG, "Error occurred during sending: esp_transport_write() returned %d, errno %d", bytes_written, errno);
-    }
-}
-
-
-
-void SnapcastStream::send_hello_(){
-    HelloMessage hello_msg;
-    this->send_message_(hello_msg);
-}
-
-
-void SnapcastStream::on_time_msg_(MessageHeader msg, tv_t latency_c2s){
-    //latency_c2s = t_server-recv - t_client-sent + t_network-latency
-    //latency_s2c = t_client-recv - t_server-sent + t_network_latency
-    //time diff between server and client as (latency_c2s - latency_s2c) / 2
-    tv_t latency_s2c = tv_t::now() - msg.sent;
-    //printf("Snapcast: Estimated time diff: %d.%06d sec\n", this->est_time_diff_.sec, this->est_time_diff_.usec);
-    
-    time_stats_.add( (latency_c2s - latency_s2c) / 2 );
-    this->est_time_diff_ = time_stats_.get_median();
-}
-
-void SnapcastStream::on_server_settings_msg_(const ServerSettingsMessage &msg){
-    this->server_buffer_size_ = msg.buffer_ms_;
-    this->volume_ = msg.volume_;
-    this->muted_ = msg.muted_;
-    if (this->on_status_update_) {
-        this->on_status_update_(this->state_, this->volume_, this->muted_);
-    } 
-}
-
 
 
 esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
@@ -185,14 +163,12 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
                     size_t size = codec_header_payload.payload_size;
                     ring_buffer->acquire_write_chunk(&timed_chunk, sizeof(timed_chunk_t) + size, pdMS_TO_TICKS(timeout_ms));
                     if (timed_chunk == nullptr) {
-                        ESP_LOGE(TAG, "Error acquiring write chunk from ring buffer");
+                        this->error_msg_ = "Error acquiring write chunk from ring buffer";
                         return ESP_FAIL;
                     }
-                    if (codec_header_payload.copyPayloadTo(timed_chunk->data, size ))
+                    if (!codec_header_payload.copyPayloadTo(timed_chunk->data, size ))
                     {
-                        ESP_LOGI(TAG, "Codec header payload size: %d", size);
-                    } else {
-                        ESP_LOGE(TAG, "Error copying codec header payload");
+                        this->error_msg_ = "Error copying codec header payload";
                         return ESP_FAIL;
                     }
                     ring_buffer->release_write_chunk(timed_chunk);
@@ -208,26 +184,28 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
                     }
                     WireChunkMessageView wire_chunk_msg;
                     if( !wire_chunk_msg.bind(payload, payload_len) ){
-                        ESP_LOGE(TAG, "Error binding wire chunk payload");
+                        this->error_msg_ = "Error binding wire chunk payload";
                         return ESP_FAIL;
+                    }
+                    tv_t time_stamp = this->to_local_time_( tv_t(wire_chunk_msg.timestamp_sec, wire_chunk_msg.timestamp_usec));
+                    if( time_stamp < tv_t::now() ){
+                        //chunk is in the past, ignore it                        
+                        continue;
                     }
                     timed_chunk_t *timed_chunk = nullptr;
                     size_t size = wire_chunk_msg.payload_size;
                     ring_buffer->acquire_write_chunk(&timed_chunk, sizeof(timed_chunk_t) + size, pdMS_TO_TICKS(timeout_ms));
                     if (timed_chunk == nullptr) {
-                        ESP_LOGE(TAG, "Error acquiring write chunk from ring buffer");
+                        this->error_msg_ = "Error acquiring write chunk from ring buffer";
                         return ESP_FAIL;
                     }
-                    timed_chunk->stamp = this->to_local_time_( tv_t(wire_chunk_msg.timestamp_sec, wire_chunk_msg.timestamp_usec));
-                    if (wire_chunk_msg.copyPayloadTo(timed_chunk->data, size))
+                    timed_chunk->stamp = time_stamp;
+                    if (!wire_chunk_msg.copyPayloadTo(timed_chunk->data, size))
                     {
-                        //ESP_LOGI(TAG, "Wire chunk payload size: %d", size);
-                    } else {
-                        ESP_LOGE(TAG, "Error copying wire chunk payload");
+                        this->error_msg_ = "Error copying wire chunk payload";
                         return ESP_FAIL;
                     }
                     ring_buffer->release_write_chunk(timed_chunk);
-                    //printf( "Number of chunks in stream buffer: %d\n", ring_buffer->chunks_available());
                     return ESP_OK;
                 }
                 break;
@@ -247,7 +225,9 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
                 break;
             
             default:
-                ESP_LOGE(TAG, "Unknown message type: %d", msg->type );
+                this->error_msg_ = "Unknown message type: " + to_string(msg->type);
+                return ESP_FAIL;
+                
         }
     } // while loop
     return ERR_TIMEOUT;
@@ -306,8 +286,8 @@ void SnapcastStream::stream_task_(){
     }
 }
 
+
 void SnapcastStream::set_state_(StreamState new_state){
-    printf( "SET TO MODE: %d\n", (uint32_t) new_state );
     this->state_= new_state;
     if( this->notification_target_ != nullptr ){
         xTaskNotify(this->notification_target_, static_cast<uint32_t>(this->state_), eSetValueWithOverwrite);
@@ -316,7 +296,6 @@ void SnapcastStream::set_state_(StreamState new_state){
         this->on_status_update_(this->state_, this->volume_, this->muted_);
     } 
 }
-
 
 void SnapcastStream::connect_(){
     if( this->transport_ == nullptr ){
@@ -361,7 +340,7 @@ void SnapcastStream::disconnect_(){
 
 void SnapcastStream::start_streaming_(){
     if( this->write_ring_buffer_ == nullptr ){
-        printf( "Ringer buffer not set yet, but trying to start streaming...\n");
+        this->error_msg_ = "Ringer buffer not set yet, but trying to start streaming...";
         this->set_state_(StreamState::ERROR);
         return;
     }
@@ -379,6 +358,31 @@ void SnapcastStream::stop_streaming_(){
     this->set_state_(StreamState::CONNECTED_IDLE);
 }
 
+void SnapcastStream::send_message_(SnapcastMessage &msg){
+    assert( msg.getMessageSize() <= sizeof(tx_buffer));
+    msg.set_send_time();
+    msg.toBytes(tx_buffer);
+    int bytes_written = esp_transport_write( this->transport_, (char*) tx_buffer, msg.getMessageSize(), 0);
+    msg.print();
+    if (bytes_written < 0) {
+        this->error_msg_ = (
+             "Error occurred during sending: esp_transport_write() returned " + to_string(bytes_written)
+           + "bytes_written, errno " + to_string(errno)
+        );
+    }
+}
+
+void SnapcastStream::send_hello_(){
+    HelloMessage hello_msg;
+    this->send_message_(hello_msg);
+}
+
+void SnapcastStream::send_report_(){
+    ClientInfoMessage msg(this->volume_, this->muted_);
+    msg.print();
+    this->send_message_(msg);
+}
+
 void SnapcastStream::send_time_sync_(){
     if (millis() - this->last_time_sync_ > TIME_SYNC_INTERVAL_MS){
         TimeMessage time_sync_msg; 
@@ -387,10 +391,31 @@ void SnapcastStream::send_time_sync_(){
     }
 }
 
-void SnapcastStream::send_report_(){
-    ClientInfoMessage msg(this->volume_, this->muted_);
-    msg.print();
-    this->send_message_(msg);
+void SnapcastStream::on_time_msg_(MessageHeader msg, tv_t latency_c2s){
+    //latency_c2s = t_server-recv - t_client-sent + t_network-latency
+    //latency_s2c = t_client-recv - t_server-sent + t_network_latency
+    //time diff between server and client as (latency_c2s - latency_s2c) / 2
+    tv_t latency_s2c = tv_t::now() - msg.sent;
+    //printf("Snapcast: Estimated time diff: %d.%06d sec\n", this->est_time_diff_.sec, this->est_time_diff_.usec);
+    
+    time_stats_.add( (latency_c2s - latency_s2c) / 2 );
+    this->est_time_diff_ = time_stats_.get_median();
+    static uint32_t last_call = millis();
+    const uint32_t server_time = millis() + this->est_time_diff_.to_millis();
+    static uint32_t last_server_time = server_time; 
+    printf( "New server time: %d, expected %d, diff: %d\n", server_time, last_server_time + millis() - last_call, last_server_time + millis() - last_call - server_time );
+    last_server_time = server_time;
+    last_call = millis();
+}
+
+void SnapcastStream::on_server_settings_msg_(const ServerSettingsMessage &msg){
+    this->server_buffer_size_ = msg.buffer_ms_;
+    this->latency_ = msg.latency_;
+    this->volume_ = msg.volume_;
+    this->muted_ = msg.muted_;
+    if (this->on_status_update_) {
+        this->on_status_update_(this->state_, this->volume_, this->muted_);
+    } 
 }
 
 

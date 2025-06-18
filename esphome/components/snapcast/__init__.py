@@ -5,6 +5,8 @@ from esphome.core import CORE
 
 
 DEPENDENCIES = ["network", "audio"]
+CODEOWNERS = ["@gnumpi"]
+
 CONF_SERVER_IP = "server_ip"
 
 def AUTO_LOAD():
@@ -21,8 +23,8 @@ CONFIG_SCHEMA = cv.Schema({
 })
 
 async def to_code(config):
-    pass
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     if CONF_SERVER_IP in config :
         cg.add(var.set_server_ip(str(config[CONF_SERVER_IP])))    
+    cg.add_define("USE_SNAPCAST", True)

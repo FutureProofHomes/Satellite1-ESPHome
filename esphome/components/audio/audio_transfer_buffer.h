@@ -222,7 +222,6 @@ class TimedAudioSinkTransferBuffer : public AudioTransferBuffer {
 protected:
   std::shared_ptr<TimedRingBuffer> ring_buffer_;
   tv current_time_stamp_{0, 0};  // Current timestamp in seconds and microseconds
-  int32_t correction_ms_{0};
 #ifdef USE_SPEAKER
   speaker::Speaker *speaker_{nullptr};
 #endif

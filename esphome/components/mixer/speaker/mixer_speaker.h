@@ -127,7 +127,7 @@ class MixerSpeaker : public Component {
   void loop() override;
 
   void add_source_speaker(SourceSpeaker *source_speaker) { this->source_speakers_.push_back(source_speaker); }
-  size_t play_silence(size_t length_ms){ if(this->output_speaker_) this->output_speaker_->play_silence(length_ms); }
+  size_t play_silence(size_t length_ms){ if(this->output_speaker_) return this->output_speaker_->play_silence(length_ms); else return 0; }
   /// @brief Starts the mixer task. Called by a source speaker giving the current audio stream information
   /// @param stream_info The calling source speakers audio stream information
   /// @return ESP_ERR_NOT_SUPPORTED if the incoming stream is incompatible due to unsupported bits per sample
@@ -149,12 +149,17 @@ class MixerSpeaker : public Component {
     if (this->output_speaker_ == nullptr) {
       return 0;
     }
-    uint32_t unwritten_ms = this->output_speaker_->get_unwritten_audio_ms();
-    if (xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10))){
-      unwritten_ms += this->audio_in_process_ms_; 
+    uint32_t unwritten_ms = 0;
+    if(xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10))){
+      unwritten_ms = this->output_speaker_->get_unwritten_audio_ms();
+      if( unwritten_ms ){
+        unwritten_ms += this->audio_in_process_ms_; 
+      }
+      //printf( "mixer: in-process: %d\n", this->audio_in_process_ms_ );
       xSemaphoreGive(this->lock_);
-    }
-    return unwritten_ms;
+      return unwritten_ms;
+    } 
+    return 0;
   }
 
  protected:

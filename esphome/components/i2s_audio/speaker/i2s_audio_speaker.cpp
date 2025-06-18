@@ -262,16 +262,14 @@ size_t bytes_written = 0;
       //printf( "Trying to write: %d, free %d, capacity: %d\n", length, temp_ring_buffer->free(), this->ringbuffer_size_ );
       return 0;
     }
-    bytes_written = temp_ring_buffer->write_without_replacement((void *) data, length, ticks_to_wait);
     if (xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10))){
+      bytes_written = temp_ring_buffer->write_without_replacement((void *) data, length, ticks_to_wait);
       //before this call count bytes as transfer buffer bytes, after this line count bytes as speaker bytes
       this->bytes_in_ringbuffer_ += bytes_written;
       //printf( "from ringbuffer: %d, from local tracking: %d\n", temp_ring_buffer->available(), this->bytes_in_ringbuffer_ );
       xSemaphoreGive(this->lock_);
     }
-    
   }
-
   return bytes_written;
 }
 
@@ -389,24 +387,17 @@ void I2SAudioSpeaker::speaker_task(void *params) {
               pdMS_TO_TICKS(task_delay_ms)
           );
           if( delay_bytes == 0 && bytes_read < read_buffer_size ){
-            printf("underrun: %d\n", bytes_read);
+            printf("underrun: %d, in_buffer: %d\n", bytes_read, this_speaker->bytes_in_ringbuffer_);
           }
-          delay_bytes = 0;
+          //delay_bytes = 0;
           
       } else {
         // don't read any bytes, write zeros to all DMA buffers instead
         //printf( "pre-delay_bytes %d, buffer_size %d\n", delay_bytes, read_buffer_size);
-        delay_bytes -= read_buffer_size;
+        delay_bytes = read_buffer_size;
       }
       //printf( "Read bytes: %d, delayed: %d\n", bytes_read, delay_bytes - audio_stream_info.frames_to_bytes(this_speaker->padded_zero_frames_));
-      if(xSemaphoreTake( this_speaker->lock_, pdMS_TO_TICKS(10))) {  
-        this_speaker->bytes_in_ringbuffer_ -= bytes_read;
-        this_speaker->padded_zero_frames_ = audio_stream_info.bytes_to_frames(delay_bytes);
-        this_speaker->last_dma_write_ = millis();
-        xSemaphoreGive(this_speaker->lock_);
-      } else {
-        printf( "Couldn't receive semaphore, values not updates");
-      }
+      
       
       if ( bytes_read > 0 && (audio_stream_info.get_bits_per_sample() == 16) && (this_speaker->q15_volume_factor_ < INT16_MAX)) {
         // Scale samples by the volume factor in place
@@ -464,6 +455,15 @@ void I2SAudioSpeaker::speaker_task(void *params) {
                                                now + dma_buffer_duration_ms * dma_buffers_count * 1000);
 
         tx_dma_underflow = false;
+      }
+      
+      if(xSemaphoreTake( this_speaker->lock_, pdMS_TO_TICKS(10))) {  
+        this_speaker->bytes_in_ringbuffer_ -= bytes_read;
+        this_speaker->padded_zero_frames_ -= audio_stream_info.bytes_to_frames(delay_bytes);
+        this_speaker->last_dma_write_ = millis();
+        xSemaphoreGive(this_speaker->lock_);
+      } else {
+        printf( "Couldn't receive semaphore, values not updates");
       }
       
       // No data received
@@ -528,10 +528,16 @@ uint32_t I2SAudioSpeaker::get_unwritten_audio_ms() const {
       pending_frames += this->padded_zero_frames_;
       pending_ms = this->audio_stream_info_.frames_to_microseconds(pending_frames) / 1000;
       //pending in DMA buffers
-      int32_t in_dma_buffer = dma_buffers_count * dma_buffer_duration_ms - (millis() - this->last_dma_write_);
+      uint32_t time_delta = (millis() - this->last_dma_write_);
+      int32_t in_dma_buffer = dma_buffers_count * dma_buffer_duration_ms - time_delta;
       pending_ms += in_dma_buffer > 0 ? in_dma_buffer : 0;
+      //pending_ms += in_dma_buffer;
+      //printf( "pending-ringbuffer: %d\n", this->audio_stream_info_.bytes_to_ms(this->bytes_in_ringbuffer_));
+      //printf( "pending-zeros: %d\n", this->audio_stream_info_.frames_to_microseconds(this->padded_zero_frames_) / 1000);
+      //printf( "dma-buffer: %d (time_delta: %d)\n", in_dma_buffer, time_delta);
       xSemaphoreGive(this->lock_);
   }
+  
   return pending_ms;
 }
 

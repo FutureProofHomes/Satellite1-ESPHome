@@ -1,3 +1,21 @@
+/*
+ * This file is part of Snapcast integration for ESPHome.
+ *
+ * Copyright (C) 2025 Mischa Siekmann <FutureProofHomes Inc.>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 #include "snapcast_client.h"
 #include "messages.h"
 
@@ -18,31 +36,42 @@ static const char *const TAG = "snapcast_client";
 
 void SnapcastClient::setup(){
     if(this->server_ip_.empty()){
-        //this->connect_via_mdns();
+        //start mDNS task and search for the MA Snapcast server
         if (this->mdns_task_handle_ == nullptr) {
             xTaskCreate([](void *param) {
             auto *client = static_cast<SnapcastClient *>(param);
-            client->connect_via_mdns();  // private task function
+            client->connect_via_mdns();
             vTaskDelete(nullptr);
             }, "snap_mdns_task", 4096, this, 5, &this->mdns_task_handle_);
         }
     } else {
-        this->stream_.connect( this->server_ip_, 1704 );
-        this->cntrl_session_.connect( this->server_ip_, 1705);
+        //use provided server ip instead
+        this->connect_to_server( this->server_ip_ );    
     }
-    
+    //callback on status changes, received from the snapcast (binary) stream
     this->stream_.set_on_status_update_callback([this](StreamState state, uint8_t volume, bool muted){
-        this->on_stream_state_update(state, volume, muted);
+        this->defer([this, state, volume, muted](){
+           this->on_stream_state_update(state, volume, muted);
+        });
+        
     });
 
+    //callback on status changes, received from snapcast control (RPC) stream 
     this->cntrl_session_.set_on_stream_update([this](const StreamInfo &info) {
-        this->on_stream_update_msg(info);
+        this->defer([this, info](){ this->on_stream_update_msg(info); });
     });
-
 }
 
 
-error_t SnapcastClient::connect_to_server(std::string url, uint32_t port){
+error_t SnapcastClient::connect_to_server(std::string url, uint32_t stream_port, uint32_t rpc_port){
+    // establish a binary stream connection to the snapcast server, MA only shows connected clients as players
+    this->stream_.connect(url, stream_port);
+    // register for snapcast control events, used to control the media player component
+    this->cntrl_session_.connect(url, rpc_port);
+    
+    this->curr_server_url_.server_ip = url;
+    this->curr_server_url_.stream_port = stream_port;
+    this->curr_server_url_.rpc_port = rpc_port;
     return ESP_OK;
 }
 
@@ -55,18 +84,35 @@ void SnapcastClient::report_volume(float volume, bool muted){
 }
 
 
+void SnapcastClient::on_stream_state_update(StreamState state, uint8_t volume, bool muted){
+    ESP_LOGD( TAG, "Stream component changed to state %d.", state );
+    if( state == StreamState::ERROR ){
+        ESP_LOGE(TAG, "stream: %s", this->stream_.error_msg_.c_str() );
+        if( this->stream_.reconnect_on_error_ ){
+            ESP_LOGI(TAG, "Reconnecting after error...");
+        }
+        return;
+    } 
+    if (this->media_player_ != nullptr) {
+        this->media_player_->make_call()
+            .set_volume( volume / 100.)
+            .set_command( muted ? media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_MUTE : media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_UNMUTE)
+            .perform();
+    }
+}
+
 void SnapcastClient::on_stream_update_msg(const StreamInfo &info){
-  ESP_LOGI(TAG, "Stream updated: status=%s", info.status.c_str());
+  ESP_LOGI(TAG, "Snapcast-stream updated: status=%s", info.status.c_str());
 
   if (this->media_player_ != nullptr) {
     if (info.status == "playing" && !this->stream_.is_running()) {
       this->media_player_->play_snapcast_stream("bla");
-      printf("Playing stream: %s\n", info.id.c_str());
+      ESP_LOGI(TAG, "Playing stream: %s\n", info.id.c_str());
     }
     else if ( info.status != "playing" && this->stream_.is_running() ) {
       this->media_player_->make_call().set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP).perform();
       this->stream_.stop_streaming();
-      printf("Stopping steram\n");
+      ESP_LOGI(TAG, "Stopping stream: %s\n", info.id.c_str());
     } 
 /*    
     else if (info.status == "paused") {
@@ -78,20 +124,13 @@ void SnapcastClient::on_stream_update_msg(const StreamInfo &info){
   }
 }
 
-void SnapcastClient::on_stream_state_update(StreamState state, uint8_t volume, bool muted){
-    if (this->media_player_ != nullptr) {
-        this->media_player_->make_call()
-            .set_volume( volume / 100.)
-            .set_command( muted ? media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_MUTE : media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_UNMUTE)
-            .perform();
-    }
-}
 
 
 
 static const char * if_str[] = {"STA", "AP", "ETH", "MAX"};
 static const char * ip_protocol_str[] = {"V4", "V6", "MAX"};
 
+//https://docs.espressif.com/projects/esp-idf/en/v4.2/esp32/api-reference/protocols/mdns.html
 static void mdns_print_results(mdns_result_t *results)
 {
     mdns_result_t *r = results;
@@ -151,15 +190,15 @@ std::string resolve_mdns_host(const char * host_name)
 
 
 error_t SnapcastClient::connect_via_mdns(){
-    
+    // search for the snapcast server that has `is_mass` in its .txt entries 
     mdns_result_t * results = nullptr;
     esp_err_t err = mdns_query_ptr( "_snapcast", "_tcp", 6000, 20,  &results);
     if(err){
-        ESP_LOGE(TAG, "Query Failed");
+        ESP_LOGE(TAG, "mDNS query Failed");
         return ESP_OK;
     }
     if(!results){
-        ESP_LOGW(TAG, "No results found!");
+        ESP_LOGW(TAG, "No Snapcast server found via mDNS!");
         return ESP_OK;
     }
     
@@ -193,16 +232,12 @@ error_t SnapcastClient::connect_via_mdns(){
     mdns_query_results_free(results);
 
     if( !ma_snapcast_ip.empty() ){
-        this->stream_.connect( ma_snapcast_ip, port );
-        this->cntrl_session_.connect( ma_snapcast_ip, 1705);
+        this->connect_to_server( ma_snapcast_ip, port, 1705);
         return ESP_OK;
     }
     ESP_LOGW(TAG, "Couldn't find MA-Snapcast server.");
     return ESP_FAIL;
 }
-
-
-
 
 
 }

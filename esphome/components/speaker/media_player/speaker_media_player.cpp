@@ -109,10 +109,11 @@ void SpeakerMediaPlayer::setup() {
       this->mark_failed();
     }
   }
+#if USE_SNAPCAST    
   if( this->snapcast_client_ != nullptr ){
     this->snapcast_client_->set_media_player(this);
   }
-
+#endif
   ESP_LOGI(TAG, "Set up speaker media player");
 }
 
@@ -437,6 +438,7 @@ void SpeakerMediaPlayer::play_file(audio::AudioFile *media_file, bool announceme
   xQueueSend(this->media_control_command_queue_, &media_command, portMAX_DELAY);
 }
 
+#if USE_SNAPCAST  
 void SpeakerMediaPlayer::play_snapcast_stream(const std::string &server_uri) {
   ESP_LOGD(TAG, "Starting snapcast stream %s", server_uri.c_str());
   if (!this->is_ready()) {
@@ -445,9 +447,8 @@ void SpeakerMediaPlayer::play_snapcast_stream(const std::string &server_uri) {
     return;
   }
   this->media_pipeline_->start_snapcast( this->snapcast_client_->get_stream() );
-  
 }
-
+#endif
 
 void SpeakerMediaPlayer::control(const media_player::MediaPlayerCall &call) {
   if (!this->is_ready()) {
@@ -569,9 +570,11 @@ void SpeakerMediaPlayer::set_volume_(float volume, bool publish) {
   } else {
     this->set_mute_state_(false);
   }
+#if USE_SNAPCAST    
   if( this->snapcast_client_ ){
     this->snapcast_client_->report_volume(volume, this->is_muted_);
   }
+#endif
   this->defer([this, volume]() { this->volume_trigger_->trigger(volume); });
 }
 

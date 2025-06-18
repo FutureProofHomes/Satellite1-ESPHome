@@ -73,8 +73,9 @@ class SpeakerMediaPlayer : public Component, public media_player::MediaPlayer {
     this->media_format_ = media_format;
   }
 
+#if USE_SNAPCAST  
   void set_snapcast_client(esphome::snapcast::SnapcastClient* snapcast_client){ this->snapcast_client_ = snapcast_client; } 
-    
+#endif   
 
 
   Trigger<> *get_mute_trigger() const { return this->mute_trigger_; }
@@ -82,8 +83,9 @@ class SpeakerMediaPlayer : public Component, public media_player::MediaPlayer {
   Trigger<float> *get_volume_trigger() const { return this->volume_trigger_; }
 
   void play_file(audio::AudioFile *media_file, bool announcement, bool enqueue);
+#if USE_SNAPCAST  
   void play_snapcast_stream(const std::string &server_uri);
-
+#endif
   void set_playlist_delay_ms(AudioPipelineType pipeline_type, uint32_t delay_ms);
 
  protected:
@@ -113,8 +115,9 @@ class SpeakerMediaPlayer : public Component, public media_player::MediaPlayer {
   std::unique_ptr<AudioPipeline> media_pipeline_;
   Speaker *media_speaker_{nullptr};
   Speaker *announcement_speaker_{nullptr};
+#if USE_SNAPCAST  
   snapcast::SnapcastClient *snapcast_client_{nullptr};
-
+#endif
   optional<media_player::MediaPlayerSupportedFormat> media_format_;
   AudioPipelineState media_pipeline_state_{AudioPipelineState::STOPPED};
   bool media_repeat_one_{false};

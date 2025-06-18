@@ -72,6 +72,7 @@ void AudioPipeline::start_file(audio::AudioFile *audio_file) {
   this->pending_file_ = true;
 }
 
+#if USE_SNAPCAST
 void AudioPipeline::start_snapcast(SnapcastStream* stream) {
   if (this->is_playing_) {
     xEventGroupSetBits(this->event_group_, PIPELINE_COMMAND_STOP);
@@ -79,6 +80,7 @@ void AudioPipeline::start_snapcast(SnapcastStream* stream) {
   this->snapcast_stream_ = stream;
   this->pending_snapcast_ = true;
 }
+#endif
 
 esp_err_t AudioPipeline::stop() {
   xEventGroupSetBits(this->event_group_, EventGroupBits::PIPELINE_COMMAND_STOP);
@@ -160,7 +162,11 @@ AudioPipelineState AudioPipeline::process_state() {
 
   EventBits_t event_bits = xEventGroupGetBits(this->event_group_);
 
+#if USE_SNAPCAST  
   if (this->pending_url_ || this->pending_file_ || this->pending_snapcast_) {
+#else
+  if (this->pending_url_ || this->pending_file_) {
+#endif    
     // Init command pending
     if (!(event_bits & EventGroupBits::PIPELINE_COMMAND_STOP)) {
       // Only start if there is no pending stop command
@@ -177,12 +183,14 @@ AudioPipelineState AudioPipeline::process_state() {
         xEventGroupSetBits(this->event_group_, EventGroupBits::READER_COMMAND_INIT_FILE);
         this->playback_ms_ = 0;
         this->pending_file_ = false;
-      } else if (this->pending_snapcast_) {
+      }
+#if USE_SNAPCAST       
+      else if (this->pending_snapcast_) {
         xEventGroupSetBits(this->event_group_, EventGroupBits::READER_COMMAND_INIT_SNAPCAST);
         this->playback_ms_ = 0;
         this->pending_snapcast_ = false;
       }
-
+#endif
       this->is_playing_ = true;
       return AudioPipelineState::PLAYING;
     }
@@ -357,19 +365,31 @@ void AudioPipeline::read_task(void *params) {
     xEventGroupSetBits(this_pipeline->event_group_, EventGroupBits::READER_MESSAGE_FINISHED);
 
     // Wait until the pipeline notifies us the source of the media file
-    EventBits_t event_bits =
+    const EventBits_t waiting_bits = (
+                   EventGroupBits::READER_COMMAND_INIT_FILE
+                 | EventGroupBits::READER_COMMAND_INIT_HTTP
+#if USE_SNAPCAST
+                 | EventGroupBits::READER_COMMAND_INIT_SNAPCAST
+#endif                 
+                 | EventGroupBits::PIPELINE_COMMAND_STOP 
+    );
+    EventBits_t event_bits = 
         xEventGroupWaitBits(this_pipeline->event_group_,
-                            EventGroupBits::READER_COMMAND_INIT_FILE | EventGroupBits::READER_COMMAND_INIT_HTTP |
-                            EventGroupBits::PIPELINE_COMMAND_STOP | EventGroupBits::READER_COMMAND_INIT_SNAPCAST,  // Bit message to read
-                            pdFALSE,                                    // Clear the bit on exit
-                            pdFALSE,                                    // Wait for all the bits,
-                            portMAX_DELAY);                             // Block indefinitely until bit is set
+                            waiting_bits,           // Bit message to read
+                            pdFALSE,                // Clear the bit on exit
+                            pdFALSE,                // Wait for all the bits,
+                            portMAX_DELAY);         // Block indefinitely until bit is set
 
+    
     if (!(event_bits & EventGroupBits::PIPELINE_COMMAND_STOP)) {
-      xEventGroupClearBits(this_pipeline->event_group_, EventGroupBits::READER_MESSAGE_FINISHED |
-                                                            EventGroupBits::READER_COMMAND_INIT_FILE |
-                                                            EventGroupBits::READER_COMMAND_INIT_HTTP |
-                                                            EventGroupBits::READER_COMMAND_INIT_SNAPCAST);
+      xEventGroupClearBits(this_pipeline->event_group_, 
+          EventGroupBits::READER_MESSAGE_FINISHED |
+          EventGroupBits::READER_COMMAND_INIT_FILE |
+          EventGroupBits::READER_COMMAND_INIT_HTTP
+#if USE_SNAPCAST 
+        | EventGroupBits::READER_COMMAND_INIT_SNAPCAST
+#endif
+      );
       InfoErrorEvent event;
       event.source = InfoErrorSource::READER;
       esp_err_t err = ESP_OK;
@@ -394,9 +414,12 @@ void AudioPipeline::read_task(void *params) {
           err = reader->start(this_pipeline->current_audio_file_, this_pipeline->current_audio_file_type_, this_pipeline->raw_file_ring_buffer_);
         } else if (event_bits & EventGroupBits::READER_COMMAND_INIT_HTTP) {
           err = reader->start(this_pipeline->current_uri_, this_pipeline->current_audio_file_type_, this_pipeline->raw_file_ring_buffer_);
-        } else if (event_bits & EventGroupBits::READER_COMMAND_INIT_SNAPCAST) {
+        } 
+#if USE_SNAPCAST        
+        else if (event_bits & EventGroupBits::READER_COMMAND_INIT_SNAPCAST) {
           err = reader->start(this_pipeline->snapcast_stream_, this_pipeline->current_audio_file_type_, this_pipeline->raw_file_ring_buffer_);
         }
+#endif
       }
       
       if (err != ESP_OK) {
