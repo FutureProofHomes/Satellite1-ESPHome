@@ -346,6 +346,7 @@ void SnapcastStream::start_streaming_(){
     }
     this->codec_header_sent_=false;
     this->send_hello_();
+    this->time_stats_.reset();
     this->set_state_(StreamState::STREAMING);
     return;
 }
@@ -399,7 +400,7 @@ void SnapcastStream::on_time_msg_(MessageHeader msg, tv_t latency_c2s){
     //printf("Snapcast: Estimated time diff: %d.%06d sec\n", this->est_time_diff_.sec, this->est_time_diff_.usec);
     
     time_stats_.add( (latency_c2s - latency_s2c) / 2 );
-    this->est_time_diff_ = time_stats_.get_median();
+    this->est_time_diff_ = time_stats_.get_estimate();
     static uint32_t last_call = millis();
     const uint32_t server_time = millis() + this->est_time_diff_.to_millis();
     static uint32_t last_server_time = server_time; 

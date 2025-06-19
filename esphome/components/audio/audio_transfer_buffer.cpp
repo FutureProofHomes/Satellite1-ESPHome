@@ -234,8 +234,9 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
       uint32_t playout_in_ms = this->get_unwritten_audio_ms();
       uint32_t now = millis();
       static uint32_t expected_next_playout_time = 0;
-      
-      if( playout_in_ms > 0 && (this->current_time_stamp_.sec != 0 || this->current_time_stamp_.usec != 0) ){
+      const uint32_t desired_playout_time_ms = this->current_time_stamp_.to_millis();
+      bool adjust = playout_in_ms > 0 && (desired_playout_time_ms - this->last_adjustment_at_ > 20);
+      if( adjust && (this->current_time_stamp_.sec != 0 || this->current_time_stamp_.usec != 0) ){
         
         static uint32_t last_call = millis();
         static uint32_t last_playout_time = now + playout_in_ms;
@@ -244,13 +245,14 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
         uint32_t expected_playout = last_playout_time + (millis() - last_call);
         last_call = millis();
         last_playout_time = last_call + playout_in_ms;
-        const uint32_t desired_playout_time_ms = this->current_time_stamp_.to_millis();
+        
         static uint32_t last_desired_time = desired_playout_time_ms;
         
         int32_t  delta_ms =  desired_playout_time_ms - (millis() + playout_in_ms);
-        
         size_t frame_size = audio_stream_info.frames_to_bytes(1);
-        if( delta_ms > 1 ){
+        size_t total_frames = this->buffer_length_ / frame_size;
+        if( delta_ms > 0 ){
+            last_adjustment_at_ = desired_playout_time_ms;
             //uint32_t to_padd = std::min(audio_stream_info.ms_to_bytes(delta_ms), size_t(this->free()/frame_size) * frame_size);
             // if( to_padd > 0 ){
             //   std::memset(this->data_start_ + this->buffer_length_, 0, to_padd);
@@ -260,13 +262,44 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
             printf( "Now: %d\n", now);
             printf( "TimeStamp: %d, in %d ms\n", desired_playout_time_ms, desired_playout_time_ms - now);
             printf( "playout_in_ms: %d, at: %d expected: %d\n", playout_in_ms, now + playout_in_ms, expected_next_playout_time );
-            this->speaker_->play_silence( std::min(delta_ms, (int32_t) 1000) );
-            expected_next_playout_time = now + playout_in_ms + delta_ms; 
-            return 0;  
+            if( delta_ms > 50 ){
+              this->speaker_->play_silence( std::min(delta_ms, (int32_t) 1000) );
+              expected_next_playout_time = now + playout_in_ms + delta_ms; 
+              return 0;  
+            } else if (this->free() >= frame_size && total_frames > 3) {
+              size_t insert_frame = 1 + (rand() % (total_frames-2));  // don't allow insertion at the end
+              size_t insert_offset = insert_frame * frame_size;
+              size_t bytes_after = this->buffer_length_ - insert_offset;
+              std::memmove(this->data_start_ + insert_offset + frame_size, this->data_start_ + insert_offset, bytes_after);
+              uint8_t channels = audio_stream_info.get_channels();
+              if( audio_stream_info.get_bits_per_sample() == 16 ){
+                int16_t* prev = reinterpret_cast<int16_t*>(this->data_start_ + insert_offset);
+                int16_t* next = reinterpret_cast<int16_t*>(this->data_start_ + insert_offset + 2 * frame_size);
+                int16_t* out  = reinterpret_cast<int16_t*>(this->data_start_ + insert_offset + frame_size);
+                for( int ch=0; ch < channels; ch++ ){
+                  int16_t prev_sample = prev[ch];
+                  int16_t next_sample = next[ch];
+                  out[ch] = (prev_sample + next_sample) / 2;
+                }
+              } else {
+                std::memset(this->data_start_ + insert_offset, 0, frame_size);
+              }
+              
+              this->increase_buffer_length(frame_size);
+            }
         }
 #if 1         
-        else if ( delta_ms < - 10 ){
-            uint32_t drop_frames = audio_stream_info.ms_to_frames( -1 * delta_ms );
+       else if( desired_playout_time_ms <= now ){
+          size_t available = this->available();
+          this->decrease_buffer_length(available);
+          return available;
+       } 
+       else if ( delta_ms < -1 ){
+            last_adjustment_at_ = desired_playout_time_ms;
+            uint32_t drop_frames = 1;
+            if( delta_ms < -50) {
+              drop_frames = audio_stream_info.ms_to_frames( -1 * delta_ms );
+            }
             uint32_t drop_bytes = std::min(audio_stream_info.frames_to_bytes(drop_frames), size_t(this->available()/frame_size) * frame_size);
             this->buffer_length_ -= drop_bytes;
             this->current_time_stamp_ = tv_t::from_millis(audio_stream_info.bytes_to_ms(drop_bytes));

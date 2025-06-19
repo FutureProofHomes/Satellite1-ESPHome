@@ -246,7 +246,7 @@ FileDecoderState AudioDecoder::decode_flac_() {
 
     // Reallocate the output transfer buffer to the smallest necessary size
     this->free_buffer_required_ = flac_decoder_->get_output_buffer_size_bytes();
-    if (!this->output_transfer_buffer_->reallocate(this->free_buffer_required_)) {
+    if (!this->output_transfer_buffer_->reallocate(this->free_buffer_required_ * 1.5)) {
       // Couldn't reallocate output buffer
       return FileDecoderState::FAILED;
     }

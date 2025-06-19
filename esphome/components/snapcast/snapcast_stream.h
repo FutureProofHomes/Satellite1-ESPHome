@@ -48,35 +48,75 @@ enum class StreamState {
 
 
 class TimeStats {
-    static constexpr uint8_t MAX_TIMES = 100; 
 public:
-    void add(tv_t val) {
-        times[next_insert] = val;
-        next_insert = (next_insert + 1) % MAX_TIMES;
-        if (count < MAX_TIMES)
-            ++count;
+    TimeStats(float smoothing = 0.05f, int outlier_threshold_ms = 5)
+        : smoothing_(smoothing), outlier_threshold_ms_(outlier_threshold_ms) {}
+
+    void add(tv_t sample) {
+        float ms = sample.to_millis();
+
+        if (!has_reference_) {
+            reference_offset_ = sample;
+            ms = 0.0f;
+            has_reference_ = true;
+        } else {
+            ms = (sample - reference_offset_).to_millis();
+        }
+
+        // Initialize EMA
+        if (!has_value_) {
+            ema_ = ms;
+            has_value_ = true;
+        } else {
+            float delta = ms - ema_;
+            if (std::abs(delta) < outlier_threshold_ms_) {
+                ema_ += smoothing_ * delta;
+            } else {
+                outlier_count_++;
+            }
+        }
+
+        // Store for median/debugging
+        if (history_.size() >= max_history_) history_.pop_front();
+        history_.push_back(tv_t::from_millis(ms));
+    }
+
+    tv_t get_estimate() const {
+        return reference_offset_ + tv_t::from_millis(ema_);
     }
 
     tv_t get_median() const {
-        if( count == 0 ){
-            return tv_t(0,0);
-        }
-        std::array<tv_t, MAX_TIMES> sorted{};
-        std::copy(times.begin(), times.begin() + count, sorted.begin());
-        std::sort(sorted.begin(), sorted.begin() + count);
-        return sorted[count / 2];
+        if (history_.empty()) return tv_t(0, 0);
+        std::vector<tv_t> sorted(history_.begin(), history_.end());
+        std::sort(sorted.begin(), sorted.end());
+        return sorted[sorted.size() / 2] + reference_offset_;
     }
 
     void reset() {
-        this->count = 0;
-        this->next_insert = 0;
+        history_.clear();
+        ema_ = 0;
+        reference_offset_ = tv_t(0, 0); 
+        has_value_ = false;
+        has_reference_ = false;
+        outlier_count_ = 0;
     }
 
+    size_t outliers() const { return outlier_count_; }
+
 private:
-    std::array<tv_t, MAX_TIMES> times{};
-    size_t count = 0;
-    size_t next_insert = 0;
+    float smoothing_;
+    int outlier_threshold_ms_;
+    float ema_ = 0.0f;
+    tv_t reference_offset_{0, 0}; 
+
+    bool has_value_ = false;
+    bool has_reference_ = false;
+    size_t outlier_count_ = 0;
+
+    static constexpr size_t max_history_ = 100;
+    std::deque<tv_t> history_;
 };
+
 
 
 class SnapcastClient;

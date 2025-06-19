@@ -315,6 +315,22 @@ bool I2SAudioOut::start_i2s_channel_() {
     return false;
   }
   
+  size_t dma_size_bytes =  this->get_dma_buffer_size_bytes();
+  uint8_t *zero_buffer = (uint8_t*) std::calloc(dma_size_bytes, sizeof(uint8_t));
+  if( zero_buffer == nullptr ){
+    ESP_LOGE(TAG, "Failed to allocate memory for pre loading the DMA buffers");
+    return false;
+  }
+  for( int dma_idx=0; dma_idx < this->get_dma_buffer_count(); dma_idx++){
+    size_t bytes_loaded = 0;
+    i2s_channel_preload_data(this->parent_->tx_handle_, zero_buffer, dma_size_bytes, &bytes_loaded);
+    if(bytes_loaded != dma_size_bytes){
+      break;
+    }
+  }
+  free(zero_buffer);
+  
+
 
   err = i2s_channel_enable(this->parent_->tx_handle_);
   if (err != ESP_OK) {
