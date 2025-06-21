@@ -53,7 +53,7 @@ class TimedRingBuffer {
    * @param ticks_to_wait Maximum number of FreeRTOS ticks to wait (default: 0)
    * @return Number of bytes read
    */
-  int32_t read(void *data, size_t max_len, tv &stamp, TickType_t ticks_to_wait = 0);
+  int32_t read(void *data, size_t max_len, tv_t &stamp, TickType_t ticks_to_wait = 0);
 
   /**
    * @brief Writes to the ring buffer without overwriting oldest data.

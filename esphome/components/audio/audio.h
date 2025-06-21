@@ -191,83 +191,114 @@ inline void pack_q31_as_audio_sample(int32_t sample, uint8_t *data, size_t bytes
 }
 
 #pragma pack(push, 1)  // Prevent padding
-/// Time value
-/// Time value
-typedef struct tv
-{
-    /// seconds
-    int32_t sec;
-    /// micro seconds
-    int32_t usec;
-    
-    /// c'tor
-    tv() : sec(0), usec(0) {}
-    /// C'tor, construct from timeval @p tv
-    explicit tv(timeval tv) : sec(tv.tv_sec), usec(tv.tv_usec){};
-    /// C'tor, construct from @p _sec and @p _usec
-    tv(int32_t _sec, int32_t _usec) : sec(_sec), usec(_usec){};
+struct tv_t {
+    int32_t sec;   ///< seconds
+    int32_t usec;  ///< microseconds (always normalized to 0–999,999)
 
-    static tv from_millis(int32_t millis)
-    {
-        tv result;
-        result.sec = millis / 1000;
-        result.usec = (millis % 1000) * 1000;
-        return result;
-    }
-    
-    static tv now()
-    {
-        tv result;
-        uint32_t usec_now = micros();
-        result.sec = usec_now / 1000000;
-        result.usec = usec_now % 1000000;
-        return result;
-    }
-    
-    int32_t to_millis() const
-    {
-        return (sec * 1000) + (usec / 1000);
+    // Default constructor
+    tv_t() : sec(0), usec(0) {}
+
+    // Constructor from timeval
+    explicit tv_t(const timeval &tv) : sec(tv.tv_sec), usec(tv.tv_usec) {
+        normalize();
     }
 
-    /// add another tv
-    tv operator+(const tv& other) const
-    {
-        tv result(*this);
-        result.sec += other.sec;
-        result.usec += other.usec;
-        if (result.usec > 1000000)
-        {
-            result.sec += result.usec / 1000000;
-            result.usec %= 1000000;
+    // Constructor from components
+    tv_t(int32_t _sec, int32_t _usec) : sec(_sec), usec(_usec) {
+        normalize();
+    }
+
+    /// Normalize microseconds to be within 0–999999
+    void normalize() {
+        if (usec >= 1000000) {
+            sec += usec / 1000000;
+            usec %= 1000000;
+        } else if (usec < 0) {
+            int32_t borrow = (-usec + 999999) / 1000000;
+            sec -= borrow;
+            usec += borrow * 1000000;
         }
+    }
+
+    // Create from milliseconds
+    static tv_t from_millis(int64_t millis) {
+        return tv_t(static_cast<int32_t>(millis / 1000),
+                    static_cast<int32_t>((millis % 1000) * 1000));
+    }
+
+    // Create from microseconds
+    static tv_t from_microseconds(int64_t microsec) {
+        return tv_t(static_cast<int32_t>(microsec / 1000000),
+                    static_cast<int32_t>(microsec % 1000000));
+    }
+
+    // Get current time (approximate, based on micros())
+    static tv_t now() {
+        uint32_t usec_now = micros();  // Use ESP32’s uptime in microseconds
+        return tv_t(usec_now / 1000000, usec_now % 1000000);
+    }
+
+    // Convert (and round) to milliseconds
+    int64_t to_millis() const {
+        int64_t total_us = static_cast<int64_t>(sec) * 1000000 + usec; 
+        if( total_us >= 0 ) {
+          return (total_us + 500) / 1000;
+        } else {
+          return (total_us - 500) / 1000;
+        }
+    }
+
+    // Convert to microseconds
+    int64_t to_microseconds() const {
+        return static_cast<int64_t>(sec) * 1000000 + usec;
+    }
+
+    // Arithmetic: addition
+    tv_t operator+(const tv_t &other) const {
+        tv_t result(sec + other.sec, usec + other.usec);
+        result.normalize();
         return result;
     }
 
-    /// subtract another tv
-    tv operator-(const tv& other) const
-    {
-        tv result(*this);
-        result.sec -= other.sec;
-        result.usec -= other.usec;
-        while (result.usec < 0)
-        {
-            result.sec -= 1;
-            result.usec += 1000000;
-        }
+    // Arithmetic: subtraction
+    tv_t operator-(const tv_t &other) const {
+        tv_t result(sec - other.sec, usec - other.usec);
+        result.normalize();
         return result;
     }
-    tv operator/(int32_t div) const
-    {
-        int64_t total_usec = static_cast<int64_t>(sec) * 1000000 + usec;
-        total_usec /= div;
-        return tv(total_usec / 1000000, total_usec % 1000000);
+
+    // Division by scalar
+    tv_t operator/(int32_t divisor) const {
+        int64_t total_usec = to_microseconds();
+        total_usec /= divisor;
+        return tv_t::from_microseconds(total_usec);
     }
-    
-    // Compare two tv_t values
-    bool operator<(const tv& other) const {
+
+    // Comparisons
+    bool operator<(const tv_t &other) const {
         return (sec < other.sec) || (sec == other.sec && usec < other.usec);
     }
-} tv_t;
+
+    bool operator==(const tv_t &other) const {
+        return sec == other.sec && usec == other.usec;
+    }
+
+    bool operator!=(const tv_t &other) const {
+        return !(*this == other);
+    }
+
+    bool operator<=(const tv_t &other) const {
+        return *this < other || *this == other;
+    }
+
+    bool operator>(const tv_t &other) const {
+        return !(*this <= other);
+    }
+
+    bool operator>=(const tv_t &other) const {
+        return !(*this < other);
+    }
+};
 #pragma pack(pop)
 
 

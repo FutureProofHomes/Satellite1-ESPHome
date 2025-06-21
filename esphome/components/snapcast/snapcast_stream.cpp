@@ -189,7 +189,8 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
                     }
                     tv_t time_stamp = this->to_local_time_( tv_t(wire_chunk_msg.timestamp_sec, wire_chunk_msg.timestamp_usec));
                     if( time_stamp < tv_t::now() ){
-                        //chunk is in the past, ignore it                        
+                        //chunk is in the past, ignore it
+                        printf( "chunk-read: skipping full frame: delta: %lld\n", time_stamp.to_millis() - tv_t::now().to_millis());                        
                         continue;
                     }
                     timed_chunk_t *timed_chunk = nullptr;
@@ -398,6 +399,9 @@ void SnapcastStream::on_time_msg_(MessageHeader msg, tv_t latency_c2s){
     //time diff between server and client as (latency_c2s - latency_s2c) / 2
     tv_t latency_s2c = tv_t::now() - msg.sent;
     //printf("Snapcast: Estimated time diff: %d.%06d sec\n", this->est_time_diff_.sec, this->est_time_diff_.usec);
+    printf( "msg.sent: sec %d, usec: %d\n", msg.sent.sec, msg.sent.usec );
+    printf( "latencey_c2s: %lld\n", latency_c2s.to_millis());
+    printf( "latency_s2c: %lld = %lld - %lld\n", latency_s2c.to_millis(), tv_t::now().to_millis(), msg.sent.to_millis());
     
     time_stats_.add( (latency_c2s - latency_s2c) / 2 );
     this->est_time_diff_ = time_stats_.get_estimate();

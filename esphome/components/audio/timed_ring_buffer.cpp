@@ -40,12 +40,12 @@ std::unique_ptr<TimedRingBuffer> TimedRingBuffer::create(size_t len) {
 }
 
 int32_t TimedRingBuffer::read(void *data, size_t max_len, TickType_t ticks_to_wait) {
- tv stamp;
+ tv_t stamp;
  return this->read(data, max_len, stamp, ticks_to_wait);
 }
 
 
-int32_t TimedRingBuffer::read(void *data, size_t max_len, tv &stamp, TickType_t ticks_to_wait) {
+int32_t TimedRingBuffer::read(void *data, size_t max_len, tv_t &stamp, TickType_t ticks_to_wait) {
   if( this->curr_chunk != nullptr ){
     if( max_len >= this->bytes_waiting_in_chunk ){
       std::memcpy(data, this->curr_chunk->data, this->bytes_waiting_in_chunk);

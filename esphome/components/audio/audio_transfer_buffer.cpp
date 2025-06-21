@@ -290,6 +290,7 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
         }
 #if 1         
        else if( desired_playout_time_ms <= now ){
+          printf( "transfer-buffer: skipping full frame: delta: %d\n", desired_playout_time_ms - now);
           size_t available = this->available();
           this->decrease_buffer_length(available);
           return available;

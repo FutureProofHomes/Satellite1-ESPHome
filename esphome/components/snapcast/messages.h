@@ -241,7 +241,7 @@ protected:
 class TimeMessage : public SnapcastMessage {
 public:
     TimeMessage() : SnapcastMessage(message_type::kTime) {
-        this->header_.typed_message_size = sizeof(tv);
+        this->header_.typed_message_size = sizeof(tv_t);
         this->set_send_time();
     }
 };

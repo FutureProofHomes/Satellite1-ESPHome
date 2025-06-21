@@ -318,7 +318,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
   if (expand_factor > 1) {
     // Allocate a scaling buffer to convert the audio data to the required bits per sample
     // The size of the scaling buffer is the same as the DMA buffer size, but with the expanded bits per sample
-    scaling_buffer = new uint8_t[dma_buffer_size_bytes * expand_factor];
+    scaling_buffer = new uint8_t[dma_buffer_size_bytes];
   } 
 #endif
   
@@ -371,6 +371,30 @@ void I2SAudioSpeaker::speaker_task(void *params) {
       // we always write full dma-buffer-sized chunks to the I2S port
       // write zeros if not enough data is available
       std::memset(this_speaker->data_buffer_, 0, read_buffer_size);
+#if 1
+      if( this_speaker->last_dma_write_ == 0 ){
+        size_t bytes_written = 0;
+        if( expand_factor == 1) {
+            i2s_channel_write(this_speaker->parent_->get_tx_handle(), this_speaker->data_buffer_,
+                          read_buffer_size, &bytes_written, 0);
+        } else if (expand_factor == 2) {
+          std::memset(scaling_buffer, 0, dma_buffer_size_bytes);
+          for (uint32_t i = 0; i < dma_buffers_count; ++i) {
+            esp_err_t err = i2s_channel_write(
+              this_speaker->parent_->get_tx_handle(), 
+              scaling_buffer,
+              dma_buffer_size_bytes, 
+              &bytes_written, 
+              0
+            );
+            if( bytes_written != dma_buffer_size_bytes){
+              break;
+            }
+          }  
+        }
+        this_speaker->last_dma_write_ = millis();
+      }
+#endif        
       size_t delay_bytes = 0;
       size_t bytes_read = 0;
       if (xSemaphoreTake(this_speaker->lock_, pdMS_TO_TICKS(10))) {
