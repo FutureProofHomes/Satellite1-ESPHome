@@ -209,11 +209,6 @@ struct tv_t {
     // Default constructor
     tv_t() : sec(0), usec(0) {}
 
-    // Constructor from timeval
-    explicit tv_t(const timeval &tv) : sec(tv.tv_sec), usec(tv.tv_usec) {
-        normalize();
-    }
-
     // Constructor from components
     tv_t(int32_t _sec, int32_t _usec) : sec(_sec), usec(_usec) {
         normalize();
