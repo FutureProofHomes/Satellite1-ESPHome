@@ -3,7 +3,7 @@
 #ifdef USE_ESP32
 
 #include "esphome/core/helpers.h"
-
+#include "esp_timer.h"
 namespace esphome {
 namespace audio {
 
@@ -231,40 +231,31 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
     if (this->speaker_ != nullptr) {
 #if 1      
       audio::AudioStreamInfo audio_stream_info = this->speaker_->get_audio_stream_info();      
-      uint32_t playout_in_ms = this->get_unwritten_audio_ms();
-      uint32_t now = millis();
-      static uint32_t expected_next_playout_time = 0;
-      const uint32_t desired_playout_time_ms = this->current_time_stamp_.to_millis();
-      bool adjust = playout_in_ms > 0 && (desired_playout_time_ms - this->last_adjustment_at_ > 20);
+      uint32_t playout_in_us = this->get_unwritten_audio_micros();
+      int64_t now = esp_timer_get_time();
+      static int64_t last_call = now;
+      const int64_t desired_playout_time_us = this->current_time_stamp_.to_microseconds();
+      
+      bool adjust = playout_in_us > 0 && (desired_playout_time_us - this->last_adjustment_at_ > 20);
       if( adjust && (this->current_time_stamp_.sec != 0 || this->current_time_stamp_.usec != 0) ){
+        static uint32_t last_playout_time = now + playout_in_us;
+        uint32_t expected_next_playout_time = last_playout_time + (now - last_call);
+        last_call = now;
+        last_playout_time = now + playout_in_us;
         
-        static uint32_t last_call = millis();
-        static uint32_t last_playout_time = now + playout_in_ms;
+        static uint32_t last_desired_time = desired_playout_time_us;
         
-        
-        uint32_t expected_playout = last_playout_time + (millis() - last_call);
-        last_call = millis();
-        last_playout_time = last_call + playout_in_ms;
-        
-        static uint32_t last_desired_time = desired_playout_time_ms;
-        
-        int32_t  delta_ms =  desired_playout_time_ms - (millis() + playout_in_ms);
-        size_t frame_size = audio_stream_info.frames_to_bytes(1);
+        int64_t delta_us = desired_playout_time_us - (now + playout_in_us);
+        const size_t frame_size = audio_stream_info.frames_to_bytes(1);
         size_t total_frames = this->buffer_length_ / frame_size;
-        if( delta_ms > 0 ){
-            last_adjustment_at_ = desired_playout_time_ms;
-            //uint32_t to_padd = std::min(audio_stream_info.ms_to_bytes(delta_ms), size_t(this->free()/frame_size) * frame_size);
-            // if( to_padd > 0 ){
-            //   std::memset(this->data_start_ + this->buffer_length_, 0, to_padd);
-            //   this->increase_buffer_length(to_padd);
-            // }
-            printf( "detla_ms %d\n", delta_ms);
-            printf( "Now: %d\n", now);
-            printf( "TimeStamp: %d, in %d ms\n", desired_playout_time_ms, desired_playout_time_ms - now);
-            printf( "playout_in_ms: %d, at: %d expected: %d\n", playout_in_ms, now + playout_in_ms, expected_next_playout_time );
-            if( delta_ms > 50 ){
-              this->speaker_->play_silence( std::min(delta_ms, (int32_t) 1000) );
-              expected_next_playout_time = now + playout_in_ms + delta_ms; 
+        
+        if( delta_us > 1000 ){
+            last_adjustment_at_ = static_cast<uint32_t>(desired_playout_time_us / 1000);
+            printf( "detla_us %" PRId64 " (Now: %" PRId64 ")\n", delta_us, now);
+            printf( "TimeStamp: %" PRId64 ", in %" PRId64 " us\n", desired_playout_time_us, desired_playout_time_us - now);
+            printf( "Playout in %d, at: %" PRId64 " expected: %d\n", playout_in_us, now + playout_in_us, expected_next_playout_time );
+            if( delta_us > 50 * 1000 ){
+              this->speaker_->play_silence( std::min( static_cast<int32_t>(delta_us / 1000), (int32_t) 1000) );
               return 0;  
             } else if (this->free() >= frame_size && total_frames > 3) {
               size_t insert_frame = 1 + (rand() % (total_frames-2));  // don't allow insertion at the end
@@ -284,36 +275,33 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
               } else {
                 std::memset(this->data_start_ + insert_offset, 0, frame_size);
               }
-              
               this->increase_buffer_length(frame_size);
             }
         }
 #if 1         
-       else if( desired_playout_time_ms <= now ){
-          printf( "transfer-buffer: skipping full frame: delta: %d\n", desired_playout_time_ms - now);
+       else if( desired_playout_time_us <= now ){
+          printf( "transfer-buffer: skipping full frame: delta: %" PRId64 "\n", desired_playout_time_us - now);
           size_t available = this->available();
           this->decrease_buffer_length(available);
           return available;
        } 
-       else if ( delta_ms < -1 ){
-            last_adjustment_at_ = desired_playout_time_ms;
+       else if ( delta_us < -1000 ){
+            last_adjustment_at_ = desired_playout_time_us;
             uint32_t drop_frames = 1;
-            if( delta_ms < -50) {
-              drop_frames = audio_stream_info.ms_to_frames( -1 * delta_ms );
+            if( delta_us < -50 * 1000) {
+              drop_frames = audio_stream_info.ms_to_frames( -1 * delta_us / 1000 );
             }
             uint32_t drop_bytes = std::min(audio_stream_info.frames_to_bytes(drop_frames), size_t(this->available()/frame_size) * frame_size);
             this->buffer_length_ -= drop_bytes;
-            this->current_time_stamp_ = tv_t::from_millis(audio_stream_info.bytes_to_ms(drop_bytes));
-            printf( "detla_ms %d, dropped %d bytes, post-delta: %d \n", delta_ms, drop_bytes, delta_ms);
-            printf( "Now: %d\n", millis());
-            printf( "TimeStamp: %d\n", desired_playout_time_ms);
-            printf( "playout_in_ms: %d, at: %d expected: %d\n", playout_in_ms, now + playout_in_ms, expected_next_playout_time );
+            this->current_time_stamp_ = this->current_time_stamp_ + tv_t::from_microseconds(audio_stream_info.bytes_to_us(drop_bytes));
+            printf( "detla_us %" PRId64 "(Now: %" PRId64 ")\n", delta_us, now);
+            printf( "TimeStamp: %" PRId64 ", in %" PRId64 " us\n", desired_playout_time_us, desired_playout_time_us - now);
+            printf( "Playout in %d, at: %" PRId64 " expected: %d\n", playout_in_us, now + playout_in_us, expected_next_playout_time );
         }
 #endif
       }
 #endif
       bytes_written = this->speaker_->play(this->data_start_, this->available(), ticks_to_wait);
-      expected_next_playout_time = now + playout_in_ms + audio_stream_info.bytes_to_ms(bytes_written);
       if( bytes_written && bytes_written != this->available() ){
         printf( "%s: speaker wrote %d bytes, remaining %lu\n", this->name_.c_str(), bytes_written, this->available()- bytes_written);
         //return -1;
@@ -350,9 +338,9 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
   return bytes_written;
 }
 
-uint32_t TimedAudioSinkTransferBuffer::get_unwritten_audio_ms() const {
+uint32_t TimedAudioSinkTransferBuffer::get_unwritten_audio_micros() const {
   if( this->speaker_ != nullptr ){
-    return this->speaker_->get_unwritten_audio_ms();
+    return this->speaker_->get_unwritten_audio_micros();
   }
   return 0;
 }

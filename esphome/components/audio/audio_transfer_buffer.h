@@ -215,7 +215,7 @@ class TimedAudioSinkTransferBuffer : public AudioTransferBuffer {
   void clear_buffered_data() override;
 
   bool has_buffered_data() const override;
-  uint32_t get_unwritten_audio_ms() const;
+  uint32_t get_unwritten_audio_micros() const;
   tv_t get_current_time_stamp() const { return this->current_time_stamp_; }
   void set_current_time_stamp(tv_t time_stamp) { this->current_time_stamp_ = time_stamp; }
   

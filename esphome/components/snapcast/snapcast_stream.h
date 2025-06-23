@@ -49,53 +49,63 @@ enum class StreamState {
 
 class TimeStats {
 public:
-    TimeStats(float smoothing = 0.05f, int outlier_threshold_ms = 5)
-        : smoothing_(smoothing), outlier_threshold_ms_(outlier_threshold_ms) {}
+    TimeStats(float smoothing = 0.05f, int outlier_threshold_ms = 5, size_t min_valid_samples = 10)
+        : smoothing_(smoothing),
+          outlier_threshold_ms_(outlier_threshold_ms),
+          min_valid_samples_(min_valid_samples) {}
 
     void add(tv_t sample) {
-        float ms = sample.to_millis();
-
         if (!has_reference_) {
             reference_offset_ = sample;
-            ms = 0.0f;
             has_reference_ = true;
-        } else {
-            ms = (sample - reference_offset_).to_millis();
         }
 
-        // Initialize EMA
-        if (!has_value_) {
-            ema_ = ms;
-            has_value_ = true;
-        } else {
-            float delta = ms - ema_;
-            if (std::abs(delta) < outlier_threshold_ms_) {
-                ema_ += smoothing_ * delta;
-            } else {
-                outlier_count_++;
-            }
-        }
+        tv_t delta = sample - reference_offset_;
 
-        // Store for median/debugging
+        // Store full history
         if (history_.size() >= max_history_) history_.pop_front();
-        history_.push_back(tv_t::from_millis(ms));
+        history_.push_back(delta);
+
+        // Collect initial samples
+        if (!has_value_) {
+            pending_init_values_.push_back(delta);
+            if (pending_init_values_.size() >= min_valid_samples_) {
+                ema_ = average_tv(pending_init_values_);
+                has_value_ = true;
+                pending_init_values_.clear();
+            }
+            return;
+        }
+
+        // After initialization: apply EMA with outlier rejection
+        tv_t diff = delta - ema_;
+        if (std::abs(diff.to_millis()) < outlier_threshold_ms_) {
+            ema_ = ema_ + (diff * smoothing_);
+        } else {
+            outlier_count_++;
+        }
+    }
+
+    bool is_ready() const {
+        return has_value_;
     }
 
     tv_t get_estimate() const {
-        return reference_offset_ + tv_t::from_millis(ema_);
+        return has_value_ ? reference_offset_ + ema_ : tv_t(0, 0);
     }
 
     tv_t get_median() const {
         if (history_.empty()) return tv_t(0, 0);
         std::vector<tv_t> sorted(history_.begin(), history_.end());
         std::sort(sorted.begin(), sorted.end());
-        return sorted[sorted.size() / 2] + reference_offset_;
+        return reference_offset_ + sorted[sorted.size() / 2];
     }
 
     void reset() {
         history_.clear();
-        ema_ = 0;
-        reference_offset_ = tv_t(0, 0); 
+        pending_init_values_.clear();
+        ema_ = tv_t(0, 0);
+        reference_offset_ = tv_t(0, 0);
         has_value_ = false;
         has_reference_ = false;
         outlier_count_ = 0;
@@ -106,15 +116,29 @@ public:
 private:
     float smoothing_;
     int outlier_threshold_ms_;
-    float ema_ = 0.0f;
-    tv_t reference_offset_{0, 0}; 
+    size_t min_valid_samples_;
 
     bool has_value_ = false;
     bool has_reference_ = false;
     size_t outlier_count_ = 0;
 
+    tv_t ema_{0, 0};
+    tv_t reference_offset_{0, 0};
+
     static constexpr size_t max_history_ = 100;
     std::deque<tv_t> history_;
+    std::vector<tv_t> pending_init_values_;
+
+    // Helper: average of tv_t deltas
+    tv_t average_tv(const std::vector<tv_t>& values) const {
+        if (values.empty()) return tv_t(0, 0);
+        int64_t total_usec = 0;
+        for (const auto& val : values) {
+            total_usec += static_cast<int64_t>(val.sec) * 1'000'000 + val.usec;
+        }
+        total_usec /= static_cast<int64_t>(values.size());
+        return tv_t(total_usec / 1'000'000, total_usec % 1'000'000);
+    }
 };
 
 

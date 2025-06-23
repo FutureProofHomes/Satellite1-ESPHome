@@ -187,6 +187,9 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
                         this->error_msg_ = "Error binding wire chunk payload";
                         return ESP_FAIL;
                     }
+                    if( !this->time_stats_.is_ready() ){
+                        continue;
+                    }
                     tv_t time_stamp = this->to_local_time_( tv_t(wire_chunk_msg.timestamp_sec, wire_chunk_msg.timestamp_usec));
                     if( time_stamp < tv_t::now() ){
                         //chunk is in the past, ignore it
@@ -347,7 +350,7 @@ void SnapcastStream::start_streaming_(){
     }
     this->codec_header_sent_=false;
     this->send_hello_();
-    this->time_stats_.reset();
+    //this->time_stats_.reset();
     this->set_state_(StreamState::STREAMING);
     return;
 }
@@ -386,7 +389,11 @@ void SnapcastStream::send_report_(){
 }
 
 void SnapcastStream::send_time_sync_(){
-    if (millis() - this->last_time_sync_ > TIME_SYNC_INTERVAL_MS){
+    uint32_t sync_interval = TIME_SYNC_INTERVAL_MS;
+    if( !this->time_stats_.is_ready() ){
+        sync_interval = 100;
+    }
+    if (millis() - this->last_time_sync_ > sync_interval){
         TimeMessage time_sync_msg; 
         this->send_message_(time_sync_msg);
         this->last_time_sync_ = millis();
@@ -405,12 +412,22 @@ void SnapcastStream::on_time_msg_(MessageHeader msg, tv_t latency_c2s){
     
     time_stats_.add( (latency_c2s - latency_s2c) / 2 );
     this->est_time_diff_ = time_stats_.get_estimate();
+    
+#if 1    
+    const int64_t server_time = (tv_t::now() + this->est_time_diff_).to_millis();
+    static int64_t last_server_time = server_time;
     static uint32_t last_call = millis();
-    const uint32_t server_time = millis() + this->est_time_diff_.to_millis();
-    static uint32_t last_server_time = server_time; 
-    printf( "New server time: %d, expected %d, diff: %d\n", server_time, last_server_time + millis() - last_call, last_server_time + millis() - last_call - server_time );
+    
+    int64_t expected_server_time = last_server_time + (millis() - last_call);
+    int64_t server_diff = server_time - expected_server_time;
+
     last_server_time = server_time;
     last_call = millis();
+
+    printf("New server time: %" PRId64 " (delta: %" PRId64 ") , expected %" PRId64 ", diff: %" PRId64 "\n",
+         server_time, this->est_time_diff_.to_millis(), expected_server_time, server_diff);
+#endif
+    
 }
 
 void SnapcastStream::on_server_settings_msg_(const ServerSettingsMessage &msg){

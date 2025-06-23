@@ -77,7 +77,7 @@ class SourceSpeaker : public speaker::Speaker, public Component {
   void set_timeout(uint32_t ms) { this->timeout_ms_ = ms; }
 
   std::weak_ptr<audio::AudioSourceTransferBuffer> get_transfer_buffer() { return this->transfer_buffer_; }
-  uint32_t get_unwritten_audio_ms() const;
+  uint32_t get_unwritten_audio_micros() const;
  
  protected:
   friend class MixerSpeaker;
@@ -145,19 +145,19 @@ class MixerSpeaker : public Component {
   void set_task_stack_in_psram(bool task_stack_in_psram) { this->task_stack_in_psram_ = task_stack_in_psram; }
 
   speaker::Speaker *get_output_speaker() const { return this->output_speaker_; }
-  uint32_t get_unwritten_audio_ms() const {
+  uint32_t get_unwritten_audio_micros() const {
     if (this->output_speaker_ == nullptr) {
       return 0;
     }
-    uint32_t unwritten_ms = 0;
+    uint32_t unwritten_us = 0;
     if(xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10))){
-      unwritten_ms = this->output_speaker_->get_unwritten_audio_ms();
-      if( unwritten_ms ){
-        unwritten_ms += this->audio_in_process_ms_; 
+      unwritten_us = this->output_speaker_->get_unwritten_audio_micros();
+      if( unwritten_us ){
+        unwritten_us += this->audio_in_process_us_; 
       }
       //printf( "mixer: in-process: %d\n", this->audio_in_process_ms_ );
       xSemaphoreGive(this->lock_);
-      return unwritten_ms;
+      return unwritten_us;
     } 
     return 0;
   }
@@ -216,7 +216,7 @@ class MixerSpeaker : public Component {
   TaskHandle_t task_handle_{nullptr};
   StaticTask_t task_stack_;
   StackType_t *task_stack_buffer_{nullptr};
-  uint32_t audio_in_process_ms_{0};
+  uint32_t audio_in_process_us_{0};
   SemaphoreHandle_t lock_;
   optional<audio::AudioStreamInfo> audio_stream_info_;
 };

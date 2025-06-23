@@ -310,14 +310,17 @@ void SourceSpeaker::duck_samples(int16_t *input_buffer, uint32_t input_samples_t
   }
 }
 
-uint32_t SourceSpeaker::get_unwritten_audio_ms() const {
+uint32_t SourceSpeaker::get_unwritten_audio_micros() const {
   if( this->transfer_buffer_ == nullptr){
     return 0;
   }
   if(xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10)) ){  
-    uint32_t unwritten_audio = this->parent_->get_unwritten_audio_ms();
+    uint32_t unwritten_audio = this->parent_->get_unwritten_audio_micros();
     if( unwritten_audio ){
-      unwritten_audio += this->audio_stream_info_.bytes_to_ms(this->bytes_in_ringbuffer_ + this->transfer_buffer_->available());
+      size_t unwritten_frames = this->audio_stream_info_.bytes_to_frames(
+        this->bytes_in_ringbuffer_ + this->transfer_buffer_->available()
+      );
+      unwritten_audio += this->audio_stream_info_.frames_to_microseconds(unwritten_frames);
     }
     //printf( "mixer-src, ring: %d\n", this->audio_stream_info_.bytes_to_ms(this->bytes_in_ringbuffer_));
     //printf( "mixer-src, transfer: %d\n", this->audio_stream_info_.bytes_to_ms(this->transfer_buffer_->available()));
@@ -545,9 +548,8 @@ void MixerSpeaker::audio_mixer_task(void *params) {
         vTaskDelay(TASK_DELAY_MS);
         continue;
       }
-      this_mixer->audio_in_process_ms_ = this_mixer->audio_stream_info_.value().bytes_to_ms(
-        output_transfer_buffer->available()
-      );
+      size_t frames = this_mixer->audio_stream_info_.value().bytes_to_frames(output_transfer_buffer->available());
+      this_mixer->audio_in_process_us_ = this_mixer->audio_stream_info_.value().frames_to_microseconds(frames);
       xSemaphoreGive(this_mixer->lock_);
     } else {
       continue;
@@ -603,8 +605,11 @@ void MixerSpeaker::audio_mixer_task(void *params) {
           // Update output transfer buffer length
             output_transfer_buffer->increase_buffer_length(
               this_mixer->audio_stream_info_.value().frames_to_bytes(frames_to_mix));
-            this_mixer->audio_in_process_ms_ = this_mixer->audio_stream_info_.value().bytes_to_ms(
-              output_transfer_buffer->available()
+              size_t in_process_frames = this_mixer->audio_stream_info_.value().bytes_to_frames(
+                  output_transfer_buffer->available()
+              );  
+              this_mixer->audio_in_process_us_ = this_mixer->audio_stream_info_.value().frames_to_microseconds(
+              in_process_frames
             );  
           xSemaphoreGive(this_mixer->lock_);
         }
@@ -661,8 +666,11 @@ void MixerSpeaker::audio_mixer_task(void *params) {
       output_transfer_buffer->increase_buffer_length(
           this_mixer->audio_stream_info_.value().frames_to_bytes(frames_to_mix));
     }
-    this_mixer->audio_in_process_ms_ = this_mixer->audio_stream_info_.value().bytes_to_ms(
-      output_transfer_buffer->available()
+    size_t in_process_frames = this_mixer->audio_stream_info_.value().bytes_to_frames(
+                  output_transfer_buffer->available()
+    );  
+    this_mixer->audio_in_process_us_ = this_mixer->audio_stream_info_.value().frames_to_microseconds(
+      in_process_frames
     );
   }
 

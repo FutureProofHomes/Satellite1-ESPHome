@@ -231,8 +231,7 @@ public:
         this->header_.print();
     }
     void set_send_time() {
-        this->header_.sent.sec = static_cast<int32_t>(millis() / 1000);
-        this->header_.sent.usec = static_cast<int32_t>(micros() % 1000000);
+        this->header_.sent = tv_t::now();
     }
 protected:
     struct MessageHeader header_;    

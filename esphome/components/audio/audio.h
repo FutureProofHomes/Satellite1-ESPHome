@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "esp_timer.h"
+
 namespace esphome {
 namespace audio {
 
@@ -36,6 +38,14 @@ class AudioStreamInfo {
   ///         or values of `bytes`.
   uint32_t bytes_to_ms(size_t bytes) const {
     return bytes * 1000 / (this->sample_rate_ * this->bytes_per_sample_ * this->channels_);
+  }
+  
+  /// @brief Convert bytes to duration in microseconds.
+  /// @param bytes Number of bytes to convert
+  /// @return Duration in milliseconds that will store `bytes` bytes of audio. May round down for certain sample rates
+  ///         or values of `bytes`.
+  int64_t bytes_to_us(size_t bytes) const {
+    return static_cast<int64_t>(bytes * 1000000) / (this->sample_rate_ * this->bytes_per_sample_ * this->channels_);
   }
 
   /// @brief Convert bytes to frames.
@@ -74,6 +84,7 @@ class AudioStreamInfo {
   size_t ms_to_bytes(uint32_t ms) const {
     return (ms * this->bytes_per_sample_ * this->channels_ * this->sample_rate_) / 1000;
   }
+
 
   /// @brief Computes the duration, in microseconds, the given amount of frames represents.
   /// @param frames Number of audio frames
@@ -234,8 +245,9 @@ struct tv_t {
 
     // Get current time (approximate, based on micros())
     static tv_t now() {
-        uint32_t usec_now = micros();  // Use ESP32’s uptime in microseconds
-        return tv_t(usec_now / 1000000, usec_now % 1000000);
+    int64_t usec_now = esp_timer_get_time();
+    return tv_t(static_cast<int32_t>(usec_now / 1000000),
+                static_cast<int32_t>(usec_now % 1000000));
     }
 
     // Convert (and round) to milliseconds
@@ -271,6 +283,12 @@ struct tv_t {
     tv_t operator/(int32_t divisor) const {
         int64_t total_usec = to_microseconds();
         total_usec /= divisor;
+        return tv_t::from_microseconds(total_usec);
+    }
+
+    tv_t operator*(float multiplicant) const {
+        int64_t total_usec = to_microseconds();
+        total_usec *= multiplicant;
         return tv_t::from_microseconds(total_usec);
     }
 
