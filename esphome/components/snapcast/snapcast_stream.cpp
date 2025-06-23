@@ -131,7 +131,6 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
             continue;
         }
         const MessageHeader* msg = reinterpret_cast<const MessageHeader*>(rx_buffer);
-        //msg->print();
         to_read = msg->getMessageSize() > rx_bufer_length ? msg->getMessageSize() - rx_bufer_length : 0;
         if ( to_read > 0 ){
             int len = esp_transport_read(this->transport_, (char*) rx_buffer + rx_bufer_length, to_read, timeout_ms);
@@ -173,7 +172,6 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
                     }
                     ring_buffer->release_write_chunk(timed_chunk);
                     this->codec_header_sent_ = true;
-                    codec_header_payload.print();
                     return ESP_OK;
                 }
                 break;
@@ -224,7 +222,6 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
                 {
                     ServerSettingsMessage server_settings_msg(*msg, payload, payload_len);
                     this->on_server_settings_msg_(server_settings_msg);
-                    server_settings_msg.print();
                 }
                 break;
             
@@ -368,7 +365,6 @@ void SnapcastStream::send_message_(SnapcastMessage &msg){
     msg.set_send_time();
     msg.toBytes(tx_buffer);
     int bytes_written = esp_transport_write( this->transport_, (char*) tx_buffer, msg.getMessageSize(), 0);
-    msg.print();
     if (bytes_written < 0) {
         this->error_msg_ = (
              "Error occurred during sending: esp_transport_write() returned " + to_string(bytes_written)
@@ -384,7 +380,6 @@ void SnapcastStream::send_hello_(){
 
 void SnapcastStream::send_report_(){
     ClientInfoMessage msg(this->volume_, this->muted_);
-    msg.print();
     this->send_message_(msg);
 }
 
@@ -405,15 +400,14 @@ void SnapcastStream::on_time_msg_(MessageHeader msg, tv_t latency_c2s){
     //latency_s2c = t_client-recv - t_server-sent + t_network_latency
     //time diff between server and client as (latency_c2s - latency_s2c) / 2
     tv_t latency_s2c = tv_t::now() - msg.sent;
-    //printf("Snapcast: Estimated time diff: %d.%06d sec\n", this->est_time_diff_.sec, this->est_time_diff_.usec);
-    printf( "msg.sent: sec %d, usec: %d\n", msg.sent.sec, msg.sent.usec );
-    printf( "latencey_c2s: %lld\n", latency_c2s.to_millis());
-    printf( "latency_s2c: %lld = %lld - %lld\n", latency_s2c.to_millis(), tv_t::now().to_millis(), msg.sent.to_millis());
-    
     time_stats_.add( (latency_c2s - latency_s2c) / 2 );
     this->est_time_diff_ = time_stats_.get_estimate();
     
-#if 1    
+#if 0
+    printf( "msg.sent: sec %d, usec: %d\n", msg.sent.sec, msg.sent.usec );
+    printf( "latencey_c2s: %lld\n", latency_c2s.to_millis());
+    printf( "latency_s2c: %lld = %lld - %lld\n", latency_s2c.to_millis(), tv_t::now().to_millis(), msg.sent.to_millis());    
+    
     const int64_t server_time = (tv_t::now() + this->est_time_diff_).to_millis();
     static int64_t last_server_time = server_time;
     static uint32_t last_call = millis();

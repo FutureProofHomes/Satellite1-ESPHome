@@ -291,6 +291,13 @@ struct tv_t {
         total_usec *= multiplicant;
         return tv_t::from_microseconds(total_usec);
     }
+    
+    tv_t &operator+=(const tv_t &other) {
+        this->sec += other.sec;
+        this->usec += other.usec;
+        this->normalize();
+        return *this;
+    }
 
     // Comparisons
     bool operator<(const tv_t &other) const {
