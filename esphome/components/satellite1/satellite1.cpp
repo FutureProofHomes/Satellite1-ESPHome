@@ -49,7 +49,7 @@ void Satellite1::loop(){
       } 
       break;
     case SAT_XMOS_CONNECTED_STATE:
-      if( (millis() - this->last_version_poll_timestamp_) > 10000 ){
+      if( (millis() - this->last_version_poll_timestamp_) > 900000 ){
         bool read_success = this->dfu_get_fw_version_();
         this->last_version_poll_timestamp_ = millis();
         version_poll_callback_.call();
