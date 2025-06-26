@@ -1,10 +1,12 @@
 #include "mic_tests.h"
 
 #include "esphome/core/log.h"
+#include "esphome/core/hal.h"
 #include "esp_dsp.h"
 
 #include <cinttypes>
 #include <cstdio>
+
 
 namespace esphome {
 namespace online_testing {
@@ -12,49 +14,72 @@ namespace online_testing {
 static const char *const TAG = "mic_tests";
 
 
-static const size_t SWEEP_LEN = 1024;
-static const size_t INPUT_BUFFER_SIZE = SWEEP_LEN * 4;
 
-// Aligned buffers for ESP-DSP
-__attribute__((aligned(16))) float mic_f32[INPUT_BUFFER_SIZE];
+static constexpr size_t INPUT_BUFFER_SIZE = 4 * 640;
+
+static const size_t SWEEP_LEN = 512;
+static constexpr size_t MAX_BUFFER_SIZE = SWEEP_LEN * 2;
+
+// Aligned buffers
+__attribute__((aligned(16))) float mic_buffer[MAX_BUFFER_SIZE];
 __attribute__((aligned(16))) float sweep_f32[SWEEP_LEN];
-__attribute__((aligned(16))) float corr_out[INPUT_BUFFER_SIZE + SWEEP_LEN - 1];
 __attribute__((aligned(16))) float window[SWEEP_LEN];
 
+size_t mic_write_index = 0;
+size_t mic_filled = 0;
 
-// Converts int16 to float
-static void convert_to_float(const int16_t *src, float *dst, int len) {
-    for (int i = 0; i < len; i++) {
-        dst[i] = (float)src[i];
+static inline size_t wrap_index(size_t idx) {
+    return idx % MAX_BUFFER_SIZE;
+}
+
+void convert_to_float(const int16_t* src, float* dst, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        dst[i] = static_cast<float>(src[i]);
     }
 }
 
-static bool detect_sweep(const int16_t *mic, const float sweep_norm ) {
-    // Convert int16 to float
-    convert_to_float(mic, mic_f32, INPUT_BUFFER_SIZE);
+bool detect_sweep_streaming(const int16_t* chunk, size_t chunk_len, float sweep_norm) {
+    uint32_t start_time = millis();
+    // 1. Convert input to float and write to circular buffer
+    for (size_t i = 0; i < chunk_len; i++) {
+        mic_buffer[mic_write_index] = static_cast<float>(chunk[i]);
+        mic_write_index = wrap_index(mic_write_index + 1);
+    }
 
-    // Sliding window over mic signal
+    mic_filled = std::min(mic_filled + chunk_len, MAX_BUFFER_SIZE);
+
+    // 2. Only process if we have enough samples
+    if (mic_filled < SWEEP_LEN) return false;
+
     float max_similarity = 0.0f;
     int best_offset = -1;
 
-    for (int offset = 0; offset <= INPUT_BUFFER_SIZE - SWEEP_LEN; offset++) {
+    // 3. Check all valid windows in the buffer
+    for (size_t i = 0; i <= mic_filled - SWEEP_LEN; i++) {
+        float window[SWEEP_LEN];
+        for (size_t j = 0; j < SWEEP_LEN; j++) {
+            size_t idx = wrap_index(mic_write_index + MAX_BUFFER_SIZE - mic_filled + i + j);
+            window[j] = mic_buffer[idx];
+        }
+
         float dot = 0.0f;
         float norm_mic = 0.0f;
-
-        dsps_dotprod_f32(&mic_f32[offset], sweep_f32, &dot, SWEEP_LEN);
-        dsps_dotprod_f32(&mic_f32[offset], &mic_f32[offset], &norm_mic, SWEEP_LEN);
+        dsps_dotprod_f32(window, sweep_f32, &dot, SWEEP_LEN);
+        dsps_dotprod_f32(window, window, &norm_mic, SWEEP_LEN);
 
         float similarity = dot / (sweep_norm * sqrtf(norm_mic) + 1e-8f);
-        
         if (similarity > max_similarity) {
             max_similarity = similarity;
-            best_offset = offset;
+            best_offset = static_cast<int>(i);
         }
     }
+    printf( "Sweep-Detect - Elapsed time: %d ms (corr=%.2f)\n", millis() - start_time, max_similarity );
+    if (max_similarity > 0.40f) {
+        ESP_LOGI("sweep", "Sweep detected: corr=%.2f at offset=%d", max_similarity, best_offset);
+        return true;
+    }
 
-    ESP_LOGD(TAG, "Max correlation: %.2f at index %d", max_similarity, best_offset);
-    return max_similarity > 0.45f;  // Tune this threshold for your signal
-
+    return false;
 }
 
 
@@ -124,22 +149,21 @@ int MicTester::read_microphone_() {
   size_t bytes_read = 0;
   if (this->mic_->is_running()) {  // Read audio into input buffer
     size_t buffer_bytes = INPUT_BUFFER_SIZE * sizeof(int16_t);
-    size_t to_read = buffer_bytes - this->read_pos_;
-    to_read = to_read > 512 ? 512 : to_read;
+    
+    size_t to_read = 960; //buffer_bytes - this->read_pos_;
+    //to_read = to_read > 512 ? 512 : to_read;
     
     if (to_read == 0 || this->read_pos_ + to_read > buffer_bytes) {
-        ESP_LOGE(TAG, "Invalid read position or size");
-        return 0;
+         ESP_LOGE(TAG, "Invalid read position or size");
+         return 0;
     }
     uint8_t* buffer = reinterpret_cast<uint8_t*>(this->input_buffer_);
-    
-    bytes_read = this->mic_->read( reinterpret_cast<int16_t*>(buffer + this->read_pos_), to_read); //, pdMS_TO_TICKS(300)
-    this->read_pos_ += bytes_read;
-    if ( this->read_pos_ >= INPUT_BUFFER_SIZE * sizeof(int16_t) ) {
-        this->read_pos_ = 0;
-        return INPUT_BUFFER_SIZE;
+    bytes_read = this->mic_->read( reinterpret_cast<int16_t*>(buffer), to_read, pdMS_TO_TICKS(30) ); 
+    if( bytes_read != to_read ){
+      ESP_LOGE(TAG, "Couldn't read enough data, read: %d", bytes_read );
+      return 0;
     }
-} else {
+  } else {
     ESP_LOGD(TAG, "microphone not running");
   }
   return bytes_read;
@@ -182,10 +206,11 @@ void MicTester::loop() {
     }
     case State::DETECTING_SWEEP: {
        size_t samples_available = this->read_microphone_();
-        if ( samples_available == INPUT_BUFFER_SIZE ){
-            if( detect_sweep(this->input_buffer_, this->sweep_norm_) ){
+        if ( samples_available == 960 ){
+            if( detect_sweep_streaming(this->input_buffer_, samples_available, this->sweep_norm_) ){
                 this->defer([this]() { this->sweep_detected_trigger_->trigger();  });
-            }
+                //std::memset( this->input_buffer_, 0, INPUT_BUFFER_SIZE * sizeof(int16_t) );
+            }           
         } 
       break;
     }

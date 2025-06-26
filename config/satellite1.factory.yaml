@@ -10,42 +10,11 @@ packages:
   # It must appear before the actual package so it becomes the original config and the
   # on_client_connected list from the package config is appended onto this one.
   va_connected_wait_for_ble_and_flasher:
-    voice_assistant:
-      on_client_connected:
-        - wait_until:
-            not: ble.enabled
-        - wait_until:
-            not: memory_flasher.in_progress
-        - delay: 2s
-    
-    wifi:
-      on_disconnect:
-        - ble.enable:
-      on_connect:
-        - delay: 5s  # Gives time for improv results to be transmitted
-        - ble.disable:
-    
     satellite1:
-      on_xmos_no_response:
-        then:
-          - if:
-              condition:
-                - lambda: return id(init_in_progress);
-                - lambda: return id(xflash).has_image_embedded();
-              then:
-                #- memory_flasher.write_embedded_image:
-      
       on_xmos_connected:
         then:
           - delay: 1s
           - script.execute: control_leds
-          - if: 
-              condition:
-                - lambda: return id(init_in_progress);
-                - lambda: return id(xflash).has_image_embedded();
-                - lambda: return !id(xflash).match_embedded( id(satellite1_id).xmos_fw_version );
-              then:
-                #- memory_flasher.write_embedded_image:
 
   home-assistant-voice: !include satellite1.base.yaml
 
@@ -55,51 +24,6 @@ esphome:
     name: ${company_name}.${project_name}
     version: ${esp32_fw_version}
 
-
-
-esp32_improv:
-  authorizer: btn_action
-  on_start:
-    - lambda: id(improv_ble_in_progress) = true;
-    - script.execute: control_leds
-  on_provisioned:
-    - lambda: id(improv_ble_in_progress) = false;
-    - script.execute: control_leds
-  on_stop:
-    - lambda: id(improv_ble_in_progress) = false;
-    - script.execute: control_leds
-
-
-
-http_request:
-
-ota:
-  - platform: http_request
-    id: ota_http_request
-
-update:
-  - platform: http_request
-    name: None
-    id: update_http_request
-    source: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/manifest.json
-
-
-switch:
-  - platform: template
-    id: beta_firmware
-    name: Beta firmware
-    icon: "mdi:test-tube"
-    entity_category: diagnostic
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
-    on_turn_on:
-      - logger.log: "OTA updates set to use Beta firmware"
-      - lambda: id(update_http_request).set_source_url("https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/manifest-beta.json");
-      - component.update: update_http_request
-    on_turn_off:
-      - logger.log: "OTA updates set to use Production firmware"
-      - lambda: id(update_http_request).set_source_url("https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/manifest.json");
-      - component.update: update_http_request
 
 
 external_components:
@@ -126,4 +50,103 @@ online_testing:
           action: "SWEEP_DETECTED"
           status: 0
       
-    
+improv_serial:
+  on_action:
+    then:
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("RESET_XMOS");
+          then:
+            - satellite1.xmos_hardware_reset:
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("ERASE_XMOS_FLASH");
+          then:
+            - memory_flasher.erase:
+
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("FLASH_XMOS_EMBEDDED");
+          then:
+            - memory_flasher.write_embedded_image:
+          
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("PLAY_SWEEP_SOUND");
+          then:
+            - script.execute:
+                id: play_sound
+                priority: false
+                sound_file: !lambda return id(audio_test_sweep);
+      
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("SET_TO_LINE_OUT");
+          then:
+            - logger.log: "Activate line-out DAC" 
+            - delay: 500ms
+            - lambda: |-
+                id(dac_proxy).activate_line_out();
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("ENABLE_SWEEP_DETECTED_LEFT");
+          then:
+            - logger.log: "Starting audio sweep detection on Comm Mic" 
+            - delay: 500ms
+            - lambda: |-
+                if (id(mic_tester).is_running()) {
+                  id(mic_tester).request_stop();  // Stop current stream
+                  delay(500);  // Wait for stream to stop
+                }
+                id(mic_tester).set_microphone(id(asr_mic));  // Set Comm mic
+                id(mic_tester).request_start(true);  // Start stream with Comm mic
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("DISABLE_SWEEP_DETECTED_LEFT");
+          then:
+            - logger.log: "Turning off audio sweep detection on Comm Mic"
+            - lambda: |-
+                if (id(mic_tester).is_running()) {
+                  id(mic_tester).request_stop();  // Stop the stream when Comm mic is turned off
+                }
+                
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("ENABLE_SWEEP_DETECTED_RIGHT");
+          then:
+            - logger.log: "Starting audio sweep detection on ASR Mic" 
+            - delay: 500ms
+            - lambda: |-
+                if (id(mic_tester).is_running()) {
+                  id(mic_tester).request_stop();  // Stop current stream
+                  delay(500);  // Wait for stream to stop
+                }
+                id(mic_tester).set_microphone(id(comm_mic));  // Set ASR mic
+                id(mic_tester).request_start(true);  // Start stream with ASR mic
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("DISABLE_SWEEP_DETECTED_RIGHT");
+          then:
+            - logger.log: "Turning off audio sweep detection on Comm Mic"
+            - lambda: |-
+                if (id(mic_tester).is_running()) {
+                  id(mic_tester).request_stop();  // Stop the stream when Comm mic is turned off
+                }
+
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("READ_XMOS_FIRMWARE");
+          then:
+            - logger.log: "Reading XMOS firmware version via SPI"
+            - satellite1.xmos_read_firmware
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("XMOS_SEND_RANDOM");
+          then:
+            - logger.log: "Sending random SPI frame to XMOS"
+            - satellite1.xmos_send_random_frame

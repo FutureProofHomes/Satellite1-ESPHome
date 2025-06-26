@@ -1,7 +1,12 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins
-from esphome.const import CONF_ID, CONF_TIMEOUT
+from esphome.const import (
+    CONF_CHANNEL,
+    CONF_ID,
+    CONF_NUM_CHANNELS, 
+    CONF_TIMEOUT
+)
 from esphome.components import esp32, speaker
 
 from .. import i2s_settings as i2s
@@ -9,7 +14,12 @@ from .. import i2s_settings as i2s
 from .. import (
     CONF_I2S_AUDIO_ID,
     CONF_I2S_DOUT_PIN,
+    CONF_LEFT,
+    CONF_MONO,
+    CONF_RIGHT,
+    CONF_STEREO,
     I2SAudioComponent,
+    i2s_audio_component_schema,
     I2SWriter,
     i2s_audio_ns,
     register_i2s_writer,
@@ -46,6 +56,40 @@ def validate_esp32_variant(config):
     return config
 
 
+BASE_SCHEMA = (
+    speaker.SPEAKER_SCHEMA.extend(
+        i2s_audio_component_schema(
+            I2SAudioSpeaker,
+            default_sample_rate=16000,
+            default_channel=CONF_MONO,
+            default_bits_per_sample="16bit",
+        )
+    )
+    .extend(
+        {
+            cv.Optional(
+                CONF_BUFFER_DURATION, default="500ms"
+            ): cv.positive_time_period_milliseconds,
+            cv.Optional(CONF_TIMEOUT, default="500ms"): cv.Any(
+                cv.positive_time_period_milliseconds,
+                cv.one_of(CONF_NEVER, lower=True),
+            ),
+        }
+    )
+    .extend(cv.COMPONENT_SCHEMA)
+)
+
+
+def _set_num_channels_from_config(config):
+    if config[CONF_CHANNEL] in (CONF_MONO, CONF_LEFT, CONF_RIGHT):
+        config[CONF_NUM_CHANNELS] = 1
+    else:
+        config[CONF_NUM_CHANNELS] = 2
+
+    return config
+
+
+
 CONFIG_SCHEMA = cv.All(
     cv.typed_schema(
         {
@@ -75,6 +119,7 @@ CONFIG_SCHEMA = cv.All(
         key=CONF_DAC_TYPE,
     ),
     validate_esp32_variant,
+    _set_num_channels_from_config
 )
 
 

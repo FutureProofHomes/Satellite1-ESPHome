@@ -37,12 +37,13 @@ void Satellite1::loop(){
     case SAT_DETACHED_STATE:
       if( this->connection_attempts <= MAX_CONNECTION_ATTEMPTS && (millis() - this->last_attempt_timestamp_) > 1000 )
       {
-        if( this->connection_attempts == MAX_CONNECTION_ATTEMPTS){
+        if(this->connection_attempts == MAX_CONNECTION_ATTEMPTS){
            this->state_callback_.call();
         } else if (this->check_for_xmos_()){
             this->state = SAT_XMOS_CONNECTED_STATE;
             this->connection_attempts = 0;
             this->state_callback_.call();
+            ESP_LOGI(TAG, "XMOS Firmware Version: %s ", this->status_string().c_str() );
         }
         this->last_attempt_timestamp_ = millis();  
         this->connection_attempts++;
@@ -72,12 +73,20 @@ std::string Satellite1::status_string(){
       return "XMOS not responding";
     
     case SAT_XMOS_CONNECTED_STATE:
-      return  (    "v" + std::to_string(this->xmos_fw_version[0])
-                +  "." + std::to_string(this->xmos_fw_version[1]) 
-                +  "." + std::to_string(this->xmos_fw_version[2])
-                +  ( this->xmos_fw_version[3] ? "-" + prerelease_str(this->xmos_fw_version[3]) : "")
-                +  ( this->xmos_fw_version[4] ? "." + std::to_string(this->xmos_fw_version[4]) : "")
-              );
+      {
+        bool allZero = std::all_of(std::begin(this->xmos_fw_version), std::end(this->xmos_fw_version), [](int x) {
+          return x == 0;
+        });
+        if ( allZero ) return "XMOS not responding";
+        
+        return  (    "v" + std::to_string(this->xmos_fw_version[0])
+                    +  "." + std::to_string(this->xmos_fw_version[1]) 
+                    +  "." + std::to_string(this->xmos_fw_version[2])
+                    +  ( this->xmos_fw_version[3] ? "-" + prerelease_str(this->xmos_fw_version[3]) : "")
+                    +  ( this->xmos_fw_version[4] ? "." + std::to_string(this->xmos_fw_version[4]) : "")
+        );
+      }
+      
     case SAT_FLASH_CONNECTED_STATE:
       return "Flashing Mode";
     default: return "";
@@ -167,12 +176,11 @@ bool Satellite1::dfu_get_fw_version_(){
   uint8_t version_resp[5];
   if( !this->transfer(DC_RESOURCE::DFU_CONTROLLER, DC_DFU_CMD::GET_VERSION, version_resp, 5 ) ){
     ESP_LOGW(TAG, "Requesting XMOS version failed");
+    memset( this->xmos_fw_version, 0, 5);
     return false;    
   }
   
   memcpy( this->xmos_fw_version, version_resp, 5);
-  ESP_LOGI(TAG, "XMOS Firmware Version: %s ", this->status_string().c_str() );
-  
   return true;
 }
 

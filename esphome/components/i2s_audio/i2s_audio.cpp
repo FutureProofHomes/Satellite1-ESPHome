@@ -7,7 +7,15 @@
 namespace esphome {
 namespace i2s_audio {
 
-static const char *const TAG = "i2s_audio";
+  static const char *const TAG = "i2s_audio";
+
+#if defined(USE_ESP_IDF) && (ESP_IDF_VERSION_MAJOR >= 5)
+static const uint8_t I2S_NUM_MAX = SOC_I2S_NUM;  // because IDF 5+ took this away :(
+#endif
+
+static const size_t DMA_BUFFERS_COUNT = 4;
+static const size_t I2S_EVENT_QUEUE_COUNT = DMA_BUFFERS_COUNT + 1;
+
 
 void I2SAudioComponent::setup() {
   static i2s_port_t next_port_num = I2S_NUM_0;
@@ -73,7 +81,7 @@ bool I2SAudioComponent::install_i2s_driver_(i2s_driver_config_t i2s_cfg, uint8_t
     if(this->access_mode_ == I2SAccessMode::DUPLEX){
       i2s_cfg.mode = (i2s_mode_t) (i2s_cfg.mode | I2S_MODE_TX | I2S_MODE_RX);
     }
-    success = ESP_OK == i2s_driver_install(this->get_port(), &i2s_cfg, 0, nullptr);
+    success = ESP_OK == i2s_driver_install(this->get_port(), &i2s_cfg, I2S_EVENT_QUEUE_COUNT, &this->i2s_event_queue_);
     esph_log_d(TAG, "Installing driver : %s", success ? "yes" : "no" );
     i2s_pin_config_t pin_config = this->get_pin_config();
     if( success ){
@@ -128,6 +136,16 @@ bool I2SAudioComponent::uninstall_i2s_driver_(uint8_t access){
   return success;
 }
 
+void I2SAudioComponent::process_i2s_events(bool &tx_dma_underflow){
+  i2s_event_t i2s_event;
+      while (xQueueReceive(this->i2s_event_queue_, &i2s_event, 0)) {
+        if (i2s_event.type == I2S_EVENT_TX_Q_OVF) {
+          tx_dma_underflow = true;
+        }
+      }
+}
+
+
 bool I2SAudioComponent::validate_cfg_for_duplex_(i2s_driver_config_t& i2s_cfg){
   i2s_driver_config_t& installed = this->installed_cfg_;
   return (
@@ -166,12 +184,12 @@ i2s_driver_config_t I2SSettings::get_i2s_cfg() const {
       .channel_format = this->channel_fmt_,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-      .dma_buf_count = 4,
-      .dma_buf_len = 480,
+      .dma_buf_count = DMA_BUFFERS_COUNT,
+      .dma_buf_len = 240,
       .use_apll = false,
       .tx_desc_auto_clear = true,
       .fixed_mclk = I2S_PIN_NO_CHANGE,
-      .mclk_multiple = I2S_MCLK_MULTIPLE_DEFAULT,
+      .mclk_multiple = I2S_MCLK_MULTIPLE_256,
       .bits_per_chan = I2S_BITS_PER_CHAN_DEFAULT,
 #if SOC_I2S_SUPPORTS_TDM
       .chan_mask = I2S_CHANNEL_MONO,

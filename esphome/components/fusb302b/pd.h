@@ -66,7 +66,8 @@ enum pd_power_data_obj_type {   /* Power data object type */
 };
 
 enum PowerDeliveryState : uint8_t {
-  PD_STATE_DISCONNECTED,  
+  PD_STATE_DISCONNECTED,
+  PD_STATE_PD_TIMEOUT,  
   PD_STATE_DEFAULT_CONTRACT,
   PD_STATE_TRANSITION,
   PD_STATE_EXPLICIT_SPR_CONTRACT,
@@ -145,9 +146,8 @@ typedef uint32_t pd_pdo_t;
 class PowerDelivery {
 public:
   PowerDeliveryState state{PD_STATE_DISCONNECTED};
-  int contract_voltage{0};
-  int measured_voltage{0};
-  std::string contract{"0.3A @ 5V"};
+  int contract_voltage{5};
+  std::string contract{"0.5A @ 5V"};
   PowerDeliveryState prev_state_{PD_STATE_DISCONNECTED};
   
   bool request_voltage(int voltage);

@@ -22,15 +22,6 @@ button:
   
 
 switch:
-    # Wake Word Sound Switch.
-  - platform: template
-    id: wake_sound
-    name: Wake sound
-    icon: "mdi:bullhorn"
-    entity_category: config
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_ON
-
     # This is the master mute switch. It is exposed to Home Assistant. The user can only turn it on and off if the hardware switch is off. (The hardware switch overrides the software one)
   - platform: template
     id: master_mute_switch
@@ -82,5 +73,5 @@ text_sensor:
     icon: "mdi:memory"
     entity_category: "diagnostic"
     update_interval: never
-    lambda: return id(satellite1_id).status_string();
+    lambda: return std::string("Unknown");
       

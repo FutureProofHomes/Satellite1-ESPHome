@@ -17,14 +17,20 @@ RestAction = tas2780_ns.class_(
 )
 
 ActivateAction = tas2780_ns.class_(
-    "ActivateAction", automation.Action, cg.Parented.template(tas2780)
+    "ActivateAction", automation.Action
+)
+
+UpdateConfigAction = tas2780_ns.class_(
+    "UpdateConfigAction", automation.Action
 )
 
 DeactivateAction = tas2780_ns.class_(
     "DeactivateAction", automation.Action, cg.Parented.template(tas2780)
 )
 
-
+CONF_VOL_RNG_MIN = "vol_range_min"
+CONF_VOL_RNG_MAX = "vol_range_max"
+CONF_AMP_LEVEL_IDX = "amp_level_idx" 
 
 CONFIG_SCHEMA = (
     cv.Schema(
@@ -37,15 +43,58 @@ CONFIG_SCHEMA = (
 )
 
 
-TAS2780_ACTION_SCHEMA = automation.maybe_simple_id({cv.GenerateID(): cv.use_id(tas2780)})
+TAS2780_ACTION_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.use_id(tas2780),
+        cv.Optional(CONF_MODE, default=2) : cv.int_range(0,3)
+    }
+)
 
 @automation.register_action("tas2780.deactivate", DeactivateAction, TAS2780_ACTION_SCHEMA)
-@automation.register_action("tas2780.activate", ActivateAction, TAS2780_ACTION_SCHEMA)
 @automation.register_action("tas2780.reset", RestAction, TAS2780_ACTION_SCHEMA)
 async def tas2780_action(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
     return var
+
+@automation.register_action("tas2780.activate", ActivateAction, TAS2780_ACTION_SCHEMA)
+async def tas2780_action(config, action_id, template_arg, args):
+    tas2780 = await cg.get_variable(config[CONF_ID])
+    var = cg.new_Pvariable(action_id, template_arg, tas2780)
+    mode_ = config.get(CONF_MODE)
+    template_ = await cg.templatable(mode_, args, cg.uint8)
+    cg.add(var.set_mode(template_))
+    return var
+
+
+
+TAS2780_UPDATE_CONFIG_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.use_id(tas2780),
+        cv.Optional(CONF_VOL_RNG_MIN, default=.3) : cv.templatable(cv.float_range(0.,1.)),
+        cv.Optional(CONF_VOL_RNG_MAX, default=1.) : cv.templatable(cv.float_range(0.,1.)),
+        cv.Optional(CONF_AMP_LEVEL_IDX) : cv.templatable(cv.int_range(0, 20))
+    }
+)
+
+
+@automation.register_action("tas2780.update_config", UpdateConfigAction, TAS2780_UPDATE_CONFIG_SCHEMA)
+async def tas2780_action(config, action_id, template_arg, args):
+    tas2780 = await cg.get_variable(config[CONF_ID])
+    var = cg.new_Pvariable(action_id, template_arg, tas2780)
+    vol_min_ = config.get(CONF_VOL_RNG_MIN)
+    template_ = await cg.templatable(vol_min_, args, float)
+    cg.add(var.set_vol_range_min(template_))
+    vol_max_ = config.get(CONF_VOL_RNG_MAX)
+    template_ = await cg.templatable(vol_max_, args, float)
+    cg.add(var.set_vol_range_max(template_))
+    if CONF_AMP_LEVEL_IDX in config:
+        amp_level_idx = config.get(CONF_AMP_LEVEL_IDX)
+        template_ = await cg.templatable(amp_level_idx, args, cg.uint8)
+        cg.add(var.set_amp_level(template_))
+    
+    return var
+
 
 
 async def to_code(config):

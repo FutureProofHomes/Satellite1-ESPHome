@@ -1,53 +1,152 @@
 substitutions:
-  name: satellite1
-  friendly_name: Satellite1
-  xmos_fw_version: "v1.0.2"
-  
-  # OPTIONALLY, set the log level to debug, info, warn, error
-  log_level: debug
+  company_name: FutureProofHomes
+  project_name: Satellite1
 
-esphome:
-  name: ${name}
-  name_add_mac_suffix: true
-  friendly_name: ${friendly_name}
+  #set this version by GHA at build time
+  esp32_fw_version: dev
 
 packages:
-  FutureProofHomes.Satellite1: 
-    url: https://github.com/futureproofhomes/satellite1-esphome
-    ref: develop
-    refresh: 1s  
-    files: 
-    # Main config files, don't remove
-    - config/satellite1.base.yaml
-    - config/common/components.external.yaml
-    
-    ## OPTIONALLY, uncomment if you have the smaller LD2410 mmWave sensor connected to your HAT.
-    #- config/common/mmwave_ld2410.yaml    
-    
-    ## OPTIONALLY, uncomment if you have the larger LD2450 mmWave sensor connected to your HAT.
-    #- config/common/mmwave_ld2450.yaml
+  # This is an inline package to prefix the on_client_connected with the wait_until action
+  # It must appear before the actual package so it becomes the original config and the
+  # on_client_connected list from the package config is appended onto this one.
+  va_connected_wait_for_ble_and_flasher:
+    satellite1:
+      on_xmos_connected:
+        then:
+          - delay: 1s
+          - script.execute: control_leds
 
-    ## OPTIONALLY, uncomment if want extra memory, wifi and xmos control of the device.
-    #- config/common/debug.yaml 
-      
+  home-assistant-voice: !include satellite1.base.yaml
+
+
+esphome:
+  project:
+    name: ${company_name}.${project_name}
+    version: ${esp32_fw_version}
+
+
+
+external_components:
+  - source:
+      type: local
+      path: ../esphome/components
+    components: [ i2s_audio, satellite1, memory_flasher, tas2780, pcm5122, fusb302b, improv_serial, online_testing ]
+
+
 logger:
-  level: ${log_level}
+  deassert_rts_dtr: true
+  hardware_uart : USB_SERIAL_JTAG
+  level: debug
 
-## OPTIONALLY, enable transport encryption for the API layer by uncommenting the following lines 
-## and replacing "REPLACE_BY_32_BIT_RANDOM_KEY" with a 32-character random key.
-## For more information, refer to the ESPHome documentation:
-## https://esphome.io/components/api.html
-## Note: The documentation also provides a tool to generate a random key
 
-#api:
-#  encryption:
-#    key: REPLACE_BY_32_BIT_RANDOM_KEY
+online_testing:
+  id: mic_tester
+  microphone: asr_mic
+  media_file: audio_test_sweep
+  on_detected:
+    then:
+      - logger.log: "Sweep detected"
+      - improv_serial.send_action_status:
+          action: "SWEEP_DETECTED"
+          status: 0
+      
+improv_serial:
+  on_action:
+    then:
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("RESET_XMOS");
+          then:
+            - satellite1.xmos_hardware_reset:
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("ERASE_XMOS_FLASH");
+          then:
+            - memory_flasher.erase:
 
-## OPTIONALLY, override the default Wi-Fi credentials provisioned on the Satellite1 device 
-## during setup by using your Wi-Fi credentials stored in the `secrets.yaml` file of the 
-## ESPHome dashboard. Uncomment the below lines to enable this feature, allowing you 
-## to manage Wi-Fi credentials centrally for all your devices.
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("FLASH_XMOS_EMBEDDED");
+          then:
+            - memory_flasher.write_embedded_image:
+          
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("PLAY_SWEEP_SOUND");
+          then:
+            - script.execute:
+                id: play_sound
+                priority: false
+                sound_file: !lambda return id(audio_test_sweep);
+      
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("SET_TO_LINE_OUT");
+          then:
+            - logger.log: "Activate line-out DAC" 
+            - delay: 500ms
+            - lambda: |-
+                id(dac_proxy).activate_line_out();
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("ENABLE_SWEEP_DETECTED_LEFT");
+          then:
+            - logger.log: "Starting audio sweep detection on Comm Mic" 
+            - delay: 500ms
+            - lambda: |-
+                if (id(mic_tester).is_running()) {
+                  id(mic_tester).request_stop();  // Stop current stream
+                  delay(500);  // Wait for stream to stop
+                }
+                id(mic_tester).set_microphone(id(asr_mic));  // Set Comm mic
+                id(mic_tester).request_start(true);  // Start stream with Comm mic
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("DISABLE_SWEEP_DETECTED_LEFT");
+          then:
+            - logger.log: "Turning off audio sweep detection on Comm Mic"
+            - lambda: |-
+                if (id(mic_tester).is_running()) {
+                  id(mic_tester).request_stop();  // Stop the stream when Comm mic is turned off
+                }
+                
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("ENABLE_SWEEP_DETECTED_RIGHT");
+          then:
+            - logger.log: "Starting audio sweep detection on ASR Mic" 
+            - delay: 500ms
+            - lambda: |-
+                if (id(mic_tester).is_running()) {
+                  id(mic_tester).request_stop();  // Stop current stream
+                  delay(500);  // Wait for stream to stop
+                }
+                id(mic_tester).set_microphone(id(comm_mic));  // Set ASR mic
+                id(mic_tester).request_start(true);  // Start stream with ASR mic
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("DISABLE_SWEEP_DETECTED_RIGHT");
+          then:
+            - logger.log: "Turning off audio sweep detection on Comm Mic"
+            - lambda: |-
+                if (id(mic_tester).is_running()) {
+                  id(mic_tester).request_stop();  // Stop the stream when Comm mic is turned off
+                }
 
-#wifi:
-#  ssid: !secret wifi_ssid
-#  password: !secret wifi_password
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("READ_XMOS_FIRMWARE");
+          then:
+            - logger.log: "Reading XMOS firmware version via SPI"
+            - satellite1.xmos_read_firmware
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("XMOS_SEND_RANDOM");
+          then:
+            - logger.log: "Sending random SPI frame to XMOS"
+            - satellite1.xmos_send_random_frame

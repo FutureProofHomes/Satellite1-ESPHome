@@ -31,7 +31,6 @@ light:
   - platform: esp32_rmt_led_strip
     id: hw_led_ring
     pin: GPIO21
-    rmt_channel: 1
     num_leds: 24
     rgb_order: GRB
     chipset: WS2812
@@ -203,7 +202,7 @@ light:
               it[18] = muted_color;
               it[19] = Color::BLACK;
             }
-            if ( id(nabu_media_player).volume == 0.0f || id(nabu_media_player).is_muted() ) {
+            if ( id(external_media_player).volume == 0.0f || id(external_media_player).is_muted() ) {
               it[1] = Color::BLACK;
               it[2] = muted_color;
               it[3] = muted_color;
@@ -233,7 +232,7 @@ light:
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
             Color silenced_color(255, 0, 0);
-            auto volume_ratio = 24.0f * id(nabu_media_player).volume;
+            auto volume_ratio = 24.0f * id(external_media_player).volume;
             for (int i = 0; i < 24; i++) {
               if (i <= volume_ratio) {
                 it[(0+i)%24] = color * min( 255.0f * (volume_ratio - i) , 255.0f ) ;
@@ -241,7 +240,7 @@ light:
                 it[(0+i)%24] = Color::BLACK;
               }
             }
-            if (id(nabu_media_player).volume == 0.0f) {
+            if (id(external_media_player).volume == 0.0f) {
               it[0] = silenced_color;
             }
       - addressable_lambda:
@@ -357,63 +356,7 @@ light:
           min_brightness: 50%
           max_brightness: 100%
       
-      - addressable_lambda:
-          name: "Timer Ring"
-          update_interval: 10ms
-          lambda: |-
-            static uint8_t brightness_step = 0;
-            static bool brightness_decreasing = true;
-            static uint8_t brightness_step_number = 10;
-            if (initial_run) {
-              brightness_step = 0;
-              brightness_decreasing = true;
-            }
-            auto light_color = id(led_ring).current_values;
-            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
-                  light_color.get_blue() * 255);
-            Color muted_color(255, 0, 0);
-            for (int i = 0; i < 24; i++) {
-              it[i] = color * uint8_t(255/brightness_step_number*(brightness_step_number-brightness_step));
-            }
-            if ( id(master_mute_switch).state ) {
-              it[3] = muted_color;
-              it[9] = muted_color;
-            }
-            if (brightness_decreasing) {
-              brightness_step++;
-            } else {
-              brightness_step--;
-            }
-            if (brightness_step == 0 || brightness_step == brightness_step_number) {
-              brightness_decreasing = !brightness_decreasing;
-            }
-      - addressable_lambda:
-          name: "Timer Tick"
-          update_interval: 100ms
-          lambda: |-
-            auto light_color = id(led_ring).current_values;
-            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
-                  light_color.get_blue() * 255);
-            Color muted_color(255, 0, 0);
-            auto timer_ratio = 24.0f * id(first_active_timer).seconds_left / max(id(first_active_timer).total_seconds , static_cast<uint32_t>(1));
-            uint8_t last_led_on = static_cast<uint8_t>(ceil(timer_ratio)) - 1;
-            for (int i = 0; i < 24; i++) {
-              float brightness_dip = ( i == id(global_led_animation_index) % 24 && i != last_led_on ) ? 0.9f : 1.0f ;
-              if (i <= timer_ratio) {
-                it[i] = color * min (255.0f * brightness_dip * (timer_ratio - i) , 255.0f * brightness_dip) ;
-              } else {
-                it[i] = Color::BLACK;
-              }
-            }
-            if (id(master_mute_switch).state) {
-              it[2] = Color::BLACK;
-              it[3] = muted_color;
-              it[4] = Color::BLACK;
-              it[8] = Color::BLACK;
-              it[9] = muted_color;
-              it[10] = Color::BLACK;
-            }
-            id(global_led_animation_index) = (24 + id(global_led_animation_index) - 1) % 24;
+      
       - addressable_rainbow:
           name: "Rainbow"
           width: 24
@@ -524,26 +467,16 @@ script:
   - id: control_leds
     then:
       - lambda: |
-          id(check_if_timers_active).execute();
-          if (id(is_timer_active)){
-            id(fetch_first_active_timer).execute();
-          }
           if (id(xmos_flashing_state) > 0) {
             id(control_leds_xmos_flasher_state_update).execute();
           } else if (id(improv_ble_in_progress)) {
             id(control_leds_improv_ble_state).execute();
-          } else if (id(init_in_progress)) {
-            id(control_leds_init_state).execute();
-          } else if (!id(wifi_id).is_connected() || !id(api_id).is_connected()){
+          } else if (!id(wifi_id).is_connected()){
             id(control_leds_no_ha_connection_state).execute();
           } 
-          
-
           else if (id(volume_buttons_touched)) {
             id(control_leds_volume_buttons_touched).execute();
           } 
-   
-          
           else if (id(btn_action).state) {
             id(control_leds_action_button_touched).execute();
           } else if (id(jack_plugged_recently)) {
@@ -551,32 +484,13 @@ script:
           } else if (id(jack_unplugged_recently)) {
             id(control_leds_jack_unplugged_recently).execute();
           } 
-          
           else if (id(warning)) {
             id(control_leds_warning).execute();
-          } else if (id(timer_ringing).state) {
-            id(control_leds_timer_ringing).execute();
-          } else if (id(voice_assistant_phase) == ${voice_assist_waiting_for_command_phase_id}) {
-            id(control_leds_voice_assistant_waiting_for_command_phase).execute();
-          } else if (id(voice_assistant_phase) == ${voice_assist_listening_for_command_phase_id}) {
-            id(control_leds_voice_assistant_listening_for_command_phase).execute();
-          } else if (id(voice_assistant_phase) == ${voice_assist_thinking_phase_id}) {
-            id(control_leds_voice_assistant_thinking_phase).execute();
-          } else if (id(voice_assistant_phase) == ${voice_assist_replying_phase_id}) {
-            id(control_leds_voice_assistant_replying_phase).execute();
-          } else if (id(voice_assistant_phase) == ${voice_assist_error_phase_id}) {
-            id(control_leds_voice_assistant_error_phase).execute();
-          } else if (id(voice_assistant_phase) == ${voice_assist_not_ready_phase_id}) {
-            id(control_leds_voice_assistant_not_ready_phase).execute();
-          } else if (id(is_timer_active)) {
-            id(control_leds_timer_ticking).execute();
           } else if (id(master_mute_switch).state) {
             id(control_leds_muted_or_silent).execute();
-          } else if (id(nabu_media_player).volume == 0.0f || id(nabu_media_player).is_muted()) {
+          } else if (id(external_media_player).volume == 0.0f || id(external_media_player).is_muted()) {
             id(control_leds_muted_or_silent).execute();
-          } else if (id(voice_assistant_phase) == ${voice_assist_idle_phase_id}) {
-            id(control_leds_voice_assistant_idle_phase).execute();
-          }
+          } 
 
   # Script executed during Improv BLE
   # Warm White Twinkle
@@ -626,68 +540,6 @@ script:
       #     id: voice_assistant_leds
       #     effect: "Twinkle"
 
-  # Script executed when the voice assistant is idle (waiting for a wake word)
-  # Nothing (Either LED ring off or LED ring on if the user decided to turn the user facing LED ring on)
-  - id: control_leds_voice_assistant_idle_phase
-    then:
-      - light.turn_off: voice_assistant_leds
-      - if:
-          condition:
-            light.is_on: led_ring
-          then:
-            light.turn_on: led_ring
-
-  # Script executed when the voice assistant is waiting for a command (After the wake word)
-  # Slow clockwise spin of the LED ring.
-  - id: control_leds_voice_assistant_waiting_for_command_phase
-    then:
-      - light.turn_on:
-          brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.2f );
-          id: voice_assistant_leds
-          effect: "Waiting for Command"
-
-  # Script executed when the voice assistant is listening to a command
-  # Fast clockwise spin of the LED ring.
-  - id: control_leds_voice_assistant_listening_for_command_phase
-    then:
-      - light.turn_on:
-          brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.2f );
-          id: voice_assistant_leds
-          effect: "Listening For Command"
-
-  # Script executed when the voice assistant is thinking to a command
-  # The spin stops and the 2 LEDs that are currently on and blinking indicating the commend is being processed.
-  - id: control_leds_voice_assistant_thinking_phase
-    then:
-      - light.turn_on:
-          brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.2f );
-          id: voice_assistant_leds
-          effect: "Thinking"
-
-  # Script executed when the voice assistant is thinking to a command
-  # Fast anticlockwise spin of the LED ring.
-  - id: control_leds_voice_assistant_replying_phase
-    then:
-      - light.turn_on:
-          brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.2f );
-          id: voice_assistant_leds
-          effect: "Replying"
-
-  # Script executed when the voice assistant is in error
-  # Fast Red Pulse
-  - id: control_leds_voice_assistant_error_phase
-    then:
-      - light.turn_on:
-          brightness: !lambda return min ( max( id(led_ring).current_values.get_brightness() , 0.2f ) + 0.1f , 1.0f );
-          red: 1
-          green: 0
-          blue: 0
-          id: voice_assistant_leds
-          effect: "Error"
-      - delay: 2s
-      - lambda: id(volume_buttons_touched) = false;
-      - script.execute: control_leds
-
   # Script executed when the voice assistant requires user action
   # 5 Fast Red Pulses
   - id: control_leds_warning
@@ -711,17 +563,6 @@ script:
           brightness: !lambda return min ( max( id(led_ring).current_values.get_brightness() , 0.2f ) + 0.1f , 1.0f );
           id: voice_assistant_leds
           effect: "Muted or Silent"
-
-  # Script executed when the voice assistant is not ready
-  - id: control_leds_voice_assistant_not_ready_phase
-    then:
-      - light.turn_on:
-          brightness: 66%
-          red: 1
-          green: 0
-          blue: 0
-          id: voice_assistant_leds
-          effect: "Twinkle"
 
   # Script executed when the volume button is touched
   # A number of LEDs turn on indicating a visual representation of the volume of the media player entity.
@@ -759,24 +600,6 @@ script:
           id: voice_assistant_leds
           effect: "Action Button Touched"
 
-  # Script executed when the timer is ringing, to control the LEDs
-  # The LED ring blinks.
-  - id: control_leds_timer_ringing
-    then:
-      - light.turn_on:
-          brightness: !lambda return min ( max( id(led_ring).current_values.get_brightness() , 0.2f ) + 0.1f , 1.0f );
-          id: voice_assistant_leds
-          effect: "Timer Ring"
-
-  # Script executed when the timer is ticking, to control the LEDs
-  # The LEDs shows the remaining time as a fraction of the full ring.
-  - id: control_leds_timer_ticking
-    then:
-      - light.turn_on:
-          brightness: !lambda return min ( max( id(led_ring).current_values.get_brightness() , 0.2f ) + 0.1f , 1.0f );
-          id: voice_assistant_leds
-          effect: "Timer tick"
-
   # Script executed when the timer is ticking, to control the LEDs
   # The LEDs shows the remaining time as a fraction of the full ring.
   - id: control_leds_xmos_flasher_state_update
@@ -797,6 +620,10 @@ script:
             - delay: 1s
             - light.turn_off:
                 id: voice_assistant_leds
-                  
+
+  - id: control_leds_turn_off
+    then: 
+       - light.turn_off:
+           id: voice_assistant_leds             
       
           

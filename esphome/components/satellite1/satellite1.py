@@ -36,13 +36,16 @@ XMOSNoResponseStateTrigger = namespace.class_(
     "XMOSNoResponseStateTrigger", automation.Trigger
 )
 
-
+XMOSVersionPollTrigger = namespace.class_(
+    "XMOSVersionPollTrigger", automation.Trigger
+)
 
 CONF_SATELLITE1 = "satellite1"
 CONF_XMOS_RST_PIN = "xmos_rst_pin"
 CONF_ON_XMOS_NO_RESPONSE = "on_xmos_no_response"
 CONF_ON_XMOS_CONNECTED = "on_xmos_connected"
 CONF_ON_FLASH_CONNECTED = "on_flash_connected"
+CONF_ON_XMOS_VERSION_POLL = "on_xmos_version_poll"
 
 SAT1_CONFIG_SCHEMA = (
      cv.Schema({
@@ -57,6 +60,9 @@ SAT1_CONFIG_SCHEMA = (
         }),
         cv.Optional(CONF_ON_XMOS_NO_RESPONSE): automation.validate_automation({
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(XMOSNoResponseStateTrigger),
+        }),
+        cv.Optional(CONF_ON_XMOS_VERSION_POLL): automation.validate_automation({
+                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(XMOSVersionPollTrigger),
         }),
 
     }).extend(spi_device_schema(True, "1Hz"))
@@ -80,6 +86,10 @@ async def register_satellite1(config) :
          await automation.build_automation(trigger, [], conf)
     
     for conf in config.get(CONF_ON_XMOS_NO_RESPONSE, []):
+         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var )
+         await automation.build_automation(trigger, [], conf)
+    
+    for conf in config.get(CONF_ON_XMOS_VERSION_POLL, []):
          trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var )
          await automation.build_automation(trigger, [], conf)
     

@@ -158,7 +158,10 @@ class Satellite1 : public Component,
   void set_xmos_rst_pin(GPIOPin* xmos_rst_pin){this->xmos_rst_pin_ = xmos_rst_pin;}
   
   void add_on_state_callback(std::function<void()> &&callback) {
-    this->state_callback_.add(std::move(callback));
+   this->state_callback_.add(std::move(callback));
+  }
+  void add_on_version_poll_callback(std::function<void()> &&callback) {
+   this->version_poll_callback_.add(std::move(callback));
   }
 
   void xmos_hardware_reset(); 
@@ -169,8 +172,10 @@ protected:
   bool dfu_get_fw_version_();
   bool check_for_xmos_();
   CallbackManager<void()> state_callback_{};
+  CallbackManager<void()> version_poll_callback_{};
 
   uint32_t last_attempt_timestamp_{0};
+  uint32_t last_version_poll_timestamp_{0};
 
   uint8_t dc_status_register_[DC_STATUS_REGISTER::REGISTER_LEN];
   bool spi_flash_direct_access_enabled_{false};

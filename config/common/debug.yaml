@@ -26,20 +26,6 @@ text_sensor:
       name: "Reset Reason"
       entity_category: "diagnostic"
 
-  - platform: template
-    name: "Compat. w/ CORE hw"
-    entity_category: "diagnostic"
-    icon: "mdi:chip"
-    lambda: |-
-      return std::string("${built_for_core_hw_version}");
-
-  - platform: template
-    name: "Compat. w/ HAT hw"
-    entity_category: "diagnostic"
-    icon: "mdi:chip"
-    lambda: |-
-      return std::string("${built_for_hat_hw_version}");
-  
   - platform: version
     name: "Firmware Version"
     hide_timestamp: true

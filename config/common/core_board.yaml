@@ -9,14 +9,13 @@ esp32:
   flash_size: 16MB
   framework:
     type: esp-idf
-    version: 4.4.8
-    platform_version: 5.4.0
+    version: recommended
     sdkconfig_options:
       CONFIG_ESP32_S3_BOX_BOARD: "y"
       CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
       
       # FreeRTOS
-      # CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY: "y"
+      CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY: "y"
       
       # LWIP
       #CONFIG_LWIP_TCPIP_TASK_AFFINITY_NO_AFFINITY: "n"

@@ -46,7 +46,7 @@ enum TaskNotificationBits : uint32_t {
 
 void NabuMicrophoneChannel::setup() {
   const size_t ring_buffer_size = RING_BUFFER_LENGTH * this->parent_->get_sample_rate() / 1000 * sizeof(int16_t);
-  this->ring_buffer_ = RingBuffer::create(ring_buffer_size);
+  this->ring_buffer_ = ChunkedRingBuffer::create(ring_buffer_size * 5);
   if (this->ring_buffer_ == nullptr) {
     ESP_LOGE(TAG, "Could not allocate ring buffer");
     this->mark_failed();
@@ -174,8 +174,6 @@ void NabuMicrophone::read_task_(void *params) {
       ExternalRAMAllocator<int32_t> allocator(ExternalRAMAllocator<int32_t>::ALLOW_FAILURE);
       int32_t *buffer = allocator.allocate(SAMPLES_IN_ALL_DMA_BUFFERS);
       
-    
-
       std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_0_samples;
       std::vector<int16_t, ExternalRAMAllocator<int16_t>> channel_1_samples;
 
@@ -231,7 +229,7 @@ void NabuMicrophone::read_task_(void *params) {
 
             size_t bytes_read;
             esp_err_t err =
-                i2s_read(this_microphone->parent_->get_port(), buffer, DMA_BUFFER_SIZE * sizeof(int32_t) * 4,
+                i2s_read(this_microphone->parent_->get_port(), buffer, DMA_BUFFER_SIZE * sizeof(int32_t),
                          &bytes_read, pdMS_TO_TICKS(TASK_DELAY_MS));
             if (err != ESP_OK) {
               event.type = TaskEventType::WARNING;
@@ -272,16 +270,40 @@ void NabuMicrophone::read_task_(void *params) {
               size_t bytes_to_write = frames_read * sizeof(int16_t);
 
               if (this_microphone->channel_0_ != nullptr) {
-                this_microphone->channel_0_->get_ring_buffer()->write((void *) channel_0_samples.data(),
-                                                                      bytes_to_write);
+                uint8_t *write_chunk;
+                this_microphone->channel_0_->get_ring_buffer()->acquire_write_chunk(
+                    &write_chunk, 
+                    bytes_to_write, 
+                    pdMS_TO_TICKS(1),
+                    true
+                );
+                if( write_chunk != nullptr ){
+                  std::memcpy( write_chunk, channel_0_samples.data(), bytes_to_write );
+                  this_microphone->channel_0_->get_ring_buffer()->release_write_chunk( write_chunk, bytes_to_write);
+                } else {
+                  printf( "Channel 0: Couldn't receive write chunk in time, free: %d\n", this_microphone->channel_0_->get_ring_buffer()->free() );
+                }
+
 #if USE_SECOND_MIC_RING_BUFFER
                 this_microphone->channel_0_->get_ring_buffer2()->write((void *) channel_0_samples.data(),
                                                                       bytes_to_write);
 #endif                                                                      
               }
               if (this_microphone->channel_1_ != nullptr) {
-                this_microphone->channel_1_->get_ring_buffer()->write((void *) channel_1_samples.data(),
-                                                                      bytes_to_write);
+                uint8_t *write_chunk;
+                this_microphone->channel_1_->get_ring_buffer()->acquire_write_chunk(
+                    &write_chunk, 
+                    bytes_to_write, 
+                    pdMS_TO_TICKS(1),
+                    true
+                );
+                if( write_chunk != nullptr ){
+                  std::memcpy( write_chunk, channel_1_samples.data(), bytes_to_write );
+                  this_microphone->channel_1_->get_ring_buffer()->release_write_chunk( write_chunk, bytes_to_write);
+                } else {
+                  printf( "Channel 1: Couldn't receive write chunk in time, free: %d\n", this_microphone->channel_1_->get_ring_buffer()->free() );
+                }
+                
 #if USE_SECOND_MIC_RING_BUFFER                
               this_microphone->channel_1_->get_ring_buffer2()->write((void *) channel_1_samples.data(),
               bytes_to_write);

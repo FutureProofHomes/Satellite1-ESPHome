@@ -124,7 +124,7 @@ void UDPStreamer::deallocate_buffers_() {
 int UDPStreamer::read_microphone_() {
   size_t bytes_read = 0;
   if (this->mic_->is_running()) {  // Read audio into input buffer
-    bytes_read = this->mic_->read2(this->input_buffer_, INPUT_BUFFER_SIZE * sizeof(int16_t));
+    bytes_read = this->mic_->read(this->input_buffer_, INPUT_BUFFER_SIZE * sizeof(int16_t), pdMS_TO_TICKS(10));
     if (bytes_read == 0) {
       memset(this->input_buffer_, 0, INPUT_BUFFER_SIZE * sizeof(int16_t));
       return 0;

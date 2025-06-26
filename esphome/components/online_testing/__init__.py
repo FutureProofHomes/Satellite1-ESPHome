@@ -8,10 +8,10 @@ from esphome.const import (
 )
 from esphome import automation
 from esphome.automation import register_action, register_condition
-from esphome.components import esp32, microphone
-from esphome.components.media_player import MEDIA_FILE_TYPE_ENUM, MediaFile
+from esphome.components import audio, esp32, microphone
 
-AUTO_LOAD = []
+
+AUTO_LOAD = ["audio"]
 DEPENDENCIES = ["microphone","media_player"]
 
 CODEOWNERS = ["@gnumpi"]
@@ -42,7 +42,7 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(MicTester),
             cv.GenerateID(CONF_MICROPHONE): cv.use_id(microphone.Microphone),
-            cv.Required(CONF_MEDIA_FILE): cv.use_id(MediaFile),
+            cv.Required(CONF_MEDIA_FILE): cv.use_id(audio.AudioFile),
             cv.Optional(CONF_ON_DETECTED): automation.validate_automation(single=True),
             cv.Optional(CONF_ON_TIMEOUT): automation.validate_automation(single=True),
         }

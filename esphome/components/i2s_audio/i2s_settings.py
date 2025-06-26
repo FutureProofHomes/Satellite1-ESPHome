@@ -9,6 +9,12 @@ CONF_PDM = "pdm"
 CONF_USE_APLL = "use_apll"
 CONF_FIXED_SETTINGS = "fixed_settings"
 
+CONF_MONO = "mono"
+CONF_LEFT = "left"
+CONF_RIGHT = "right"
+CONF_STEREO = "stereo"
+
+
 
 INTERNAL_CLK = "internal"
 EXTERNAL_CLK = "external"
@@ -38,6 +44,12 @@ CHANNEL_FORMAT = {
     "all_right": i2s_channel_fmt_t.I2S_CHANNEL_FMT_ALL_RIGHT,
     # Load left channel data in both two channels
     "all_left": i2s_channel_fmt_t.I2S_CHANNEL_FMT_ALL_LEFT,
+}
+I2S_CHANNELS = {
+    CONF_MONO: i2s_channel_fmt_t.I2S_CHANNEL_FMT_ALL_LEFT,
+    CONF_LEFT: i2s_channel_fmt_t.I2S_CHANNEL_FMT_ONLY_LEFT,
+    CONF_RIGHT: i2s_channel_fmt_t.I2S_CHANNEL_FMT_ONLY_RIGHT,
+    CONF_STEREO: i2s_channel_fmt_t.I2S_CHANNEL_FMT_RIGHT_LEFT,
 }
 
 i2s_bits_per_sample_t = cg.global_ns.enum("i2s_bits_per_sample_t")
@@ -76,7 +88,7 @@ def get_i2s_config_schema(default_channel, default_rate, default_bits):
     return cv.Schema(
         {
             cv.Optional(CONF_CLK_MODE, default=INTERNAL_CLK): cv.enum(I2S_CLK_MODES),
-            cv.Optional(CONF_CHANNEL, default=default_channel): cv.enum(CHANNEL_FORMAT),
+            cv.Optional(CONF_CHANNEL, default=default_channel): cv.enum(I2S_CHANNELS),
             cv.Optional(CONF_SAMPLE_RATE, default=default_rate): cv.int_range(min=1),
             cv.Optional(CONF_BITS_PER_SAMPLE, default=default_bits): cv.All(
                 _validate_bits, cv.enum(BITS_PER_SAMPLE)

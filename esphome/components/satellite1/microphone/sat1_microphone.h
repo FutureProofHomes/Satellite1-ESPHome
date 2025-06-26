@@ -9,6 +9,7 @@
 #include "esphome/components/microphone/microphone.h"
 #include "esphome/core/component.h"
 #include "esphome/core/ring_buffer.h"
+#include "chunked_ring_buffer.h"
 
 namespace esphome {
 namespace nabu_microphone {
@@ -98,10 +99,12 @@ class NabuMicrophoneChannel : public microphone::Microphone, public Component {
     return this->ring_buffer_->read((void *) buf, len, ticks_to_wait);
   };
   size_t read(int16_t *buf, size_t len) override { return this->ring_buffer_->read((void *) buf, len); };
+  
   size_t read2(int16_t *buf, size_t len) { return this->ring_buffer2_->read((void *) buf, len); };
+  
   void reset() override { this->ring_buffer_->reset(); }
 
-  RingBuffer *get_ring_buffer() { return this->ring_buffer_.get(); }
+  ChunkedRingBuffer *get_ring_buffer() { return this->ring_buffer_.get(); }
   RingBuffer *get_ring_buffer2() { return this->ring_buffer2_.get(); }
 
   void set_amplify_shift(uint8_t amplify_shift) { this->amplify_shift_ = amplify_shift; }
@@ -109,7 +112,7 @@ class NabuMicrophoneChannel : public microphone::Microphone, public Component {
 
  protected:
   NabuMicrophone *parent_;
-  std::unique_ptr<RingBuffer> ring_buffer_;
+  std::unique_ptr<ChunkedRingBuffer> ring_buffer_;
   std::unique_ptr<RingBuffer> ring_buffer2_;
 
   uint8_t amplify_shift_;

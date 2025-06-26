@@ -35,7 +35,9 @@ class PowerReadyTrigger : public Trigger<>{
 public:
   explicit PowerReadyTrigger(PowerDelivery *pd) {
     pd->add_on_state_callback([this, pd]() {
-      if (pd->state == PD_STATE_EXPLICIT_SPR_CONTRACT || pd->state == PD_STATE_EXPLICIT_EPR_CONTRACT )
+      if (    pd->state == PD_STATE_EXPLICIT_SPR_CONTRACT 
+           || pd->state == PD_STATE_EXPLICIT_EPR_CONTRACT 
+           || pd->state == PD_STATE_PD_TIMEOUT)
         this->trigger();
     });
   }

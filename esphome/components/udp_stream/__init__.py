@@ -55,7 +55,7 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(UDPStreamer),
             cv.GenerateID(CONF_MICROPHONE): cv.use_id(microphone.Microphone),
-            cv.Optional(CONF_IP_ADDRESS, default=get_local_ip()) : cv.ipv4,
+            cv.Optional(CONF_IP_ADDRESS, default="") : cv.ipv4, #get_local_ip()
             cv.Optional(CONF_ON_START): automation.validate_automation(single=True),
             cv.Optional(CONF_ON_END): automation.validate_automation(single=True),
             cv.Optional(CONF_ON_ERROR): automation.validate_automation(single=True),

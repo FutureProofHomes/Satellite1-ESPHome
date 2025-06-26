@@ -51,6 +51,8 @@ class I2SAudioComponent : public Component {
   void set_access_mode(I2SAccessMode access_mode){this->access_mode_ = access_mode;}
   bool is_exclusive(){return this->access_mode_ == I2SAccessMode::EXCLUSIVE;}
 
+  void process_i2s_events(bool &tx_dma_underflow);
+
  protected:
   friend I2SReader;
   friend I2SWriter;
@@ -73,6 +75,7 @@ class I2SAudioComponent : public Component {
   int lrclk_pin_;
   i2s_port_t port_{};
   i2s_driver_config_t installed_cfg_{};
+  QueueHandle_t i2s_event_queue_;
   bool driver_loaded_{false};
 };
 
@@ -83,23 +86,28 @@ public:
 
   i2s_driver_config_t get_i2s_cfg() const;
   void dump_i2s_settings() const;
-
-  void set_use_apll(uint32_t use_apll) { this->use_apll_ = use_apll; }
-  void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }
+  
+  void set_clk_mode(i2s_mode_t clk_mode){ this->i2s_clk_mode_ = clk_mode; } 
   void set_channel(i2s_channel_fmt_t channel_fmt) { this->channel_fmt_ = channel_fmt; }
-  void set_pdm(bool pdm) { this->pdm_ = pdm; }
   void set_sample_rate(uint32_t sample_rate) { this->sample_rate_ = sample_rate; }
+  void set_bits_per_sample(i2s_bits_per_sample_t bits_per_sample) { this->bits_per_sample_ = bits_per_sample; }
+  void set_bits_per_channel(i2s_bits_per_chan_t bits_per_channel) { this->bits_per_channel_ = bits_per_channel; }
+  void set_use_apll(uint32_t use_apll) { this->use_apll_ = use_apll; }
+  
+  void set_pdm(bool pdm) { this->pdm_ = pdm; }
   void set_fixed_settings(bool is_fixed){ this->is_fixed_ = is_fixed; }
   int num_of_channels() const { return (this->channel_fmt_ == I2S_CHANNEL_FMT_ONLY_RIGHT
    || this->channel_fmt_ == I2S_CHANNEL_FMT_ONLY_LEFT) ? 1 : 2; }
-  void set_clk_mode(i2s_mode_t clk_mode){ this->i2s_clk_mode_ = clk_mode; }
+  
 
 protected:
    bool use_apll_{false};
    i2s_bits_per_sample_t bits_per_sample_;
+   i2s_bits_per_chan_t bits_per_channel_;
    i2s_channel_fmt_t channel_fmt_;
    i2s_mode_t i2s_clk_mode_{I2S_MODE_MASTER};
    i2s_mode_t i2s_access_mode_;
+   
    bool pdm_{false};
    uint32_t sample_rate_;
 

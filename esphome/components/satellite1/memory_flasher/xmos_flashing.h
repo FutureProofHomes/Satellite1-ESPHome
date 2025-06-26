@@ -1,7 +1,6 @@
 #pragma once
 
 #include "esphome/components/http_request/http_request.h"
-#include "esphome/components/ota/ota_backend.h"
 #include "esphome/components/spi/spi.h"
 #include "esphome/components/md5/md5.h"
 

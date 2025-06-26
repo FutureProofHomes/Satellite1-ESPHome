@@ -3,9 +3,6 @@
 
 external_components:  
   - source:
-      #type: git
-      #url: https://github.com/FutureProofHomes/Satellite1-ESPHome
-      #ref: develop
       type: local
       path: ../esphome/components
     components: [ udp_stream ]
@@ -15,6 +12,7 @@ external_components:
 udp_stream:
   id: udp_streamer
   microphone: asr_mic  # Default microphone to prevent validation errors
+  ip_address: 192.168.178.101
 
 
 # Switches to toggle between ASR and Comm microphones
@@ -70,61 +68,4 @@ switch:
           }
       - delay: 500ms
 
-  - platform: template
-    name: "Detect Audio Sweep COMM"
-    entity_category: "diagnostic"
-    id: detect_audio_sweep_switch_comm
-    icon: mdi:microphone
-    restore_mode: RESTORE_DEFAULT_OFF
-    optimistic: true
-    on_turn_on:
-      - logger.log: "Starting audio sweep detection on Comm Mic" 
-      - lambda: id(mww).stop();
-      - delay: 500ms
-      - lambda: |-
-          if (id(mic_tester).is_running()) {
-            id(mic_tester).request_stop();  // Stop current stream
-            delay(500);  // Wait for stream to stop
-          }
-          id(mic_tester).set_microphone(id(comm_mic));  // Set Comm mic
-          id(mic_tester).request_start(true);  // Start stream with Comm mic
 
-    on_turn_off:
-      - logger.log: "Turning off audio sweep detection on Comm Mic"
-      - lambda: |-
-          if (id(mic_tester).is_running()) {
-            id(mic_tester).request_stop();  // Stop the stream when Comm mic is turned off
-          }
-      - delay: 500ms
-
-  - platform: template
-    name: "Detect Audio Sweep ASR"
-    entity_category: "diagnostic"
-    id: detect_audio_sweep_switch_asr
-    icon: mdi:microphone
-    restore_mode: RESTORE_DEFAULT_OFF
-    optimistic: true
-    on_turn_on:
-      - logger.log: "Starting audio sweep detection on Comm Mic" 
-      - lambda: id(mww).stop();
-      - delay: 500ms
-      - lambda: |-
-          if (id(mic_tester).is_running()) {
-            id(mic_tester).request_stop();  // Stop current stream
-            delay(500);  // Wait for stream to stop
-          }
-          id(mic_tester).set_microphone(id(asr_mic));  // Set ASR mic
-          id(mic_tester).request_start(true);  // Start stream with ASR mic
-
-    on_turn_off:
-      - logger.log: "Turning off audio sweep detection on Comm Mic"
-      - lambda: |-
-          if (id(mic_tester).is_running()) {
-            id(mic_tester).request_stop();  // Stop the stream when Comm mic is turned off
-          }
-      - delay: 500ms
-
-binary_sensor:
-  - platform: template
-    name: "WakeWord Detected"
-    id: wake_word_detected_report

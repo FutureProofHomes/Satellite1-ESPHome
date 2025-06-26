@@ -7,7 +7,7 @@
 #include "esphome/core/helpers.h"
 
 #include "esphome/components/microphone/microphone.h"
-#include "esphome/components/media_player/media_player.h"
+#include "esphome/components/audio/audio.h"
 
 #include <unordered_map>
 #include <vector>
@@ -33,7 +33,7 @@ class MicTester : public Component {
   void failed_to_start();
 
   void set_microphone(microphone::Microphone *mic) { this->mic_ = mic; }
-  void set_media_file(media_player::MediaFile *ref_media_file) { this->ref_media_file_ = ref_media_file; }
+  void set_media_file(audio::AudioFile *ref_media_file) { this->ref_media_file_ = ref_media_file; }
 
   void request_start(bool continuous);
   void request_stop();
@@ -68,7 +68,7 @@ class MicTester : public Component {
 
   microphone::Microphone *mic_{nullptr};
 
-  media_player::MediaFile *ref_media_file_{nullptr};
+  audio::AudioFile *ref_media_file_{nullptr};
   float sweep_norm_ = 0.0f;
   
   

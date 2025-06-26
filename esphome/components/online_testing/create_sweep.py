@@ -4,7 +4,7 @@ from scipy.io.wavfile import write
 
 # Parameters
 sample_rate = 16000  # 16kHz
-fft_size = 1024      # Matches ESP-DSP FFT size
+fft_size = 512      # Matches ESP-DSP FFT size
 duration = fft_size / sample_rate  # Duration in seconds
 f_start = 300        # Start frequency of sweep (Hz)
 f_end = 7000         # End frequency of sweep (Hz)
@@ -23,5 +23,5 @@ sweep *= window
 sweep /= np.max(np.abs(sweep))
 
 # Optional: Save to WAV file
-write("sweep_1024.wav", sample_rate, (sweep * 32767).astype(np.int16))
+write("sweep_512.wav", sample_rate, (sweep * 32767).astype(np.int16))
 

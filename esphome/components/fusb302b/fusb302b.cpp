@@ -345,6 +345,8 @@ void FUSB302B::check_status_(){
             ESP_LOGD(TAG, "PD-Negotiaton failed. Staying with default 5V supply.");
             this->wait_src_cap_ = false;
             this->active_ams_ = false;
+            this->set_state_(PD_STATE_PD_TIMEOUT);
+            this->publish_();
           }
         } 
       }

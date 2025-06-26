@@ -54,6 +54,7 @@ class DACProxy : public audio_dac::AudioDac,
 
   DacOutput active_dac{SPEAKER};
 protected:
+  bool setup_was_called_{false};
   ESPPreferenceObject pref_;
   DACProxyRestoreState restore_state_;
   void save_volume_restore_state_();
