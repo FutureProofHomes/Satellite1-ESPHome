@@ -153,11 +153,13 @@ void SpeakerMediaPlayer::watch_media_commands_() {
           // Ensure the loaded next item doesn't start playing, clear the queue, start the file, and unpause
           this->cancel_timeout("next_ann");
           this->announcement_playlist_.clear();
+#if 0          
           if (media_command.file.has_value()) {
             this->announcement_pipeline_->start_file(playlist_item.file.value());
           } else if (media_command.url.has_value()) {
             this->announcement_pipeline_->start_url(playlist_item.url.value());
           }
+#endif          
           this->announcement_pipeline_->set_pause_state(false);
         }
         this->announcement_playlist_.push_back(playlist_item);
@@ -178,20 +180,29 @@ void SpeakerMediaPlayer::watch_media_commands_() {
               }
               return RetryResult::RETRY;
             });
-          } else {
-            // Not paused, just directly start the file
+          } 
+#if 0          
+          else {
+            // Not paused, add item to playlist, will be played when pipeline in stopped state
             if (media_command.file.has_value()) {
               this->media_pipeline_->start_file(playlist_item.file.value());
             } else if (media_command.url.has_value()) {
+#if USE_SNAPCAST                
+              if( this->snapcast_client_ && this->snapcast_client_->is_snapcast_url(playlist_item.url.value())){
+                 this->snapcast_client_->connect_to_url(playlist_item.url.value());
+                 //this->media_pipeline_->start_snapcast( this->snapcast_client_->get_stream() );
+              } 
+              else 
+#endif               
               this->media_pipeline_->start_url(playlist_item.url.value());
             }
             this->media_pipeline_->set_pause_state(false);
             this->is_paused_ = false;
           }
+#endif
         }
         this->media_playlist_.push_back(playlist_item);
       }
-
       return;  // Don't process the new file play command further
     }
 
@@ -339,79 +350,96 @@ void SpeakerMediaPlayer::loop() {
   if (this->announcement_pipeline_state_ != AudioPipelineState::STOPPED) {
     this->state = media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
   } else {
-    if (!this->announcement_playlist_.empty()) {
+    optional<PlaylistItem> next_item;
+    if( this->announcement_repeat_one_ && this->curr_announce_item_.has_value() ){
+      // repeat current playing_item
+      next_item = this->curr_announce_item_.value();
+    } else if (!this->announcement_playlist_.empty()){
+      // play front of playlist next
+      next_item = this->announcement_playlist_.front();
+      this->announcement_playlist_.pop_front();
+    }
+    
+    if(next_item.has_value()){
       uint32_t timeout_ms = 0;
-      if (old_announcement_pipeline_state == AudioPipelineState::PLAYING) {
-        // Finished the current announcement file
-        if (!this->announcement_repeat_one_) {
-          //  Pop item off the playlist if repeat is disabled
-          this->announcement_playlist_.pop_front();
-        }
+      if( this->curr_announce_item_.has_value()){
         // Only delay starting playback if moving on the next playlist item or repeating the current item
         timeout_ms = this->announcement_playlist_delay_ms_;
       }
-
-      if (!this->announcement_playlist_.empty()) {
-        // Start the next announcement file
-        PlaylistItem playlist_item = this->announcement_playlist_.front();
-        if (playlist_item.url.has_value()) {
-          this->announcement_pipeline_->start_url(playlist_item.url.value());
-        } else if (playlist_item.file.has_value()) {
-          this->announcement_pipeline_->start_file(playlist_item.file.value());
+      printf( "Playing next item after pipeline has stopped\n" );
+      this->curr_announce_item_ = next_item.value();
+      if( next_item.value().url.has_value()){
+        {
+          this->announcement_pipeline_->start_url(next_item.value().url.value());
         }
-
-        if (timeout_ms > 0) {
+      } else if (next_item.value().file.has_value()) {
+          this->announcement_pipeline_->start_file(next_item.value().file.value());
+      }
+      if (timeout_ms > 0) {
           // Pause pipeline internally to facilitate the delay between items
           this->announcement_pipeline_->set_pause_state(true);
           // Internally unpause the pipeline after the delay between playlist items. Announcements do not follow the
           // media player's pause state.
           this->set_timeout("next_ann", timeout_ms, [this]() { this->announcement_pipeline_->set_pause_state(false); });
-        }
       }
+      return;
     } else {
+      this->curr_announce_item_.reset();
+    }
+  } 
+  
+  {
       if (this->is_paused_) {
         this->state = media_player::MEDIA_PLAYER_STATE_PAUSED;
       } else if (this->media_pipeline_state_ == AudioPipelineState::PLAYING) {
         this->state = media_player::MEDIA_PLAYER_STATE_PLAYING;
       } else if (this->media_pipeline_state_ == AudioPipelineState::STOPPED) {
-        if (!media_playlist_.empty()) {
+        
+        optional<PlaylistItem> next_item;
+        if( this->media_repeat_one_ && this->curr_media_item_.has_value() ){
+          // repeat current playing_item
+          next_item = this->curr_media_item_.value();
+        } else if (!this->media_playlist_.empty()){
+          // play front of playlist next
+          next_item = this->media_playlist_.front();
+          this->media_playlist_.pop_front();
+        }
+
+        if(next_item.has_value()){
           uint32_t timeout_ms = 0;
-          if (old_media_pipeline_state == AudioPipelineState::PLAYING) {
-            // Finished the current media file
-            if (!this->media_repeat_one_) {
-              // Pop item off the playlist if repeat is disabled
-              this->media_playlist_.pop_front();
-            }
+          if( this->curr_media_item_.has_value()){
             // Only delay starting playback if moving on the next playlist item or repeating the current item
             timeout_ms = this->announcement_playlist_delay_ms_;
           }
-          if (!this->media_playlist_.empty()) {
-            PlaylistItem playlist_item = this->media_playlist_.front();
-            if (playlist_item.url.has_value()) {
-              if( this->snapcast_client_ && this->snapcast_client_->is_snapcast_url(playlist_item.url.value())){
-                 this->snapcast_client_->connect_to_url(playlist_item.url.value());
-                 this->media_pipeline_->start_snapcast( this->snapcast_client_->get_stream() );
-              } else {
-                this->media_pipeline_->start_url(playlist_item.url.value());
-              }
-            } else if (playlist_item.file.has_value()) {
-              this->media_pipeline_->start_file(playlist_item.file.value());
+          printf( "Playing next item after pipeline has stopped\n" );
+          this->curr_media_item_ = next_item.value();
+          if( next_item.value().url.has_value()){
+#if USE_SNAPCAST                
+            if( this->snapcast_client_ && this->snapcast_client_->is_snapcast_url(next_item.value().url.value())){
+              this->snapcast_client_->connect_to_url(next_item.value().url.value());
+              this->media_pipeline_->start_snapcast( this->snapcast_client_->get_stream() );
+            } 
+            else 
+#endif               
+            {
+              this->media_pipeline_->start_url(next_item.value().url.value());
             }
-
-            if (timeout_ms > 0) {
+          } else if (next_item.value().file.has_value()) {
+              this->media_pipeline_->start_file(next_item.value().file.value());
+          }
+          if (timeout_ms > 0) {
               // Pause pipeline internally to facilitate the delay between items
               this->media_pipeline_->set_pause_state(true);
               // Internally unpause the pipeline after the delay between playlist items, if the media player state is
               // not paused.
               this->set_timeout("next_media", timeout_ms,
                                 [this]() { this->media_pipeline_->set_pause_state(this->is_paused_); });
-            }
           }
         } else {
+          this->curr_media_item_.reset();
           this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
         }
       }
-    }
   }
 
   if (this->state != old_state) {
@@ -445,6 +473,7 @@ void SpeakerMediaPlayer::play_snapcast_stream(const std::string &server_uri) {
     // Ignore any commands sent before the media player is setup
     ESP_LOGE(TAG, "The media player is not ready, cannot start snapcast stream");
     return;
+
   }
   this->media_pipeline_->start_snapcast( this->snapcast_client_->get_stream() );
 }

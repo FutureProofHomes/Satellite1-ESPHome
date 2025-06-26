@@ -239,6 +239,7 @@ private:
     
     esp_err_t read_and_process_messages_(uint32_t timeout_ms);
     
+    bool start_after_connecting_{false};
     bool codec_header_sent_{false};
     esp_transport_handle_t transport_{nullptr};
 };

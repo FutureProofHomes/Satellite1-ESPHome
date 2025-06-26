@@ -89,6 +89,7 @@ esp_err_t SnapcastStream::disconnect(){
 }
 
 esp_err_t SnapcastStream::start_with_notify(std::shared_ptr<esphome::TimedRingBuffer> ring_buffer, TaskHandle_t notification_task){
+    printf( "Called start_with_notify in state %d\n", static_cast<int>(this->state_));
     ESP_LOGD(TAG, "Starting stream..." );
     this->write_ring_buffer_ = ring_buffer;
     this->notification_target_ = notification_task;
@@ -191,7 +192,9 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
                     tv_t time_stamp = this->to_local_time_( tv_t(wire_chunk_msg.timestamp_sec, wire_chunk_msg.timestamp_usec));
                     if( time_stamp < tv_t::now() ){
                         //chunk is in the past, ignore it
-                        printf( "chunk-read: skipping full frame: delta: %lld\n", time_stamp.to_millis() - tv_t::now().to_millis());                        
+                        printf( "chunk-read: skipping full frame: delta: %lld\n", time_stamp.to_millis() - tv_t::now().to_millis());
+                        printf( "server-time: sec:%d, usec:%d\n", wire_chunk_msg.timestamp_sec, wire_chunk_msg.timestamp_usec);
+                        printf( "local-time: sec:%d, usec:%d\n", time_stamp.sec, time_stamp.usec);                                                
                         continue;
                     }
                     timed_chunk_t *timed_chunk = nullptr;
@@ -245,7 +248,7 @@ void SnapcastStream::stream_task_(){
         TickType_t wait_time = (this->state_ == StreamState::STREAMING) ? STREAMING_WAIT : IDLE_WAIT;
         if (xTaskNotifyWait(0, 0xFFFFFFFF, &notify_value, wait_time)) {
             if (notify_value & static_cast<uint32_t>(StreamCommandBits::CONNECT)) {
-                if( this->state_ == StreamState::DISCONNECTED || this->state_ == StreamState::ERROR ){
+                if( this->state_ == StreamState::DISCONNECTED ){
                     this->set_state_(StreamState::CONNECTING);
                 }
             }
@@ -270,6 +273,9 @@ void SnapcastStream::stream_task_(){
             case StreamState::STREAMING:
                 this->send_time_sync_();
                 if( this->read_and_process_messages_(100) == ESP_FAIL){
+                    // if( this->reconnect_on_error_ ){
+                    //     this->start_after_connecting_ = true;
+                    // }
                     this->set_state_(StreamState::ERROR);
                 }      
                 break;
@@ -302,6 +308,7 @@ void SnapcastStream::connect_(){
     if( this->transport_ == nullptr ){
         this->transport_ = esp_transport_tcp_init();
         if (this->transport_ == nullptr) {
+            this->error_msg_ = "Error while trying to initiate esp_transport";
             this->set_state_(StreamState::ERROR);
             return;
         }
@@ -320,12 +327,16 @@ void SnapcastStream::connect_(){
             vTaskDelay(pdMS_TO_TICKS(5000));
             return;
         }
+        this->error_msg_ = "Error while trying to connect to server";
         this->set_state_(StreamState::ERROR);
         return;
     }
     this->time_stats_.reset();
     this->send_hello_();
     this->set_state_(StreamState::CONNECTED_IDLE);
+    if( this->start_after_connecting_ ){
+        this->start_streaming_();
+    }
 }
 
 
@@ -340,6 +351,16 @@ void SnapcastStream::disconnect_(){
 }
 
 void SnapcastStream::start_streaming_(){
+    if( this->state_ == StreamState::STREAMING ){
+        //this->error_msg_ = "Called start streaming in " + to_string(static_cast<int>(this->state_)) +  " state";
+        //this->set_state_(StreamState::ERROR);
+        printf( "Called start streaming in STREAMING state...\n");
+        return;
+    }
+    if( this->state_ != StreamState::CONNECTED_IDLE ){
+        this->start_after_connecting_ = true;
+        return;
+    }
     if( this->write_ring_buffer_ == nullptr ){
         this->error_msg_ = "Ringer buffer not set yet, but trying to start streaming...";
         this->set_state_(StreamState::ERROR);
@@ -348,15 +369,19 @@ void SnapcastStream::start_streaming_(){
     this->codec_header_sent_=false;
     this->send_hello_();
     //this->time_stats_.reset();
+    this->start_after_connecting_ = false;
     this->set_state_(StreamState::STREAMING);
     return;
 }
 
 void SnapcastStream::stop_streaming_(){
     if( this->state_ != StreamState::STREAMING ){
-        this->set_state_(StreamState::ERROR);
+        //this->error_msg_ = "Called stop streaming in " + to_string(static_cast<int>(this->state_)) +  " state";
+        //this->set_state_(StreamState::ERROR);
         return;
     }
+    this->start_after_connecting_ = false;
+    printf( "called stop streaming!\n");
     this->set_state_(StreamState::CONNECTED_IDLE);
 }
 
@@ -364,11 +389,13 @@ void SnapcastStream::send_message_(SnapcastMessage &msg){
     assert( msg.getMessageSize() <= sizeof(tx_buffer));
     msg.set_send_time();
     msg.toBytes(tx_buffer);
+    printf( "Sending message in state: %d\n",  static_cast<int>(this->state_));
+    msg.print();
     int bytes_written = esp_transport_write( this->transport_, (char*) tx_buffer, msg.getMessageSize(), 0);
     if (bytes_written < 0) {
         this->error_msg_ = (
              "Error occurred during sending: esp_transport_write() returned " + to_string(bytes_written)
-           + "bytes_written, errno " + to_string(errno)
+           + " bytes_written, errno " + to_string(errno)
         );
     }
 }
@@ -403,7 +430,7 @@ void SnapcastStream::on_time_msg_(MessageHeader msg, tv_t latency_c2s){
     time_stats_.add( (latency_c2s - latency_s2c) / 2 );
     this->est_time_diff_ = time_stats_.get_estimate();
     
-#if 0
+#if 1
     printf( "msg.sent: sec %d, usec: %d\n", msg.sent.sec, msg.sent.usec );
     printf( "latencey_c2s: %lld\n", latency_c2s.to_millis());
     printf( "latency_s2c: %lld = %lld - %lld\n", latency_s2c.to_millis(), tv_t::now().to_millis(), msg.sent.to_millis());    

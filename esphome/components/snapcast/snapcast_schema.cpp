@@ -18,9 +18,32 @@
  */
 #include "snapcast_schema.h"
 #include <sstream>
+#include <string>
+#include <cctype>
+#include <iomanip>
 
 namespace esphome {
 namespace snapcast {
+
+std::string uri_encode(const std::string &str) {
+    std::ostringstream escaped;
+    escaped.fill('0');
+    escaped << std::hex;
+
+    for (char c : str) {
+        // Keep alphanumerics and a few safe characters as-is
+        if (isalnum(static_cast<unsigned char>(c)) ||
+            c == '-' || c == '_' || c == '.' || c == '~') {
+            escaped << c;
+        } else {
+            // Percent-encode all others
+            escaped << '%' << std::uppercase << std::setw(2)
+                    << int(static_cast<unsigned char>(c));
+        }
+    }
+
+    return escaped.str();
+}
 
 
 std::string SnapcastUrl::to_str() const {
@@ -32,7 +55,7 @@ std::string SnapcastUrl::to_str() const {
         }
 
         if (stream_name) {
-            oss << "/" << *stream_name;
+            oss << "/" << uri_encode(*stream_name);
         }
 
         if (rpc_port) {

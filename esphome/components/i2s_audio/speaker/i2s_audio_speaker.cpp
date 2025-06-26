@@ -264,8 +264,8 @@ size_t bytes_written = 0;
     }
     if (xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10))){
       bytes_written = temp_ring_buffer->write_without_replacement((void *) data, length, ticks_to_wait);
-      //before this call count bytes as transfer buffer bytes, after this line count bytes as speaker bytes
-      this->bytes_in_ringbuffer_ += bytes_written;
+      //this->bytes_in_ringbuffer_ += bytes_written;
+      this->bytes_in_ringbuffer_ = temp_ring_buffer->available();
       //printf( "from ringbuffer: %d, from local tracking: %d\n", temp_ring_buffer->available(), this->bytes_in_ringbuffer_ );
       xSemaphoreGive(this->lock_);
     }
@@ -411,7 +411,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
               pdMS_TO_TICKS(task_delay_ms)
           );
           if( delay_bytes == 0 && bytes_read < read_buffer_size ){
-            printf("underrun: %d, in_buffer: %d\n", bytes_read, this_speaker->bytes_in_ringbuffer_);
+            printf("underrun - read %d (requested %d), in_buffer: %d\n", bytes_read, to_read, this_speaker->bytes_in_ringbuffer_);
           }
           //delay_bytes = 0;
           
@@ -655,7 +655,8 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_(audio::AudioStreamInfo &audio_strea
 
 void I2SAudioSpeaker::delete_task_(size_t buffer_size) {
   this->audio_ring_buffer_.reset();  // Releases ownership of the shared_ptr
-
+  this->bytes_in_ringbuffer_ = 0;
+  
   if (this->data_buffer_ != nullptr) {
     ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
     allocator.deallocate(this->data_buffer_, buffer_size);

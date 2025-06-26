@@ -132,7 +132,9 @@ class SpeakerMediaPlayer : public Component, public media_player::MediaPlayer {
 
   std::deque<PlaylistItem> announcement_playlist_;
   std::deque<PlaylistItem> media_playlist_;
-
+  optional<PlaylistItem> curr_media_item_; 
+  optional<PlaylistItem> curr_announce_item_; 
+  
   size_t buffer_size_;
 
   bool task_stack_in_psram_;

@@ -103,16 +103,21 @@ void SnapcastClient::on_stream_state_update(StreamState state, uint8_t volume, b
 
 void SnapcastClient::on_stream_update_msg(const StreamInfo &info){
   ESP_LOGI(TAG, "Snapcast-stream updated: status=%s", info.status.c_str());
-
+  static std::string last_state = "unknown";  
   if (this->media_player_ != nullptr) {
-    if (info.status == "playing" && !this->stream_.is_running()) {
-      this->media_player_->play_snapcast_stream("bla");
-      ESP_LOGI(TAG, "Playing stream: %s\n", info.id.c_str());
+    if (info.status == "playing" && last_state != "playing") {
+        ESP_LOGI(TAG, "Playing stream: %s\n", info.id.c_str());
+        this->curr_server_url_.stream_name = info.id;
+        this->media_player_->make_call()
+            .set_media_url( this->curr_server_url_.to_str() )
+            .perform();
+        last_state = "playing";
     }
-    else if ( info.status != "playing" && this->stream_.is_running() ) {
+    else if ( info.status != "playing" && last_state == "playing" ) {
       this->media_player_->make_call().set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP).perform();
-      this->stream_.stop_streaming();
+      //this->stream_.stop_streaming();
       ESP_LOGI(TAG, "Stopping stream: %s\n", info.id.c_str());
+      last_state = info.status;
     } 
 /*    
     else if (info.status == "paused") {

@@ -37,7 +37,9 @@
 namespace esphome {
 namespace snapcast {
 
-
+/*
+ESPHome Snapcast client, this component manages connections to the snapcast server and controls the media_player component.
+*/
 class SnapcastClient : public Component {
 public:
   void setup() override;
@@ -54,7 +56,7 @@ public:
   void on_stream_state_update(StreamState state, uint8_t volume, bool muted);
 
   error_t connect_to_url(std::string url){ return ESP_OK; }
-  bool is_snapcast_url(std::string url){ return url.starts_with("snapcast://SERVER_IP:STREAM_PORT/STREAM_NAME?RPC_PORT=1705"); }
+  bool is_snapcast_url(std::string url){ return url.starts_with("snapcast://"); }
 
   
 protected:

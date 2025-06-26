@@ -168,7 +168,7 @@ AudioPipelineState AudioPipeline::process_state() {
   if (this->pending_url_ || this->pending_file_) {
 #endif    
     // Init command pending
-    if (!(event_bits & EventGroupBits::PIPELINE_COMMAND_STOP)) {
+    if (!(event_bits & EventGroupBits::PIPELINE_COMMAND_STOP) && !this->is_playing_) {
       // Only start if there is no pending stop command
       if ((this->read_task_handle_ == nullptr) || (this->decode_task_handle_ == nullptr)) {
         // At least one task isn't running
@@ -193,7 +193,7 @@ AudioPipelineState AudioPipeline::process_state() {
 #endif
       this->is_playing_ = true;
       return AudioPipelineState::PLAYING;
-    }
+    } 
   }
 
   if ((event_bits & EventGroupBits::READER_MESSAGE_ERROR)) {
@@ -206,6 +206,11 @@ AudioPipelineState AudioPipeline::process_state() {
     return AudioPipelineState::ERROR_DECODING;
   }
 
+  if ((this->read_task_handle_ == nullptr) && (this->decode_task_handle_ == nullptr)) {
+    xEventGroupClearBits(this->event_group_, EventGroupBits::PIPELINE_COMMAND_STOP);
+    return AudioPipelineState::STOPPED;
+  } 
+  
   if ((event_bits & EventGroupBits::READER_MESSAGE_FINISHED) &&
       (!(event_bits & EventGroupBits::READER_MESSAGE_LOADED_MEDIA_TYPE) &&
        (event_bits & EventGroupBits::DECODER_MESSAGE_FINISHED))) {
@@ -232,17 +237,15 @@ AudioPipelineState AudioPipeline::process_state() {
       }
     }
     this->is_playing_ = false;
-    return AudioPipelineState::STOPPED;
+    return AudioPipelineState::STOPPING;
   }
 
+  if (event_bits & EventGroupBits::PIPELINE_COMMAND_STOP) {
+    return AudioPipelineState::STOPPING;
+  }
+  
   if (this->pause_state_) {
     return AudioPipelineState::PAUSED;
-  }
-
-  if ((this->read_task_handle_ == nullptr) && (this->decode_task_handle_ == nullptr)) {
-    // No tasks are running, so the pipeline is stopped.
-    xEventGroupClearBits(this->event_group_, EventGroupBits::PIPELINE_COMMAND_STOP);
-    return AudioPipelineState::STOPPED;
   }
 
   this->is_playing_ = true;
@@ -325,7 +328,7 @@ esp_err_t AudioPipeline::start_tasks_() {
 void AudioPipeline::delete_tasks_() {
   if (this->read_task_handle_ != nullptr) {
     vTaskDelete(this->read_task_handle_);
-
+    
     if (this->read_task_stack_buffer_ != nullptr) {
       if (this->task_stack_in_psram_) {
         RAMAllocator<StackType_t> stack_allocator(RAMAllocator<StackType_t>::ALLOC_EXTERNAL);
@@ -334,7 +337,6 @@ void AudioPipeline::delete_tasks_() {
         RAMAllocator<StackType_t> stack_allocator(RAMAllocator<StackType_t>::ALLOC_INTERNAL);
         stack_allocator.deallocate(this->read_task_stack_buffer_, READ_TASK_STACK_SIZE);
       }
-
       this->read_task_stack_buffer_ = nullptr;
       this->read_task_handle_ = nullptr;
     }
@@ -342,7 +344,7 @@ void AudioPipeline::delete_tasks_() {
 
   if (this->decode_task_handle_ != nullptr) {
     vTaskDelete(this->decode_task_handle_);
-
+    this->decode_task_handle_ = nullptr;
     if (this->decode_task_stack_buffer_ != nullptr) {
       if (this->task_stack_in_psram_) {
         RAMAllocator<StackType_t> stack_allocator(RAMAllocator<StackType_t>::ALLOC_EXTERNAL);
@@ -351,9 +353,7 @@ void AudioPipeline::delete_tasks_() {
         RAMAllocator<StackType_t> stack_allocator(RAMAllocator<StackType_t>::ALLOC_INTERNAL);
         stack_allocator.deallocate(this->decode_task_stack_buffer_, DECODE_TASK_STACK_SIZE);
       }
-
       this->decode_task_stack_buffer_ = nullptr;
-      this->decode_task_handle_ = nullptr;
     }
   }
 }
@@ -448,7 +448,6 @@ void AudioPipeline::read_task(void *params) {
         audio::AudioReaderState reader_state = reader->read();
 
         if (reader_state == audio::AudioReaderState::FINISHED) {
-          reader->stop();
           break;
         } else if (reader_state == audio::AudioReaderState::FAILED) {
           xEventGroupSetBits(this_pipeline->event_group_,
