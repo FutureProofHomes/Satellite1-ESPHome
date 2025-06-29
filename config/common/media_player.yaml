@@ -144,15 +144,14 @@ speaker:
     output_speaker: announcement_mixing_input
     sample_rate: 48000
     bits_per_sample: 16
-  # - platform: resampler
-  #   id: media_resampling_speaker
-  #   output_speaker: media_mixing_input
-  #   sample_rate: 48000
-  #   bits_per_sample: 16
+  - platform: resampler
+    id: media_resampling_speaker
+    output_speaker: media_mixing_input
+    sample_rate: 48000
+    bits_per_sample: 16
 
 snapcast:
   id: snapcast_client
-  #server_ip: 192.168.178.57
   #server_ip: 192.168.178.101
 
 media_player:
@@ -170,7 +169,7 @@ media_player:
       num_channels: 1  # Stereo audio is unnecessary for announcements
       sample_rate: 48000
     media_pipeline:
-      speaker: media_mixing_input
+      speaker: media_resampling_speaker
       format: FLAC     # FLAC is the least processor intensive codec
       num_channels: 2
       sample_rate: 48000

@@ -62,6 +62,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   void set_mute_state(bool mute_state) override;
   
   uint32_t get_unwritten_audio_micros() const override;
+  int64_t get_playout_time( int64_t self_buffer_us ) const override;
 
  protected:
   /// @brief Function for the FreeRTOS task handling audio output.
@@ -128,6 +129,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   int64_t last_dma_write_{0};
   size_t padded_zero_frames_{0};
   size_t bytes_in_ringbuffer_{0};
+  size_t in_write_buffer_{0};
   SemaphoreHandle_t lock_;
   size_t ringbuffer_size_{0};
 };

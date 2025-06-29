@@ -330,6 +330,26 @@ uint32_t SourceSpeaker::get_unwritten_audio_micros() const {
   return 0;
 }
 
+int64_t SourceSpeaker::get_playout_time( int64_t self_buffer_us ) const {
+  if( this->transfer_buffer_ == nullptr){
+    return 0;
+  }
+  int64_t playout_at = 0;
+  if(xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10)) ){  
+      size_t unwritten_frames = this->audio_stream_info_.bytes_to_frames(
+        this->bytes_in_ringbuffer_ + this->transfer_buffer_->available()
+      );
+      playout_at = this->parent_->get_playout_time(
+         this->audio_stream_info_.frames_to_microseconds(unwritten_frames) + self_buffer_us 
+      );
+    xSemaphoreGive(this->lock_);
+    }
+    //printf( "mixer-src, ring: %d\n", this->audio_stream_info_.bytes_to_ms(this->bytes_in_ringbuffer_));
+    //printf( "mixer-src, transfer: %d\n", this->audio_stream_info_.bytes_to_ms(this->transfer_buffer_->available()));
+  return playout_at;
+}
+
+
 void MixerSpeaker::dump_config() {
   ESP_LOGCONFIG(TAG, "Speaker Mixer:");
   ESP_LOGCONFIG(TAG, "  Number of output channels: %u", this->output_channels_);

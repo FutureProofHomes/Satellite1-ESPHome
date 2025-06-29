@@ -77,9 +77,10 @@ class SourceSpeaker : public speaker::Speaker, public Component {
   void set_timeout(uint32_t ms) { this->timeout_ms_ = ms; }
 
   std::weak_ptr<audio::AudioSourceTransferBuffer> get_transfer_buffer() { return this->transfer_buffer_; }
-  uint32_t get_unwritten_audio_micros() const;
- 
- protected:
+  uint32_t get_unwritten_audio_micros() const override;
+  int64_t get_playout_time( int64_t self_buffer_us ) const override; 
+  
+  protected:
   friend class MixerSpeaker;
   esp_err_t start_();
   void stop_();
@@ -161,6 +162,18 @@ class MixerSpeaker : public Component {
     } 
     return 0;
   }
+  int64_t get_playout_time( int64_t self_buffer_us ) const {
+    if (this->output_speaker_ == nullptr) {
+      return 0;
+    }
+    int64_t playout_at = 0;
+    if(xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10))){
+      playout_at = this->output_speaker_->get_playout_time(
+          this->audio_in_process_us_ + self_buffer_us );
+      xSemaphoreGive(this->lock_);
+    }      
+    return playout_at;
+  } 
 
  protected:
   /// @brief Copies audio frames from the input buffer to the output buffer taking into account the number of channels

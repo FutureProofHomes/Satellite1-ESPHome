@@ -289,7 +289,8 @@ AudioReaderState AudioReader::http_read_() {
       printf("Error acquiring write chunk from ring buffer");
       return AudioReaderState::FAILED;
     }
-    this->bytes_in_chunk_ = 0;  
+    this->bytes_in_chunk_ = 0;
+    timed_chunk->stamp = tv_t(0,0);  
   }
   
   size_t bytes_to_read = HTTP_STREAM_BUFFER_SIZE - this->bytes_in_chunk_;

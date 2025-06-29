@@ -39,7 +39,7 @@ static uint32_t rx_bufer_length = 0;
 static const uint8_t STREAM_TASK_PRIORITY = 5;
 static const uint32_t CONNECTION_TIMEOUT_MS = 2000;
 static const size_t TASK_STACK_SIZE = 4 * 1024;
-static const uint32_t TIME_SYNC_INTERVAL_MS =  5000;
+static const uint32_t TIME_SYNC_INTERVAL_MS =  2000;
 
 enum class StreamCommandBits : uint32_t {
   NONE           = 0,
@@ -272,9 +272,9 @@ void SnapcastStream::stream_task_(){
             case StreamState::CONNECTED_IDLE:
             case StreamState::STREAMING:
                 this->send_time_sync_();
-                if( this->read_and_process_messages_(100) == ESP_FAIL){
+                if( this->read_and_process_messages_(200) == ESP_FAIL){
                     // if( this->reconnect_on_error_ ){
-                    //     this->start_after_connecting_ = true;
+                    //      this->start_after_connecting_ = true;
                     // }
                     this->set_state_(StreamState::ERROR);
                 }      
@@ -369,6 +369,7 @@ void SnapcastStream::start_streaming_(){
     this->codec_header_sent_=false;
     this->send_hello_();
     //this->time_stats_.reset();
+    this->write_ring_buffer_->reset();
     this->start_after_connecting_ = false;
     this->set_state_(StreamState::STREAMING);
     return;
