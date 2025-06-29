@@ -43,10 +43,7 @@ binary_sensor:
     icon: "mdi:volume-plus"
     on_press:
       then:
-        # - lambda: id(volume_buttons_touched) = true;
-        # - script.execute:
-        #     id: control_volume
-        #     increase_volume: true
+        - logger.log: "Button Up - pressed" 
   
   - platform: gpio
     id: btn_down
@@ -59,10 +56,7 @@ binary_sensor:
     icon: "mdi:volume-minus"
     on_press:
       then:
-        # - lambda: id(volume_buttons_touched) = true;
-        # - script.execute:
-        #     id: control_volume
-        #     increase_volume: false
+        - logger.log: "Button Down - pressed" 
   
   - platform: gpio
     id: btn_left
@@ -75,25 +69,7 @@ binary_sensor:
     icon: "mdi:microphone-off"
     on_state:
       then:
-      # - if:
-      #     condition:
-      #       binary_sensor.is_off: btn_left
-      #     then:
-      #       - script.execute:
-      #           id: play_sound
-      #           priority: false
-      #           sound_file: !lambda return id(mute_switch_off_sound);
-      #       - switch.template.publish:
-      #           id: master_mute_switch
-      #           state: OFF
-      #     else:
-      #       - script.execute:
-      #           id: play_sound
-      #           priority: false
-      #           sound_file: !lambda return id(mute_switch_on_sound);
-      #       - switch.template.publish:
-      #           id: master_mute_switch
-      #           state: ON
+        - logger.log: "Button Left - pressed" 
 
   - platform: gpio
     id: btn_action
@@ -106,11 +82,9 @@ binary_sensor:
       ignore_strapping_warning: true
     name: "Button Right (Action)"
     icon: "mdi:gesture-tap"
-    # on_press:
-    #   #- script.execute: control_leds
+    on_press:
+      - logger.log: "Button Right - pressed" 
     
-    # on_release:
-    #   - script.execute: control_leds
       
     on_multi_click:  
       # Factory Reset Warning

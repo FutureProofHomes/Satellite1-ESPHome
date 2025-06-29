@@ -69,7 +69,51 @@ improv_serial:
             lambda: return x.get_action() == std::string("FLASH_XMOS_EMBEDDED");
           then:
             - memory_flasher.write_embedded_image:
-          
+
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("READ_XMOS_FIRMWARE");
+          then:
+            - logger.log: "Reading XMOS firmware version via SPI"
+            - satellite1.xmos_read_firmware
+
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("ENABLE_LED_RING");
+          then:
+            - logger.log: "Enable full led ring with color: white"
+            - light.turn_on:
+                id: voice_assistant_leds
+                brightness: 33%
+                red: 100%
+                green: 100%
+                blue: 100%
+                effect: None
+
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("DISABLE_LED_RING");
+          then:
+            - light.turn_off:
+                id: voice_assistant_leds
+
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("LOG_CURR_TEMP_HUMIDITY");
+          then:
+            - logger.log:
+                format: "The AHT20 reports temperature %.1f and humidity %.1f"
+                args: [ 'id(temperature_sensor).state', 'id(humidity_sensor).state' ]
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("LOG_CURR_LIGHT_SENSOR");
+          then:
+            - logger.log:
+                format: "The light sensor reports: %.1f"
+                args: [ 'id(ambient_light).state' ]
+
+
       - if:
           condition:                                      
             lambda: return x.get_action() == std::string("PLAY_SWEEP_SOUND");
@@ -137,12 +181,6 @@ improv_serial:
                   id(mic_tester).request_stop();  // Stop the stream when Comm mic is turned off
                 }
 
-      - if:
-          condition:                                      
-            lambda: return x.get_action() == std::string("READ_XMOS_FIRMWARE");
-          then:
-            - logger.log: "Reading XMOS firmware version via SPI"
-            - satellite1.xmos_read_firmware
       
       - if:
           condition:                                      

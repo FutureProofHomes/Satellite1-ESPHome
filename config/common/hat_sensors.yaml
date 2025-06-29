@@ -18,12 +18,15 @@ sensor:
   
 
   - platform: ltr_als_ps
+    id: light_sensor
     address: 0x29
     type: ALS
     update_interval: 10s
 
     # short variant of sensor definition:
-    ambient_light: "Ambient light"
+    ambient_light: 
+        name: "Ambient light"
+        id: ambient_light
  
 
 number:

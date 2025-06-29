@@ -181,6 +181,7 @@ bool Satellite1::dfu_get_fw_version_(){
   }
   
   memcpy( this->xmos_fw_version, version_resp, 5);
+  ESP_LOGI(TAG, "XMOS Firmware Version: %s ", this->status_string().c_str() );
   return true;
 }
 
