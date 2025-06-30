@@ -166,6 +166,7 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
                         this->error_msg_ = "Error acquiring write chunk from ring buffer";
                         return ESP_FAIL;
                     }
+                    timed_chunk->stamp = tv_t(0,0);
                     if (!codec_header_payload.copyPayloadTo(timed_chunk->data, size ))
                     {
                         this->error_msg_ = "Error copying codec header payload";
@@ -197,6 +198,12 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
                         printf( "local-time: sec:%d, usec:%d\n", time_stamp.sec, time_stamp.usec);                                                
                         continue;
                     }
+                    static tv_t last_time_stamp = time_stamp;
+                    if( (time_stamp - last_time_stamp).to_millis() > 24 ){
+                        printf( "chunk-read: packet loss, diff: %" PRId64 " ms\n", (time_stamp - last_time_stamp).to_millis()  );
+                    }
+                    last_time_stamp = time_stamp;
+                    
                     timed_chunk_t *timed_chunk = nullptr;
                     size_t size = wire_chunk_msg.payload_size;
                     ring_buffer->acquire_write_chunk(&timed_chunk, sizeof(timed_chunk_t) + size, pdMS_TO_TICKS(timeout_ms));

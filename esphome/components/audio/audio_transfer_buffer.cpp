@@ -230,6 +230,14 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
     if (this->speaker_ != nullptr) {
       audio::AudioStreamInfo audio_stream_info = this->speaker_->get_audio_stream_info();      
       const int64_t desired_playout_time_us = this->current_time_stamp_.to_microseconds();    
+      static int64_t last_time_stamp = desired_playout_time_us;
+      bool stamp_off = false;
+      if( desired_playout_time_us - last_time_stamp > 24000 ){
+        printf( "packet stamp off by %" PRId64 " us\n", desired_playout_time_us - last_time_stamp );
+        stamp_off = true;
+      }
+      last_time_stamp = desired_playout_time_us;
+      
       //const uint32_t playout_in_us = this->speaker_->get_unwritten_audio_micros();
       const int64_t playout_at = this->speaker_->get_playout_time(0);
       
@@ -246,7 +254,11 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
             last_adjustment_at_ = static_cast<uint32_t>(desired_playout_time_us / 1000);
             if( delta_us > 10000 ){
               printf( "detla_us %" PRId64 " (Now: %" PRId64 ")\n", delta_us, now);
-              printf( "TimeStamp: %" PRId64 ", in %" PRId64 " us\n", desired_playout_time_us, desired_playout_time_us - now);
+              printf( "TimeStamp: %" PRId64 ", in %" PRId64 " us %s \n", 
+                desired_playout_time_us, 
+                desired_playout_time_us - now,
+                stamp_off ? "(off)" :""
+              );
             }
             //printf( "Playout in %d, at: %" PRId64 " expected: %d\n", playout_in_us, now + playout_in_us, expected_next_playout_time );
             if( delta_us > 50 * 1000 ){
@@ -280,20 +292,28 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
           return available;
         } 
         else if ( delta_us < -1000 ){
-            last_adjustment_at_ = static_cast<uint32_t>(desired_playout_time_us / 1000);
-            size_t drop_frames = 1;
-            if( delta_us < -50 * 1000) {
-              drop_frames = audio_stream_info.ms_to_frames( -1 * delta_us / 1000 );
-            }
-            drop_frames = std::min(drop_frames, total_frames);
-            uint32_t drop_bytes = audio_stream_info.frames_to_bytes(drop_frames);
-            this->buffer_length_ -= drop_bytes;
-            this->current_time_stamp_ += tv_t::from_microseconds(audio_stream_info.bytes_to_us(drop_bytes));
-            if( delta_us < - 10000 ){
-              printf( "detla_us %" PRId64 " (Now: %" PRId64 ")\n", delta_us, now);
-              printf( "TimeStamp: %" PRId64 ", in %" PRId64 " us\n", desired_playout_time_us, desired_playout_time_us - now);
-            }
-            //printf( "Playout in %d, at: %" PRId64 " expected: %d\n", playout_in_us, now + playout_in_us, expected_next_playout_time );
+          last_adjustment_at_ = static_cast<uint32_t>(desired_playout_time_us / 1000);
+          size_t drop_frames = 1;
+          if( delta_us < -50 * 1000) {
+            drop_frames = audio_stream_info.ms_to_frames( -1 * delta_us / 1000 );
+          }
+          drop_frames = std::min(drop_frames, total_frames);
+          if( drop_frames == total_frames ){
+            size_t available = this->available();
+            this->decrease_buffer_length(available);
+            printf( "detla_us %" PRId64 " (Now: %" PRId64 ")\n", delta_us, now);
+            printf( "TimeStamp: %" PRId64 ", in %" PRId64 " us\n", desired_playout_time_us, desired_playout_time_us - now);
+            printf( "dropped full frame \n");
+            return available;
+          }
+          uint32_t drop_bytes = audio_stream_info.frames_to_bytes(drop_frames);
+          this->buffer_length_ -= drop_bytes;
+          this->current_time_stamp_ += tv_t::from_microseconds(audio_stream_info.bytes_to_us(drop_bytes));
+          if( delta_us < - 10000 ){
+            printf( "detla_us %" PRId64 " (Now: %" PRId64 ")\n", delta_us, now);
+            printf( "TimeStamp: %" PRId64 ", in %" PRId64 " us\n", desired_playout_time_us, desired_playout_time_us - now);
+          }
+          //printf( "Playout in %d, at: %" PRId64 " expected: %d\n", playout_in_us, now + playout_in_us, expected_next_playout_time );
         }
       }
 
