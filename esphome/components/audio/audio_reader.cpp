@@ -180,6 +180,7 @@ esp_err_t AudioReader::start(const std::string &uri, AudioFileType &file_type, c
 
   this->last_data_read_ms_ = millis();
   this->output_ring_buffer_ = output_ring_buffer.lock();
+  this->output_ring_buffer_->reset();
   return ESP_OK;
 }
 
@@ -283,7 +284,7 @@ AudioReaderState AudioReader::http_read_() {
     this->output_ring_buffer_->acquire_write_chunk(
         &timed_chunk, 
         sizeof(timed_chunk_t) + HTTP_STREAM_BUFFER_SIZE, 
-        pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS)
+        pdMS_TO_TICKS(100)
     );
     if (timed_chunk == nullptr) {
       printf("Error acquiring write chunk from ring buffer");

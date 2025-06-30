@@ -200,6 +200,7 @@ void SpeakerMediaPlayer::watch_media_commands_() {
             this->is_paused_ = false;
           }
 #endif
+          this->media_pipeline_->stop();
         }
         this->media_playlist_.push_back(playlist_item);
       }
@@ -365,7 +366,7 @@ void SpeakerMediaPlayer::loop() {
         // Only delay starting playback if moving on the next playlist item or repeating the current item
         timeout_ms = this->announcement_playlist_delay_ms_;
       }
-      printf( "Playing next item after pipeline has stopped\n" );
+      
       this->curr_announce_item_ = next_item.value();
       if( next_item.value().url.has_value()){
         {
@@ -412,7 +413,6 @@ void SpeakerMediaPlayer::loop() {
           // Only delay starting playback if moving on the next playlist item or repeating the current item
           timeout_ms = this->announcement_playlist_delay_ms_;
         }
-        printf( "Playing next item after pipeline has stopped\n" );
         this->curr_media_item_ = next_item.value();
         if( next_item.value().url.has_value()){
 #if USE_SNAPCAST                
@@ -472,14 +472,16 @@ void SpeakerMediaPlayer::play_file(audio::AudioFile *media_file, bool announceme
 
 #if USE_SNAPCAST  
 void SpeakerMediaPlayer::play_snapcast_stream(const std::string &server_uri) {
-  ESP_LOGD(TAG, "Starting snapcast stream %s", server_uri.c_str());
   if (!this->is_ready()) {
     // Ignore any commands sent before the media player is setup
-    ESP_LOGE(TAG, "The media player is not ready, cannot start snapcast stream");
     return;
-
   }
-  this->media_pipeline_->start_snapcast( this->snapcast_client_->get_stream() );
+
+  MediaCallCommand media_command;
+  media_command.url = new std::string(server_uri); //will be deleted in watch_media_commands_()
+  media_command.announce = false;
+  media_command.enqueue = false;
+  xQueueSend(this->media_control_command_queue_, &media_command, portMAX_DELAY); 
 }
 #endif
 

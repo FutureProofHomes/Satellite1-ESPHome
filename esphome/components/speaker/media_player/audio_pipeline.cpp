@@ -218,19 +218,23 @@ AudioPipelineState AudioPipeline::process_state() {
 
     if (event_bits & EventGroupBits::PIPELINE_COMMAND_STOP) {
       // Stop command is fully processed, so clear the command bit
-      xEventGroupClearBits(this->event_group_, EventGroupBits::PIPELINE_COMMAND_STOP);
+      //xEventGroupClearBits(this->event_group_, EventGroupBits::PIPELINE_COMMAND_STOP);
       this->hard_stop_ = true;
     }
 
-    if (!this->is_playing_) {
+    //if (!this->is_playing_) {
+    if (event_bits & EventGroupBits::PIPELINE_COMMAND_STOP) {
       // The tasks have been stopped for two ``process_state`` calls in a row, so delete the tasks
       if ((this->read_task_handle_ != nullptr) || (this->decode_task_handle_ != nullptr)) {
+        printf( "deleting tasks\n" );
         this->delete_tasks_();
         if (this->hard_stop_) {
           // Stop command was sent, so immediately end of the playback
+          printf( "hard stop\n" );
           this->speaker_->stop();
           this->hard_stop_ = false;
         } else {
+          printf( "finishing\n" );
           // Decoded all the audio, so let the speaker finish playing before stopping
           this->speaker_->finish();
         }
@@ -328,33 +332,38 @@ esp_err_t AudioPipeline::start_tasks_() {
 void AudioPipeline::delete_tasks_() {
   if (this->read_task_handle_ != nullptr) {
     vTaskDelete(this->read_task_handle_);
-    
-    if (this->read_task_stack_buffer_ != nullptr) {
-      if (this->task_stack_in_psram_) {
-        RAMAllocator<StackType_t> stack_allocator(RAMAllocator<StackType_t>::ALLOC_EXTERNAL);
-        stack_allocator.deallocate(this->read_task_stack_buffer_, READ_TASK_STACK_SIZE);
-      } else {
-        RAMAllocator<StackType_t> stack_allocator(RAMAllocator<StackType_t>::ALLOC_INTERNAL);
-        stack_allocator.deallocate(this->read_task_stack_buffer_, READ_TASK_STACK_SIZE);
-      }
-      this->read_task_stack_buffer_ = nullptr;
-      this->read_task_handle_ = nullptr;
-    }
-  }
+    this->read_task_handle_ = nullptr;
+  }  
+  
+  //   if (this->read_task_stack_buffer_ != nullptr) {
+  //     printf( "deleting stack buffer\n" );
+  //     if (this->task_stack_in_psram_) {
+  //       RAMAllocator<StackType_t> stack_allocator(RAMAllocator<StackType_t>::ALLOC_EXTERNAL);
+  //       stack_allocator.deallocate(this->read_task_stack_buffer_, READ_TASK_STACK_SIZE);
+  //     } else {
+  //       RAMAllocator<StackType_t> stack_allocator(RAMAllocator<StackType_t>::ALLOC_INTERNAL);
+  //       stack_allocator.deallocate(this->read_task_stack_buffer_, READ_TASK_STACK_SIZE);
+  //     }
+  //     printf( "post deleting stack buffer\n" );
+  //     this->read_task_stack_buffer_ = nullptr;
+  //     
+  //   }
+  // }
 
   if (this->decode_task_handle_ != nullptr) {
     vTaskDelete(this->decode_task_handle_);
     this->decode_task_handle_ = nullptr;
-    if (this->decode_task_stack_buffer_ != nullptr) {
-      if (this->task_stack_in_psram_) {
-        RAMAllocator<StackType_t> stack_allocator(RAMAllocator<StackType_t>::ALLOC_EXTERNAL);
-        stack_allocator.deallocate(this->decode_task_stack_buffer_, DECODE_TASK_STACK_SIZE);
-      } else {
-        RAMAllocator<StackType_t> stack_allocator(RAMAllocator<StackType_t>::ALLOC_INTERNAL);
-        stack_allocator.deallocate(this->decode_task_stack_buffer_, DECODE_TASK_STACK_SIZE);
-      }
-      this->decode_task_stack_buffer_ = nullptr;
-    }
+    // if (this->decode_task_stack_buffer_ != nullptr) {
+    //   if (this->task_stack_in_psram_) {
+    //     RAMAllocator<StackType_t> stack_allocator(RAMAllocator<StackType_t>::ALLOC_EXTERNAL);
+    //     stack_allocator.deallocate(this->decode_task_stack_buffer_, DECODE_TASK_STACK_SIZE);
+    //   } else {
+    //     RAMAllocator<StackType_t> stack_allocator(RAMAllocator<StackType_t>::ALLOC_INTERNAL);
+    //     stack_allocator.deallocate(this->decode_task_stack_buffer_, DECODE_TASK_STACK_SIZE);
+    //   }
+    //   this->decode_task_stack_buffer_ = nullptr;
+    //   this->decode_task_handle_ = nullptr;
+    // }
   }
 }
 
@@ -456,13 +465,14 @@ void AudioPipeline::read_task(void *params) {
           break;
         }
       }
+      
       event_bits = xEventGroupGetBits(this_pipeline->event_group_);
       if ((event_bits & EventGroupBits::READER_MESSAGE_LOADED_MEDIA_TYPE) ||
           (this_pipeline->raw_file_ring_buffer_.use_count() == 1)) {
         // Decoder task hasn't started yet, so delay a bit before releasing ownership of the ring buffer
         delay(10);
       }
-    }
+    } //if !(event_bits & EventGroupBits::PIPELINE_COMMAND_STOP)
   }
 }
 
@@ -598,7 +608,7 @@ void AudioPipeline::decode_task(void *params) {
           }
         }
       }
-    }
+    } 
   }
 }
 
