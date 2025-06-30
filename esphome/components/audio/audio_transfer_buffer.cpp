@@ -189,23 +189,39 @@ size_t TimedAudioSourceTransferBuffer::transfer_data_from_source(TickType_t tick
     }
     this->data_start_ = this->buffer_;
   }
-
+  
+  if (this->ring_buffer_.use_count() == 0) {
+    return 0;
+  }
+  
   size_t bytes_to_read = this->free();
   int32_t bytes_read = 0;
-  if (bytes_to_read > 0) {
+  int32_t read_now = 0;
+  TickType_t start_ticks = xTaskGetTickCount();
+  
+  while (bytes_to_read > 0 ) {
+    TickType_t now = xTaskGetTickCount();
+    TickType_t elapsed = now - start_ticks;
+    if (elapsed >= ticks_to_wait) break;
+    
     tv_t new_time_stamp;
-    if (this->ring_buffer_.use_count() > 0) {
-      bytes_read = this->ring_buffer_->read((void *) this->get_buffer_end(), bytes_to_read, new_time_stamp, ticks_to_wait);
-      //printf( "TransferBuffer: free %d, read %d\n", bytes_to_read, bytes_read );
-    } else {
-      printf( "use-count is zero!!\n");
+    read_now = this->ring_buffer_->read((void *) this->get_buffer_end(), bytes_to_read, new_time_stamp, ticks_to_wait - elapsed);
+    
+    if( read_now <= 0 ){
+      // next chunk doesn't fit into free space
+      return bytes_read;
     }
-    if( bytes_read <= 0 ){
-      return 0;
+    
+    bytes_read += read_now;
+    bytes_to_read -= read_now;
+    this->increase_buffer_length(read_now);
+    
+    if (new_time_stamp > tv_t(0,0 )){
+      this->current_time_stamp_ = new_time_stamp;
+      break; // Process only one chunk if timestamp present
     }
-    this->current_time_stamp_ = new_time_stamp;  // Update the current timestamp
-    this->increase_buffer_length(bytes_read);
   }
+  
   return bytes_read;
 }
 

@@ -56,7 +56,7 @@ int32_t TimedRingBuffer::read(void *data, size_t max_len, tv_t &stamp, TickType_
       return this->bytes_waiting_in_chunk;
     }
     else {
-      printf("pre: TimedRingBuffer: max length %d bytes, bytes in chunk: %d \n", max_len, this->bytes_waiting_in_chunk);
+      //printf("pre: TimedRingBuffer: max length %d bytes, bytes in chunk: %d \n", max_len, this->bytes_waiting_in_chunk);
       return -1;
     }
   }
@@ -75,7 +75,7 @@ int32_t TimedRingBuffer::read(void *data, size_t max_len, tv_t &stamp, TickType_
       this->bytes_available_ -= this->bytes_waiting_in_chunk; 
       return this->bytes_waiting_in_chunk;
   }
-  printf("post: TimedRingBuffer: max length %d bytes, bytes in chunk: %d \n", max_len, this->bytes_waiting_in_chunk);
+  //printf("post: TimedRingBuffer: max length %d bytes, bytes in chunk: %d \n", max_len, this->bytes_waiting_in_chunk);
   return -1;
 
 #if 0

@@ -148,9 +148,10 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
         this->playback_ms_ +=
             this->audio_stream_info_.value().frames_to_milliseconds_with_remainder(&this->accumulated_frames_written_);
       }
-    } else {
-      // If paused, block to avoid wasting CPU resources
-      delay(READ_WRITE_TIMEOUT_MS);
+    } else if ( this->get_audio_stream_info().has_value() ) {
+        // If paused, block to avoid wasting CPU resources
+        delay(READ_WRITE_TIMEOUT_MS);
+        return AudioDecoderState::DECODING;
     }
 
     // Verify there is enough space to store more decoded audio and that the function hasn't been running too long
@@ -164,7 +165,6 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
     // Only shift data on the first loop iteration to avoid unnecessary, slow moves
     size_t bytes_read = this->input_transfer_buffer_->transfer_data_from_source(pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS),
                                                                                 first_loop_iteration);
-
     if (!first_loop_iteration && (this->input_transfer_buffer_->available() < bytes_processed)) {
       // Less data is available than what was processed in last iteration, so don't attempt to decode.
       // This attempts to avoid the decoder from consistently trying to decode an incomplete frame. The transfer buffer
@@ -277,6 +277,7 @@ FileDecoderState AudioDecoder::decode_flac_() {
     // Corrupted frame, don't retry with current buffer content, wait for new sync
     return FileDecoderState::POTENTIALLY_FAILED;
   }
+
 
   // We have successfully decoded some input data and have new output data
   this->output_transfer_buffer_->increase_buffer_length(
