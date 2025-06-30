@@ -77,7 +77,6 @@ class SourceSpeaker : public speaker::Speaker, public Component {
   void set_timeout(uint32_t ms) { this->timeout_ms_ = ms; }
 
   std::weak_ptr<audio::AudioSourceTransferBuffer> get_transfer_buffer() { return this->transfer_buffer_; }
-  uint32_t get_unwritten_audio_micros() const override;
   int64_t get_playout_time( int64_t self_buffer_us ) const override; 
   
   protected:
@@ -146,36 +145,25 @@ class MixerSpeaker : public Component {
   void set_task_stack_in_psram(bool task_stack_in_psram) { this->task_stack_in_psram_ = task_stack_in_psram; }
 
   speaker::Speaker *get_output_speaker() const { return this->output_speaker_; }
-  uint32_t get_unwritten_audio_micros() const {
-    if (this->output_speaker_ == nullptr) {
-      return 0;
-    }
-    uint32_t unwritten_us = 0;
-    if(xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10))){
-      unwritten_us = this->output_speaker_->get_unwritten_audio_micros();
-      if( unwritten_us ){
-        unwritten_us += this->audio_in_process_us_; 
-      }
-      //printf( "mixer: in-process: %d\n", this->audio_in_process_ms_ );
-      xSemaphoreGive(this->lock_);
-      return unwritten_us;
-    } 
-    return 0;
-  }
-  int64_t get_playout_time( int64_t self_buffer_us ) const {
-    if (this->output_speaker_ == nullptr) {
-      return 0;
-    }
-    int64_t playout_at = 0;
-    if(xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10))){
-      playout_at = this->output_speaker_->get_playout_time(
-          this->audio_in_process_us_ + self_buffer_us );
-      xSemaphoreGive(this->lock_);
-    }      
-    return playout_at;
-  } 
-
- protected:
+  //SemaphoreHandle_t get_lock() {return this->lock_ };
+  
+  // int64_t get_playout_time( int64_t self_buffer_us ) const {
+  //   if (this->output_speaker_ == nullptr) {
+  //     return 0;
+  //   }
+  //   int64_t playout_at = 0;
+  //   if(xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10))){
+  //     playout_at = this->output_speaker_->get_playout_time(
+  //         this->audio_in_process_us_ + self_buffer_us );
+  //     xSemaphoreGive(this->lock_);
+  //   }
+  //   //printf( "sSpeaker: %" PRId64 " in_process: %" PRId64 "\n",self_buffer_us, this->audio_in_process_us_);      
+  //   return playout_at;
+  // } 
+  
+ 
+  protected:
+  friend SourceSpeaker;
   /// @brief Copies audio frames from the input buffer to the output buffer taking into account the number of channels
   /// in each stream. If the output stream has more channels, the input samples are duplicated. If the output stream has
   /// less channels, the extra channel input samples are dropped.
