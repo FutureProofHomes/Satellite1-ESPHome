@@ -223,7 +223,7 @@ AudioPipelineState AudioPipeline::process_state() {
     }
 
     //if (!this->is_playing_) {
-    if (event_bits & EventGroupBits::PIPELINE_COMMAND_STOP) {
+    //if (event_bits & EventGroupBits::PIPELINE_COMMAND_STOP) {
       // The tasks have been stopped for two ``process_state`` calls in a row, so delete the tasks
       if ((this->read_task_handle_ != nullptr) || (this->decode_task_handle_ != nullptr)) {
         printf( "deleting tasks\n" );
@@ -239,7 +239,7 @@ AudioPipelineState AudioPipeline::process_state() {
           this->speaker_->finish();
         }
       }
-    }
+    //}
     this->is_playing_ = false;
     return AudioPipelineState::STOPPING;
   }

@@ -45,6 +45,7 @@ class SourceSpeaker : public speaker::Speaker, public Component {
   size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) override;
   size_t play(const uint8_t *data, size_t length) override { return this->play(data, length, 0); }
   size_t play_silence(size_t length_ms) override; 
+  
   void start() override;
   void stop() override;
   void finish() override;

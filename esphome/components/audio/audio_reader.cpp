@@ -338,7 +338,7 @@ AudioReaderState AudioReader::http_read_() {
     this->bytes_in_chunk_ += received_len;
     printf("AudioReader: Read %d bytes, total in chunk %d\n", received_len, this->bytes_in_chunk_);
   }
-  vTaskDelay(pdMS_TO_TICKS(10));  // Give some time for the next read  
+  //vTaskDelay(pdMS_TO_TICKS(10));  // Give some time for the next read  
   return AudioReaderState::READING;
 }
 

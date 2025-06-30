@@ -161,6 +161,7 @@ void SpeakerMediaPlayer::watch_media_commands_() {
           }
 #endif          
           this->announcement_pipeline_->set_pause_state(false);
+          this->announcement_pipeline_->stop();
         }
         this->announcement_playlist_.push_back(playlist_item);
       } else {

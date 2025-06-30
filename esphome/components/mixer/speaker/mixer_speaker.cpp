@@ -128,7 +128,7 @@ size_t SourceSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_
     }
     if (xSemaphoreTake( this->parent_->lock_, pdMS_TO_TICKS(10))){
       bytes_written = temp_ring_buffer->write_without_replacement(data, length, ticks_to_wait);
-      this->bytes_in_ringbuffer_ += bytes_written;
+      this->bytes_in_ringbuffer_ = temp_ring_buffer->available();
        xSemaphoreGive(this->parent_->lock_);
     }
     if (bytes_written > 0) {
