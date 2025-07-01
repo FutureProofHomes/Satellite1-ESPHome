@@ -137,6 +137,7 @@ size_t SourceSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_
   }
   return bytes_written;
 }
+
 size_t SourceSpeaker::play_silence(size_t length_ms){ 
   if(this->parent_){
     return this->parent_->play_silence(length_ms);
@@ -558,6 +559,7 @@ void MixerSpeaker::audio_mixer_task(void *params) {
       this_mixer->audio_in_process_us_ = 0;
       xSemaphoreGive(this_mixer->lock_);
     } else {
+      // no extra delay needed, already waited for semaphore timeout
       continue;
     }
     const uint32_t output_frames_free =

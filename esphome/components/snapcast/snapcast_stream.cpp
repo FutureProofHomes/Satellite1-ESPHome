@@ -129,9 +129,21 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
             }
         }
         if (rx_bufer_length < sizeof(MessageHeader)){
+            vTaskDelay(1);
             continue;
         }
-        const MessageHeader* msg = reinterpret_cast<const MessageHeader*>(rx_buffer);
+        
+        MessageHeader* msg = reinterpret_cast<MessageHeader*>(rx_buffer);
+        if( msg->received == tv_t(0,0) ){
+            tv_t now = tv_t::now();
+            msg->received = now;
+#if 0            
+            if( this->time_stats_.is_ready() ){
+                tv_t local_est_server_time = now + this->time_stats_.get_estimate();
+                this->time_stats_.add_bias( msg->sent - local_est_server_time );
+            }
+#endif            
+        }        
         to_read = msg->getMessageSize() > rx_bufer_length ? msg->getMessageSize() - rx_bufer_length : 0;
         if ( to_read > 0 ){
             int len = esp_transport_read(this->transport_, (char*) rx_buffer + rx_bufer_length, to_read, timeout_ms);
@@ -141,6 +153,7 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
                 rx_bufer_length += len;
             }
             if ( rx_bufer_length < msg->getMessageSize()){
+                vTaskDelay(1);
                 continue;
             }
         }
@@ -232,6 +245,7 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
                 {
                     ServerSettingsMessage server_settings_msg(*msg, payload, payload_len);
                     this->on_server_settings_msg_(server_settings_msg);
+                    server_settings_msg.print();
                 }
                 break;
             
@@ -435,7 +449,7 @@ void SnapcastStream::on_time_msg_(MessageHeader msg, tv_t latency_c2s){
     //latency_s2c = t_client-recv - t_server-sent + t_network_latency
     //time diff between server and client as (latency_c2s - latency_s2c) / 2
     tv_t latency_s2c = tv_t::now() - msg.sent;
-    time_stats_.add( (latency_c2s - latency_s2c) / 2 );
+    time_stats_.add_offset( (latency_c2s - latency_s2c) / 2 );
     this->est_time_diff_ = time_stats_.get_estimate();
     
 #if 1

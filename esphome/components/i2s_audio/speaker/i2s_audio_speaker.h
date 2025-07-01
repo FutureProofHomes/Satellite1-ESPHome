@@ -45,8 +45,14 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   /// @return The number of bytes that were actually written to the ring buffer.
   size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) override;
   size_t play(const uint8_t *data, size_t length) override { return play(data, length, 0); }
+  
+  
+  /// @brief Inserts silence by delaying audio readout and filling the DMA buffer with zeros.
+  /// This function writes zeros to the DMA buffer instead of audio data for a specified duration.
+  /// @param length_ms Duration of silence to insert, in milliseconds.
+  /// @return Total number of zero frames that are currently in the queue.
   size_t play_silence(size_t length_ms) override;
-
+ 
   bool has_buffered_data() const override;
 
   /// @brief Sets the volume of the speaker. Uses the speaker's configured audio dac component. If unavailble, it is
@@ -61,7 +67,6 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   /// @param mute_state true for muting, false for unmuting
   void set_mute_state(bool mute_state) override;
   
-  uint32_t get_unwritten_audio_micros() const override;
   int64_t get_playout_time( int64_t self_buffer_us ) const override;
 
  protected:

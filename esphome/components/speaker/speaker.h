@@ -113,8 +113,7 @@ class Speaker {
   void add_audio_output_callback(std::function<void(uint32_t, int64_t)> &&callback) {
     this->audio_output_callback_.add(std::move(callback));
   }
-  virtual uint32_t get_unwritten_audio_micros() const {return 0; }
-  virtual int64_t get_playout_time( int64_t self_buffered ) const { return 0; }
+  virtual int64_t get_playout_time( int64_t self_buffer_us ) const { return 0; }
  
   protected:
   State state_{STATE_STOPPED};

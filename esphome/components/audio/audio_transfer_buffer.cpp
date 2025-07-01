@@ -217,7 +217,12 @@ size_t TimedAudioSourceTransferBuffer::transfer_data_from_source(TickType_t tick
     this->increase_buffer_length(read_now);
     
     if (new_time_stamp > tv_t(0,0 )){
-      this->current_time_stamp_ = new_time_stamp;
+      if( (new_time_stamp - this->current_time_stamp_ ).to_microseconds() > 24000 ){
+          printf( "transfer-from-source: packet loss, diff: %" PRId64 " ms\n", (new_time_stamp - this->current_time_stamp_ ).to_microseconds() );
+      }
+      if( this->available() == read_now ){
+        this->current_time_stamp_ = new_time_stamp;
+      }
       break; // Process only one chunk if timestamp present
     }
   }

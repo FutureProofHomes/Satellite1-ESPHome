@@ -24,7 +24,7 @@ enum EventGroupBits : uint32_t {
 
   // Stops all activity in the pipeline elements; cleared by process_state() and set by stop() or by each task
   PIPELINE_COMMAND_STOP = (1 << 0),
-
+  
   // Read audio from an HTTP source; cleared by reader task and set by start_url
   READER_COMMAND_INIT_HTTP = (1 << 4),
   // Read audio from an audio file from the flash; cleared by reader task and set by start_file
@@ -222,24 +222,20 @@ AudioPipelineState AudioPipeline::process_state() {
       this->hard_stop_ = true;
     }
 
-    //if (!this->is_playing_) {
-    //if (event_bits & EventGroupBits::PIPELINE_COMMAND_STOP) {
+    if (!this->is_playing_) {
       // The tasks have been stopped for two ``process_state`` calls in a row, so delete the tasks
       if ((this->read_task_handle_ != nullptr) || (this->decode_task_handle_ != nullptr)) {
-        printf( "deleting tasks\n" );
         this->delete_tasks_();
         if (this->hard_stop_) {
           // Stop command was sent, so immediately end of the playback
-          printf( "hard stop\n" );
           this->speaker_->stop();
           this->hard_stop_ = false;
         } else {
-          printf( "finishing\n" );
           // Decoded all the audio, so let the speaker finish playing before stopping
           this->speaker_->finish();
         }
       }
-    //}
+    }
     this->is_playing_ = false;
     return AudioPipelineState::STOPPING;
   }

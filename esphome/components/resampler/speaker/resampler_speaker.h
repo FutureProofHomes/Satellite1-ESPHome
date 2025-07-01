@@ -26,10 +26,6 @@ class ResamplerSpeaker : public Component, public speaker::Speaker {
     if (!this->output_speaker_) return 0;
     return this->output_speaker_->play_silence(length_ms); 
   }
-  uint32_t get_unwritten_audio_micros() const override {
-    if (!this->output_speaker_) return 0;
-    return this->output_speaker_->get_unwritten_audio_micros(); 
-  }
   int64_t get_playout_time( int64_t self_buffer_us ) const override { 
     if (!this->output_speaker_) return 0;
     return this->output_speaker_->get_playout_time(self_buffer_us); 

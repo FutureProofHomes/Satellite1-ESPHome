@@ -216,7 +216,13 @@ class TimedAudioSinkTransferBuffer : public AudioTransferBuffer {
 
   bool has_buffered_data() const override;
   tv_t get_current_time_stamp() const { return this->current_time_stamp_; }
-  void set_current_time_stamp(tv_t time_stamp) { this->current_time_stamp_ = time_stamp; }
+    void set_current_time_stamp(tv_t time_stamp) { 
+    if( (time_stamp - this->current_time_stamp_ ).to_microseconds() > 24000 ){
+      printf( "transfer-set_time: packet loss, diff: %" PRId64 " ms\n", (time_stamp - this->current_time_stamp_ ).to_microseconds() );
+    }
+    this->current_time_stamp_ = time_stamp; 
+  }
+
   
 protected:
   std::shared_ptr<TimedRingBuffer> ring_buffer_;

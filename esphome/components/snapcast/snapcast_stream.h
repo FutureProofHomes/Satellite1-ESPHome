@@ -54,7 +54,8 @@ public:
           outlier_threshold_ms_(outlier_threshold_ms),
           min_valid_samples_(min_valid_samples) {}
 
-    void add(tv_t sample) {
+    
+    void add_offset(tv_t sample) {
         if (!has_reference_) {
             reference_offset_ = sample;
             has_reference_ = true;
@@ -86,27 +87,52 @@ public:
         }
     }
 
+    // Add bias sample (from (latency_c2s - latency_s2c)/2)
+    void add_bias(tv_t asymmetry) {
+        if (!has_bias_) {
+        bias_ = asymmetry;
+        has_bias_ = true;
+        return;
+        }
+        
+        tv_t diff = asymmetry - bias_;
+        if (std::abs(diff.to_millis()) < outlier_threshold_ms_) {
+            bias_ = bias_ + (diff * smoothing_);
+        }
+    }
+
+    // Optional: correct drift from frequent packets
+    void add_drift_correction(tv_t predicted_server, tv_t received_server) {
+        // Just adjust offset by tiny fraction of error
+        tv_t diff = received_server - predicted_server;
+        ema_ = ema_ + (diff * 0.001f); // tiny correction
+    }
+
     bool is_ready() const {
         return has_value_;
     }
 
     tv_t get_estimate() const {
-        return has_value_ ? reference_offset_ + ema_ : tv_t(0, 0);
+        return has_value_ ? reference_offset_ + ema_ + (has_bias_ ? bias_ : tv_t(0, 0)) : tv_t(0, 0);
     }
 
     tv_t get_median() const {
         if (history_.empty()) return tv_t(0, 0);
         std::vector<tv_t> sorted(history_.begin(), history_.end());
         std::sort(sorted.begin(), sorted.end());
-        return reference_offset_ + sorted[sorted.size() / 2];
+        return reference_offset_ + sorted[sorted.size() / 2] + bias_;
     }
 
     void reset() {
         history_.clear();
         pending_init_values_.clear();
-        ema_ = tv_t(0, 0);
+        
         reference_offset_ = tv_t(0, 0);
+        ema_  = tv_t(0, 0);
+        bias_ = tv_t{0,0};
+        
         has_value_ = false;
+        has_bias_ = false;
         has_reference_ = false;
         outlier_count_ = 0;
     }
@@ -119,10 +145,12 @@ private:
     size_t min_valid_samples_;
 
     bool has_value_ = false;
+    bool has_bias_ = false;
     bool has_reference_ = false;
     size_t outlier_count_ = 0;
 
     tv_t ema_{0, 0};
+    tv_t bias_{0, 0};
     tv_t reference_offset_{0, 0};
 
     static constexpr size_t max_history_ = 100;

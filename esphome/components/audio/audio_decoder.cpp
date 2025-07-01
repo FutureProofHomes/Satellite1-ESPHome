@@ -132,7 +132,9 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
   size_t bytes_processed = 0;
   size_t bytes_available_before_processing = 0;
 
+  //why do we need this inner loop?
   while (state == FileDecoderState::MORE_TO_PROCESS) {
+  
     // Transfer decoded out
     if (!this->pause_output_) {
       // Never shift the data in the output transfer buffer to avoid unnecessary, slow data moves
@@ -140,7 +142,7 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
           this->output_transfer_buffer_->transfer_data_to_sink(pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS*10), false);
       if( this->output_transfer_buffer_->available() ){
         //only decode next frame, when last one has been completely written to the output
-        delay(READ_WRITE_TIMEOUT_MS);
+        delay(READ_WRITE_TIMEOUT_MS); // do we need this delay, doesn't writing_data_to sink already timedout?
         return AudioDecoderState::DECODING;
       }
       if (this->audio_stream_info_.has_value()) {
@@ -155,8 +157,9 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
     }
 
     // Verify there is enough space to store more decoded audio and that the function hasn't been running too long
-    if ((this->output_transfer_buffer_->free() < this->free_buffer_required_) ||
-        (millis() - decoding_start > DECODING_TIMEOUT_MS)) {
+    // removed: this->output_transfer_buffer_->free() < this->free_buffer_required_), 
+    // we get only here if output_transfer_buffer is empty 
+    if ((millis() - decoding_start > DECODING_TIMEOUT_MS)) {
       return AudioDecoderState::DECODING;
     }
 
@@ -170,7 +173,11 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
       // This attempts to avoid the decoder from consistently trying to decode an incomplete frame. The transfer buffer
       // will shift the remaining data to the start and copy more from the source the next time the decode function is
       // called
-      break;
+
+      // only meaningful if data is not already chunked correctly
+      if( this->input_transfer_buffer_->get_current_time_stamp() == tv_t(0,0) ){
+        break;
+      }
     }
 
     bytes_available_before_processing = this->input_transfer_buffer_->available();
@@ -267,6 +274,7 @@ FileDecoderState AudioDecoder::decode_flac_() {
   this->output_transfer_buffer_->set_current_time_stamp( this->input_transfer_buffer_->get_current_time_stamp());
   if (result == esp_audio_libs::flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
     // Not an issue, just needs more data that we'll get next time.
+    printf( "Not enough data, reading next chunk! \n" );
     return FileDecoderState::POTENTIALLY_FAILED;
   }
 
@@ -275,6 +283,7 @@ FileDecoderState AudioDecoder::decode_flac_() {
 
   if (result > esp_audio_libs::flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
     // Corrupted frame, don't retry with current buffer content, wait for new sync
+    printf( "Corrupted frame, skipping and waiting for new sync\n" );
     return FileDecoderState::POTENTIALLY_FAILED;
   }
 
