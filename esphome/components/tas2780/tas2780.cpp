@@ -556,7 +556,6 @@ void TAS2780::update_register(){
   // CHANNEL_SELECT
   this->reg(TAS2780_TDM_CFG2) = (
       get_channel_select_reg_val(this->selected_channel_) |
-      TAS2780_TDM_CFG2_RX_SCFG__MONO_RIGHT |
       TAS2780_TDM_CFG2_RX_WLEN__32BIT |
       TAS2780_TDM_CFG2_RX_SLEN__32BIT
   );  

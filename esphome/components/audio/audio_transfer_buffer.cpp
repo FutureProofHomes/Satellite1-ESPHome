@@ -199,14 +199,14 @@ size_t TimedAudioSourceTransferBuffer::transfer_data_from_source(TickType_t tick
   int32_t read_now = 0;
   TickType_t start_ticks = xTaskGetTickCount();
   
+  //chunks with time stamps are only return as long new_time_stamp is not (0,0)
+  tv_t new_time_stamp = tv_t(-1,-1); 
   while (bytes_to_read > 0 ) {
     TickType_t now = xTaskGetTickCount();
     TickType_t elapsed = now - start_ticks;
     if (elapsed >= ticks_to_wait) break;
     
-    tv_t new_time_stamp;
     read_now = this->ring_buffer_->read((void *) this->get_buffer_end(), bytes_to_read, new_time_stamp, ticks_to_wait - elapsed);
-    
     if( read_now <= 0 ){
       // next chunk doesn't fit into free space
       return bytes_read;
@@ -216,9 +216,10 @@ size_t TimedAudioSourceTransferBuffer::transfer_data_from_source(TickType_t tick
     bytes_to_read -= read_now;
     this->increase_buffer_length(read_now);
     
-    if (new_time_stamp > tv_t(0,0 )){
+    if (new_time_stamp > tv_t(0,0)){
       if( (new_time_stamp - this->current_time_stamp_ ).to_microseconds() > 24000 ){
-          printf( "transfer-from-source: packet loss, diff: %" PRId64 " ms\n", (new_time_stamp - this->current_time_stamp_ ).to_microseconds() );
+          printf( "transfer-from-source: packet loss, diff: %" PRId64 " us\n", (new_time_stamp - this->current_time_stamp_ ).to_microseconds() );
+          printf( "transfer-from-source: read: %d, avialable: %d\n", read_now, this->available() );
       }
       if( this->available() == read_now ){
         this->current_time_stamp_ = new_time_stamp;

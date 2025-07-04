@@ -88,7 +88,7 @@ esp_err_t SnapcastStream::disconnect(){
    return ESP_OK; 
 }
 
-esp_err_t SnapcastStream::start_with_notify(std::shared_ptr<esphome::TimedRingBuffer> ring_buffer, TaskHandle_t notification_task){
+esp_err_t SnapcastStream::start_with_notify(std::weak_ptr<esphome::TimedRingBuffer> ring_buffer, TaskHandle_t notification_task){
     printf( "Called start_with_notify in state %d\n", static_cast<int>(this->state_));
     ESP_LOGD(TAG, "Starting stream..." );
     this->write_ring_buffer_ = ring_buffer;
@@ -116,7 +116,7 @@ esp_err_t SnapcastStream::report_volume(uint8_t volume, bool muted){
 
 
 esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
-    std::shared_ptr<esphome::TimedRingBuffer> &ring_buffer = this->write_ring_buffer_;
+    auto ring_buffer = this->write_ring_buffer_.lock();
     const uint32_t timeout = millis() + timeout_ms;
     while( millis() < timeout ){
         size_t to_read = sizeof(MessageHeader) > rx_bufer_length ? sizeof(MessageHeader) - rx_bufer_length : 0;
@@ -185,7 +185,7 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
                         this->error_msg_ = "Error copying codec header payload";
                         return ESP_FAIL;
                     }
-                    ring_buffer->release_write_chunk(timed_chunk);
+                    ring_buffer->release_write_chunk(timed_chunk, size);
                     this->codec_header_sent_ = true;
                     return ESP_OK;
                 }
@@ -230,7 +230,7 @@ esp_err_t SnapcastStream::read_and_process_messages_(uint32_t timeout_ms){
                         this->error_msg_ = "Error copying wire chunk payload";
                         return ESP_FAIL;
                     }
-                    ring_buffer->release_write_chunk(timed_chunk);
+                    ring_buffer->release_write_chunk(timed_chunk, size);
                     return ESP_OK;
                 }
                 break;
@@ -382,15 +382,15 @@ void SnapcastStream::start_streaming_(){
         this->start_after_connecting_ = true;
         return;
     }
-    if( this->write_ring_buffer_ == nullptr ){
+    auto rb = this->write_ring_buffer_.lock();
+    if( !rb ){
         this->error_msg_ = "Ringer buffer not set yet, but trying to start streaming...";
         this->set_state_(StreamState::ERROR);
         return;
     }
     this->codec_header_sent_=false;
     this->send_hello_();
-    //this->time_stats_.reset();
-    this->write_ring_buffer_->reset();
+    rb->reset();
     this->start_after_connecting_ = false;
     this->set_state_(StreamState::STREAMING);
     return;

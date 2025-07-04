@@ -189,7 +189,7 @@ public:
     /// @param ring_buffer The buffer where received audio samples are written.
     /// @param notification_task A FreeRTOS task to be notified on status changes.
     /// @return `ESP_OK` on success, or an appropriate error code.
-    esp_err_t start_with_notify(std::shared_ptr<esphome::TimedRingBuffer> ring_buffer, TaskHandle_t notification_task);
+    esp_err_t start_with_notify(std::weak_ptr<esphome::TimedRingBuffer> ring_buffer, TaskHandle_t notification_task);
 
     /// @brief Stop the audio/data stream and return to an idle state.
     /// @return `ESP_OK` on success, or an appropriate error code.
@@ -243,7 +243,7 @@ protected:
     TimeStats time_stats_;
     tv_t est_time_diff_{0, 0};
     
-    std::shared_ptr<esphome::TimedRingBuffer> write_ring_buffer_;
+    std::weak_ptr<esphome::TimedRingBuffer> write_ring_buffer_;
     
     TaskHandle_t notification_target_{nullptr};
     std::function<void(StreamState state, uint8_t volume, bool muted)> on_status_update_;

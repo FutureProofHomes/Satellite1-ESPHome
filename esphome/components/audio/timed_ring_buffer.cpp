@@ -66,6 +66,10 @@ int32_t TimedRingBuffer::read(void *data, size_t max_len, tv_t &stamp, TickType_
     //printf("TimedRingBuffer: Failed to receive chunk, timeout or no data available\n");
     return 0;
   }
+  // if new chunk is the first chunk with time stamp, return it in the next call
+  if( stamp == tv_t(0,0) && this->curr_chunk->stamp > tv_t(0,0) ){
+    return -1;
+  }
   this->bytes_waiting_in_chunk -= sizeof(timed_chunk_t);  // Adjust for the size of the time header
   if( max_len >= this->bytes_waiting_in_chunk){
       std::memcpy(data, this->curr_chunk->data, this->bytes_waiting_in_chunk);
@@ -126,7 +130,7 @@ size_t TimedRingBuffer::write_without_replacement(const void *data, size_t len, 
       printf("Failed to send item\n");
       return 0;
   }
-  this->bytes_available_ += len;
+  this->bytes_available_ += chunk_data_size;
   return chunk_data_size;
 }
 
@@ -157,8 +161,6 @@ error_t TimedRingBuffer::release_write_chunk(timed_chunk_t *write_chunk, size_t 
 }
 
 
-
-
 size_t TimedRingBuffer::chunks_available() const {
   UBaseType_t ux_items_waiting = 0;
   vRingbufferGetInfo(this->handle_, nullptr, nullptr, nullptr, nullptr, &ux_items_waiting);
@@ -169,6 +171,12 @@ size_t TimedRingBuffer::free() const { return xRingbufferGetCurFreeSize(this->ha
 
 BaseType_t TimedRingBuffer::reset() {
   // Discards all the available data
+  if( this->curr_chunk != nullptr ){
+    vRingbufferReturnItem(this->handle_, this->curr_chunk);
+    this->curr_chunk = nullptr;
+    this->bytes_available_ -= this->bytes_waiting_in_chunk; 
+    this->bytes_waiting_in_chunk = 0;
+  }
   return this->discard_chunks_(this->chunks_available());
 }
 
@@ -181,7 +189,8 @@ bool TimedRingBuffer::discard_chunks_(size_t discard_chunks) {
       return bytes_discarded;
     }
     vRingbufferReturnItem(this->handle_, buffer_data);
-    bytes_discarded += bytes_in_chunk; 
+    bytes_discarded += bytes_in_chunk;
+    this->bytes_available_ -= bytes_in_chunk; 
   }
   return bytes_discarded > 0;
 }

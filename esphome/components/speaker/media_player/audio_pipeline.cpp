@@ -10,7 +10,7 @@
 namespace esphome {
 namespace speaker {
 
-static const uint32_t INITIAL_BUFFER_MS = 1000;  // Start playback after buffering this duration of the file
+static const uint32_t INITIAL_BUFFER_MS = 600;  // Start playback after buffering this duration of the file
 
 static const uint32_t READ_TASK_STACK_SIZE = 5 * 1024;
 static const uint32_t DECODE_TASK_STACK_SIZE = 3 * 1024;
@@ -208,6 +208,8 @@ AudioPipelineState AudioPipeline::process_state() {
 
   if ((this->read_task_handle_ == nullptr) && (this->decode_task_handle_ == nullptr)) {
     xEventGroupClearBits(this->event_group_, EventGroupBits::PIPELINE_COMMAND_STOP);
+    this->is_playing_ = false;
+    
     return AudioPipelineState::STOPPED;
   } 
   
@@ -222,7 +224,7 @@ AudioPipelineState AudioPipeline::process_state() {
       this->hard_stop_ = true;
     }
 
-    if (!this->is_playing_) {
+    //if (!this->is_playing_) {
       // The tasks have been stopped for two ``process_state`` calls in a row, so delete the tasks
       if ((this->read_task_handle_ != nullptr) || (this->decode_task_handle_ != nullptr)) {
         this->delete_tasks_();
@@ -235,8 +237,8 @@ AudioPipelineState AudioPipeline::process_state() {
           this->speaker_->finish();
         }
       }
-    }
-    this->is_playing_ = false;
+    //}
+    //this->is_playing_ = false;
     return AudioPipelineState::STOPPING;
   }
 
@@ -270,6 +272,15 @@ esp_err_t AudioPipeline::allocate_communications_() {
 }
 
 esp_err_t AudioPipeline::start_tasks_() {
+  
+  if (!this->reader_output_rb_) {
+    this->reader_output_rb_ = std::move(TimedRingBuffer::create(this->buffer_size_));
+  }
+  
+  if (!this->reader_output_rb_) {
+    return ESP_ERR_NO_MEM;
+  }
+  
   if (this->read_task_handle_ == nullptr) {
     if (this->read_task_stack_buffer_ == nullptr) {
       if (this->task_stack_in_psram_) {
@@ -395,37 +406,24 @@ void AudioPipeline::read_task(void *params) {
         | EventGroupBits::READER_COMMAND_INIT_SNAPCAST
 #endif
       );
+
       InfoErrorEvent event;
       event.source = InfoErrorSource::READER;
       esp_err_t err = ESP_OK;
 
       std::unique_ptr<audio::AudioReader> reader =
-          make_unique<audio::AudioReader>(this_pipeline->transfer_buffer_size_);
-     
-      
-      size_t file_ring_buffer_size = this_pipeline->buffer_size_;
-      std::shared_ptr<TimedRingBuffer> temp_ring_buffer;
+          make_unique<audio::AudioReader>(this_pipeline->transfer_buffer_size_, this_pipeline->reader_output_rb_);
 
-      if (!this_pipeline->raw_file_ring_buffer_.use_count()) {
-        temp_ring_buffer = TimedRingBuffer::create(file_ring_buffer_size);
-        this_pipeline->raw_file_ring_buffer_ = temp_ring_buffer;
-      }
-      if (!this_pipeline->raw_file_ring_buffer_.use_count()) {
-        err = ESP_ERR_NO_MEM;
-      }
-      
-      if( err == ESP_OK ){
-        if (event_bits & EventGroupBits::READER_COMMAND_INIT_FILE) {
-          err = reader->start(this_pipeline->current_audio_file_, this_pipeline->current_audio_file_type_, this_pipeline->raw_file_ring_buffer_);
-        } else if (event_bits & EventGroupBits::READER_COMMAND_INIT_HTTP) {
-          err = reader->start(this_pipeline->current_uri_, this_pipeline->current_audio_file_type_, this_pipeline->raw_file_ring_buffer_);
-        } 
+      if (event_bits & EventGroupBits::READER_COMMAND_INIT_FILE) {
+        err = reader->start(this_pipeline->current_audio_file_, this_pipeline->current_audio_file_type_);
+      } else if (event_bits & EventGroupBits::READER_COMMAND_INIT_HTTP) {
+        err = reader->start(this_pipeline->current_uri_, this_pipeline->current_audio_file_type_);
+      } 
 #if USE_SNAPCAST        
-        else if (event_bits & EventGroupBits::READER_COMMAND_INIT_SNAPCAST) {
-          err = reader->start(this_pipeline->snapcast_stream_, this_pipeline->current_audio_file_type_, this_pipeline->raw_file_ring_buffer_);
-        }
-#endif
+      else if (event_bits & EventGroupBits::READER_COMMAND_INIT_SNAPCAST) {
+        err = reader->start(this_pipeline->snapcast_stream_, this_pipeline->current_audio_file_type_);
       }
+#endif
       
       if (err != ESP_OK) {
         // Send specific error message
@@ -461,13 +459,6 @@ void AudioPipeline::read_task(void *params) {
           break;
         }
       }
-      
-      event_bits = xEventGroupGetBits(this_pipeline->event_group_);
-      if ((event_bits & EventGroupBits::READER_MESSAGE_LOADED_MEDIA_TYPE) ||
-          (this_pipeline->raw_file_ring_buffer_.use_count() == 1)) {
-        // Decoder task hasn't started yet, so delay a bit before releasing ownership of the ring buffer
-        delay(10);
-      }
     } //if !(event_bits & EventGroupBits::PIPELINE_COMMAND_STOP)
   }
 }
@@ -497,7 +488,8 @@ void AudioPipeline::decode_task(void *params) {
           make_unique<audio::AudioDecoder>(this_pipeline->transfer_buffer_size_, this_pipeline->transfer_buffer_size_);
 
       esp_err_t err = decoder->start(this_pipeline->current_audio_file_type_);
-      decoder->add_source(this_pipeline->raw_file_ring_buffer_);
+      
+      decoder->add_source(this_pipeline->reader_output_rb_);
 
       if (err != ESP_OK) {
         // Send specific error message
@@ -598,8 +590,8 @@ void AudioPipeline::decode_task(void *params) {
 
         if (!started_playback && has_stream_info) {
           // Verify enough data is available before starting playback
-          std::shared_ptr<TimedRingBuffer> temp_ring_buffer = this_pipeline->raw_file_ring_buffer_.lock();
-          if (temp_ring_buffer->chunks_available() >= 3) {
+          //if (temp_ring_buffer->chunks_available() >= 200) {
+          if (this_pipeline->reader_output_rb_->bytes_available() >= initial_bytes_to_buffer ) {
             started_playback = true;
           }
         }

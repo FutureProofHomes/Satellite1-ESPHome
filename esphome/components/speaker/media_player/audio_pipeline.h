@@ -149,7 +149,7 @@ class AudioPipeline {
   size_t buffer_size_;           // Ring buffer between reader and decoder
   size_t transfer_buffer_size_;  // Internal source/sink buffers for the audio reader and decoder
 
-  std::weak_ptr<TimedRingBuffer> raw_file_ring_buffer_;
+  std::shared_ptr<TimedRingBuffer> reader_output_rb_;
 
   // Handles basic control/state of the three tasks
   EventGroupHandle_t event_group_{nullptr};

@@ -25,7 +25,7 @@ AudioDecoder::~AudioDecoder() {
 #endif
 }
 
-esp_err_t AudioDecoder::add_source(std::weak_ptr<TimedRingBuffer> &input_ring_buffer) {
+esp_err_t AudioDecoder::add_source(std::weak_ptr<TimedRingBuffer> input_ring_buffer) {
   if (this->input_transfer_buffer_ != nullptr) {
     this->input_transfer_buffer_->set_source(input_ring_buffer);
     return ESP_OK;
@@ -33,7 +33,7 @@ esp_err_t AudioDecoder::add_source(std::weak_ptr<TimedRingBuffer> &input_ring_bu
   return ESP_ERR_NO_MEM;
 }
 
-esp_err_t AudioDecoder::add_sink(std::weak_ptr<TimedRingBuffer> &output_ring_buffer) {
+esp_err_t AudioDecoder::add_sink(std::weak_ptr<TimedRingBuffer> output_ring_buffer) {
   if (this->output_transfer_buffer_ != nullptr) {
     this->output_transfer_buffer_->set_sink(output_ring_buffer);
     return ESP_OK;
@@ -57,9 +57,9 @@ esp_err_t AudioDecoder::start(AudioFileType audio_file_type) {
   }
 
   this->audio_file_type_ = audio_file_type;
-
   this->potentially_failed_count_ = 0;
   this->end_of_file_ = false;
+  this->input_transfer_buffer_->decrease_buffer_length(this->input_transfer_buffer_->available());
 
   switch (this->audio_file_type_) {
 #ifdef USE_AUDIO_FLAC_SUPPORT
@@ -280,6 +280,10 @@ FileDecoderState AudioDecoder::decode_flac_() {
 
   size_t bytes_consumed = this->flac_decoder_->get_bytes_index();
   this->input_transfer_buffer_->decrease_buffer_length(bytes_consumed);
+
+  if( this->input_transfer_buffer_->available() ){
+    printf( "decoder: bytes consumed: %d, left: %d\n", bytes_consumed, this->input_transfer_buffer_->available() );
+  }
 
   if (result > esp_audio_libs::flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
     // Corrupted frame, don't retry with current buffer content, wait for new sync

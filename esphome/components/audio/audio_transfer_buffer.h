@@ -204,7 +204,7 @@ class TimedAudioSinkTransferBuffer : public AudioTransferBuffer {
 
   /// @brief Adds a ring buffer as the transfer buffer's sink.
   /// @param ring_buffer weak_ptr to the allocated ring buffer
-  void set_sink(const std::weak_ptr<TimedRingBuffer> &ring_buffer) { this->ring_buffer_ = ring_buffer.lock(); }
+  void set_sink(const std::weak_ptr<TimedRingBuffer> ring_buffer) { this->ring_buffer_ = ring_buffer.lock(); }
 
 #ifdef USE_SPEAKER
   /// @brief Adds a speaker as the transfer buffer's sink.
@@ -218,7 +218,7 @@ class TimedAudioSinkTransferBuffer : public AudioTransferBuffer {
   tv_t get_current_time_stamp() const { return this->current_time_stamp_; }
     void set_current_time_stamp(tv_t time_stamp) { 
     if( (time_stamp - this->current_time_stamp_ ).to_microseconds() > 24000 ){
-      printf( "transfer-set_time: packet loss, diff: %" PRId64 " ms\n", (time_stamp - this->current_time_stamp_ ).to_microseconds() );
+      printf( "transfer-set_time: packet loss, diff: %" PRId64 " us\n", (time_stamp - this->current_time_stamp_ ).to_microseconds() );
     }
     this->current_time_stamp_ = time_stamp; 
   }
