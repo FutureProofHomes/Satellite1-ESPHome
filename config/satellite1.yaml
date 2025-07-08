@@ -92,6 +92,32 @@ improv_serial:
 
       - if:
           condition:                                      
+            lambda: return x.get_action() == std::string("SET_TEST_FAILED_STATE");
+          then:
+            - logger.log: "Test failed, set leds to red"
+            - light.turn_on:
+                id: voice_assistant_leds
+                brightness: 33%
+                red: 100%
+                green: 0%
+                blue:  0%
+                effect: None
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("SET_WAITING_FOR_LINE_OUT");
+          then:
+            - logger.log: "We are waiting for the line out to be connected"
+            - light.turn_on:
+                id: voice_assistant_leds
+                brightness: 33%
+                red: 100%
+                green: 100%
+                blue:  100%
+                effect: "Jack Unplugged"
+
+      - if:
+          condition:                                      
             lambda: return x.get_action() == std::string("DISABLE_LED_RING");
           then:
             - light.turn_off:

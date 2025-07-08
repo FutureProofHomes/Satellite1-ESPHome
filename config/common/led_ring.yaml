@@ -455,9 +455,7 @@ light:
               if (initial_run) {
                 index = 0;
               }
-              auto light_color = id(led_ring).current_values;
-              Color color(light_color.get_red() * 255, light_color.get_green() * 255,
-                    light_color.get_blue() * 255);
+              auto color = Color(255,255,255);
               if (index <= 12) {
                 for (int i = 0; i < 24; i++) {
                   if (i == index) {
