@@ -113,7 +113,15 @@ improv_serial:
                 format: "The light sensor reports: %.1f"
                 args: [ 'id(ambient_light).state' ]
 
-
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("LOG_LINE_OUT_STATE");
+          then:
+            - logger.log:
+                format: "The line out reports: %s"
+                args: [ 'id(line_out_sensor).state ? "connected" : "disconnected"' ]
+      
+      
       - if:
           condition:                                      
             lambda: return x.get_action() == std::string("PLAY_SWEEP_SOUND");
@@ -188,3 +196,42 @@ improv_serial:
           then:
             - logger.log: "Sending random SPI frame to XMOS"
             - satellite1.xmos_send_random_frame
+
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("LED_INSTRUCTION_UP_BUTTON");
+          then:
+            - logger.log: "led instructions up button detected"
+            - lambda: id(test_instructions) = 1;
+            - light.turn_on:
+                id: voice_assistant_leds
+                brightness: 33%
+                red: 100%
+                green: 100%
+                blue: 100%
+                effect: "Test Instructions"
+            
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("LED_INSTRUCTION_DOWN_BUTTON");
+          then:
+            - logger.log: "led instructions up down detected"
+            - lambda: id(test_instructions) = 3;
+            - script.execute: control_leds
+
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("LED_INSTRUCTION_LEFT_BUTTON");
+          then:
+            - logger.log: "led instructions up left detected"
+            - lambda: id(test_instructions) = 4;
+            - script.execute: control_leds
+      
+      - if:
+          condition:                                      
+            lambda: return x.get_action() == std::string("LED_INSTRUCTION_RIGHT_BUTTON");
+          then:
+            - logger.log: "led instructions up right detected"
+            - lambda: id(test_instructions) = 2;
+            - script.execute: control_leds

@@ -43,6 +43,9 @@ binary_sensor:
       - delayed_off: 200ms
     
     on_press:
+      - logger.log:
+          format: "The line out reports: %s"
+          args: [ 'id(line_out_sensor).state ? "connected" : "disconnected"' ]
       - dac_proxy.activate_line_out:
       - lambda: id(jack_plugged_recently) = true;
       - script.execute: control_leds
@@ -57,6 +60,9 @@ binary_sensor:
       
     
     on_release:
+      - logger.log:
+          format: "The line out reports: %s"
+          args: [ 'id(line_out_sensor).state ? "connected" : "disconnected"' ]
       - dac_proxy.activate_speaker:
       - lambda: id(jack_unplugged_recently) = true;
       - script.execute: control_leds

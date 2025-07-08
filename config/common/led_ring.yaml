@@ -15,6 +15,11 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  # Global variable representing the current test instructions.
+  - id: test_instructions
+    type: int
+    restore_value: no
+    initial_value: '0'
 
 time:
   - platform: sntp
@@ -224,6 +229,35 @@ light:
               it[22] = muted_color;
               it[23] = Color::BLACK;
             }
+      
+      - addressable_lambda:
+          name: "Test Instructions"
+          update_interval: 100ms
+          lambda: |-
+            Color indication_color(255, 255, 255);
+            
+            it.all() = Color::BLACK;
+
+            if ( id(test_instructions) == 1) {
+              it[23] = indication_color;
+              it[0] = indication_color;
+              it[1] = indication_color;
+            } else if ( id(test_instructions) == 2) {  
+              it[5] = indication_color;
+              it[6] = indication_color;
+              it[7] = indication_color;
+            } else if ( id(test_instructions) == 3) {  
+              it[11] = indication_color;
+              it[12] = indication_color;
+              it[13] = indication_color;
+            } else if ( id(test_instructions) == 4) {    
+              it[17] = indication_color;
+              it[18] = indication_color;
+              it[19] = indication_color;
+            }
+            
+      
+      
       - addressable_lambda:
           name: "Volume Display"
           update_interval: 50ms
@@ -243,6 +277,7 @@ light:
             if (id(external_media_player).volume == 0.0f) {
               it[0] = silenced_color;
             }
+      
       - addressable_lambda:
           name: "Action Button Touched"
           update_interval: 16ms
@@ -265,6 +300,7 @@ light:
       - addressable_twinkle:
           name: "Twinkle"
           twinkle_probability: 50%
+      
       - addressable_lambda:
           name: "Error"
           update_interval: 10ms
@@ -491,7 +527,10 @@ script:
           } else if (id(external_media_player).volume == 0.0f || id(external_media_player).is_muted()) {
             id(control_leds_muted_or_silent).execute();
           } 
-
+          
+          else if (id(test_instructions) > 0) {
+            id(control_leds_test_instructions).execute();
+          } 
   # Script executed during Improv BLE
   # Warm White Twinkle
   - id: control_leds_improv_ble_state
@@ -620,6 +659,14 @@ script:
             - delay: 1s
             - light.turn_off:
                 id: voice_assistant_leds
+
+  - id: control_leds_test_instructions
+    then:
+      - light.turn_on:
+          brightness: !lambda return min ( max( id(led_ring).current_values.get_brightness() , 0.2f ) + 0.1f , 1.0f );
+          id: voice_assistant_leds
+          effect: "Test Instructions"
+
 
   - id: control_leds_turn_off
     then: 
