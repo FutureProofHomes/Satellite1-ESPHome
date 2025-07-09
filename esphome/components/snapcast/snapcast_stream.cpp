@@ -334,6 +334,23 @@ void SnapcastStream::connect_(){
             return;
         }
     }
+    
+    typedef struct {
+        void *data;
+    } esp_transport_item_t;
+
+    typedef struct {
+        int sock;
+    } esp_transport_tcp_t;
+    
+    esp_transport_item_t *transport_item = (esp_transport_item_t *) this->transport_;
+    esp_transport_tcp_t *tcp = (esp_transport_tcp_t *) transport_item->data;
+
+    if (tcp) {
+        int flag = 1;
+        setsockopt(tcp->sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+    }
+
     esp_transport_keep_alive_t keep_alive_config = {
         .keep_alive_enable = true,
         .keep_alive_idle = 10000, // 10 seconds
