@@ -48,9 +48,10 @@ enum class StreamState {
 
 
 class TimeStats {
+    static constexpr size_t MAX_CONSECUTIVE_OUTLIERS = 5;
 public:
     TimeStats(float smoothing = 0.05f, int outlier_threshold_ms = 5, size_t min_valid_samples = 10)
-        : smoothing_(smoothing),
+        : smoothing_(smoothing), base_smoothing_(smoothing),
           outlier_threshold_ms_(outlier_threshold_ms),
           min_valid_samples_(min_valid_samples) {}
 
@@ -82,8 +83,23 @@ public:
         tv_t diff = delta - ema_;
         if (std::abs(diff.to_millis()) < outlier_threshold_ms_) {
             ema_ = ema_ + (diff * smoothing_);
+            consecutive_outliers_ = 0;
+            
+            // Slowly decay alpha if it was bumped
+            if (smoothing_ > base_smoothing_) {
+                smoothing_ *= 0.99f; 
+                smoothing_ = std::max(smoothing_, base_smoothing_);
+            }
         } else {
             outlier_count_++;
+            consecutive_outliers_++;
+            
+            if (consecutive_outliers_ >= MAX_CONSECUTIVE_OUTLIERS) {
+                // Snap to new estimate and speed up smoothing
+                ema_ = delta;
+                smoothing_ = std::min(0.5f, smoothing_ * 2);
+                consecutive_outliers_ = 0;
+            }
         }
     }
 
@@ -135,12 +151,14 @@ public:
         has_bias_ = false;
         has_reference_ = false;
         outlier_count_ = 0;
+        consecutive_outliers_ = 0;
     }
 
     size_t outliers() const { return outlier_count_; }
 
 private:
     float smoothing_;
+    const float base_smoothing_;
     int outlier_threshold_ms_;
     size_t min_valid_samples_;
 
@@ -148,6 +166,7 @@ private:
     bool has_bias_ = false;
     bool has_reference_ = false;
     size_t outlier_count_ = 0;
+    size_t consecutive_outliers_ = 0;
 
     tv_t ema_{0, 0};
     tv_t bias_{0, 0};
