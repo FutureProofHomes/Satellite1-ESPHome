@@ -321,7 +321,7 @@ void SnapcastStream::set_state_(StreamState new_state){
         xTaskNotify(this->notification_target_, static_cast<uint32_t>(this->state_), eSetValueWithOverwrite);
     }
     if (this->on_status_update_) {
-        this->on_status_update_(this->state_, this->volume_, this->muted_);
+        this->on_status_update_(this->state_, 255, false); // 255 for volume means do not set
     } 
 }
 
