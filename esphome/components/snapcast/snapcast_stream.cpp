@@ -167,7 +167,12 @@ esp_err_t SnapcastStream::report_volume(uint8_t volume, bool muted){
 
 
 
-static void transport_task_(std::string server, uint32_t port, std::shared_ptr<ChunkedRingBuffer> ring_buffer, TaskHandle_t stream_task_handle){
+static void transport_task_( 
+                std::string server, 
+                uint32_t port, 
+                std::shared_ptr<ChunkedRingBuffer> ring_buffer, 
+                TaskHandle_t stream_task_handle,
+                TimeStats* time_stats ){
     constexpr size_t HEADER_SIZE = sizeof(MessageHeader);
     esp_transport_handle_t transport = nullptr;
     
@@ -308,12 +313,12 @@ static void transport_task_(std::string server, uint32_t port, std::shared_ptr<C
                 msg->set_send_time();
                 msg->toBytes(tx_buffer);
                 int bytes_written = esp_transport_write( transport, (char*) tx_buffer, msg->getMessageSize(), 0);
-                delete msg;  // Free the message after serialization
-                if (bytes_written <= 0) {
-                    // handle error
+                if (bytes_written > 0 && msg->getMessageType() == message_type::kTime) {
+                    time_stats->set_request_time(tv_t::now());
                 }
+                delete msg;  // Free the message after serialization
+                
             }
-
         }
         
         esp_transport_close(transport);
@@ -412,6 +417,13 @@ esp_err_t SnapcastStream::read_and_process_messages_(ChunkedRingBuffer* read_rin
                         continue;
                     }
                     tv_t time_stamp = this->to_local_time_( tv_t(wire_chunk_msg.timestamp_sec, wire_chunk_msg.timestamp_usec));
+                    
+                    static tv_t last_time_stamp = time_stamp;
+                    if( (time_stamp - last_time_stamp).to_millis() > 24 ){
+                        printf( "chunk-read: packet loss, diff: %" PRId64 " ms\n", (time_stamp - last_time_stamp).to_millis()  );
+                    }
+                    last_time_stamp = time_stamp;
+                    
                     if( time_stamp < tv_t::now() ){
                         //chunk is in the past, ignore it
                         printf( "chunk-read: skipping full frame: delta: %lld\n", time_stamp.to_millis() - tv_t::now().to_millis());
@@ -420,11 +432,6 @@ esp_err_t SnapcastStream::read_and_process_messages_(ChunkedRingBuffer* read_rin
                         read_ring_buffer->release_read_chunk(chunk);
                         continue;
                     }
-                    static tv_t last_time_stamp = time_stamp;
-                    if( (time_stamp - last_time_stamp).to_millis() > 24 ){
-                        printf( "chunk-read: packet loss, diff: %" PRId64 " ms\n", (time_stamp - last_time_stamp).to_millis()  );
-                    }
-                    last_time_stamp = time_stamp;
                     
                     timed_chunk_t *timed_chunk = nullptr;
                     size_t size = wire_chunk_msg.payload_size;
@@ -477,7 +484,7 @@ esp_err_t SnapcastStream::read_and_process_messages_(ChunkedRingBuffer* read_rin
 
 void SnapcastStream::stream_task_(){
     
-    std::shared_ptr<ChunkedRingBuffer> stream_package_buffer = ChunkedRingBuffer::create(1024 * 1024);
+    std::shared_ptr<ChunkedRingBuffer> stream_package_buffer = ChunkedRingBuffer::create(128 * 1024);
     
     if( stream_package_buffer == nullptr ){
         ESP_LOGE(TAG, "Failed to create stream package buffer!");
@@ -497,6 +504,7 @@ void SnapcastStream::stream_task_(){
         std::string server;
         uint32_t port;
         TaskHandle_t stream_task_handle;
+        TimeStats *time_stats_; 
     };
 
     ReadTaskArgs *args = new ReadTaskArgs();
@@ -504,11 +512,12 @@ void SnapcastStream::stream_task_(){
     args->server = this->server_;
     args->port = this->port_;
     args->stream_task_handle = xTaskGetCurrentTaskHandle();
+    args->time_stats_ = &this->time_stats_; // Pass the time stats reference
 
     TaskHandle_t transport_task_handle = nullptr;
     BaseType_t result = xTaskCreate([](void *param) {
             auto *args = static_cast<ReadTaskArgs*>(param);
-            transport_task_(args->server, args->port, args->buffer, args->stream_task_handle);
+            transport_task_(args->server, args->port, args->buffer, args->stream_task_handle, args->time_stats_);
             delete args;
             vTaskDelete(nullptr);  // Task cleans itself up after loop exits
         },
@@ -691,7 +700,7 @@ void SnapcastStream::on_time_msg_(MessageHeader msg, tv_t latency_c2s){
     //latency_s2c = t_client-recv - t_server-sent + t_network_latency
     //time diff between server and client as (latency_c2s - latency_s2c) / 2
     tv_t latency_s2c = msg.received - msg.sent;
-    time_stats_.add_offset( (latency_c2s - latency_s2c) / 2 );
+    time_stats_.add_offset( (latency_c2s - latency_s2c) / 2, msg.received );
     this->est_time_diff_ = time_stats_.get_estimate();
     
 #if 1

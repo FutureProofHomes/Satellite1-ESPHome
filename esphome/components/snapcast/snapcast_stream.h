@@ -50,39 +50,56 @@ enum class StreamState {
 
 class TimeStats {
     static constexpr size_t MAX_CONSECUTIVE_OUTLIERS = 5;
+    struct OffsetSample {
+        tv_t offset;
+        tv_t rtt;
+    };
 public:
-    TimeStats(float smoothing = 0.05f, int outlier_threshold_ms = 5, size_t min_valid_samples = 10)
+    TimeStats(float smoothing = 0.02f, int outlier_threshold_ms = 10, size_t min_valid_samples = 20)
         : smoothing_(smoothing), base_smoothing_(smoothing),
           outlier_threshold_ms_(outlier_threshold_ms),
           min_valid_samples_(min_valid_samples) {}
 
     
-    void add_offset(tv_t sample) {
+    void add_offset(tv_t sample, tv_t received_time) {
         if (!has_reference_) {
             reference_offset_ = sample;
             has_reference_ = true;
         }
 
         tv_t delta = sample - reference_offset_;
+        tv_t rtt = received_time - send_request_time_;
 
-        // Store full history
-        if (history_.size() >= max_history_) history_.pop_front();
-        history_.push_back(delta);
-
-        // Collect initial samples
+        // Initialization with minimum RTT filter
         if (!has_value_) {
-            pending_init_values_.push_back(delta);
+            pending_init_values_.push_back({delta, rtt});
+
             if (pending_init_values_.size() >= min_valid_samples_) {
-                ema_ = average_tv(pending_init_values_);
+                // Find sample with minimum RTT
+                auto best = std::min_element(
+                    pending_init_values_.begin(),
+                    pending_init_values_.end(),
+                    [](const auto &a, const auto &b) { return a.rtt < b.rtt; });
+
+                ema_ = best->offset;
                 has_value_ = true;
                 pending_init_values_.clear();
+                printf("Init done: using offset with min RTT: %" PRId64 " us\n", ema_.to_microseconds());
             }
             return;
         }
 
+        window_.push_back({delta, rtt});
+        if (window_.size() > 5) window_.pop_front();
+
+        // Find offset with minimum RTT
+        auto best = std::min_element(
+            window_.begin(), window_.end(),
+            [](const OffsetSample& a, const OffsetSample& b) { return a.rtt < b.rtt; });
+
+
         // After initialization: apply EMA with outlier rejection
         tv_t diff = delta - ema_;
-        printf( "new-delta: %" PRId64 " ema: %" PRId64 " diff: %" PRId64 "\n", delta.to_microseconds(), ema_.to_microseconds(), diff.to_microseconds() );
         if (std::abs(diff.to_millis()) < outlier_threshold_ms_) {
             ema_ = ema_ + (diff * smoothing_);
             consecutive_outliers_ = 0;
@@ -96,7 +113,7 @@ public:
             
             outlier_count_++;
             consecutive_outliers_++;
-            
+#if 0            
             if (consecutive_outliers_ >= MAX_CONSECUTIVE_OUTLIERS) {
                 // Snap to new estimate and speed up smoothing
                 printf( "MAX_CONSECTUIVE_OUTLIERS reached, resetting EMA\n" );
@@ -104,7 +121,9 @@ public:
                 smoothing_ = std::min(0.5f, smoothing_ * 2);
                 consecutive_outliers_ = 0;
             }
+#endif            
         }
+        printf( "new: %" PRId64 " minRTT: %" PRId64 " ema: %" PRId64 " diff: %" PRId64 " RTT: %" PRId64 "\n", delta.to_microseconds(), best->offset.to_microseconds(), ema_.to_microseconds(), diff.to_microseconds(), rtt.to_microseconds() );
     }
 
     // Add bias sample (from (latency_c2s - latency_s2c)/2)
@@ -128,6 +147,10 @@ public:
         ema_ = ema_ + (diff * 0.001f); // tiny correction
     }
 
+    void set_request_time(tv_t request_time) {
+        this->send_request_time_ = request_time;
+    }       
+    
     bool is_ready() const {
         return has_value_;
     }
@@ -175,10 +198,13 @@ private:
     tv_t ema_{0, 0};
     tv_t bias_{0, 0};
     tv_t reference_offset_{0, 0};
+    tv_t send_request_time_{0,0};
 
     static constexpr size_t max_history_ = 100;
     std::deque<tv_t> history_;
-    std::vector<tv_t> pending_init_values_;
+    
+    std::deque<OffsetSample> window_;
+    std::vector<OffsetSample> pending_init_values_;
 
     // Helper: average of tv_t deltas
     tv_t average_tv(const std::vector<tv_t>& values) const {
