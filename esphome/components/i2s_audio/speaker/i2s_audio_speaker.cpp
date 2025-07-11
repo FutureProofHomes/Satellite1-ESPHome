@@ -373,9 +373,9 @@ void I2SAudioSpeaker::speaker_task(void *params) {
             this_speaker->padded_zero_frames_  -= audio_stream_info.bytes_to_frames(delay_bytes);
             this_speaker->in_write_buffer_ = read_buffer_size;  
           
-            if( delay_bytes == 0 && bytes_read < read_buffer_size ){
-              printf("underrun - read %d (requested %d), in_buffer: %d\n", bytes_read, to_read, this_speaker->bytes_in_ringbuffer_);
-            }
+            // if( delay_bytes == 0 && bytes_read < read_buffer_size ){
+            //   printf("underrun - read %d (requested %d), in_buffer: %d\n", bytes_read, to_read, this_speaker->bytes_in_ringbuffer_);
+            // }
         } else {
           // don't read any bytes, write zeros to all DMA buffers instead
           delay_bytes = read_buffer_size;

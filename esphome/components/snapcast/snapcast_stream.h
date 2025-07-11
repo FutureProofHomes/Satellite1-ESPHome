@@ -26,6 +26,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/component.h"
 
+#include "esphome/components/audio/chunked_ring_buffer.h"
 #include "esphome/components/audio/timed_ring_buffer.h"
 
 #include "messages.h"
@@ -81,6 +82,7 @@ public:
 
         // After initialization: apply EMA with outlier rejection
         tv_t diff = delta - ema_;
+        printf( "new-delta: %" PRId64 " ema: %" PRId64 " diff: %" PRId64 "\n", delta.to_microseconds(), ema_.to_microseconds(), diff.to_microseconds() );
         if (std::abs(diff.to_millis()) < outlier_threshold_ms_) {
             ema_ = ema_ + (diff * smoothing_);
             consecutive_outliers_ = 0;
@@ -91,12 +93,14 @@ public:
                 smoothing_ = std::max(smoothing_, base_smoothing_);
             }
         } else {
+            
             outlier_count_++;
             consecutive_outliers_++;
             
             if (consecutive_outliers_ >= MAX_CONSECUTIVE_OUTLIERS) {
                 // Snap to new estimate and speed up smoothing
-                ema_ = delta;
+                printf( "MAX_CONSECTUIVE_OUTLIERS reached, resetting EMA\n" );
+                ema_ +=  diff.to_millis() > 0 ? tv_t::from_millis(this->outlier_threshold_ms_) : tv_t::from_millis( -1 * this->outlier_threshold_ms_);
                 smoothing_ = std::min(0.5f, smoothing_ * 2);
                 consecutive_outliers_ = 0;
             }
@@ -268,27 +272,25 @@ protected:
     std::function<void(StreamState state, uint8_t volume, bool muted)> on_status_update_;
 
 private:    
-    TaskHandle_t stream_task_handle_{nullptr};    
+    TaskHandle_t stream_task_handle_{nullptr};
     StaticTask_t task_stack_;
     StackType_t *task_stack_buffer_{nullptr};
+    
     void stream_task_();
 
-    void connect_();
-    void disconnect_();
     void start_streaming_();
     void stop_streaming_();
     void set_state_(StreamState new_state);
 
-    void send_message_(SnapcastMessage &msg);
+    void send_message_(SnapcastMessage *msg);
     void send_hello_();
     void send_report_();
     void send_time_sync_();
     
-    esp_err_t read_and_process_messages_(uint32_t timeout_ms);
+    esp_err_t read_and_process_messages_(ChunkedRingBuffer* read_ring_buffer, uint32_t timeout_ms);
     
     bool start_after_connecting_{false};
     bool codec_header_sent_{false};
-    esp_transport_handle_t transport_{nullptr};
 };
 
 }

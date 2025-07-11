@@ -460,6 +460,9 @@ void AudioPipeline::read_task(void *params) {
         }
       }
     } //if !(event_bits & EventGroupBits::PIPELINE_COMMAND_STOP)
+    else {
+      vTaskDelay(100 / portTICK_PERIOD_MS);  // Wait a bit before checking the stop command again
+    }
   }
 }
 
@@ -471,10 +474,9 @@ void AudioPipeline::decode_task(void *params) {
 
     // Wait until the reader notifies us that the media type is available
     EventBits_t event_bits = xEventGroupWaitBits(this_pipeline->event_group_,
-                                                 EventGroupBits::READER_MESSAGE_LOADED_MEDIA_TYPE |
-                                                     EventGroupBits::PIPELINE_COMMAND_STOP,  // Bit message to read
-                                                 pdFALSE,                                    // Clear the bit on exit
-                                                 pdFALSE,                                    // Wait for all the bits,
+                                                 EventGroupBits::READER_MESSAGE_LOADED_MEDIA_TYPE,  // Bit message to read
+                                                 pdFALSE,                                           // Clear the bit on exit
+                                                 pdFALSE,                                           // Wait for all the bits,
                                                  portMAX_DELAY);  // Block indefinitely until bit is set
 
     xEventGroupClearBits(this_pipeline->event_group_,
@@ -596,7 +598,9 @@ void AudioPipeline::decode_task(void *params) {
           }
         }
       }
-    } 
+    } else {
+      vTaskDelay( 100 / portTICK_PERIOD_MS);  // Wait a bit before checking the stop command again
+    }
   }
 }
 

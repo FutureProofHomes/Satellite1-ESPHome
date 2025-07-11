@@ -131,7 +131,8 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
 
   size_t bytes_processed = 0;
   size_t bytes_available_before_processing = 0;
-
+  
+  uint32_t skip_next_frames = 0;
   //why do we need this inner loop?
   while (state == FileDecoderState::MORE_TO_PROCESS) {
   
@@ -139,7 +140,7 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
     if (!this->pause_output_) {
       // Never shift the data in the output transfer buffer to avoid unnecessary, slow data moves
       esp_err_t bytes_written =
-          this->output_transfer_buffer_->transfer_data_to_sink(pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS*10), false);
+          this->output_transfer_buffer_->transfer_data_to_sink(pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS*10), skip_next_frames, false );
       if( this->output_transfer_buffer_->available() ){
         //only decode next frame, when last one has been completely written to the output
         delay(READ_WRITE_TIMEOUT_MS); // do we need this delay, doesn't writing_data_to sink already timedout?
@@ -164,10 +165,21 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
     }
 
     // Decode more audio
+    
+    while( skip_next_frames > 0 ){
+      // Only shift data on the first loop iteration to avoid unnecessary, slow moves
+      size_t bytes_read = this->input_transfer_buffer_->transfer_data_from_source(pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS),
+                                                                                  first_loop_iteration);
+      this->input_transfer_buffer_->decrease_buffer_length(bytes_read);                                                                            
+      skip_next_frames--;
+      printf( "decoder: skipped 1 frame (%d) bytes\n", bytes_read );
+    }
+
 
     // Only shift data on the first loop iteration to avoid unnecessary, slow moves
     size_t bytes_read = this->input_transfer_buffer_->transfer_data_from_source(pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS),
                                                                                 first_loop_iteration);
+
     if (!first_loop_iteration && (this->input_transfer_buffer_->available() < bytes_processed)) {
       // Less data is available than what was processed in last iteration, so don't attempt to decode.
       // This attempts to avoid the decoder from consistently trying to decode an incomplete frame. The transfer buffer
@@ -281,11 +293,13 @@ FileDecoderState AudioDecoder::decode_flac_() {
   size_t bytes_consumed = this->flac_decoder_->get_bytes_index();
   this->input_transfer_buffer_->decrease_buffer_length(bytes_consumed);
 
+#if 0  
   if( this->input_transfer_buffer_->available() ){
     printf( "decoder: bytes consumed: %d, left: %d\n", bytes_consumed, this->input_transfer_buffer_->available() );
   }
-
-  if (result > esp_audio_libs::flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
+#endif
+  
+if (result > esp_audio_libs::flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
     // Corrupted frame, don't retry with current buffer content, wait for new sync
     printf( "Corrupted frame, skipping and waiting for new sync\n" );
     return FileDecoderState::POTENTIALLY_FAILED;

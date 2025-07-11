@@ -245,7 +245,7 @@ std::unique_ptr<TimedAudioSinkTransferBuffer> TimedAudioSinkTransferBuffer::crea
 static constexpr uint32_t MAX_CHUNK_SIZE = 9200;  
 
 
-esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_to_wait, bool post_shift) {
+esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_to_wait, uint32_t &skip_next_frames, bool post_shift) {
   size_t bytes_written = 0;
   if (this->available()) {
 #ifdef USE_SPEAKER
@@ -274,6 +274,7 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
         //printf( "detla_us %" PRId64 " (Now: %" PRId64 ")\n", delta_us, now);
         if( delta_us > 1000 ){
             last_adjustment_at_ = static_cast<uint32_t>(desired_playout_time_us / 1000);
+#if 0            
             if( delta_us > 10000 ){
               printf( "detla_us %" PRId64 " (Now: %" PRId64 ")\n", delta_us, now);
               printf( "TimeStamp: %" PRId64 ", in %" PRId64 " us %s \n", 
@@ -282,6 +283,7 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
                 stamp_off ? "(off)" :""
               );
             }
+#endif
             //printf( "Playout in %d, at: %" PRId64 " expected: %d\n", playout_in_us, now + playout_in_us, expected_next_playout_time );
             if( delta_us > 50 * 1000 ){
               this->speaker_->play_silence( std::min( static_cast<int32_t>(delta_us / 1000), (int32_t) 1000) );
@@ -313,6 +315,9 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
           this->decrease_buffer_length(available);
           return available;
         } 
+        else if ( desired_playout_time_us - now < 240000){
+           skip_next_frames++;
+        }
         else if ( delta_us < -1000 ){
           last_adjustment_at_ = static_cast<uint32_t>(desired_playout_time_us / 1000);
           size_t drop_frames = 1;
@@ -323,17 +328,21 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
           if( drop_frames == total_frames ){
             size_t available = this->available();
             this->decrease_buffer_length(available);
+#if 1            
             printf( "detla_us %" PRId64 " (Now: %" PRId64 ")\n", delta_us, now);
             printf( "TimeStamp: %" PRId64 ", in %" PRId64 " us\n", desired_playout_time_us, desired_playout_time_us - now);
             printf( "dropped full frame \n");
+#endif
             return available;
           }
           uint32_t drop_bytes = audio_stream_info.frames_to_bytes(drop_frames);
           this->buffer_length_ -= drop_bytes;
           this->current_time_stamp_ += tv_t::from_microseconds(audio_stream_info.bytes_to_us(drop_bytes));
           if( delta_us < - 10000 ){
+#if 0
             printf( "detla_us %" PRId64 " (Now: %" PRId64 ")\n", delta_us, now);
             printf( "TimeStamp: %" PRId64 ", in %" PRId64 " us\n", desired_playout_time_us, desired_playout_time_us - now);
+#endif
           }
           //printf( "Playout in %d, at: %" PRId64 " expected: %d\n", playout_in_us, now + playout_in_us, expected_next_playout_time );
         }

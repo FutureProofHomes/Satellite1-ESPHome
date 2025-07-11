@@ -200,7 +200,7 @@ class TimedAudioSinkTransferBuffer : public AudioTransferBuffer {
   /// @param post_shift If true, all remaining data is moved to the start of the buffer after transferring to the sink.
   ///                   Defaults to true.
   /// @return Number of bytes written
-  esp_err_t transfer_data_to_sink(TickType_t ticks_to_wait, bool post_shift = true);
+  esp_err_t transfer_data_to_sink(TickType_t ticks_to_wait, uint32_t &skip_next_frames, bool post_shift = true);
 
   /// @brief Adds a ring buffer as the transfer buffer's sink.
   /// @param ring_buffer weak_ptr to the allocated ring buffer

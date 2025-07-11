@@ -47,7 +47,7 @@ namespace speaker {
 
 static const uint32_t MEDIA_CONTROLS_QUEUE_LENGTH = 20;
 
-static const UBaseType_t MEDIA_PIPELINE_TASK_PRIORITY = 1;
+static const UBaseType_t MEDIA_PIPELINE_TASK_PRIORITY = 10;
 static const UBaseType_t ANNOUNCEMENT_PIPELINE_TASK_PRIORITY = 1;
 
 static const float FIRST_BOOT_DEFAULT_VOLUME = 0.5f;
@@ -222,11 +222,13 @@ void SpeakerMediaPlayer::watch_media_commands_() {
           this->is_paused_ = false;
           break;
         case media_player::MEDIA_PLAYER_COMMAND_PAUSE:
-          if ((this->media_pipeline_ != nullptr) && (!this->is_paused_)) {
+#if 0
+        if ((this->media_pipeline_ != nullptr) && (!this->is_paused_)) {
             this->media_pipeline_->set_pause_state(true);
           }
           this->is_paused_ = true;
           break;
+#endif
         case media_player::MEDIA_PLAYER_COMMAND_STOP:
           // Pipelines do not stop immediately after calling the stop command, so confirm its stopped before unpausing.
           // This avoids an audible short segment playing after receiving the stop command in a paused state.
