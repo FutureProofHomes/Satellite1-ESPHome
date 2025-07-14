@@ -30,13 +30,15 @@ audio_dac:
 
 select:
   - platform: template
-    name: TAS2780 Mode Select
+    name: Audio channel output
     id: tas_mode_select
+    icon: "mdi:speaker-multiple"
     options:
-     - "Mono"
-     - "Left"
-     - "Right"
-    initial_option: "Mono"
+     - "Mono (Left + Right)"
+     - "Left Channel Only"
+     - "Right Channel Only"
+    initial_option: "Mono (Left + Right)"
+    entity_category: config
     optimistic: true
     restore_value: true
     on_value:
