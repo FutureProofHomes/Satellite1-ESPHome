@@ -49,12 +49,6 @@ void Satellite1::loop(){
       } 
       break;
     case SAT_XMOS_CONNECTED_STATE:
-      if( (millis() - this->last_version_poll_timestamp_) > 10000 ){
-        bool read_success = this->dfu_get_fw_version_();
-        this->last_version_poll_timestamp_ = millis();
-        version_poll_callback_.call();
-      }
-      break;
     case SAT_FLASH_CONNECTED_STATE:
       break;
   }
@@ -78,20 +72,12 @@ std::string Satellite1::status_string(){
       return "XMOS not responding";
     
     case SAT_XMOS_CONNECTED_STATE:
-      {
-        bool allZero = std::all_of(std::begin(this->xmos_fw_version), std::end(this->xmos_fw_version), [](int x) {
-          return x == 0;
-        });
-        if ( allZero ) return "XMOS not responding";
-        
-        return  (    "v" + std::to_string(this->xmos_fw_version[0])
-                    +  "." + std::to_string(this->xmos_fw_version[1]) 
-                    +  "." + std::to_string(this->xmos_fw_version[2])
-                    +  ( this->xmos_fw_version[3] ? "-" + prerelease_str(this->xmos_fw_version[3]) : "")
-                    +  ( this->xmos_fw_version[4] ? "." + std::to_string(this->xmos_fw_version[4]) : "")
-        );
-      }
-      
+      return  (    "v" + std::to_string(this->xmos_fw_version[0])
+                +  "." + std::to_string(this->xmos_fw_version[1]) 
+                +  "." + std::to_string(this->xmos_fw_version[2])
+                +  ( this->xmos_fw_version[3] ? "-" + prerelease_str(this->xmos_fw_version[3]) : "")
+                +  ( this->xmos_fw_version[4] ? "." + std::to_string(this->xmos_fw_version[4]) : "")
+              );
     case SAT_FLASH_CONNECTED_STATE:
       return "Flashing Mode";
     default: return "";
@@ -181,7 +167,6 @@ bool Satellite1::dfu_get_fw_version_(){
   uint8_t version_resp[5];
   if( !this->transfer(DC_RESOURCE::DFU_CONTROLLER, DC_DFU_CMD::GET_VERSION, version_resp, 5 ) ){
     ESP_LOGW(TAG, "Requesting XMOS version failed");
-    memset( this->xmos_fw_version, 0, 5);
     return false;    
   }
   
