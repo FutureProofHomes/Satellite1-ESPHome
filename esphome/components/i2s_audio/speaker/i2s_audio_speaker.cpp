@@ -14,7 +14,7 @@ namespace esphome {
 namespace i2s_audio {
 
 static const size_t TASK_STACK_SIZE = 4096;
-static const ssize_t TASK_PRIORITY = 23;
+static const ssize_t TASK_PRIORITY = 17;
 
 static const char *const TAG = "i2s_audio.speaker";
 

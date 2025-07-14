@@ -39,6 +39,9 @@ class ResamplerSpeaker : public Component, public speaker::Speaker {
   bool get_pause_state() const override { return this->output_speaker_->get_pause_state(); }
 
   bool has_buffered_data() const override;
+  bool is_stopped() const override {
+    return this->state_ == esphome::speaker::STATE_STOPPED && (this->output_speaker_ == nullptr || this->output_speaker_->is_stopped());
+  }
 
   /// @brief Mute state changes are passed to the parent's output speaker
   void set_mute_state(bool mute_state) override;
@@ -93,6 +96,7 @@ class ResamplerSpeaker : public Component, public speaker::Speaker {
 
   bool task_stack_in_psram_{false};
   bool task_created_{false};
+  bool finishing_{false};
 
   TaskHandle_t task_handle_{nullptr};
   StaticTask_t task_stack_;

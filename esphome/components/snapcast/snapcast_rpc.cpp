@@ -168,7 +168,7 @@ void SnapcastControlSession::notification_loop() {
                                   this->on_stream_update_(sInfo);
                               }
                         } else {
-                          printf( "got id: %s, requested: %s\n", params["id"].as<std::string>().c_str(), this->client_state_.stream_id);
+                          printf( "got id: %s, requested: %s\n", params["id"].as<std::string>().c_str(), this->client_state_.stream_id.c_str());
                         }
                       } else if (method == "Stream.OnProperties"){
                         JsonObject params = root["params"];

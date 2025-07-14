@@ -27,4 +27,6 @@ async def to_code(config):
     await cg.register_component(var, config)
     if CONF_SERVER_IP in config :
         cg.add(var.set_server_ip(str(config[CONF_SERVER_IP])))    
+    
     cg.add_define("USE_SNAPCAST", True)
+    cg.add_define("SNAPCAST_DEBUG", True)

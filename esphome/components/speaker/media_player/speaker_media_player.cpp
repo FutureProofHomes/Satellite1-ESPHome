@@ -411,6 +411,7 @@ void SpeakerMediaPlayer::loop() {
       }
 
       if(next_item.has_value()){
+        printf( "Playing next item after pipeline has stopped\n" );
         uint32_t timeout_ms = 0;
         if( this->curr_media_item_.has_value()){
           // Only delay starting playback if moving on the next playlist item or repeating the current item

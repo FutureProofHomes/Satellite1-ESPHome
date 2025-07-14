@@ -382,7 +382,7 @@ void MixerSpeaker::loop() {
     bool all_stopped = true;
 
     for (auto &speaker : this->source_speakers_) {
-      all_stopped &= speaker->is_stopped();
+      all_stopped &= speaker->state_ == speaker::STATE_STOPPED;
     }
     
     if (all_stopped) {

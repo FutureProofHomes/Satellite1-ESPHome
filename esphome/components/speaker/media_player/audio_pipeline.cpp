@@ -83,6 +83,7 @@ void AudioPipeline::start_snapcast(SnapcastStream* stream) {
 #endif
 
 esp_err_t AudioPipeline::stop() {
+  printf( "AudioPipeline::stop() called, hard_stop: %d, is_playing: %d\n", this->hard_stop_, this->is_playing_);
   xEventGroupSetBits(this->event_group_, EventGroupBits::PIPELINE_COMMAND_STOP);
 
   return ESP_OK;
@@ -192,6 +193,7 @@ AudioPipelineState AudioPipeline::process_state() {
       }
 #endif
       this->is_playing_ = true;
+      this->hard_stop_ = false;
       return AudioPipelineState::PLAYING;
     } 
   }
@@ -219,15 +221,12 @@ AudioPipelineState AudioPipeline::process_state() {
     // Tasks are finished and there's no media in between the reader and decoder
 
     if (event_bits & EventGroupBits::PIPELINE_COMMAND_STOP) {
-      // Stop command is fully processed, so clear the command bit
-      //xEventGroupClearBits(this->event_group_, EventGroupBits::PIPELINE_COMMAND_STOP);
+      // if stop was requested, stop immediately, if reader/decoder have finished, wait for speaker to finish
       this->hard_stop_ = true;
     }
 
-    //if (!this->is_playing_) {
-      // The tasks have been stopped for two ``process_state`` calls in a row, so delete the tasks
-      if ((this->read_task_handle_ != nullptr) || (this->decode_task_handle_ != nullptr)) {
-        this->delete_tasks_();
+    if ((this->read_task_handle_ != nullptr) || (this->decode_task_handle_ != nullptr)) {
+      if( this->speaker_ != nullptr && !this->speaker_->is_stopped() ) {
         if (this->hard_stop_) {
           // Stop command was sent, so immediately end of the playback
           this->speaker_->stop();
@@ -235,10 +234,11 @@ AudioPipelineState AudioPipeline::process_state() {
         } else {
           // Decoded all the audio, so let the speaker finish playing before stopping
           this->speaker_->finish();
-        }
+        }  
+      } else {
+        this->delete_tasks_();
       }
-    //}
-    //this->is_playing_ = false;
+    }
     return AudioPipelineState::STOPPING;
   }
 
@@ -527,8 +527,13 @@ void AudioPipeline::decode_task(void *params) {
         }
 
         // Stop gracefully if the reader has finished
+        uint32_t start_time = millis();
         audio::AudioDecoderState decoder_state = decoder->decode(event_bits & EventGroupBits::READER_MESSAGE_FINISHED);
-
+        if (millis() - start_time < 20 ) {
+          // while filling up the output buffer, we don't want to consume too much CPU time
+          vTaskDelay(20 - (millis() - start_time) / portTICK_PERIOD_MS);  
+        }
+        
         if ((decoder_state == audio::AudioDecoderState::DECODING) ||
             (decoder_state == audio::AudioDecoderState::FINISHED)) {
           this_pipeline->playback_ms_ = decoder->get_playback_ms();

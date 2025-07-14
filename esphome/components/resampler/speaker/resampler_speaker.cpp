@@ -160,6 +160,7 @@ esp_err_t ResamplerSpeaker::start_() {
 
   this->output_speaker_->set_audio_stream_info(this->target_stream_info_);
   this->output_speaker_->start();
+  this->finishing_ = false;
 
   if (this->requires_resampling_()) {
     // Start the resampler task to handle converting sample rates
@@ -196,13 +197,20 @@ esp_err_t ResamplerSpeaker::start_task_() {
   return ESP_OK;
 }
 
-void ResamplerSpeaker::stop() { this->state_ = speaker::STATE_STOPPING; }
+void ResamplerSpeaker::stop() { 
+  this->finishing_ = false;
+  this->state_ = speaker::STATE_STOPPING; 
+}
 
 void ResamplerSpeaker::stop_() {
   if (this->task_handle_ != nullptr) {
     xEventGroupSetBits(this->event_group_, ResamplingEventGroupBits::COMMAND_STOP);
   }
-  this->output_speaker_->stop();
+  if( this->finishing_ ) {
+    this->output_speaker_->finish();
+  } else {
+    this->output_speaker_->stop();
+  }
 }
 
 esp_err_t ResamplerSpeaker::delete_task_() {
@@ -227,7 +235,10 @@ esp_err_t ResamplerSpeaker::delete_task_() {
   return ESP_ERR_INVALID_STATE;
 }
 
-void ResamplerSpeaker::finish() { this->output_speaker_->finish(); }
+void ResamplerSpeaker::finish() {
+  this->finishing_ = true; 
+  this->state_ = speaker::STATE_STOPPING;
+}
 
 bool ResamplerSpeaker::has_buffered_data() const {
   bool has_ring_buffer_data = false;
