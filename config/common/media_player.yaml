@@ -36,7 +36,7 @@ binary_sensor:
       pcm5122: 
       pin: 4
       inverted: false
-    name: "line-out jack"
+    name: "Line-Out Connected"
     icon: "mdi:audio-input-stereo-minijack"
     filters:
       - delayed_on: 200ms

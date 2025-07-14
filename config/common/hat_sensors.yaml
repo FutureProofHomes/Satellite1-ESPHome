@@ -23,7 +23,7 @@ sensor:
     update_interval: 60s
 
     # short variant of sensor definition:
-    ambient_light: "Ambient light"
+    ambient_light: "Ambient Light"
  
 
 number:
