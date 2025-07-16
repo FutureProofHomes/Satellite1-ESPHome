@@ -106,7 +106,19 @@ external_components:
   - source:
       type: local
       path: ../esphome/components
-    components: [ i2s_audio, satellite1, memory_flasher, tas2780, pcm5122, fusb302b ]
+    components: 
+        - audio 
+        - fusb302b
+        - i2s_audio
+        - memory_flasher
+        - microphone
+        - mixer
+        - pcm5122 
+        - resampler 
+        - satellite1 
+        - speaker
+        - tas2780
+        
 
 
 logger:
