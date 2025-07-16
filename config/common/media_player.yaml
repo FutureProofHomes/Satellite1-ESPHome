@@ -30,7 +30,7 @@ audio_dac:
 
 select:
   - platform: template
-    name: Audio channel output
+    name: Speaker channel output
     id: tas_mode_select
     icon: "mdi:speaker-multiple"
     options:
