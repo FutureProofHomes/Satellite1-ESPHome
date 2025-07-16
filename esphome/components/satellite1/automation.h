@@ -39,15 +39,6 @@ class XMOSNoResponseStateTrigger : public Trigger<> {
   }
 };
 
-class XMOSVersionPollTrigger : public Trigger<> {
-  public:
-   explicit XMOSVersionPollTrigger(Satellite1 *sat1) {
-     sat1->add_on_version_poll_callback([this, sat1]() {
-         this->trigger();
-     });
-   }
- };
-
 
 
 }
