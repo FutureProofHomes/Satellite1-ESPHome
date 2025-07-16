@@ -62,6 +62,7 @@ void SourceSpeaker::setup() {
       this->audio_output_callback_(speakers_playback_frames, write_timestamp);
     }
   });
+  this->lock_ = xSemaphoreCreateMutex();
 }
 
 void SourceSpeaker::loop() {
@@ -125,12 +126,23 @@ size_t SourceSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_
     {
       return 0;
     }
-    bytes_written = temp_ring_buffer->write_without_replacement(data, length, ticks_to_wait);
+    if (xSemaphoreTake( this->parent_->lock_, pdMS_TO_TICKS(10))){
+      bytes_written = temp_ring_buffer->write_without_replacement(data, length, ticks_to_wait);
+      this->bytes_in_ringbuffer_ = temp_ring_buffer->available();
+       xSemaphoreGive(this->parent_->lock_);
+    }
     if (bytes_written > 0) {
       this->last_seen_data_ms_ = millis();
     }
   }
   return bytes_written;
+}
+
+size_t SourceSpeaker::play_silence(size_t length_ms){ 
+  if(this->parent_){
+    return this->parent_->play_silence(length_ms);
+  }
+  return 0;  
 }
 
 void SourceSpeaker::start() { this->state_ = speaker::STATE_STARTING; }
@@ -200,8 +212,12 @@ size_t SourceSpeaker::process_data_from_source(TickType_t ticks_to_wait) {
   // Store current offset, as these samples are already ducked
   const size_t current_length = this->transfer_buffer_->available();
 
-  size_t bytes_read = this->transfer_buffer_->transfer_data_from_source(ticks_to_wait);
-
+  size_t bytes_read = 0;
+  if (xSemaphoreTake( this->parent_->lock_, pdMS_TO_TICKS(10))){
+    bytes_read = this->transfer_buffer_->transfer_data_from_source(ticks_to_wait);
+    this->bytes_in_ringbuffer_ -= bytes_read;
+    xSemaphoreGive(this->parent_->lock_);
+  }
   uint32_t samples_to_duck = this->audio_stream_info_.bytes_to_samples(bytes_read);
   if (samples_to_duck > 0) {
     int16_t *current_buffer = reinterpret_cast<int16_t *>(this->transfer_buffer_->get_buffer_start() + current_length);
@@ -294,6 +310,26 @@ void SourceSpeaker::duck_samples(int16_t *input_buffer, uint32_t input_samples_t
   }
 }
 
+int64_t SourceSpeaker::get_playout_time( int64_t self_buffer_us ) const {
+  if( this->transfer_buffer_ == nullptr){
+    return 0;
+  }
+  int64_t playout_at = 0;
+  if(xSemaphoreTake( this->parent_->lock_, pdMS_TO_TICKS(10)) ){  
+      size_t unwritten_frames = this->audio_stream_info_.bytes_to_frames(
+        this->bytes_in_ringbuffer_ + this->transfer_buffer_->available()
+      );
+      playout_at = this->parent_->output_speaker_->get_playout_time(
+            this->parent_->audio_in_process_us_ 
+          + self_buffer_us
+          + this->audio_stream_info_.frames_to_microseconds(unwritten_frames)
+      );
+      xSemaphoreGive(this->parent_->lock_);
+    }
+  return playout_at;
+}
+
+
 void MixerSpeaker::dump_config() {
   ESP_LOGCONFIG(TAG, "Speaker Mixer:");
   ESP_LOGCONFIG(TAG, "  Number of output channels: %u", this->output_channels_);
@@ -307,6 +343,7 @@ void MixerSpeaker::setup() {
     this->mark_failed();
     return;
   }
+  this->lock_ = xSemaphoreCreateMutex();
 }
 
 void MixerSpeaker::loop() {
@@ -504,9 +541,17 @@ void MixerSpeaker::audio_mixer_task(void *params) {
     }
 
     // Never shift the data in the output transfer buffer to avoid unnecessary, slow data moves
-    output_transfer_buffer->transfer_data_to_sink(pdMS_TO_TICKS(TASK_DELAY_MS), false);
-    if( output_transfer_buffer->available() ){
-      vTaskDelay(TASK_DELAY_MS);
+    if (xSemaphoreTake( this_mixer->lock_, pdMS_TO_TICKS(10))) {  
+      output_transfer_buffer->transfer_data_to_sink(pdMS_TO_TICKS(TASK_DELAY_MS*4), false);
+      if( output_transfer_buffer->available() ){
+        xSemaphoreGive(this_mixer->lock_);
+        vTaskDelay(TASK_DELAY_MS);
+        continue;
+      }
+      this_mixer->audio_in_process_us_ = 0;
+      xSemaphoreGive(this_mixer->lock_);
+    } else {
+      // no extra delay needed, already waited for semaphore timeout
       continue;
     }
 
@@ -553,13 +598,20 @@ void MixerSpeaker::audio_mixer_task(void *params) {
                     reinterpret_cast<int16_t *>(output_transfer_buffer->get_buffer_end()),
                     this_mixer->audio_stream_info_.value(), frames_to_mix);
 
-        // Update source speaker buffer length
-        transfer_buffers_with_data[0]->decrease_buffer_length(active_stream_info.frames_to_bytes(frames_to_mix));
-        speakers_with_data[0]->pending_playback_frames_ += frames_to_mix;
-
-        // Update output transfer buffer length
-        output_transfer_buffer->increase_buffer_length(
-            this_mixer->audio_stream_info_.value().frames_to_bytes(frames_to_mix));
+        // Update source speaker and output buffer length
+        if (xSemaphoreTake( this_mixer->lock_, pdMS_TO_TICKS(100))) {  
+          transfer_buffers_with_data[0]->decrease_buffer_length(active_stream_info.frames_to_bytes(frames_to_mix));
+          speakers_with_data[0]->pending_playback_frames_ += frames_to_mix;
+          
+          // Update output transfer buffer length
+          output_transfer_buffer->increase_buffer_length(
+              this_mixer->audio_stream_info_.value().frames_to_bytes(frames_to_mix));
+          size_t in_process_frames = this_mixer->audio_stream_info_.value().bytes_to_frames(
+                  output_transfer_buffer->available());  
+          this_mixer->audio_in_process_us_ = this_mixer->audio_stream_info_.value().frames_to_microseconds(
+              in_process_frames);  
+          xSemaphoreGive(this_mixer->lock_);
+        }
       } else {
         // Speaker's stream info doesn't match the output speaker's, so it's a new source speaker
         if (!this_mixer->output_speaker_->is_stopped()) {
@@ -602,16 +654,26 @@ void MixerSpeaker::audio_mixer_task(void *params) {
         }
       }
 
-      // Update source transfer buffer lengths and add new audio durations to the source speaker pending playbacks
-      for (int i = 0; i < transfer_buffers_with_data.size(); ++i) {
-        transfer_buffers_with_data[i]->decrease_buffer_length(
-            speakers_with_data[i]->get_audio_stream_info().frames_to_bytes(frames_to_mix));
-        speakers_with_data[i]->pending_playback_frames_ += frames_to_mix;
-      }
+      if (xSemaphoreTake( this_mixer->lock_, pdMS_TO_TICKS(100))) {  
+        // Update source transfer buffer lengths and add new audio durations to the source speaker pending playbacks
+        for (int i = 0; i < transfer_buffers_with_data.size(); ++i) {
+          transfer_buffers_with_data[i]->decrease_buffer_length(
+              speakers_with_data[i]->get_audio_stream_info().frames_to_bytes(frames_to_mix));
+          speakers_with_data[i]->pending_playback_frames_ += frames_to_mix;
+        }
 
-      // Update output transfer buffer length
-      output_transfer_buffer->increase_buffer_length(
-          this_mixer->audio_stream_info_.value().frames_to_bytes(frames_to_mix));
+        // Update output transfer buffer length
+        output_transfer_buffer->increase_buffer_length(
+            this_mixer->audio_stream_info_.value().frames_to_bytes(frames_to_mix));
+        
+        size_t in_process_frames = this_mixer->audio_stream_info_.value().bytes_to_frames(
+                    output_transfer_buffer->available()
+        );  
+        this_mixer->audio_in_process_us_ = this_mixer->audio_stream_info_.value().frames_to_microseconds(
+          in_process_frames
+        );
+        xSemaphoreGive(this_mixer->lock_);
+      }
     }
   }
 

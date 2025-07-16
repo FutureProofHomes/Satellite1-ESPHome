@@ -20,6 +20,8 @@ template<typename... Ts> class PlayOnDeviceMediaAction : public Action<Ts...>, p
   }
 };
 
+
+
 }  // namespace speaker
 }  // namespace esphome
 

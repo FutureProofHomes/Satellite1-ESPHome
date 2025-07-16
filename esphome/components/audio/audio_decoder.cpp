@@ -57,7 +57,6 @@ esp_err_t AudioDecoder::start(AudioFileType audio_file_type) {
   }
 
   this->audio_file_type_ = audio_file_type;
-
   this->potentially_failed_count_ = 0;
   this->end_of_file_ = false;
   this->input_transfer_buffer_->decrease_buffer_length(this->input_transfer_buffer_->available());
@@ -168,6 +167,7 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
                                                                                   first_loop_iteration);
       this->input_transfer_buffer_->decrease_buffer_length(bytes_read);                                                                            
       skip_next_frames--;
+      printf( "decoder: skipped 1 frame (%d) bytes\n", bytes_read );
     }
 
     // Decode more audio
@@ -262,7 +262,8 @@ FileDecoderState AudioDecoder::decode_flac_() {
 
     // Reallocate the output transfer buffer to the smallest necessary size
     this->free_buffer_required_ = flac_decoder_->get_output_buffer_size_bytes();
-    if (!this->output_transfer_buffer_->reallocate(this->free_buffer_required_)) {
+    // add some extra space for zero padding needed by time syncing
+    if (!this->output_transfer_buffer_->reallocate(this->free_buffer_required_ * 1.5)) {
       // Couldn't reallocate output buffer
       return FileDecoderState::FAILED;
     }
@@ -305,7 +306,8 @@ FileDecoderState AudioDecoder::decode_flac_() {
   size_t bytes_consumed = this->flac_decoder_->get_bytes_index();
   this->input_transfer_buffer_->decrease_buffer_length(bytes_consumed);
 
-  if (result > esp_audio_libs::flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
+  
+if (result > esp_audio_libs::flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
     // Corrupted frame, don't retry with current buffer content, wait for new sync
     return FileDecoderState::POTENTIALLY_FAILED;
   }

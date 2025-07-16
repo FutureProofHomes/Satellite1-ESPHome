@@ -44,7 +44,8 @@ class SourceSpeaker : public speaker::Speaker, public Component {
 
   size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) override;
   size_t play(const uint8_t *data, size_t length) override { return this->play(data, length, 0); }
-
+  size_t play_silence(size_t length_ms) override; 
+  
   void start() override;
   void stop() override;
   void finish() override;
@@ -77,8 +78,9 @@ class SourceSpeaker : public speaker::Speaker, public Component {
   void set_timeout(uint32_t ms) { this->timeout_ms_ = ms; }
 
   std::weak_ptr<audio::AudioSourceTransferBuffer> get_transfer_buffer() { return this->transfer_buffer_; }
-
- protected:
+  int64_t get_playout_time( int64_t self_buffer_us ) const override; 
+  
+  protected:
   friend class MixerSpeaker;
   esp_err_t start_();
   void stop_();
@@ -105,6 +107,8 @@ class SourceSpeaker : public speaker::Speaker, public Component {
   uint32_t last_seen_data_ms_{0};
   optional<uint32_t> timeout_ms_;
   bool stop_gracefully_{false};
+  size_t bytes_in_ringbuffer_{0};
+  SemaphoreHandle_t lock_;
 
   bool pause_state_{false};
 
@@ -124,7 +128,12 @@ class MixerSpeaker : public Component {
   void loop() override;
 
   void add_source_speaker(SourceSpeaker *source_speaker) { this->source_speakers_.push_back(source_speaker); }
-
+  size_t play_silence(size_t length_ms){ 
+    if(this->output_speaker_) {
+      return this->output_speaker_->play_silence(length_ms);
+    } else  
+      return 0; 
+    }
   /// @brief Starts the mixer task. Called by a source speaker giving the current audio stream information
   /// @param stream_info The calling source speakers audio stream information
   /// @return ESP_ERR_NOT_SUPPORTED if the incoming stream is incompatible due to unsupported bits per sample
@@ -144,6 +153,7 @@ class MixerSpeaker : public Component {
   speaker::Speaker *get_output_speaker() const { return this->output_speaker_; }
 
  protected:
+  friend SourceSpeaker;
   /// @brief Copies audio frames from the input buffer to the output buffer taking into account the number of channels
   /// in each stream. If the output stream has more channels, the input samples are duplicated. If the output stream has
   /// less channels, the extra channel input samples are dropped.
@@ -197,7 +207,8 @@ class MixerSpeaker : public Component {
   TaskHandle_t task_handle_{nullptr};
   StaticTask_t task_stack_;
   StackType_t *task_stack_buffer_{nullptr};
-
+  uint32_t audio_in_process_us_{0};
+  SemaphoreHandle_t lock_;
   optional<audio::AudioStreamInfo> audio_stream_info_;
 };
 
