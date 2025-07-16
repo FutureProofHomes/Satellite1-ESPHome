@@ -4,8 +4,9 @@
 
 #include "audio.h"
 #include "audio_transfer_buffer.h"
+#include "chunked_ring_buffer.h"
 
-#include "esphome/core/ring_buffer.h"
+
 
 #include "esp_err.h"
 
@@ -30,13 +31,8 @@ class AudioReader {
   /// @brief Constructs an AudioReader object.
   /// The transfer buffer isn't allocated here, but only if necessary (an http source) in the start function.
   /// @param buffer_size Transfer buffer size in bytes.
-  AudioReader(size_t buffer_size) : buffer_size_(buffer_size) {}
+  AudioReader(size_t buffer_size, std::weak_ptr<TimedRingBuffer> output_ring_buffer) : buffer_size_(buffer_size), output_ring_buffer_(output_ring_buffer) {}
   ~AudioReader();
-
-  /// @brief Adds a sink ring buffer for audio data. Takes ownership of the ring buffer in a shared_ptr
-  /// @param output_ring_buffer weak_ptr of a shared_ptr of the sink ring buffer to transfer ownership
-  /// @return  ESP_OK if successful, ESP_ERR_INVALID_STATE otherwise
-  esp_err_t add_sink(const std::weak_ptr<RingBuffer> &output_ring_buffer);
 
   /// @brief Starts reading an audio file from an http source. The transfer buffer is allocated here.
   /// @param uri Web url to the http file.
@@ -54,6 +50,8 @@ class AudioReader {
   /// @return AudioReaderState
   AudioReaderState read();
 
+  esp_err_t stop();
+
  protected:
   /// @brief Monitors the http client events to attempt determining the file type from the Content-Type header
   static esp_err_t http_event_handler(esp_http_client_event_t *evt);
@@ -66,8 +64,9 @@ class AudioReader {
   AudioReaderState file_read_();
   AudioReaderState http_read_();
 
-  std::shared_ptr<RingBuffer> file_ring_buffer_;
-  std::unique_ptr<AudioSinkTransferBuffer> output_transfer_buffer_;
+  std::weak_ptr<TimedRingBuffer> output_ring_buffer_;
+  timed_chunk_t *current_timed_chunk_{nullptr};
+  size_t bytes_in_chunk_{0};  // Number of bytes currently in the chunk being read
   void cleanup_connection_();
 
   size_t buffer_size_;
