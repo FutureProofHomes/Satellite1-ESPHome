@@ -27,7 +27,30 @@ audio_dac:
                 .set_command(MEDIA_PLAYER_COMMAND_MUTE)
                 .perform();
            }
-      
+
+select:
+  - platform: template
+    name: Speaker channel output
+    id: tas_mode_select
+    icon: "mdi:speaker-multiple"
+    options:
+     - "Mono (Left + Right)"
+     - "Left Channel Only"
+     - "Right Channel Only"
+    initial_option: "Mono (Left + Right)"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    on_value:
+      - tas2780.update_config:
+          channel: !lambda |-
+            auto index = id(tas_mode_select).active_index();
+            if (index.has_value()){
+              return index.value();
+            }
+            ESP_LOGI("main", "No channel selected");
+            return 0;
+
 
 binary_sensor:
   - platform: gpio
