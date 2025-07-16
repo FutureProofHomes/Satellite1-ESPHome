@@ -14,7 +14,7 @@ namespace esphome {
 namespace i2s_audio {
 
 static const size_t TASK_STACK_SIZE = 4096;
-static const ssize_t TASK_PRIORITY = 23;
+static const ssize_t TASK_PRIORITY = 17;
 
 static const char *const TAG = "i2s_audio.speaker";
 
@@ -197,7 +197,7 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t tick
     this->start();
   }
 
-  if ((this->state_ != speaker::STATE_RUNNING) || (this->audio_ring_buffer_.use_count() == 1)) {
+  if ((this->state_ != speaker::STATE_RUNNING)) { 
     // Unable to write data to a running speaker, so delay the max amount of time so it can get ready
     vTaskDelay(ticks_to_wait);
     ticks_to_wait = 0;
@@ -210,6 +210,10 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t tick
 
     // Temporarily share ownership of the ring buffer so it won't be deallocated while writing
     std::shared_ptr<RingBuffer> temp_ring_buffer = this->audio_ring_buffer_;
+    if( temp_ring_buffer->free() < length ){
+      // only allow to write all data at once
+      return 0;
+    }
     bytes_written = temp_ring_buffer->write_without_replacement((void *) data, length, ticks_to_wait);
   }
 
@@ -246,7 +250,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
 
   const size_t dma_buffer_size_bytes = this_speaker->get_dma_buffer_size_bytes();
   const uint8_t dma_buffers_count = this_speaker->get_dma_buffer_count();
-  const size_t dma_buffer_duration_ms = audio_stream_info.bytes_to_ms(dma_buffer_size_bytes);
+  const size_t dma_buffer_duration_ms = this_speaker->get_dma_buffer_size_ms();
   const size_t task_delay_ms = dma_buffer_duration_ms * dma_buffers_count / 2;
   
   const uint8_t expand_factor = this_speaker->i2s_bits_per_sample() / audio_stream_info.get_bits_per_sample();
@@ -261,7 +265,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
   if (expand_factor > 1) {
     // Allocate a scaling buffer to convert the audio data to the required bits per sample
     // The size of the scaling buffer is the same as the DMA buffer size, but with the expanded bits per sample
-    scaling_buffer = new uint8_t[dma_buffer_size_bytes * expand_factor];
+    scaling_buffer = new uint8_t[dma_buffer_size_bytes];
   } 
 #endif
   
@@ -276,10 +280,9 @@ void I2SAudioSpeaker::speaker_task(void *params) {
 
     bool stop_gracefully = false;
     uint32_t last_data_received_time = millis();
-    bool tx_dma_underflow = false;
 
     this_speaker->accumulated_frames_written_ = 0;
-
+    
     // Keep looping if paused, there is no timeout configured, or data was received more recently than the configured
     // timeout
     while (this_speaker->pause_state_ || !this_speaker->timeout_.has_value() ||
@@ -294,15 +297,10 @@ void I2SAudioSpeaker::speaker_task(void *params) {
         xEventGroupClearBits(this_speaker->event_group_, SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY);
         stop_gracefully = true;
       }
-
       if (this_speaker->audio_stream_info_ != audio_stream_info) {
         // Audio stream info changed, stop the speaker task so it will restart with the proper settings.
         break;
       }
-
-#ifdef USE_I2S_LEGACY
-      this_speaker->parent_->process_i2s_events(tx_dma_underflow);
-#endif
 
       if (this_speaker->pause_state_) {
         // Pause state is accessed atomically, so thread safe
@@ -310,6 +308,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
         delay(task_delay_ms);
         continue;
       }
+      
       // we always write full dma-buffer-sized chunks to the I2S port
       // write zeros if not enough data is available
       std::memset(this_speaker->data_buffer_, 0, read_buffer_size);
@@ -329,11 +328,12 @@ void I2SAudioSpeaker::speaker_task(void *params) {
         last_data_received_time = millis();
       }
       
-      // Write the audio data to a single DMA buffer at a time to reduce latency for the audio duration played
-      // callback.
+      // Write the audio data to a single DMA buffer at a time,
+      // limits the required size of the scaling buffer to the size of one DMA buffer
       for (uint32_t i = 0; i < dma_buffers_count; ++i) {
         const size_t bytes_to_write = read_buffer_size / dma_buffers_count;
         size_t bytes_written = 0;
+
 #ifdef USE_I2S_LEGACY
         if ( expand_factor == 1) {
             i2s_write(this_speaker->parent_->get_port(), this_speaker->data_buffer_ + i * bytes_to_write,
@@ -365,20 +365,15 @@ void I2SAudioSpeaker::speaker_task(void *params) {
           bytes_written /= 2;
         }
 #endif
-        int64_t now = esp_timer_get_time();
-
+        
         if (bytes_written != bytes_to_write) {
           xEventGroupSetBits(this_speaker->event_group_, SpeakerEventGroupBits::ERR_ESP_INVALID_SIZE);
         }
         
-        this_speaker->audio_output_callback_(audio_stream_info.bytes_to_frames(bytes_written),
-                                               now + dma_buffer_duration_ms * dma_buffers_count * 1000);
-
-        tx_dma_underflow = false;
       }
       
       // No data received
-      if ( bytes_read == 0 && stop_gracefully && tx_dma_underflow) {
+      if ( bytes_read == 0 && stop_gracefully) {
         break;
       }
     }

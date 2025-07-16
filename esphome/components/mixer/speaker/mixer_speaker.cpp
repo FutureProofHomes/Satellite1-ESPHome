@@ -14,7 +14,7 @@ namespace mixer_speaker {
 
 static const UBaseType_t MIXER_TASK_PRIORITY = 10;
 
-static const uint32_t TRANSFER_BUFFER_DURATION_MS = 50;
+static const uint32_t TRANSFER_BUFFER_DURATION_MS = 100;
 static const uint32_t TASK_DELAY_MS = 25;
 
 static const size_t TASK_STACK_SIZE = 4096;
@@ -121,6 +121,10 @@ size_t SourceSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_
   size_t bytes_written = 0;
   if (this->ring_buffer_.use_count() == 1) {
     std::shared_ptr<RingBuffer> temp_ring_buffer = this->ring_buffer_.lock();
+    if( temp_ring_buffer->free() < length )
+    {
+      return 0;
+    }
     bytes_written = temp_ring_buffer->write_without_replacement(data, length, ticks_to_wait);
     if (bytes_written > 0) {
       this->last_seen_data_ms_ = millis();
@@ -323,6 +327,9 @@ void MixerSpeaker::loop() {
   }
   if (event_group_bits & MixerEventGroupBits::STATE_STOPPING) {
     ESP_LOGD(TAG, "Stopping speaker mixer");
+    if( this->output_speaker_ != nullptr ){
+      this->output_speaker_->finish();
+    }    
     xEventGroupClearBits(this->event_group_, MixerEventGroupBits::STATE_STOPPING);
   }
   if (event_group_bits & MixerEventGroupBits::STATE_STOPPED) {
@@ -498,6 +505,10 @@ void MixerSpeaker::audio_mixer_task(void *params) {
 
     // Never shift the data in the output transfer buffer to avoid unnecessary, slow data moves
     output_transfer_buffer->transfer_data_to_sink(pdMS_TO_TICKS(TASK_DELAY_MS), false);
+    if( output_transfer_buffer->available() ){
+      vTaskDelay(TASK_DELAY_MS);
+      continue;
+    }
 
     const uint32_t output_frames_free =
         this_mixer->audio_stream_info_.value().bytes_to_frames(output_transfer_buffer->free());
