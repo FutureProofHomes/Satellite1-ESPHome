@@ -208,7 +208,7 @@ esphome logs config/satellite1.yaml
 <!-- LICENSE -->
 ## License
 
-Distributed under the ESPHOME License. See `LICENSE.txt` for more information.
+Distributed under the ESPHOME License. See `LICENSE` for more information.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -251,7 +251,7 @@ Checkout out our growing YouTube Channel  - [YouTube.com/@FutureProofHomes](http
 [issues-shield]: https://img.shields.io/github/issues/FutureProofHomes/Satellite1-ESPHome.svg?style=for-the-badge
 [issues-url]: https://github.com/FutureProofHomes/Satellite1-ESPHome/issues
 [license-shield]: https://img.shields.io/github/license/FutureProofHomes/Satellite1-ESPHome.svg?style=for-the-badge
-[license-url]: https://github.com/FutureProofHomes/Satellite1-ESPHome/blob/master/LICENSE.txt
+[license-url]: https://github.com/FutureProofHomes/Satellite1-ESPHome/blob/master/LICENSE
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 [linkedin-url]: https://linkedin.com/in/linkedin_username
 [genaimockup]: assets/images/mockup.png
