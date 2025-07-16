@@ -3,7 +3,7 @@ from esphome.components import i2c
 import esphome.config_validation as cv
 from esphome import automation
 from esphome.components.audio_dac import AudioDac, audio_dac_ns
-from esphome.const import CONF_ID, CONF_MODE
+from esphome.const import CONF_ID, CONF_MODE, CONF_CHANNEL
 
 CODEOWNERS = ["@gnumpi"]
 DEPENDENCIES = ["i2c"]
@@ -73,7 +73,8 @@ TAS2780_UPDATE_CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.use_id(tas2780),
         cv.Optional(CONF_VOL_RNG_MIN, default=.3) : cv.templatable(cv.float_range(0.,1.)),
         cv.Optional(CONF_VOL_RNG_MAX, default=1.) : cv.templatable(cv.float_range(0.,1.)),
-        cv.Optional(CONF_AMP_LEVEL_IDX) : cv.templatable(cv.int_range(0, 20))
+        cv.Optional(CONF_AMP_LEVEL_IDX) : cv.templatable(cv.int_range(0, 20)),
+        cv.Optional(CONF_CHANNEL) : cv.templatable(cv.int_range(0,2))
     }
 )
 
@@ -92,6 +93,10 @@ async def tas2780_action(config, action_id, template_arg, args):
         amp_level_idx = config.get(CONF_AMP_LEVEL_IDX)
         template_ = await cg.templatable(amp_level_idx, args, cg.uint8)
         cg.add(var.set_amp_level(template_))
+    if CONF_CHANNEL in config:
+        channel = config.get(CONF_CHANNEL)
+        template_ = await cg.templatable(channel, args, cg.uint8)
+        cg.add(var.set_channel(template_))
     
     return var
 
