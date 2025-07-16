@@ -119,6 +119,11 @@ voice_assistant:
         then:
           - lambda: id(voice_assistant_phase) = ${voice_assist_error_phase_id};
           - script.execute: control_leds
+    # Stop ducking audio.
+    - mixer_speaker.apply_ducking:
+        id: media_mixing_input
+        decibel_reduction: 0   # 0 dB means no reduction
+        duration: 1.0s
   
   # When the voice assistant starts: Play a wake up sound, duck audio.
   on_start:
