@@ -129,7 +129,8 @@ speaker:
     sample_rate: 48000
     bits_per_sample: 16
 
-
+snapcast:
+  id: snapcast_client
 
 media_player:
   - platform: speaker
@@ -139,6 +140,7 @@ media_player:
     volume_increment: 0.05
     volume_min: 0.1
     volume_max: 1.
+    snapcast: snapcast_client
     announcement_pipeline:
       speaker: announcement_resampling_speaker
       format: FLAC     # FLAC is the least processor intensive codec

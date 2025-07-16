@@ -6,7 +6,9 @@
 #include "audio_transfer_buffer.h"
 #include "chunked_ring_buffer.h"
 
-
+#if USE_SNAPCAST
+#include "esphome/components/snapcast/snapcast_stream.h"
+#endif
 
 #include "esp_err.h"
 
@@ -46,6 +48,14 @@ class AudioReader {
   /// @return ESP_OK
   esp_err_t start(AudioFile *audio_file, AudioFileType &file_type);
 
+#if USE_SNAPCAST   
+  /// @brief Starts reading an audio file from flash. No transfer buffer is allocated.
+  /// @param stream Pointer to a snapcast stream
+  /// @param file_type AudioFileType variable passed-by-reference indicating the type of file being read.
+  /// @return ESP_OK
+  esp_err_t start(snapcast::SnapcastStream* stream, AudioFileType &file_type);
+#endif
+
   /// @brief Reads new file data from the source and sends to the ring buffer sink.
   /// @return AudioReaderState
   AudioReaderState read();
@@ -63,7 +73,10 @@ class AudioReader {
 
   AudioReaderState file_read_();
   AudioReaderState http_read_();
-
+#if USE_SNAPCAST  
+  AudioReaderState snapcast_read_();
+#endif
+  
   std::weak_ptr<TimedRingBuffer> output_ring_buffer_;
   timed_chunk_t *current_timed_chunk_{nullptr};
   size_t bytes_in_chunk_{0};  // Number of bytes currently in the chunk being read
@@ -77,6 +90,10 @@ class AudioReader {
   AudioFile *current_audio_file_{nullptr};
   AudioFileType audio_file_type_{AudioFileType::NONE};
   const uint8_t *file_current_{nullptr};
+
+#if USE_SNAPCAST  
+  snapcast::SnapcastStream* snapcast_stream_{nullptr};
+#endif
 };
 }  // namespace audio
 }  // namespace esphome

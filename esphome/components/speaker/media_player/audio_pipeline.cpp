@@ -10,7 +10,7 @@
 namespace esphome {
 namespace speaker {
 
-static const uint32_t INITIAL_BUFFER_MS = 1000;  // Start playback after buffering this duration of the file
+static const uint32_t INITIAL_BUFFER_MS = 600;  // Start playback after buffering this duration of the file
 
 static const uint32_t READ_TASK_STACK_SIZE = 5 * 1024;
 static const uint32_t DECODE_TASK_STACK_SIZE = 3 * 1024;
@@ -29,13 +29,15 @@ enum EventGroupBits : uint32_t {
   READER_COMMAND_INIT_HTTP = (1 << 4),
   // Read audio from an audio file from the flash; cleared by reader task and set by start_file
   READER_COMMAND_INIT_FILE = (1 << 5),
+  // Read audio from a snapcast server; cleared by reader task and set by start_snapcast
+  READER_COMMAND_INIT_SNAPCAST = (1 << 6),
 
   // Audio file type is read after checking it is supported; cleared by decoder task
-  READER_MESSAGE_LOADED_MEDIA_TYPE = (1 << 6),
+  READER_MESSAGE_LOADED_MEDIA_TYPE = (1 << 7),
   // Reader is done (either through a failure or just end of the stream); cleared by reader task
-  READER_MESSAGE_FINISHED = (1 << 7),
+  READER_MESSAGE_FINISHED = (1 << 8),
   // Error reading the file; cleared by process_state()
-  READER_MESSAGE_ERROR = (1 << 8),
+  READER_MESSAGE_ERROR = (1 << 9),
 
   // Decoder is done (either through a faiilure or the end of the stream); cleared by decoder task
   DECODER_MESSAGE_FINISHED = (1 << 12),
@@ -69,6 +71,16 @@ void AudioPipeline::start_file(audio::AudioFile *audio_file) {
   this->current_audio_file_ = audio_file;
   this->pending_file_ = true;
 }
+
+#if USE_SNAPCAST
+void AudioPipeline::start_snapcast(snapcast::SnapcastStream* stream) {
+  if (this->is_playing_) {
+    xEventGroupSetBits(this->event_group_, PIPELINE_COMMAND_STOP);
+  }
+  this->snapcast_stream_ = stream;
+  this->pending_snapcast_ = true;
+}
+#endif
 
 esp_err_t AudioPipeline::stop() {
   xEventGroupSetBits(this->event_group_, EventGroupBits::PIPELINE_COMMAND_STOP);
@@ -150,7 +162,11 @@ AudioPipelineState AudioPipeline::process_state() {
 
   EventBits_t event_bits = xEventGroupGetBits(this->event_group_);
 
+#if USE_SNAPCAST  
+  if (this->pending_url_ || this->pending_file_ || this->pending_snapcast_) {
+#else
   if (this->pending_url_ || this->pending_file_) {
+#endif    
     // Init command pending
     if (!(event_bits & EventGroupBits::PIPELINE_COMMAND_STOP) && !this->is_playing_) {
       // Only start if there is no pending stop command
@@ -168,7 +184,13 @@ AudioPipelineState AudioPipeline::process_state() {
         this->playback_ms_ = 0;
         this->pending_file_ = false;
       }
-
+#if USE_SNAPCAST       
+      else if (this->pending_snapcast_) {
+        xEventGroupSetBits(this->event_group_, EventGroupBits::READER_COMMAND_INIT_SNAPCAST);
+        this->playback_ms_ = 0;
+        this->pending_snapcast_ = false;
+      }
+#endif
       this->is_playing_ = true;
       this->hard_stop_ = false;
       return AudioPipelineState::PLAYING;
@@ -337,6 +359,9 @@ void AudioPipeline::read_task(void *params) {
     const EventBits_t waiting_bits = (
                    EventGroupBits::READER_COMMAND_INIT_FILE
                  | EventGroupBits::READER_COMMAND_INIT_HTTP
+#if USE_SNAPCAST
+                 | EventGroupBits::READER_COMMAND_INIT_SNAPCAST
+#endif                 
                  | EventGroupBits::PIPELINE_COMMAND_STOP 
     );
     EventBits_t event_bits = 
@@ -352,6 +377,9 @@ void AudioPipeline::read_task(void *params) {
           EventGroupBits::READER_MESSAGE_FINISHED |
           EventGroupBits::READER_COMMAND_INIT_FILE |
           EventGroupBits::READER_COMMAND_INIT_HTTP
+#if USE_SNAPCAST 
+        | EventGroupBits::READER_COMMAND_INIT_SNAPCAST
+#endif
       );
 
       InfoErrorEvent event;
@@ -366,6 +394,11 @@ void AudioPipeline::read_task(void *params) {
       } else if (event_bits & EventGroupBits::READER_COMMAND_INIT_HTTP) {
         err = reader->start(this_pipeline->current_uri_, this_pipeline->current_audio_file_type_);
       } 
+#if USE_SNAPCAST        
+      else if (event_bits & EventGroupBits::READER_COMMAND_INIT_SNAPCAST) {
+        err = reader->start(this_pipeline->snapcast_stream_, this_pipeline->current_audio_file_type_);
+      }
+#endif
       
       if (err != ESP_OK) {
         // Send specific error message
@@ -539,7 +572,8 @@ void AudioPipeline::decode_task(void *params) {
 
         if (!started_playback && has_stream_info) {
           // Verify enough data is available before starting playback
-          if (this_pipeline->reader_output_rb_->bytes_available() >= initial_bytes_to_buffer ) {
+          size_t curr_bytes = this_pipeline->reader_output_rb_->bytes_available();
+          if ( curr_bytes >= initial_bytes_to_buffer ) {
             started_playback = true;
           }
         }

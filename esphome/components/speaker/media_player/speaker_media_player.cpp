@@ -9,6 +9,10 @@
 #include "esphome/components/ota/ota_backend.h"
 #endif
 
+#if USE_SNAPCAST
+#include "esphome/components/snapcast/snapcast_client.h"
+#endif
+
 namespace esphome {
 namespace speaker {
 
@@ -107,7 +111,11 @@ void SpeakerMediaPlayer::setup() {
       this->mark_failed();
     }
   }
-
+#if USE_SNAPCAST    
+  if( this->snapcast_client_ != nullptr ){
+    this->snapcast_client_->set_media_player(this);
+  }
+#endif
   ESP_LOGI(TAG, "Set up speaker media player");
 }
 
@@ -379,6 +387,13 @@ void SpeakerMediaPlayer::loop() {
         }
         this->curr_media_item_ = next_item.value();
         if( next_item.value().url.has_value()){
+#if USE_SNAPCAST                
+          if( this->snapcast_client_ && this->snapcast_client_->is_snapcast_url(next_item.value().url.value())){
+            this->snapcast_client_->connect_to_url(next_item.value().url.value());
+            this->media_pipeline_->start_snapcast( this->snapcast_client_->get_stream() );
+          } 
+          else 
+#endif               
           {
             this->media_pipeline_->start_url(next_item.value().url.value());
           }
@@ -426,6 +441,21 @@ void SpeakerMediaPlayer::play_file(audio::AudioFile *media_file, bool announceme
   media_command.enqueue = enqueue;
   xQueueSend(this->media_control_command_queue_, &media_command, portMAX_DELAY);
 }
+
+#if USE_SNAPCAST  
+void SpeakerMediaPlayer::play_snapcast_stream(const std::string &server_uri) {
+  if (!this->is_ready()) {
+    // Ignore any commands sent before the media player is setup
+    return;
+  }
+
+  MediaCallCommand media_command;
+  media_command.url = new std::string(server_uri); //will be deleted in watch_media_commands_()
+  media_command.announce = false;
+  media_command.enqueue = false;
+  xQueueSend(this->media_control_command_queue_, &media_command, portMAX_DELAY); 
+}
+#endif
 
 void SpeakerMediaPlayer::control(const media_player::MediaPlayerCall &call) {
   if (!this->is_ready()) {
@@ -547,7 +577,11 @@ void SpeakerMediaPlayer::set_volume_(float volume, bool publish) {
   } else {
     this->set_mute_state_(false);
   }
-
+#if USE_SNAPCAST    
+  if( this->snapcast_client_ ){
+    this->snapcast_client_->report_volume(volume, this->is_muted_);
+  }
+#endif
   this->defer([this, volume]() { this->volume_trigger_->trigger(volume); });
 }
 

@@ -16,6 +16,11 @@
 #include <freertos/queue.h>
 
 namespace esphome {
+#if USE_SNAPCAST 
+namespace snapcast {
+class SnapcastStream;
+}
+#endif
 namespace speaker {
 
 // Internal sink/source buffers for reader and decoder
@@ -77,6 +82,13 @@ class AudioPipeline {
   /// @return ESP_OK if successful or an appropriate error if not
   void start_file(audio::AudioFile *audio_file);
 
+#if USE_SNAPCAST  
+  /// @brief Starts an audio pipeline given a pointer to a snapcast stream
+  /// @param stream Pointer to a snapcast stream
+  /// @return ESP_OK if successful or an appropriate error if not
+    void start_snapcast(snapcast::SnapcastStream* stream);
+#endif
+
   /// @brief Stops the pipeline. Sends a stop signal to each task (if running) and clears the ring buffers.
   /// @return ESP_OK if successful or ESP_ERR_TIMEOUT if the tasks did not indicate they stopped
   esp_err_t stop();
@@ -120,12 +132,16 @@ class AudioPipeline {
   // Pending file start state used to ensure the pipeline fully stops before attempting to start the next file
   bool pending_url_{false};
   bool pending_file_{false};
-
+#if USE_SNAPCAST    
+  bool pending_snapcast_{false};
+#endif
   speaker::Speaker *speaker_{nullptr};
 
   std::string current_uri_{};
   audio::AudioFile *current_audio_file_{nullptr};
-
+#if USE_SNAPCAST    
+  snapcast::SnapcastStream* snapcast_stream_{nullptr};
+#endif
   audio::AudioFileType current_audio_file_type_;
   audio::AudioStreamInfo current_audio_stream_info_;
 
