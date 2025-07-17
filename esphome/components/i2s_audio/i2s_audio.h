@@ -306,6 +306,9 @@ public:
   size_t get_dma_buffer_size_bytes() const { 
    return this->parent_->dma_buffer_length_ * this->num_of_channels() * this->i2s_bits_per_sample() / 8;
   }
+  size_t get_dma_buffer_size_ms() const { 
+   return this->parent_->dma_buffer_length_ * 1000 / this->sample_rate_;
+  }
   uint8_t get_dma_buffer_count() const { return this->parent_->dma_buffer_count_; }
   
   void register_at_parent() override {

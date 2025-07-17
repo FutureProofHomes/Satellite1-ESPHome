@@ -14,7 +14,7 @@ namespace esphome {
 namespace i2s_audio {
 
 static const size_t TASK_STACK_SIZE = 4096;
-static const ssize_t TASK_PRIORITY = 23;
+static const ssize_t TASK_PRIORITY = 17;
 
 static const char *const TAG = "i2s_audio.speaker";
 
@@ -96,6 +96,8 @@ void I2SAudioSpeaker::setup() {
     this->mark_failed();
     return;
   }
+
+  this->lock_ = xSemaphoreCreateMutex();
 }
 
 void I2SAudioSpeaker::loop() {
@@ -197,7 +199,7 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t tick
     this->start();
   }
 
-  if ((this->state_ != speaker::STATE_RUNNING) || (this->audio_ring_buffer_.use_count() == 1)) {
+  if ((this->state_ != speaker::STATE_RUNNING)) { 
     // Unable to write data to a running speaker, so delay the max amount of time so it can get ready
     vTaskDelay(ticks_to_wait);
     ticks_to_wait = 0;
@@ -210,9 +212,16 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t tick
 
     // Temporarily share ownership of the ring buffer so it won't be deallocated while writing
     std::shared_ptr<RingBuffer> temp_ring_buffer = this->audio_ring_buffer_;
-    bytes_written = temp_ring_buffer->write_without_replacement((void *) data, length, ticks_to_wait);
+    if( temp_ring_buffer->free() < length ){
+      // only allow to write all data at once
+      return 0;
+    }
+    if (xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10))){
+      bytes_written = temp_ring_buffer->write_without_replacement((void *) data, length, ticks_to_wait);
+      this->bytes_in_ringbuffer_ = temp_ring_buffer->available();
+      xSemaphoreGive(this->lock_);
+    }
   }
-
   return bytes_written;
 }
 
@@ -246,7 +255,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
 
   const size_t dma_buffer_size_bytes = this_speaker->get_dma_buffer_size_bytes();
   const uint8_t dma_buffers_count = this_speaker->get_dma_buffer_count();
-  const size_t dma_buffer_duration_ms = audio_stream_info.bytes_to_ms(dma_buffer_size_bytes);
+  const size_t dma_buffer_duration_ms = this_speaker->get_dma_buffer_size_ms();
   const size_t task_delay_ms = dma_buffer_duration_ms * dma_buffers_count / 2;
   
   const uint8_t expand_factor = this_speaker->i2s_bits_per_sample() / audio_stream_info.get_bits_per_sample();
@@ -261,7 +270,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
   if (expand_factor > 1) {
     // Allocate a scaling buffer to convert the audio data to the required bits per sample
     // The size of the scaling buffer is the same as the DMA buffer size, but with the expanded bits per sample
-    scaling_buffer = new uint8_t[dma_buffer_size_bytes * expand_factor];
+    scaling_buffer = new uint8_t[dma_buffer_size_bytes];
   } 
 #endif
   
@@ -276,10 +285,9 @@ void I2SAudioSpeaker::speaker_task(void *params) {
 
     bool stop_gracefully = false;
     uint32_t last_data_received_time = millis();
-    bool tx_dma_underflow = false;
 
-    this_speaker->accumulated_frames_written_ = 0;
-
+    this_speaker->last_dma_write_ = 0;
+    
     // Keep looping if paused, there is no timeout configured, or data was received more recently than the configured
     // timeout
     while (this_speaker->pause_state_ || !this_speaker->timeout_.has_value() ||
@@ -294,15 +302,10 @@ void I2SAudioSpeaker::speaker_task(void *params) {
         xEventGroupClearBits(this_speaker->event_group_, SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY);
         stop_gracefully = true;
       }
-
       if (this_speaker->audio_stream_info_ != audio_stream_info) {
         // Audio stream info changed, stop the speaker task so it will restart with the proper settings.
         break;
       }
-
-#ifdef USE_I2S_LEGACY
-      this_speaker->parent_->process_i2s_events(tx_dma_underflow);
-#endif
 
       if (this_speaker->pause_state_) {
         // Pause state is accessed atomically, so thread safe
@@ -310,14 +313,61 @@ void I2SAudioSpeaker::speaker_task(void *params) {
         delay(task_delay_ms);
         continue;
       }
+      
       // we always write full dma-buffer-sized chunks to the I2S port
       // write zeros if not enough data is available
       std::memset(this_speaker->data_buffer_, 0, read_buffer_size);
-      size_t bytes_read = this_speaker->audio_ring_buffer_->read(
-          (void *) this_speaker->data_buffer_, 
-          read_buffer_size,
-          pdMS_TO_TICKS(task_delay_ms)
-      );
+      //fill up all dma-buffers with zeros, gives a defined playout time
+      if( this_speaker->last_dma_write_ == 0 ){
+        size_t bytes_written = 0;
+        if( expand_factor == 1) {
+            i2s_channel_write(this_speaker->parent_->get_tx_handle(), this_speaker->data_buffer_,
+                          read_buffer_size, &bytes_written, 0);
+        } else if (expand_factor == 2) {
+          std::memset(scaling_buffer, 0, dma_buffer_size_bytes);
+          for (uint32_t i = 0; i < dma_buffers_count; ++i) {
+            esp_err_t err = i2s_channel_write(
+              this_speaker->parent_->get_tx_handle(), 
+              scaling_buffer,
+              dma_buffer_size_bytes, 
+              &bytes_written, 
+              0
+            );
+            if( bytes_written != dma_buffer_size_bytes){
+              break;
+            }
+          }  
+        }
+        this_speaker->last_dma_write_ = esp_timer_get_time();
+      }
+
+      size_t delay_bytes = 0;
+      size_t bytes_read = 0;
+      if(xSemaphoreTake( this_speaker->lock_, pdMS_TO_TICKS(10))) {            
+        delay_bytes = audio_stream_info.frames_to_bytes(this_speaker->padded_zero_frames_);
+        if( read_buffer_size > delay_bytes ){
+            size_t to_read = read_buffer_size - delay_bytes; 
+        
+            bytes_read = this_speaker->audio_ring_buffer_->read(
+              (void *) this_speaker->data_buffer_, 
+              to_read,
+              pdMS_TO_TICKS(task_delay_ms)
+            );
+            
+            this_speaker->bytes_in_ringbuffer_ -= bytes_read;
+            this_speaker->padded_zero_frames_  -= audio_stream_info.bytes_to_frames(delay_bytes);
+            this_speaker->in_write_buffer_ = read_buffer_size;  
+          
+        } else {
+          // don't read any bytes, write zeros to all DMA buffers instead
+          delay_bytes = read_buffer_size;
+          this_speaker->padded_zero_frames_ -= std::min( this_speaker->padded_zero_frames_, (size_t) audio_stream_info.bytes_to_frames(delay_bytes));
+          this_speaker->in_write_buffer_ = read_buffer_size;
+        }
+        xSemaphoreGive(this_speaker->lock_);
+      } else {
+        continue;
+      }
       
       if ( bytes_read > 0 && (audio_stream_info.get_bits_per_sample() == 16) && (this_speaker->q15_volume_factor_ < INT16_MAX)) {
         // Scale samples by the volume factor in place
@@ -329,11 +379,12 @@ void I2SAudioSpeaker::speaker_task(void *params) {
         last_data_received_time = millis();
       }
       
-      // Write the audio data to a single DMA buffer at a time to reduce latency for the audio duration played
-      // callback.
+      // Write the audio data to a single DMA buffer at a time,
+      // limits the required size of the scaling buffer to the size of one DMA buffer
       for (uint32_t i = 0; i < dma_buffers_count; ++i) {
         const size_t bytes_to_write = read_buffer_size / dma_buffers_count;
         size_t bytes_written = 0;
+
 #ifdef USE_I2S_LEGACY
         if ( expand_factor == 1) {
             i2s_write(this_speaker->parent_->get_port(), this_speaker->data_buffer_ + i * bytes_to_write,
@@ -365,24 +416,24 @@ void I2SAudioSpeaker::speaker_task(void *params) {
           bytes_written /= 2;
         }
 #endif
-        int64_t now = esp_timer_get_time();
-
+        
         if (bytes_written != bytes_to_write) {
           xEventGroupSetBits(this_speaker->event_group_, SpeakerEventGroupBits::ERR_ESP_INVALID_SIZE);
         }
-        
-        this_speaker->audio_output_callback_(audio_stream_info.bytes_to_frames(bytes_written),
-                                               now + dma_buffer_duration_ms * dma_buffers_count * 1000);
-
-        tx_dma_underflow = false;
       }
-      
+      if(xSemaphoreTake( this_speaker->lock_, pdMS_TO_TICKS(10))) {  
+        this_speaker->in_write_buffer_ = 0;
+        this_speaker->last_dma_write_ = esp_timer_get_time();
+        xSemaphoreGive(this_speaker->lock_);
+      }
+
       // No data received
-      if ( bytes_read == 0 && stop_gracefully && tx_dma_underflow) {
+      if ( bytes_read == 0 && stop_gracefully) {
         break;
       }
     }
-
+    
+    this_speaker->last_dma_write_ = 0;
     xEventGroupSetBits(this_speaker->event_group_, SpeakerEventGroupBits::STATE_STOPPING);
 
     this_speaker->stop_i2s_channel_();
@@ -414,6 +465,54 @@ void I2SAudioSpeaker::start() {
     }
   }
 }
+
+size_t I2SAudioSpeaker::play_silence(size_t length_ms){
+  audio::AudioStreamInfo audio_stream_info = this->audio_stream_info_;
+  if (xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10))){
+    this->padded_zero_frames_ += audio_stream_info.ms_to_frames(length_ms);
+    xSemaphoreGive(this->lock_);
+  }
+  return this->padded_zero_frames_;
+}
+
+
+int64_t I2SAudioSpeaker::get_playout_time( int64_t add_buffer_us ) const {
+  if( this->audio_ring_buffer_ == nullptr ){
+    return 0;
+  }
+  audio::AudioStreamInfo audio_stream_info = this->audio_stream_info_;
+  const size_t dma_buffer_duration_us = this->get_dma_buffer_size_ms() * 1000;
+  const uint8_t dma_buffers_count = this->get_dma_buffer_count();
+  int64_t playout_at = 0;
+  uint32_t pending_frames = 0;
+  if (xSemaphoreTake(this->lock_, pdMS_TO_TICKS(10))){
+      int64_t now = esp_timer_get_time();
+      playout_at  = now;
+      playout_at += add_buffer_us;  
+      
+      pending_frames  = this->audio_stream_info_.bytes_to_frames(this->bytes_in_ringbuffer_ + this->in_write_buffer_);
+      pending_frames += this->padded_zero_frames_;
+      playout_at += this->audio_stream_info_.frames_to_microseconds(pending_frames);
+      
+      //pending in DMA buffers
+      int64_t time_delta = now - this->last_dma_write_;
+      int64_t in_dma_buffer = static_cast<int64_t>(dma_buffers_count) * dma_buffer_duration_us - time_delta;
+      if (in_dma_buffer > 0) {
+          playout_at += static_cast<uint32_t>(in_dma_buffer);
+      }
+      
+      //printf( "pending-ringbuffer: %d\n", this->audio_stream_info_.bytes_to_ms(this->bytes_in_ringbuffer_));
+      //printf( "pending-zeros: %d\n", this->audio_stream_info_.frames_to_microseconds(this->padded_zero_frames_) / 1000);
+      //printf( "dma-buffer: %d (time_delta: %d)\n", in_dma_buffer, time_delta);
+      //printf( "Speaker: returning %d us\n" , playout_at );
+      xSemaphoreGive(this->lock_);
+  }
+  
+  return playout_at;
+}
+
+
+
 
 void I2SAudioSpeaker::stop() { this->stop_(false); }
 
@@ -501,7 +600,8 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_(audio::AudioStreamInfo &audio_strea
 
 void I2SAudioSpeaker::delete_task_(size_t buffer_size) {
   this->audio_ring_buffer_.reset();  // Releases ownership of the shared_ptr
-
+  this->bytes_in_ringbuffer_ = 0;
+  
   if (this->data_buffer_ != nullptr) {
     ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
     allocator.deallocate(this->data_buffer_, buffer_size);
