@@ -103,13 +103,6 @@ class Speaker {
 
   audio::AudioStreamInfo &get_audio_stream_info() { return this->audio_stream_info_; }
 
-  /// Callback function for sending the duration of the audio written to the speaker since the last callback.
-  /// Parameters:
-  ///   - Frames played
-  ///   - System time in microseconds when the frames were written to the DAC
-  void add_audio_output_callback(std::function<void(uint32_t, int64_t)> &&callback) {
-    this->audio_output_callback_.add(std::move(callback));
-  }
   virtual int64_t get_playout_time( int64_t self_buffer_us ) const { return 0; }
  
   protected:
@@ -122,7 +115,6 @@ class Speaker {
   audio_dac::AudioDac *audio_dac_{nullptr};
 #endif
 
-  CallbackManager<void(uint32_t, int64_t)> audio_output_callback_{};
 };
 
 }  // namespace speaker

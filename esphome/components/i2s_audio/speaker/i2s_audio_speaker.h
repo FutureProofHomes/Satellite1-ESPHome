@@ -128,14 +128,11 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
 
   int16_t q15_volume_factor_{INT16_MAX};
   
-  size_t bytes_written_{0};
-  uint32_t accumulated_frames_written_{0};
   int64_t last_dma_write_{0};
   size_t padded_zero_frames_{0};
   size_t bytes_in_ringbuffer_{0};
   size_t in_write_buffer_{0};
   SemaphoreHandle_t lock_;
-  size_t ringbuffer_size_{0};
 };
 
 }  // namespace i2s_audio

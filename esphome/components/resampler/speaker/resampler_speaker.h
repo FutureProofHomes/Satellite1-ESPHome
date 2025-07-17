@@ -111,8 +111,7 @@ class ResamplerSpeaker : public Component, public speaker::Speaker {
   uint32_t target_sample_rate_;
 
   uint32_t buffer_duration_ms_;
-
-  uint64_t callback_remainder_{0};
+  
 };
 
 }  // namespace resampler
