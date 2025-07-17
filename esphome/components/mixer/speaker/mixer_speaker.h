@@ -118,7 +118,6 @@ class SourceSpeaker : public speaker::Speaker, public Component {
   uint32_t ducking_transition_samples_remaining_{0};
   uint32_t samples_per_ducking_step_{0};
 
-  uint32_t pending_playback_frames_{0};
 };
 
 class MixerSpeaker : public Component {

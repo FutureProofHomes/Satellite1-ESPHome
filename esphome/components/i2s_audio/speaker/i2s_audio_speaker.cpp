@@ -286,7 +286,6 @@ void I2SAudioSpeaker::speaker_task(void *params) {
     bool stop_gracefully = false;
     uint32_t last_data_received_time = millis();
 
-    this_speaker->accumulated_frames_written_ = 0;
     this_speaker->last_dma_write_ = 0;
     
     // Keep looping if paused, there is no timeout configured, or data was received more recently than the configured

@@ -43,18 +43,6 @@ void ResamplerSpeaker::setup() {
     return;
   }
 
-  this->output_speaker_->add_audio_output_callback([this](uint32_t new_frames, int64_t write_timestamp) {
-    if (this->audio_stream_info_.get_sample_rate() != this->target_stream_info_.get_sample_rate()) {
-      // Convert the number of frames from the target sample rate to the source sample rate. Track the remainder to
-      // avoid losing frames from integer division truncation.
-      const uint64_t numerator = new_frames * this->audio_stream_info_.get_sample_rate() + this->callback_remainder_;
-      const uint64_t denominator = this->target_stream_info_.get_sample_rate();
-      this->callback_remainder_ = numerator % denominator;
-      this->audio_output_callback_(numerator / denominator, write_timestamp);
-    } else {
-      this->audio_output_callback_(new_frames, write_timestamp);
-    }
-  });
 }
 
 void ResamplerSpeaker::loop() {
