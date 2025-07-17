@@ -205,21 +205,25 @@ error_t SnapcastClient::connect_via_mdns(){
     uint32_t port = 0;
     mdns_result_t *r = results;
     while(r){
+        std::string check_ip;
+        if( r->addr && r->addr->addr.type == ESP_IPADDR_TYPE_V4 ){
+            mdns_ip_addr_t *a = r->addr;
+            char buffer[16];  // Enough for "255.255.255.255\0"
+            snprintf(buffer, sizeof(buffer), IPSTR, IP2STR(&(a->addr.u_addr.ip4)));
+            check_ip = std::string(buffer);   
+        } else {
+            check_ip = resolve_mdns_host( r->hostname);
+        }
+        if(!check_ip.empty()){
+            ma_snapcast_ip = check_ip;
+            ma_snapcast_hostname = std::string(r->hostname) + ".local";
+            port = r->port;
+        }
         if (r->txt_count) {
             for (int t = 0; t < r->txt_count; t++) {
                 if( strcmp(r->txt[t].key, "is_mass") == 0){
-                    ma_snapcast_hostname = std::string(r->hostname) + ".local";
-                    port = r->port;
-                    if( r->addr && r->addr->addr.type == ESP_IPADDR_TYPE_V4 ){
-                         mdns_ip_addr_t *a = r->addr;
-                         char buffer[16];  // Enough for "255.255.255.255\0"
-                         snprintf(buffer, sizeof(buffer), IPSTR, IP2STR(&(a->addr.u_addr.ip4)));
-                         ma_snapcast_ip = std::string(buffer);   
-                    } else {
-                        ma_snapcast_ip = resolve_mdns_host( r->hostname);
-                    }
-                    ESP_LOGI(TAG, "MA-Snapcast server found: %s:%d", ma_snapcast_hostname.c_str(), port );
-                    ESP_LOGI(TAG, "resolved: %s:%d\n", ma_snapcast_ip.c_str(), port );
+                    // if music assistant snapcast server is among found servers, take it
+                    if(!check_ip.empty()) break;
                 }
             }
         }
@@ -228,6 +232,9 @@ error_t SnapcastClient::connect_via_mdns(){
     mdns_query_results_free(results);
 
     if( !ma_snapcast_ip.empty() ){
+        ESP_LOGI(TAG, "MA-Snapcast server found: %s:%d", ma_snapcast_hostname.c_str(), port );
+        ESP_LOGI(TAG, "resolved: %s:%d\n", ma_snapcast_ip.c_str(), port );
+        
         this->connect_to_server( ma_snapcast_ip, port, 1705);
         return ESP_OK;
     }
