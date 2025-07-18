@@ -78,7 +78,7 @@ switch:
     bluetooth:
       name: "Bluetooth"
     multi_target:
-      name: Multi Target Tracking"
+      name: "Multi Target Tracking"
 
 
 select:

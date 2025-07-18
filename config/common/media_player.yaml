@@ -27,7 +27,30 @@ audio_dac:
                 .set_command(MEDIA_PLAYER_COMMAND_MUTE)
                 .perform();
            }
-      
+
+select:
+  - platform: template
+    name: Speaker channel output
+    id: tas_mode_select
+    icon: "mdi:speaker-multiple"
+    options:
+     - "Mono (Left + Right)"
+     - "Left Channel Only"
+     - "Right Channel Only"
+    initial_option: "Mono (Left + Right)"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    on_value:
+      - tas2780.update_config:
+          channel: !lambda |-
+            auto index = id(tas_mode_select).active_index();
+            if (index.has_value()){
+              return index.value();
+            }
+            ESP_LOGI("main", "No channel selected");
+            return 0;
+
 
 binary_sensor:
   - platform: gpio
@@ -36,7 +59,7 @@ binary_sensor:
       pcm5122: 
       pin: 4
       inverted: false
-    name: "line-out jack"
+    name: "Line-Out Connected"
     icon: "mdi:audio-input-stereo-minijack"
     filters:
       - delayed_on: 200ms
@@ -97,7 +120,6 @@ speaker:
   - platform: i2s_audio
     id: i2s_audio_speaker
     sample_rate: 48000
-    i2s_clock_mode: external
     i2s_dout_pin: GPIO9
     bits_per_sample: 32bit
     i2s_audio_id: i2s_shared
@@ -130,7 +152,8 @@ speaker:
     sample_rate: 48000
     bits_per_sample: 16
 
-
+snapcast:
+  id: snapcast_client
 
 media_player:
   - platform: speaker
@@ -140,6 +163,7 @@ media_player:
     volume_increment: 0.05
     volume_min: 0.1
     volume_max: 1.
+    snapcast: snapcast_client
     announcement_pipeline:
       speaker: announcement_resampling_speaker
       format: FLAC     # FLAC is the least processor intensive codec

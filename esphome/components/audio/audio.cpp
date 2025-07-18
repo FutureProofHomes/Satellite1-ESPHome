@@ -20,7 +20,9 @@ AudioStreamInfo::AudioStreamInfo(uint8_t bits_per_sample, uint8_t channels, uint
 }
 
 uint32_t AudioStreamInfo::frames_to_microseconds(uint32_t frames) const {
-  return (frames * 1000000 + (this->sample_rate_ >> 1)) / this->sample_rate_;
+  return static_cast<uint32_t>(
+    (static_cast<uint64_t>(frames) * 1000000 + (this->sample_rate_ >> 1)) / this->sample_rate_
+  );
 }
 
 uint32_t AudioStreamInfo::frames_to_milliseconds_with_remainder(uint32_t *total_frames) const {
