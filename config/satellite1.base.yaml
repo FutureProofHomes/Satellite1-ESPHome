@@ -13,7 +13,7 @@ substitutions:
   component_name: Core
   
   esp32_fw_version: dev
-  xmos_fw_version: "v1.0.2"
+  xmos_fw_version: "v1.0.3-alpha.2"
 
 
 globals:
@@ -123,8 +123,8 @@ memory_flasher:
     id: xflash
     embed_flash_image:
       image_version: ${xmos_fw_version}
-      image_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
-      md5_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
+      image_file: https://github.com/FutureProofHomes/Satellite1-XMOS/releases/download/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
+      md5_file: https://github.com/FutureProofHomes/Satellite1-XMOS/releases/download/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
 
     on_flashing_start:    
       then:
