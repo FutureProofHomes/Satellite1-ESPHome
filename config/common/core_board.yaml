@@ -9,7 +9,9 @@ esp32:
   flash_size: 16MB
   framework:
     type: esp-idf
-    version: recommended
+    version: 5.1.6
+    platform_version: 51.3.7
+
     sdkconfig_options:
       CONFIG_ESP32_S3_BOX_BOARD: "y"
       CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
