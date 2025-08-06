@@ -13,7 +13,7 @@ substitutions:
   component_name: Core
   
   esp32_fw_version: dev
-  xmos_fw_version: "v1.0.2"
+  xmos_fw_version: "v1.0.3"
 
 
 globals:
