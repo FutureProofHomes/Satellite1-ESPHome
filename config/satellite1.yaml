@@ -113,7 +113,8 @@ external_components:
         - memory_flasher
         - microphone
         - mixer
-        - pcm5122 
+        - pcm5122
+        - psram 
         - resampler 
         - satellite1 
         - snapcast
