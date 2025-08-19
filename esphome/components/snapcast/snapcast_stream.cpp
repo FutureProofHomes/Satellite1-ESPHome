@@ -23,6 +23,7 @@
 
 extern "C" {
   #include <sys/select.h>
+  #include <sys/socket.h>
   #include <sys/time.h>
   #include <sys/types.h>
   #include <unistd.h>
@@ -30,8 +31,6 @@ extern "C" {
 }
 
 
-#include "esp_transport.h"
-#include "esp_transport_tcp.h"
 
 #include "esp_mac.h"
 
@@ -45,7 +44,7 @@ static uint8_t tx_buffer[1024];
 static uint8_t rx_buffer[4096];
 static uint32_t rx_buffer_length = 0; 
 
-static const uint8_t STREAM_TASK_PRIORITY = 15;
+static const uint8_t STREAM_TASK_PRIORITY = 14;
 static const uint32_t CONNECTION_TIMEOUT_MS = 2000;
 static const size_t TASK_STACK_SIZE = 4 * 1024;
 static const uint32_t TIME_SYNC_INTERVAL_MS =  2000;
@@ -180,50 +179,48 @@ static void transport_task_(
                 TaskHandle_t stream_task_handle,
                 TimeStats* time_stats ){
     
-                    constexpr size_t HEADER_SIZE = sizeof(MessageHeader);
-    esp_transport_handle_t transport = nullptr;
-    
+    constexpr size_t HEADER_SIZE = sizeof(MessageHeader);
     
     while( true ){
-        uint32_t notify_value;
+        uint32_t notify_value = 0;
         xTaskNotifyWait(0, CONNECT_BIT | STOP_BIT, &notify_value, portMAX_DELAY);
-
-        if (notify_value & STOP_BIT) {
-            break;
-        }
-        
-        if (!(notify_value & CONNECT_BIT)) {
-            continue;  // Shouldn't happen, but safe
-        }
+        if (notify_value & STOP_BIT) break;
+        if (!(notify_value & CONNECT_BIT)) continue;
         
         
-        // Initialize transport
-        transport = esp_transport_tcp_init();
-        if( !transport ){
+        // === Create socket and connect ===
+        int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+        if (sock < 0) {
+            ESP_LOGE("transport", "Failed to create socket: errno %d", errno);
             xTaskNotify(stream_task_handle, CONNECTION_FAILED_BIT, eSetBits);
             continue;
         }
-       
-        error_t err = esp_transport_connect(transport, server.c_str(), port, CONNECTION_TIMEOUT_MS);
         
-        if (err != ESP_OK) {
-            if( transport ){
-                esp_transport_close(transport);
-                esp_transport_destroy(transport);
-                transport = nullptr;
-            }
+        struct sockaddr_in dest_addr;
+        dest_addr.sin_addr.s_addr = inet_addr(server.c_str());  // Make sure it's a numeric IP
+        dest_addr.sin_family = AF_INET;
+        dest_addr.sin_port = htons(port);
+        
+        int err = connect(sock, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
+        if (err != 0) {
+            ESP_LOGE("transport", "Socket unable to connect: errno %d", errno);
+            close(sock);
             xTaskNotify(stream_task_handle, CONNECTION_FAILED_BIT, eSetBits);
-            continue;               
+            continue;
         }
         
-        esp_transport_keep_alive_t keep_alive_config = {
-            .keep_alive_enable = true,
-            .keep_alive_idle = 10000, // 10 seconds
-            .keep_alive_interval = 5000, // 5 seconds
-            .keep_alive_count = 5, // Number of keep-alive probes to send before considering the connection dead
-        };
-        esp_transport_tcp_set_keep_alive(transport, &keep_alive_config);    
-
+        // TCP_NODELAY
+        int one = 1;
+        setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+        setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof(one));
+#ifdef TCP_KEEPIDLE
+        int idle=30, intvl=5, cnt=3;
+        setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE,  &idle, sizeof(idle));
+        setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
+        setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT,   &cnt,   sizeof(cnt));
+#endif
+        int flags = lwip_fcntl(sock, F_GETFL, 0);
+        lwip_fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 
         // Notify the RX task that the connection is established
         xTaskNotify(stream_task_handle, CONNECTION_ESTABLISHED_BIT, eSetBits);
@@ -249,11 +246,20 @@ static void transport_task_(
                 to_read = msg->getMessageSize() - rx_buffer_length;
             }
 
-            
-            int poll_result = esp_transport_poll_read(transport, 50);
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            FD_SET(sock, &read_fds);
+            struct timeval timeout = {0, 500000};  // 500ms
+            int sel = lwip_select(sock + 1, &read_fds, NULL, NULL, &timeout);
+            if (sel < 0) {
+                ESP_LOGE("transport", "select() error: errno %d", errno);
+                break;
+            } else if (sel == 0) {
+                // Timeout, nothing ready to read
+            } else if (FD_ISSET(sock, &read_fds)) {
+                tv_t now = tv_t::now();
 
-            if (poll_result > 0) {
-                int len = esp_transport_read(transport, (char*) rx_buffer + rx_buffer_length, to_read, 50);
+                int len = recv(sock, (char*)rx_buffer + rx_buffer_length, to_read, 0);
                 if (len <= 0) {
                     // Handle reconnect or exit
                     xTaskNotify(stream_task_handle, CONNECTION_DROPPED_BIT, eSetBits);
@@ -267,7 +273,6 @@ static void transport_task_(
                     MessageHeader* msg = reinterpret_cast<MessageHeader*>(rx_buffer);
 
                     if( !time_set ){
-                        tv_t now = tv_t::now();
                         msg->received = now;
                         time_set = true;
                     }
@@ -291,17 +296,13 @@ static void transport_task_(
                         time_set = false;
                     }
                 }
-            } else if( poll_result < 0 ) {
-                // Error occurred
-                xTaskNotify(stream_task_handle, CONNECTION_DROPPED_BIT, eSetBits);
-                break;
             }
 
             SnapcastMessage* msg;
             if (xQueueReceive(outgoing_queue, &msg, 0) == pdPASS) {
                 msg->set_send_time();
                 msg->toBytes(tx_buffer);
-                int bytes_written = esp_transport_write( transport, (char*) tx_buffer, msg->getMessageSize(), 0);
+                int bytes_written = send(sock, (char*) tx_buffer, msg->getMessageSize(), 0);
                 if (bytes_written > 0 && msg->getMessageType() == message_type::kTime) {
                     time_stats->set_request_time(tv_t::now());
                 }
@@ -309,18 +310,11 @@ static void transport_task_(
                 
             }
         }
-        
-        esp_transport_close(transport);
-        esp_transport_destroy(transport);
-        transport = nullptr;
+        close(sock);
         xTaskNotify(stream_task_handle, CONNECTION_CLOSED_BIT, eSetBits);
     }
     
     xTaskNotify(stream_task_handle, TASK_CLOSING_BIT, eSetBits);
-    if (transport) {
-        esp_transport_close(transport);
-        esp_transport_destroy(transport);
-    }
 }
 
 
@@ -349,7 +343,7 @@ esp_err_t SnapcastStream::read_and_process_messages_(ChunkedRingBuffer* read_rin
         
         MessageHeader *msg = reinterpret_cast<MessageHeader *>(chunk);
         if( len < msg->getMessageSize() ){
-            // incomplete message, wait for more data
+            // incomplete message, drop it
             read_ring_buffer->release_read_chunk(chunk);
             vTaskDelay(pdMS_TO_TICKS(1));
             continue;
@@ -455,7 +449,7 @@ esp_err_t SnapcastStream::read_and_process_messages_(ChunkedRingBuffer* read_rin
                 {
                   tv_t stamp;
                   std::memcpy(&stamp, payload, sizeof(stamp));
-                    this->on_time_msg_(*msg, stamp);
+                  this->on_time_msg_(*msg, stamp);
                 }
                 read_ring_buffer->release_read_chunk(chunk);
                 continue;
@@ -512,7 +506,7 @@ void SnapcastStream::stream_task_(){
     args->time_stats_ = &this->time_stats_; // Pass the time stats reference
 
     TaskHandle_t transport_task_handle = nullptr;
-    BaseType_t result = xTaskCreate([](void *param) {
+    BaseType_t result = xTaskCreatePinnedToCore([](void *param) {
             auto *args = static_cast<ReadTaskArgs*>(param);
             transport_task_(args->server, args->port, args->buffer, args->stream_task_handle, args->time_stats_);
             delete args;
@@ -521,8 +515,9 @@ void SnapcastStream::stream_task_(){
         "snapcast_tx_rx",      // Task name
         4096,                  // Stack size in words
         args,                  // param: your 'this' pointer
-        18,                    // Priority
-        &transport_task_handle // Store handle if you want to kill it later
+        16,                    // Priority
+        &transport_task_handle, // Store handle if you want to kill it later
+        1
     );
 
     if (result != pdPASS) {
@@ -588,7 +583,7 @@ void SnapcastStream::stream_task_(){
                     xTaskNotify(transport_task_handle, CONNECT_BIT, eSetBits);
                 } else {
                     this->error_msg_ = "Failed to connect or connection dropped";
-                    set_state_(StreamState::ERROR);
+                    this->set_state_(StreamState::ERROR);
                 }
             }
         }
@@ -600,8 +595,8 @@ void SnapcastStream::stream_task_(){
                     this->start_after_connecting_ = true;
                     xTaskNotify(transport_task_handle, DISCONNECT_BIT | CONNECT_BIT, eSetBits);  
                 } else {
+                    this->set_state_(StreamState::ERROR);
                     this->error_msg_ = "Error reading or processing messages";
-                    this->set_state_(StreamState::ERROR);    
                 }
             }      
         }
