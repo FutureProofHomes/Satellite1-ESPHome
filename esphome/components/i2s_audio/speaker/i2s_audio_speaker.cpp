@@ -603,7 +603,7 @@ void I2SAudioSpeaker::delete_task_(size_t buffer_size) {
   this->bytes_in_ringbuffer_ = 0;
   
   if (this->data_buffer_ != nullptr) {
-    ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
+    ExternalRAMAllocator<uint8_t> allocator;
     allocator.deallocate(this->data_buffer_, buffer_size);
     this->data_buffer_ = nullptr;
   }
