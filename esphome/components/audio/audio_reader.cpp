@@ -18,11 +18,10 @@ static const uint32_t READ_WRITE_TIMEOUT_MS = 15;
 static const uint32_t CONNECTION_TIMEOUT_MS = 5000;
 
 // The number of times the http read times out with no data before throwing an error
-static const uint32_t ERROR_COUNT_NO_DATA_READ_TIMEOUT = 100;
-
+static const uint8_t MAX_FETCHING_HEADER_ATTEMPTS = 6;
 static const size_t HTTP_STREAM_BUFFER_SIZE = 1440 * 4;
 
-static const uint8_t MAX_REDIRECTION = 5;
+static const uint8_t MAX_REDIRECTIONS = 5;
 
 // Some common HTTP status codes - borrowed from http_request component accessed 20241224
 enum HttpStatus {
@@ -80,7 +79,7 @@ esp_err_t AudioReader::start(const std::string &uri, AudioFileType &file_type) {
   client_config.url = uri.c_str();
   client_config.cert_pem = nullptr;
   client_config.disable_auto_redirect = false;
-  client_config.max_redirection_count = 10;
+  client_config.max_redirection_count = MAX_REDIRECTIONS;
   client_config.event_handler = http_event_handler;
   client_config.user_data = this;
   client_config.buffer_size = HTTP_STREAM_BUFFER_SIZE;
@@ -107,6 +106,20 @@ esp_err_t AudioReader::start(const std::string &uri, AudioFileType &file_type) {
   }
 
   int64_t header_length = esp_http_client_fetch_headers(this->client_);
+  uint8_t reattempt_count = 0;
+  while ((header_length < 0) && (reattempt_count < MAX_FETCHING_HEADER_ATTEMPTS)) {
+    this->cleanup_connection_();
+    if (header_length != -ESP_ERR_HTTP_EAGAIN) {
+      // Serious error, no recovery
+      return ESP_FAIL;
+    } else {
+      // Reconnect from a fresh state to avoid a bug where it never reads the headers even if made available
+      this->client_ = esp_http_client_init(&client_config);
+      esp_http_client_open(this->client_, 0);
+      header_length = esp_http_client_fetch_headers(this->client_);
+      ++reattempt_count;
+    }
+  }
   if (header_length < 0) {
     this->cleanup_connection_();
     return ESP_FAIL;
@@ -121,7 +134,7 @@ esp_err_t AudioReader::start(const std::string &uri, AudioFileType &file_type) {
 
   ssize_t redirect_count = 0;
 
-  while ((esp_http_client_set_redirection(this->client_) == ESP_OK) && (redirect_count < MAX_REDIRECTION)) {
+  while ((esp_http_client_set_redirection(this->client_) == ESP_OK) && (redirect_count < MAX_REDIRECTIONS)) {
     err = esp_http_client_open(this->client_, 0);
     if (err != ESP_OK) {
       this->cleanup_connection_();
