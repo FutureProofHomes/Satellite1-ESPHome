@@ -15,7 +15,7 @@ static const char *const TAG = "timed_ring_buffer";
 ChunkedRingBuffer::~ChunkedRingBuffer() {
   if (this->handle_ != nullptr) {
     vRingbufferDelete(this->handle_);
-    RAMAllocator<uint8_t> allocator(RAMAllocator<uint8_t>::ALLOW_FAILURE);
+    RAMAllocator<uint8_t> allocator;
     allocator.deallocate(this->storage_, this->size_);
     this->storage_ = nullptr;
     this->handle_ = nullptr;
@@ -28,7 +28,7 @@ esp_err_t ChunkedRingBuffer::init() {
     return ESP_FAIL;
   }
 
-  RAMAllocator<uint8_t> allocator(RAMAllocator<uint8_t>::ALLOW_FAILURE);
+  RAMAllocator<uint8_t> allocator;
   this->storage_ = allocator.allocate(this->size_);
   if (this->storage_ == nullptr) {
     ESP_LOGE(TAG, "Failed to allocate storage of size %zu", this->size_);
