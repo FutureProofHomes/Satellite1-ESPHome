@@ -116,8 +116,12 @@ public:
   }
 #endif
 protected:
-   virtual bool start_i2s_channel_() = 0;
-   virtual bool stop_i2s_channel_() = 0;
+  virtual bool start_i2s_channel_(i2s_event_callbacks_t callbacks) = 0;  
+  virtual bool start_i2s_channel_() {
+    const i2s_event_callbacks_t callbacks = {};
+    return this->start_i2s_channel_(callbacks);
+  }
+  virtual bool stop_i2s_channel_() = 0;
 
 #ifndef USE_I2S_LEGACY
    virtual bool IRAM_ATTR i2s_overflow_cb(i2s_chan_handle_t handle, i2s_event_data_t *event, void *user_ctx){ return true; }   
@@ -267,7 +271,8 @@ public:
     this->parent_->set_audio_in(this);
  }
 protected:
-  bool start_i2s_channel_() override;
+  using I2SAudioBase::start_i2s_channel_;
+  bool start_i2s_channel_(i2s_event_callbacks_t callbacks) override;
   bool stop_i2s_channel_() override;
 #ifdef USE_I2S_LEGACY
 #if SOC_I2S_SUPPORTS_ADC
@@ -318,7 +323,8 @@ public:
   bool is_adjustable() const { return !this->is_fixed_ && this->parent_->is_exclusive(); }
 
 protected:
-  bool start_i2s_channel_() override;
+  using I2SAudioBase::start_i2s_channel_;
+  bool start_i2s_channel_(i2s_event_callbacks_t callbacks) override;
   bool stop_i2s_channel_() override;
 #ifdef USE_I2S_LEGACY
 #if SOC_I2S_SUPPORTS_DAC
