@@ -111,21 +111,21 @@ size_t SourceSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_
     this->start();
   }
   size_t bytes_written = 0;
-  if (this->ring_buffer_.use_count() == 1) {
-    std::shared_ptr<RingBuffer> temp_ring_buffer = this->ring_buffer_.lock();
-    if( temp_ring_buffer->free() < length )
-    {
-      return 0;
-    }
-    if (xSemaphoreTake( this->parent_->lock_, pdMS_TO_TICKS(10))){
-      bytes_written = temp_ring_buffer->write_without_replacement(data, length, ticks_to_wait);
-      this->bytes_in_ringbuffer_ = temp_ring_buffer->available();
-       xSemaphoreGive(this->parent_->lock_);
-    }
-    if (bytes_written > 0) {
-      this->last_seen_data_ms_ = millis();
-    }
+  auto rb = this->ring_buffer_.lock();
+  if (!rb) return 0;
+  if( rb->free() < length )
+  {
+    return 0;
   }
+  if (xSemaphoreTake( this->parent_->lock_, pdMS_TO_TICKS(10))){
+    bytes_written = rb->write_without_replacement(data, length, ticks_to_wait);
+    this->bytes_in_ringbuffer_ = rb->available();
+      xSemaphoreGive(this->parent_->lock_);
+  }
+  if (bytes_written > 0) {
+    this->last_seen_data_ms_ = millis();
+  }
+  
   return bytes_written;
 }
 
@@ -147,10 +147,10 @@ esp_err_t SourceSpeaker::start_() {
     if (this->transfer_buffer_ == nullptr) {
       return ESP_ERR_NO_MEM;
     }
-    std::shared_ptr<RingBuffer> temp_ring_buffer;
+    std::shared_ptr<audio::RingBuffer> temp_ring_buffer;
 
     if (!this->ring_buffer_.use_count()) {
-      temp_ring_buffer = RingBuffer::create(ring_buffer_size);
+      temp_ring_buffer = audio::RingBuffer::create(ring_buffer_size);
       this->ring_buffer_ = temp_ring_buffer;
     }
 
