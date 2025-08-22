@@ -206,22 +206,19 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t tick
   }
 
   size_t bytes_written = 0;
-  if ((this->state_ == speaker::STATE_RUNNING) && (this->audio_ring_buffer_.use_count() == 1)) {
-    // Only one owner of the ring buffer (the speaker task), so the ring buffer is allocated and no other components are
-    // attempting to write to it.
-
-    // Temporarily share ownership of the ring buffer so it won't be deallocated while writing
-    std::shared_ptr<RingBuffer> temp_ring_buffer = this->audio_ring_buffer_;
-    if( temp_ring_buffer->free() < length ){
+  auto rb = this->audio_ring_buffer_;
+  if (!rb) return 0;
+    
+    if( rb->free() < length ){
       // only allow to write all data at once
       return 0;
     }
     if (xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10))){
-      bytes_written = temp_ring_buffer->write_without_replacement((void *) data, length, ticks_to_wait);
-      this->bytes_in_ringbuffer_ = temp_ring_buffer->available();
+      bytes_written = rb->write_without_replacement((void *) data, length, ticks_to_wait);
+      this->bytes_in_ringbuffer_ = rb->available();
       xSemaphoreGive(this->lock_);
     }
-  }
+  
   return bytes_written;
 }
 
@@ -569,7 +566,7 @@ esp_err_t I2SAudioSpeaker::allocate_buffers_(size_t data_buffer_size, size_t rin
 
   if (this->audio_ring_buffer_.use_count() == 0) {
     // Allocate ring buffer. Uses a shared_ptr to ensure it isn't improperly deallocated.
-    this->audio_ring_buffer_ = RingBuffer::create(ring_buffer_size);
+    this->audio_ring_buffer_ = audio::RingBuffer::create(ring_buffer_size);
   }
 
   if (this->audio_ring_buffer_ == nullptr) {
