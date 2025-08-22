@@ -95,7 +95,7 @@ class AudioSinkTransferBuffer : public AudioTransferBuffer {
   /// @param post_shift If true, all remaining data is moved to the start of the buffer after transferring to the sink.
   ///                   Defaults to true.
   /// @return Number of bytes written
-  size_t transfer_data_to_sink(TickType_t ticks_to_wait, bool post_shift = true);
+  size_t transfer_data_to_sink(TickType_t ticks_to_wait, bool post_shift = true, bool write_partial = false);
 
   /// @brief Adds a ring buffer as the transfer buffer's sink.
   /// @param ring_buffer weak_ptr to the allocated ring buffer
@@ -165,9 +165,12 @@ class TimedAudioSourceTransferBuffer : public AudioSourceTransferBuffer {
   /// @param ring_buffer weak_ptr to the allocated ring buffer
   void set_source(const std::weak_ptr<TimedRingBuffer> &ring_buffer) { this->ring_buffer_ = ring_buffer.lock(); };
 
+  bool has_buffered_data() const override;
+  
   tv_t get_current_time_stamp() const { return this->current_time_stamp_; }
   void set_current_time_stamp(tv_t time_stamp) { this->current_time_stamp_ = time_stamp; }
-protected:
+
+  protected:
   std::shared_ptr<TimedRingBuffer> ring_buffer_;
   tv_t current_time_stamp_{0, 0};  // Current timestamp in seconds and microseconds
 };

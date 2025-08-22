@@ -44,7 +44,9 @@ class AudioStreamInfo {
   /// @return Duration in milliseconds that will store `bytes` bytes of audio. May round down for certain sample rates
   ///         or values of `bytes`.
   int64_t bytes_to_us(size_t bytes) const {
-    return static_cast<int64_t>(bytes * 1000000) / (this->sample_rate_ * this->bytes_per_sample_ * this->channels_);
+    const int64_t num = static_cast<int64_t>(bytes) * 1000000LL;
+    const int64_t den = static_cast<int64_t>(this->sample_rate_) * this->bytes_per_sample_ * this->channels_;
+    return (num + den/2) / den;
   }
 
   /// @brief Convert bytes to frames.
