@@ -42,7 +42,7 @@ class SourceSpeaker : public speaker::Speaker, public Component {
   void setup() override;
   void loop() override;
 
-  size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) override;
+  size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait, bool write_partial = false) override;
   size_t play(const uint8_t *data, size_t length) override { return this->play(data, length, 0); }
   size_t play_silence(size_t length_ms) override; 
   
@@ -79,6 +79,7 @@ class SourceSpeaker : public speaker::Speaker, public Component {
 
   std::weak_ptr<audio::AudioSourceTransferBuffer> get_transfer_buffer() { return this->transfer_buffer_; }
   int64_t get_playout_time( int64_t self_buffer_us ) const override; 
+  bool update_buffer_states(int32_t bytes_transfered ) override;
   
   protected:
   friend class MixerSpeaker;
@@ -206,7 +207,7 @@ class MixerSpeaker : public Component {
   TaskHandle_t task_handle_{nullptr};
   StaticTask_t task_stack_;
   StackType_t *task_stack_buffer_{nullptr};
-  uint32_t audio_in_process_us_{0};
+  int64_t audio_in_process_us_{0};
   SemaphoreHandle_t lock_;
   optional<audio::AudioStreamInfo> audio_stream_info_;
 };

@@ -139,6 +139,7 @@ speaker:
         timeout: never
       - id: media_mixing_input
         timeout: never
+        buffer_duration: 100ms
 
   # Vritual speakers to resample each pipelines' audio, if necessary, as the mixer speaker requires the same sample rate
   - platform: resampler

@@ -132,12 +132,12 @@ size_t AudioSourceTransferBuffer::transfer_data_from_source(TickType_t ticks_to_
   return bytes_read;
 }
 
-size_t AudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_to_wait, bool post_shift) {
+size_t AudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_to_wait, bool post_shift, bool write_partial) {
   size_t bytes_written = 0;
   if (this->available()) {
 #ifdef USE_SPEAKER
     if (this->speaker_ != nullptr) {
-      bytes_written = this->speaker_->play(this->data_start_, this->available(), ticks_to_wait);
+      bytes_written = this->speaker_->play(this->data_start_, this->available(), ticks_to_wait, write_partial);
     } else
 #endif
         if (this->ring_buffer_.use_count() > 0) {
@@ -190,9 +190,7 @@ size_t TimedAudioSourceTransferBuffer::transfer_data_from_source(TickType_t tick
     this->data_start_ = this->buffer_;
   }
   
-  if (this->ring_buffer_.use_count() == 0) {
-    return 0;
-  }
+  if (!ring_buffer_) return 0;
   
   size_t bytes_to_read = this->free();
   int32_t bytes_read = 0;
@@ -285,9 +283,9 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
               );
             }
 #endif
-            if( delta_us > 50 * 1000 ){
+            if( delta_us >= 24 * 1000 ){
               this->speaker_->play_silence( std::min( static_cast<int32_t>(delta_us / 1000), (int32_t) 1000) );
-              return 0;  
+  
             } else if (this->free() >= frame_size && total_frames > 3) {
               size_t insert_frame = 1 + (rand() % (total_frames-2));  // don't allow insertion at beginning and the end
               size_t insert_offset = insert_frame * frame_size;
@@ -317,9 +315,6 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
           this->decrease_buffer_length(available);
           return available;
         } 
-        else if ( desired_playout_time_us - now < 240000){
-           skip_next_frames++;
-        }
         else if ( delta_us < -1000 ){
           last_adjustment_at_ = static_cast<uint32_t>(desired_playout_time_us / 1000);
           size_t drop_frames = 1;
@@ -352,6 +347,9 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
 #endif      
 
       bytes_written = this->speaker_->play(this->data_start_, this->available(), ticks_to_wait);
+      if( bytes_written > 0){
+        while(!this->speaker_->update_buffer_states(bytes_written)){}
+     }
 #if SNAPCAST_DEBUG      
       if( bytes_written && bytes_written != this->available() ){
         printf( "wrote %d bytes to speaker, remaining %lu\n", bytes_written, this->available()- bytes_written);
@@ -385,6 +383,13 @@ bool TimedAudioSinkTransferBuffer::has_buffered_data() const {
   }
 #endif
   return false;
+}
+
+bool TimedAudioSourceTransferBuffer::has_buffered_data() const {
+  if (this->ring_buffer_.use_count() > 0) {
+    return ((this->ring_buffer_->chunks_available() > 0) || (this->available() > 0));
+  }
+  return (this->available() > 0);
 }
 
 }  // namespace audio

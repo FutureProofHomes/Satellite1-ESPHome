@@ -122,7 +122,7 @@ void ResamplerSpeaker::loop() {
   }
 }
 
-size_t ResamplerSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) {
+size_t ResamplerSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_to_wait, bool write_partial) {
   if (this->is_stopped()) {
     this->start();
   }

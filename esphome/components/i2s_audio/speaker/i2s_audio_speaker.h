@@ -43,7 +43,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   /// @param length The length of the audio data in bytes.
   /// @param ticks_to_wait The FreeRTOS ticks to wait before writing as much data as possible to the ring buffer.
   /// @return The number of bytes that were actually written to the ring buffer.
-  size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) override;
+  size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait, bool write_partial = false) override;
   size_t play(const uint8_t *data, size_t length) override { return play(data, length, 0); }
   
   
@@ -68,6 +68,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   void set_mute_state(bool mute_state) override;
   
   int64_t get_playout_time( int64_t self_buffer_us ) const override;
+  bool update_buffer_states(int32_t bytes_transfered ) override;
 
  protected:
   /// @brief Function for the FreeRTOS task handling audio output.
