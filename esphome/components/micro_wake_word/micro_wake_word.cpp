@@ -24,7 +24,7 @@ static const size_t DATA_TIMEOUT_MS = 50;
 static const uint32_t RING_BUFFER_DURATION_MS = 120;
 
 static const uint32_t INFERENCE_TASK_STACK_SIZE = 3072;
-static const UBaseType_t INFERENCE_TASK_PRIORITY = 3;
+static const UBaseType_t INFERENCE_TASK_PRIORITY = 11;
 
 enum EventGroupBits : uint32_t {
   COMMAND_STOP = (1 << 0),  // Signals the inference task should stop
@@ -305,8 +305,8 @@ void MicroWakeWord::loop() {
           return;
         }
 
-        xTaskCreate(MicroWakeWord::inference_task, "mww", INFERENCE_TASK_STACK_SIZE, (void *) this,
-                    INFERENCE_TASK_PRIORITY, &this->inference_task_handle_);
+        xTaskCreatePinnedToCore(MicroWakeWord::inference_task, "mww", INFERENCE_TASK_STACK_SIZE, (void *) this,
+                    INFERENCE_TASK_PRIORITY, &this->inference_task_handle_, 1);
 
         if (this->inference_task_handle_ == nullptr) {
           FrontendFreeStateContents(&this->frontend_state_);  // Deallocate frontend state

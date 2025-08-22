@@ -353,7 +353,7 @@ void I2SAudioSpeaker::speaker_task(void *params) {
             bytes_read = this_speaker->audio_ring_buffer_->read(
               (void *) this_speaker->data_buffer_, 
               to_read,
-              pdMS_TO_TICKS(task_delay_ms)
+              0
             );
             
             this_speaker->bytes_in_ringbuffer_ -= bytes_read;
