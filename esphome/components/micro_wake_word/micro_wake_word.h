@@ -9,7 +9,7 @@
 
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
-#include "esphome/core/ring_buffer.h"
+#include "esphome/components/audio/ring_buffer.h"
 
 #include <freertos/event_groups.h>
 
@@ -67,7 +67,7 @@ class MicroWakeWord : public Component {
   Trigger<std::string> *wake_word_detected_trigger_ = new Trigger<std::string>();
   State state_{State::STOPPED};
 
-  std::weak_ptr<RingBuffer> ring_buffer_;
+  std::weak_ptr<audio::RingBuffer> ring_buffer_;
   std::vector<WakeWordModel *> wake_word_models_;
 
 #ifdef USE_MICRO_WAKE_WORD_VAD
