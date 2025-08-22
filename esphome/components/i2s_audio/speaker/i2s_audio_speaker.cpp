@@ -190,7 +190,7 @@ void I2SAudioSpeaker::set_mute_state(bool mute_state) {
   }
 }
 
-size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) {
+size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_to_wait, bool write_partial) {
   if (this->is_failed()) {
     ESP_LOGE(TAG, "Cannot play audio, speaker failed to setup");
     return 0;
@@ -208,18 +208,18 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t tick
   size_t bytes_written = 0;
   auto rb = this->audio_ring_buffer_;
   if (!rb) return 0;
-    
-    if( rb->free() < length ){
-      // only allow to write all data at once
-      return 0;
-    }
-    if (xSemaphoreTake( this->lock_, pdMS_TO_TICKS(10))){
-      bytes_written = rb->write_without_replacement((void *) data, length, ticks_to_wait);
-      this->bytes_in_ringbuffer_ = rb->available();
-      xSemaphoreGive(this->lock_);
-    }
   
+  bytes_written = rb->write_without_replacement((void *) data, length, ticks_to_wait, write_partial);
   return bytes_written;
+}
+
+bool I2SAudioSpeaker::update_buffer_states(int32_t bytes_transfered) {
+  if (xSemaphoreTake(this->lock_, pdMS_TO_TICKS(10))) {
+    this->bytes_in_ringbuffer_ += bytes_transfered;
+    xSemaphoreGive(this->lock_);
+    return true;
+  }
+  return false;
 }
 
 bool I2SAudioSpeaker::has_buffered_data() const {
