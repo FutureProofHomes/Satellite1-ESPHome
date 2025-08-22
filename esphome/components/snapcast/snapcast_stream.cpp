@@ -44,7 +44,7 @@ static uint8_t tx_buffer[1024];
 static uint8_t rx_buffer[4096];
 static uint32_t rx_buffer_length = 0; 
 
-static const uint8_t STREAM_TASK_PRIORITY = 15;
+static const uint8_t STREAM_TASK_PRIORITY = 14;
 static const uint32_t CONNECTION_TIMEOUT_MS = 2000;
 static const size_t TASK_STACK_SIZE = 4 * 1024;
 static const uint32_t TIME_SYNC_INTERVAL_MS =  2000;
@@ -506,7 +506,7 @@ void SnapcastStream::stream_task_(){
     args->time_stats_ = &this->time_stats_; // Pass the time stats reference
 
     TaskHandle_t transport_task_handle = nullptr;
-    BaseType_t result = xTaskCreate([](void *param) {
+    BaseType_t result = xTaskCreatePinnedToCore([](void *param) {
             auto *args = static_cast<ReadTaskArgs*>(param);
             transport_task_(args->server, args->port, args->buffer, args->stream_task_handle, args->time_stats_);
             delete args;
@@ -515,8 +515,9 @@ void SnapcastStream::stream_task_(){
         "snapcast_tx_rx",      // Task name
         4096,                  // Stack size in words
         args,                  // param: your 'this' pointer
-        18,                    // Priority
-        &transport_task_handle // Store handle if you want to kill it later
+        16,                    // Priority
+        &transport_task_handle, // Store handle if you want to kill it later
+        1
     );
 
     if (result != pdPASS) {
