@@ -61,6 +61,7 @@ public:
 protected:
   error_t connect_via_mdns();
   std::string server_ip_;
+  std::string client_id_;
   TaskHandle_t mdns_task_handle_{nullptr};
 
   SnapcastUrl curr_server_url_;
