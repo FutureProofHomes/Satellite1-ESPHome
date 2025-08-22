@@ -262,6 +262,11 @@ void I2SAudioSpeaker::speaker_task(void *params) {
   const size_t duration_settings_bytes = audio_stream_info.ms_to_bytes(this_speaker->buffer_duration_ms_);
   const size_t ring_buffer_size = std::max(duration_settings_bytes, read_buffer_size);
 
+  if (this_speaker->i2s_sent_time_queue_ == nullptr) {
+    this_speaker->i2s_sent_time_queue_ = xQueueCreate(dma_buffers_count+1, sizeof(int64_t));
+  }
+
+
 #ifndef USE_I2S_LEGACY
   uint8_t* scaling_buffer = nullptr;
   if (expand_factor > 1) {
@@ -418,9 +423,13 @@ void I2SAudioSpeaker::speaker_task(void *params) {
           xEventGroupSetBits(this_speaker->event_group_, SpeakerEventGroupBits::ERR_ESP_INVALID_SIZE);
         }
       }
+      
+      int64_t write_timestamp;
+      while (xQueueReceive(this_speaker->i2s_sent_time_queue_, &write_timestamp, 0)){}
+      
       if(xSemaphoreTake( this_speaker->lock_, pdMS_TO_TICKS(10))) {  
         this_speaker->in_write_buffer_ = 0;
-        this_speaker->last_dma_write_ = esp_timer_get_time();
+        this_speaker->last_dma_write_ = write_timestamp + dma_buffer_duration_ms * 1000;
         xSemaphoreGive(this_speaker->lock_);
       }
 
@@ -483,20 +492,12 @@ int64_t I2SAudioSpeaker::get_playout_time( int64_t add_buffer_us ) const {
   int64_t playout_at = 0;
   uint32_t pending_frames = 0;
   if (xSemaphoreTake(this->lock_, pdMS_TO_TICKS(10))){
-      int64_t now = esp_timer_get_time();
-      playout_at  = now;
+      playout_at  = this->last_dma_write_ + static_cast<int64_t>(dma_buffers_count) * dma_buffer_duration_us;
       playout_at += add_buffer_us;  
       
       pending_frames  = this->audio_stream_info_.bytes_to_frames(this->bytes_in_ringbuffer_ + this->in_write_buffer_);
       pending_frames += this->padded_zero_frames_;
       playout_at += this->audio_stream_info_.frames_to_microseconds(pending_frames);
-      
-      //pending in DMA buffers
-      int64_t time_delta = now - this->last_dma_write_;
-      int64_t in_dma_buffer = static_cast<int64_t>(dma_buffers_count) * dma_buffer_duration_us - time_delta;
-      if (in_dma_buffer > 0) {
-          playout_at += static_cast<uint32_t>(in_dma_buffer);
-      }
       
       //printf( "pending-ringbuffer: %d\n", this->audio_stream_info_.bytes_to_ms(this->bytes_in_ringbuffer_));
       //printf( "pending-zeros: %d\n", this->audio_stream_info_.frames_to_microseconds(this->padded_zero_frames_) / 1000);
@@ -576,6 +577,30 @@ esp_err_t I2SAudioSpeaker::allocate_buffers_(size_t data_buffer_size, size_t rin
   return ESP_OK;
 }
 
+
+#ifndef USE_I2S_LEGACY
+bool IRAM_ATTR I2SAudioSpeaker::i2s_on_sent_cb(i2s_chan_handle_t handle, i2s_event_data_t *event, void *user_ctx) {
+  int64_t now = esp_timer_get_time();
+
+  BaseType_t need_yield1 = pdFALSE;
+  BaseType_t need_yield2 = pdFALSE;
+  BaseType_t need_yield3 = pdFALSE;
+
+  I2SAudioSpeaker *this_speaker = (I2SAudioSpeaker *) user_ctx;
+
+  if (xQueueIsQueueFullFromISR(this_speaker->i2s_sent_time_queue_)) {
+    // Queue is full, so discard the oldest event
+    int64_t dummy;
+    xQueueReceiveFromISR(this_speaker->i2s_sent_time_queue_, &dummy, &need_yield1);
+  }
+
+  xQueueSendToBackFromISR(this_speaker->i2s_sent_time_queue_, &now, &need_yield3);
+
+  return need_yield1 | need_yield2 | need_yield3;
+}
+#endif
+
+
 esp_err_t I2SAudioSpeaker::start_i2s_driver_(audio::AudioStreamInfo &audio_stream_info) {
   if (this->has_fixed_i2s_rate() && (this->sample_rate_ != audio_stream_info.get_sample_rate())) {  // NOLINT
     // Can't reconfigure I2S bus, so the sample rate must match the configured value
@@ -588,10 +613,18 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_(audio::AudioStreamInfo &audio_strea
     // Can't reconfigure I2S bus, and bit depth must match the configured value
     return ESP_ERR_NOT_SUPPORTED;
   }
-
+#if USE_I2S_LEGACY
   if( !this->start_i2s_channel_() ){
     return ESP_ERR_INVALID_STATE;
   }
+#else
+  const i2s_event_callbacks_t callbacks = {
+                .on_sent = i2s_on_sent_cb,
+    };  
+if( !this->start_i2s_channel_(callbacks) ){
+    return ESP_ERR_INVALID_STATE;
+  }
+#endif  
   return ESP_OK;
 }
 
