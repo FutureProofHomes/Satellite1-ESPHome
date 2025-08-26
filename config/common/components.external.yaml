@@ -6,4 +6,20 @@ external_components:
       type: git
       url: https://github.com/FutureProofHomes/Satellite1-ESPHome
       ref: ${ext_comp_repo_ref}
-    components: [ audio, i2s_audio, satellite1, memory_flasher, tas2780, pcm5122, fusb302b, snapcast, speaker, microphone, mixer, resampler ]
+    components:
+        - audio 
+        - fusb302b
+        - i2s_audio
+        - memory_flasher
+        - microphone
+        - micro_wake_word
+        - mixer
+        - pcm5122
+        - psram 
+        - resampler 
+        - satellite1 
+        - snapcast
+        - speaker
+        - tas2780
+        - voice_assistant 
+
