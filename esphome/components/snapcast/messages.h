@@ -373,8 +373,8 @@ protected:
         this->body_size_ = size;
         
         bool valid = json::parse_json(jsonString, [this](JsonObject root) -> bool {
-            if (!root.containsKey("bufferMs") || !root.containsKey("latency") || !root.containsKey("muted")
-                || !root.containsKey("volume")) {
+            if (!root["bufferMs"].is<int32_t>() || !root["latency"].is<int32_t>() || !root["muted"].is<bool>()
+                || !root["volume"].is<uint16_t>()) {
                 return false;
             }
             this->buffer_ms_ = root["bufferMs"].as<int32_t>();

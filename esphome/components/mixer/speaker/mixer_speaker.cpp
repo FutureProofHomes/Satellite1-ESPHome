@@ -43,8 +43,10 @@ enum MixerEventGroupBits : uint32_t {
 };
 
 void SourceSpeaker::dump_config() {
-  ESP_LOGCONFIG(TAG, "Mixer Source Speaker");
-  ESP_LOGCONFIG(TAG, "  Buffer Duration: %" PRIu32 " ms", this->buffer_duration_ms_);
+  ESP_LOGCONFIG(TAG,
+                "Mixer Source Speaker\n"
+                "  Buffer Duration: %" PRIu32 " ms",
+                this->buffer_duration_ms_);
   if (this->timeout_ms_.has_value()) {
     ESP_LOGCONFIG(TAG, "  Timeout: %" PRIu32 " ms", this->timeout_ms_.value());
   } else {
@@ -330,8 +332,10 @@ int64_t SourceSpeaker::get_playout_time( int64_t self_buffer_us ) const {
 
 
 void MixerSpeaker::dump_config() {
-  ESP_LOGCONFIG(TAG, "Speaker Mixer:");
-  ESP_LOGCONFIG(TAG, "  Number of output channels: %u", this->output_channels_);
+  ESP_LOGCONFIG(TAG,
+                "Speaker Mixer:\n"
+                "  Number of output channels: %u",
+                this->output_channels_);
 }
 
 void MixerSpeaker::setup() {
