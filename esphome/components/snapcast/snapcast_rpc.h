@@ -75,7 +75,7 @@ struct StreamInfo {
   bool canGoPrevious;
 
   bool from_json(JsonObject stream_obj) {
-    if (!stream_obj["id"].is<std::string>()) return false;
+    if (!stream_obj.containsKey("id")) return false;
 
     id = stream_obj["id"].as<std::string>();
     status = stream_obj["status"].as<std::string>();

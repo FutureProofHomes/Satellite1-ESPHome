@@ -137,7 +137,7 @@ void SnapcastControlSession::notification_loop() {
               this->recv_buffer_.erase(0, pos + 1);
 
               json::parse_json(json_line, [this](JsonObject root) -> bool {
-                  if(root["result"].is<JsonObject>() && root["id"].is<uint32_t>()){ 
+                  if(root.containsKey("result")){
                     uint32_t id = root["id"]; 
                     switch (static_cast<RequestId>(id)) {
                           case RequestId::GetServerStatus:
@@ -157,7 +157,7 @@ void SnapcastControlSession::notification_loop() {
                               ESP_LOGW(TAG, "Unknown request ID: %u", id);
                       }           
 
-                  } else if(root["method"].is<std::string>()){
+                  } else if(root.containsKey("method")) {
                       std::string method = root["method"].as<std::string>();    
                       if (method == "Server.OnUpdate" ){
                           this->update_from_server_obj_(root["params"]["server"].as<JsonObject>());
@@ -237,11 +237,11 @@ void SnapcastControlSession::notification_loop() {
 
 
 void SnapcastControlSession::send_rpc_request_(const std::string &method, std::function<void(JsonObject)> fill_params, uint32_t id) {
-  JsonDocument doc;
+  StaticJsonDocument<512> doc;
   doc["jsonrpc"] = "2.0";
   doc["id"] = id;
   doc["method"] = method;
-  JsonObject params = doc["params"].to<JsonObject>();
+  JsonObject params = doc.createNestedObject("params");
   fill_params(params);
 
   char json_buf[512];
