@@ -276,19 +276,8 @@ bool I2SPortComponent::init_driver_(i2s_std_config_t std_cfg) {
 }
 #endif
 
-bool I2SAudioOut::start_i2s_channel_() {
-#ifdef USE_I2S_LEGACY
-  if (!this->claim_i2s_access()) {
-    return false;
-  }
-
-  i2s_driver_config_t config = this->get_i2s_cfg(this->parent_->i2s_mode_);
-  if(!this->parent_->install_i2s_driver_(config, I2SAccess::TX))
-  {
-    this->parent_->release_access_(I2SAccess::TX); 
-    return false;
-  }
-#else
+bool I2SAudioOut::start_i2s_channel_(i2s_event_callbacks_t callbacks) {
+#ifndef USE_I2S_LEGACY
   if( this->parent_->tx_handle_ == nullptr ){
     if( this->parent_->rx_handle_ != nullptr ){
       ESP_LOGE(TAG, "Trying to start I2S-TX channel, but RX handle is available. This is not allowed.");
@@ -314,16 +303,37 @@ bool I2SAudioOut::start_i2s_channel_() {
     ESP_LOGE(TAG, "TX channel is not configured for TX direction");
     return false;
   }
-  
+
+  if (callbacks.on_sent != nullptr) {
+    err = i2s_channel_register_event_callback(this->parent_->tx_handle_, &callbacks, this);
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to register TX channel callbacks: %s", esp_err_to_name(err));
+      return false;
+    }
+  }
+ 
   err = i2s_channel_enable(this->parent_->tx_handle_);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "Failed to enable TX channel: %s", esp_err_to_name(err));
     i2s_del_channel(this->parent_->tx_handle_);
     return false;
-  } 
-#endif
-  return true;
+  }
+#else
+  if (!this->claim_i2s_access()) {
+    return false;
+  }
+
+  i2s_driver_config_t config = this->get_i2s_cfg(this->parent_->i2s_mode_);
+  if(!this->parent_->install_i2s_driver_(config, I2SAccess::TX))
+  {
+    this->parent_->release_access_(I2SAccess::TX); 
+    return false;
+  }
+
+#endif  
+return true; 
 }
+
 
 bool I2SAudioOut::stop_i2s_channel_() {
 #ifdef USE_I2S_LEGACY
@@ -351,7 +361,7 @@ bool I2SAudioOut::stop_i2s_channel_() {
 }
 
 
-bool I2SAudioIn::start_i2s_channel_() {
+bool I2SAudioIn::start_i2s_channel_(i2s_event_callbacks_t callbacks) {
 #ifdef USE_I2S_LEGACY
   if (!this->claim_i2s_access()) {
     return false;

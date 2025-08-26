@@ -117,7 +117,14 @@ public:
             consecutive_outliers_++;
         }
 #if SNAPCAST_DEBUG        
-        printf( "new: %" PRId64 " minRTT: %" PRId64 " ema: %" PRId64 " diff: %" PRId64 " RTT: %" PRId64 "\n", delta.to_microseconds(), best->offset.to_microseconds(), ema_.to_microseconds(), diff.to_microseconds(), rtt.to_microseconds() );
+        printf( "new: %" PRId64 " AtminRTT: %" PRId64 " ema: %" PRId64 " diff: %" PRId64 " RTT: %" PRId64 " minRTT: %" PRId64 "\n", 
+            delta.to_microseconds(), 
+            best->offset.to_microseconds(), 
+            ema_.to_microseconds(), 
+            diff.to_microseconds(), 
+            rtt.to_microseconds(),
+            best->rtt.to_microseconds() 
+        );
 #endif        
     }
 

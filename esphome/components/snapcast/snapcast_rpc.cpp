@@ -66,12 +66,18 @@ void SnapcastControlSession::update_from_server_obj_(const JsonObject &server_ob
     if( state.from_groups_json( server_obj["groups"], get_mac_address_pretty()) ){
         printf( "group_id: %s stream_id: %s\n", state.group_id.c_str(), state.stream_id.c_str() );
     }
-    StreamInfo sInfo;
-    if( sInfo.from_streams_json( server_obj["streams"], state.stream_id )){
-        printf( "stream: %s state: %s\n", sInfo.id.c_str(), sInfo.status.c_str() );
-        if (this->on_stream_update_) {
-            this->on_stream_update_(sInfo);
-        }
+    
+    JsonArray streams = server_obj["streams"];
+    known_streams_.clear();
+    for (JsonObject stream_obj : streams ) {
+        if (!stream_obj["id"].is<std::string>()) continue;  
+        StreamInfo sInfo;
+        sInfo.from_json(stream_obj);
+        this->known_streams_[stream_obj["id"].as<std::string>()] = sInfo;
+    }
+    auto it = this->known_streams_.find( state.stream_id);
+    if (it != this->known_streams_.end() && this->on_stream_update_ ){
+      this->on_stream_update_(it->second);
     }
 }
 
@@ -187,13 +193,34 @@ void SnapcastControlSession::notification_loop() {
                         JsonObject params = root["params"]; 
                         if(params["id"].as<std::string>() == this->client_state_.group_id){
                               if(this->client_state_.stream_id != params["stream_id"].as<std::string>()){
-                                  this->send_rpc_request_("Server.GetStatus",
-                                      [](JsonObject params) {
-                                      // no params
-                                      },
-                                      static_cast<uint32_t>(RequestId::GetServerStatus)
-                                  );  
+                                this->client_state_.stream_id = params["stream_id"].as<std::string>();  
+                                StreamInfo& sInfo = this->known_streams_[this->client_state_.stream_id];
+                                if (sInfo.id.empty()){
+                                  sInfo.set_id(this->client_state_.stream_id);
+                                }
+                                if(this->on_stream_update_)
+                                {
+                                  this->on_stream_update_(sInfo);
+                                }
                           }
+                        }
+                      } else if (method == "Stream.OnUpdate"){
+                        JsonObject params = root["params"];
+                        StreamInfo& sInfo = this->known_streams_[params["id"].as<std::string>()];
+                        sInfo.from_json(params["stream"]);  
+                        if(sInfo.id == this->client_state_.stream_id && this->on_stream_update_){
+                                this->on_stream_update_(sInfo);
+                        }
+                      
+                      } else if (method == "Client.OnConnect"){
+                        JsonObject params = root["params"]; 
+                        if(params["id"].as<std::string>() == this->client_id_){
+                          this->send_rpc_request_("Server.GetStatus",
+                                [](JsonObject params) {
+                                // no params
+                                },
+                                static_cast<uint32_t>(RequestId::GetServerStatus)
+                          );  
                         }
                       }   
                   }

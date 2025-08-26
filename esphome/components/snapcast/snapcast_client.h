@@ -42,7 +42,7 @@ ESPHome Snapcast client, this component manages connections to the Snapcast serv
 class SnapcastClient : public Component {
 public:
   void setup() override;
-  float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
+  float get_setup_priority() const override { return setup_priority::AFTER_CONNECTION - 10; }
 
   error_t connect_to_server(std::string url, uint32_t stream_port=1704, uint32_t rpc_port=1705);
   void set_media_player(esphome::speaker::SpeakerMediaPlayer* media_player){ this->media_player_ = media_player; }  
@@ -61,6 +61,7 @@ public:
 protected:
   error_t connect_via_mdns();
   std::string server_ip_;
+  std::string client_id_;
   TaskHandle_t mdns_task_handle_{nullptr};
 
   SnapcastUrl curr_server_url_;
