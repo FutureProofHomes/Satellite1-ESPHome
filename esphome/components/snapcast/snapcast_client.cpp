@@ -35,6 +35,9 @@ static const char *const TAG = "snapcast_client";
 
 
 void SnapcastClient::setup(){
+    this->client_id_ = get_mac_address_pretty();
+    this->cntrl_session_.client_id_ = this->client_id_;
+    
     if(this->server_ip_.empty()){
         //start mDNS task and search for the MA Snapcast server
         if (this->mdns_task_handle_ == nullptr) {
@@ -87,7 +90,7 @@ void SnapcastClient::report_volume(float volume, bool muted){
 
 void SnapcastClient::on_stream_state_update(StreamState state, uint8_t volume, bool muted){
     ESP_LOGD( TAG, "Stream component changed to state %d.", state );
-    if( state == StreamState::ERROR ){
+    if( state == StreamState::ERROR || state == StreamState::DISCONNECTED ){
         ESP_LOGE(TAG, "stream: %s", this->stream_.error_msg_.c_str() );
         if( this->stream_.reconnect_on_error_ ){
             ESP_LOGI(TAG, "Reconnecting after error...");

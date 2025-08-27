@@ -20,6 +20,7 @@
 #pragma once
 
 #include <string>
+#include <map>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 
@@ -74,7 +75,7 @@ struct StreamInfo {
   bool canGoPrevious;
 
   bool from_json(JsonObject stream_obj) {
-    if (!stream_obj.containsKey("id")) return false;
+    if (!stream_obj["id"].is<std::string>()) return false;
 
     id = stream_obj["id"].as<std::string>();
     status = stream_obj["status"].as<std::string>();
@@ -105,8 +106,19 @@ struct StreamInfo {
     return true;
   }
 
+  bool set_id(std::string stream_id){
+    id = stream_id;
+    status = "idle";
+    return true;
+  }
+  
+  bool set_to_default(){
+    return this->set_id("default");
+  }
+
 };
 
+class SnapcastClient;
 
 class SnapcastControlSession {
 public:
@@ -121,17 +133,19 @@ public:
 
 
 protected:
+    friend SnapcastClient;
     void send_rpc_request_(const std::string &method, std::function<void(JsonObject)> fill_params, uint32_t id);
     void update_from_server_obj_(const JsonObject &server_obj);
     
     std::string server_;
     uint32_t port_;
+    std::string client_id_;
     esp_transport_handle_t transport_{nullptr};
     bool notification_task_should_run_{false};
     TaskHandle_t notification_task_handle_{nullptr};
     std::string recv_buffer_;
     ClientState client_state_;
-   
+    std::map<std::string,StreamInfo> known_streams_;
     std::function<void(const StreamInfo &)> on_stream_update_;
 };
 

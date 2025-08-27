@@ -35,7 +35,7 @@ class Speaker {
   /// @param length The length of the audio data in bytes.
   /// @param ticks_to_wait The FreeRTOS ticks to wait before writing as much data as possible to the ring buffer.
   /// @return The number of bytes that were actually written to the speaker's internal buffer.
-  virtual size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) {
+  virtual size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait, bool write_partial = false) {
     return this->play(data, length);
   };
   virtual size_t play_silence(size_t length_ms){ return 0; } 
@@ -104,6 +104,7 @@ class Speaker {
   audio::AudioStreamInfo &get_audio_stream_info() { return this->audio_stream_info_; }
 
   virtual int64_t get_playout_time( int64_t self_buffer_us ) const { return 0; }
+  virtual bool update_buffer_states(int32_t bytes_transfered ) { return true; }
  
   protected:
   State state_{STATE_STOPPED};

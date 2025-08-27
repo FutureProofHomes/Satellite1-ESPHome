@@ -140,7 +140,6 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
           this->output_transfer_buffer_->transfer_data_to_sink(pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS*10), skip_next_frames, false );
       if( this->output_transfer_buffer_->available() ){
         //only decode next frame, when last one has been completely written to the output
-        delay(READ_WRITE_TIMEOUT_MS);
         return AudioDecoderState::DECODING;
       }
       if (this->audio_stream_info_.has_value()) {
@@ -351,7 +350,7 @@ FileDecoderState AudioDecoder::decode_mp3_() {
   if (err) {
     switch (err) {
       case esp_audio_libs::helix_decoder::ERR_MP3_OUT_OF_MEMORY:
-        // Intentional fallthrough
+         [[fallthrough]];
       case esp_audio_libs::helix_decoder::ERR_MP3_NULL_POINTER:
         return FileDecoderState::FAILED;
         break;
