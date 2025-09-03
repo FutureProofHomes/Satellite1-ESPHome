@@ -41,6 +41,8 @@ micro_wake_word:
       id: hey_jarvis
     - model: okay_nabu
       id: okay_nabu    
+    - model: alexa
+      id: alexa    
     - model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
       id: stop
       internal: true
