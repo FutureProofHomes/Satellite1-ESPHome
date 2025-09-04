@@ -51,3 +51,8 @@ logger:
 #wifi:
 #  ssid: !secret wifi_ssid
 #  password: !secret wifi_password
+
+## OPTIONALLY, uncomment the following lines to customize the Snapcast server to connect to.
+#snapcast:
+#  id: snapcast_client
+#  server_ip: 192.168.178.101
