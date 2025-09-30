@@ -9,8 +9,8 @@ esp32:
   flash_size: 16MB
   framework:
     type: esp-idf
-    version: 5.1.6
-    platform_version: 51.3.7
+    #version: 5.1.6
+    #platform_version: 51.3.7
 
     sdkconfig_options:
       CONFIG_ESP32_S3_BOX_BOARD: "y"
