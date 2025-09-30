@@ -72,8 +72,6 @@ void MicroWakeWord::dump_config() {
 }
 
 void MicroWakeWord::setup() {
-  ESP_LOGCONFIG(TAG, "Running setup");
-
   this->frontend_config_.window.size_ms = FEATURE_DURATION_MS;
   this->frontend_config_.window.step_size_ms = this->features_step_size_;
   this->frontend_config_.filterbank.num_channels = PREPROCESSOR_FEATURE_SIZE;
@@ -108,7 +106,7 @@ void MicroWakeWord::setup() {
     if (this->state_ == State::STOPPED) {
       return;
     }
-    std::shared_ptr<audio::RingBuffer> temp_ring_buffer = this->ring_buffer_.lock();
+    std::shared_ptr<RingBuffer> temp_ring_buffer = this->ring_buffer_.lock();
     if (this->ring_buffer_.use_count() > 1) {
       size_t bytes_free = temp_ring_buffer->free();
 
@@ -130,7 +128,6 @@ void MicroWakeWord::setup() {
         }
       });
 #endif
-  ESP_LOGCONFIG(TAG, "Micro Wake Word initialized");
 }
 
 void MicroWakeWord::inference_task(void *params) {
@@ -156,7 +153,7 @@ void MicroWakeWord::inference_task(void *params) {
 
     if (!(xEventGroupGetBits(this_mww->event_group_) & ERROR_BITS)) {
       // Allocate ring buffer
-      std::shared_ptr<audio::RingBuffer> temp_ring_buffer = audio::RingBuffer::create(
+      std::shared_ptr<RingBuffer> temp_ring_buffer = RingBuffer::create(
           this_mww->microphone_source_->get_audio_stream_info().ms_to_bytes(RING_BUFFER_DURATION_MS));
       if (temp_ring_buffer.use_count() == 0) {
         xEventGroupSetBits(this_mww->event_group_, EventGroupBits::ERROR_MEMORY);
