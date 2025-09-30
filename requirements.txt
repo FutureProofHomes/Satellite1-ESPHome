@@ -1,2 +1,2 @@
-esphome==2025.7.5
+esphome==2025.9.2
 setuptools
