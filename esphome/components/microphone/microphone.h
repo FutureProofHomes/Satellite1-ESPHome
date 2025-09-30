@@ -33,7 +33,6 @@ class Microphone {
   audio::AudioStreamInfo get_audio_stream_info() { return this->audio_stream_info_; }
 
  protected:
-
   State state_{STATE_STOPPED};
   bool mute_state_{false};
 

@@ -14,7 +14,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/helpers.h"
-#include "esphome/components/audio/ring_buffer.h"
+#include "esphome/core/ring_buffer.h"
 
 namespace esphome {
 namespace i2s_audio {
@@ -127,7 +127,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   EventGroupHandle_t event_group_{nullptr};
 
   uint8_t *data_buffer_;
-  std::shared_ptr<audio::RingBuffer> audio_ring_buffer_;
+  std::shared_ptr<esphome::RingBuffer> audio_ring_buffer_;
 
   uint32_t buffer_duration_ms_;
 
