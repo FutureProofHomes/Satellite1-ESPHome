@@ -238,10 +238,10 @@ void VoiceAssistant::loop() {
 
       api::VoiceAssistantRequest msg;
       msg.start = true;
-      msg.conversation_id = this->conversation_id_;
+      msg.set_conversation_id(StringRef(this->conversation_id_));
       msg.flags = flags;
       msg.audio_settings = audio_settings;
-      msg.wake_word_phrase = this->wake_word_;
+      msg.set_wake_word_phrase(StringRef(this->wake_word_));
       this->wake_word_ = "";
 
       // Reset media player state tracking
@@ -251,7 +251,8 @@ void VoiceAssistant::loop() {
       }
 #endif
 
-      if (this->api_client_ == nullptr || !this->api_client_->send_message(msg)) {
+      if (this->api_client_ == nullptr ||
+          !this->api_client_->send_message(msg, api::VoiceAssistantRequest::MESSAGE_TYPE)) {
         ESP_LOGW(TAG, "Could not request start");
         this->error_trigger_->trigger("not-connected", "Could not request start");
         this->continuous_ = false;
@@ -272,8 +273,8 @@ void VoiceAssistant::loop() {
         size_t read_bytes = this->ring_buffer_->read((void *) this->send_buffer_, SEND_BUFFER_SIZE, 0);
         if (this->audio_mode_ == AUDIO_MODE_API) {
           api::VoiceAssistantAudio msg;
-          msg.data.assign((char *) this->send_buffer_, read_bytes);
-          this->api_client_->send_message(msg);
+          msg.set_data(this->send_buffer_, read_bytes);
+          this->api_client_->send_message(msg, api::VoiceAssistantAudio::MESSAGE_TYPE);
         } else {
           if (!this->udp_socket_running_) {
             if (!this->start_udp_socket_()) {
@@ -352,7 +353,7 @@ void VoiceAssistant::loop() {
 
           api::VoiceAssistantAnnounceFinished msg;
           msg.success = true;
-          this->api_client_->send_message(msg);
+          this->api_client_->send_message(msg, api::VoiceAssistantAnnounceFinished::MESSAGE_TYPE);
           break;
         }
       }
@@ -605,7 +606,7 @@ void VoiceAssistant::signal_stop_() {
   ESP_LOGD(TAG, "Signaling stop");
   api::VoiceAssistantRequest msg;
   msg.start = false;
-  this->api_client_->send_message(msg);
+  this->api_client_->send_message(msg, api::VoiceAssistantRequest::MESSAGE_TYPE);
 }
 
 void VoiceAssistant::start_playback_timeout_() {
@@ -615,7 +616,7 @@ void VoiceAssistant::start_playback_timeout_() {
 
     api::VoiceAssistantAnnounceFinished msg;
     msg.success = true;
-    this->api_client_->send_message(msg);
+    this->api_client_->send_message(msg, api::VoiceAssistantAnnounceFinished::MESSAGE_TYPE);
   });
 }
 
