@@ -95,7 +95,7 @@ class ResamplerSpeaker : public Component, public speaker::Speaker {
 
   EventGroupHandle_t event_group_{nullptr};
 
-  std::weak_ptr<audio::RingBuffer> ring_buffer_;
+  std::weak_ptr<RingBuffer> ring_buffer_;
 
   speaker::Speaker *output_speaker_{nullptr};
 

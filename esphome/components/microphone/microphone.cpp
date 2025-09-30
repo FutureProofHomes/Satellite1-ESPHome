@@ -15,6 +15,5 @@ void Microphone::add_data_callback(std::function<void(const std::vector<uint8_t>
   this->data_callbacks_.add(std::move(mute_handled_callback));
 }
 
-
 }  // namespace microphone
 }  // namespace esphome
