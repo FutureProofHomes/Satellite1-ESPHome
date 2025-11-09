@@ -62,30 +62,34 @@ micro_wake_word:
                 switch.is_on: timer_ringing
               then:
                 - switch.turn_off: timer_ringing
-              # Start voice assistant, stop current announcement.
+              # Stop voice assistant if running
               else:
                 - if:
                     condition:
-                      lambda: return id(external_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+                      voice_assistant.is_running:
                     then:
-                      lambda: |-
-                        id(external_media_player)
-                          ->make_call()
-                          .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
-                          .set_announcement(true)
-                          .perform();
+                      voice_assistant.stop:
+                    # Stop any other media player announcement
                     else:
                       - if:
                           condition:
-                            switch.is_on: wake_sound
+                            media_player.is_announcing:
                           then:
-                            - script.execute:
-                                id: play_sound
-                                priority: true
-                                sound_file: !lambda return id(wake_word_triggered_sound);
-                            - delay: 300ms
-                      - voice_assistant.start:
-                          wake_word: !lambda return wake_word;
+                            - media_player.stop:
+                                announcement: true
+                          # Start the voice assistant and play the wake sound, if enabled
+                          else:
+                            - if:
+                                condition:
+                                  switch.is_on: wake_sound
+                                then:
+                                  - script.execute:
+                                      id: play_sound
+                                      priority: true
+                                      sound_file: !lambda return id(wake_word_triggered_sound);
+                                  - delay: 300ms
+                            - voice_assistant.start:
+                                wake_word: !lambda return wake_word;
 
 
 
