@@ -19,17 +19,14 @@ switch:
     on_turn_off:
       # Disable stop wake word
       - micro_wake_word.disable_model: stop
+      - script.execute: disable_repeat
       # Stop any current annoucement (ie: stop the timer ring mid playback)
       - if:
           condition:
-            lambda: return id(external_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+            media_player.is_announcing:
           then:
-            lambda: |-
-              id(external_media_player)
-                ->make_call()
-                .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
-                .set_announcement(true)
-                .perform();
+            media_player.stop:
+              announcement: true
       # Set back ducking ratio to zero
       - mixer_speaker.apply_ducking:
           id: media_mixing_input
@@ -58,21 +55,35 @@ script:
   # Script executed when the timer is ringing, to playback sounds.
   - id: ring_timer
     then:
-      - while:
-          condition:
-            switch.is_on: timer_ringing
-          then:
-            - script.execute:
-                id: play_sound
-                priority: true
-                sound_file: !lambda return id(timer_finished_sound);
-            - wait_until:
-                lambda: |-
-                  return id(external_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
-            - wait_until:
-                not:
-                  lambda: |-
-                    return id(external_media_player)->state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING;
+      - script.execute: enable_repeat_one
+      - script.execute:
+          id: play_sound
+          priority: true
+          sound_file: !lambda return id(timer_finished_sound);
+
+  # Script executed when the timer is ringing, to repeat the timer finished sound.
+  - id: enable_repeat_one
+    then:
+      # Turn on the repeat mode and pause for 500 ms between playlist items/repeats
+      - lambda: |-
+            id(external_media_player)
+              ->make_call()
+              .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_REPEAT_ONE)
+              .set_announcement(true)
+              .perform();
+            id(external_media_player)->set_playlist_delay_ms(speaker::AudioPipelineType::ANNOUNCEMENT, 500);
+
+  # Script execute when the timer is done ringing, to disable repeat mode.
+  - id: disable_repeat
+    then:
+      # Turn off the repeat mode and pause for 0 ms between playlist items/repeats
+      - lambda: |-
+            id(external_media_player)
+              ->make_call()
+              .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_REPEAT_OFF)
+              .set_announcement(true)
+              .perform();
+            id(external_media_player)->set_playlist_delay_ms(speaker::AudioPipelineType::ANNOUNCEMENT, 0);
 
 
   # Script used to fetch the first active timer (Stored in global first_active_timer)
