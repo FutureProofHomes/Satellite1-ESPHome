@@ -18,7 +18,7 @@ switch:
     restore_mode: ALWAYS_OFF
     on_turn_off:
       # Disable stop wake word
-      # - lambda: id(stop).disable();
+      - micro_wake_word.disable_model: stop
       # Stop any current annoucement (ie: stop the timer ring mid playback)
       - if:
           condition:
@@ -44,7 +44,7 @@ switch:
           decibel_reduction: 20
           duration: 0.0s
       # Enable stop wake word
-      # - lambda: id(stop).enable();
+      - micro_wake_word.enable_model: stop
       # Ring timer
       - script.execute: ring_timer
       # Refresh LED
