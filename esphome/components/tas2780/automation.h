@@ -10,7 +10,7 @@ namespace tas2780 {
 template< typename... Ts>
 class ResetAction : public Action<Ts...>, public Parented<TAS2780> {
  public:
-  void play(Ts... x) override { this->parent_->reset(); }
+  void play(const Ts &...x) override { this->parent_->reset(); }
 };
 
 template< typename... Ts>
@@ -19,7 +19,7 @@ class ActivateAction : public Action<Ts...> {
   ActivateAction(TAS2780 *parent) : parent_(parent) {}
   TEMPLATABLE_VALUE(uint8_t, mode)
   
-  void play(Ts... x) override { 
+  void play(const Ts &...x) override { 
     if( this->mode_.has_value() ){
       this->parent_->activate(this->mode_.value(x...));
     }
@@ -41,7 +41,7 @@ class UpdateConfigAction : public Action<Ts...> {
   TEMPLATABLE_VALUE(float, vol_range_max)
   TEMPLATABLE_VALUE(uint8_t, channel)
   
-  void play(Ts... x) override { 
+  void play(const Ts &...x) override { 
     if( this->amp_level_.has_value() ){
       this->parent_->set_amp_level(this->amp_level_.value(x...));
     }
