@@ -15,6 +15,10 @@ sensor:
       filters:
         - offset: ${humidity_offset}
         - lambda: "return x + id(humidity_offset_ui).state;"
+  - platform: wifi_signal
+    name: "Wi-Fi Signal Strength"
+    entity_category: "diagnostic"
+    update_interval: 60s
   
 
   - platform: ltr_als_ps
