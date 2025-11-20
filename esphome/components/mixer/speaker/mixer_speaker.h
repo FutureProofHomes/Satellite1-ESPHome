@@ -102,7 +102,7 @@ class SourceSpeaker : public speaker::Speaker, public Component {
   MixerSpeaker *parent_;
 
   std::shared_ptr<audio::AudioSourceTransferBuffer> transfer_buffer_;
-  std::weak_ptr<audio::RingBuffer> ring_buffer_;
+  std::weak_ptr<esphome::RingBuffer> ring_buffer_;
 
   uint32_t buffer_duration_ms_;
   uint32_t last_seen_data_ms_{0};

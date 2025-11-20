@@ -152,10 +152,10 @@ esp_err_t SourceSpeaker::start_() {
     if (this->transfer_buffer_ == nullptr) {
       return ESP_ERR_NO_MEM;
     }
-    std::shared_ptr<audio::RingBuffer> temp_ring_buffer;
+    std::shared_ptr<RingBuffer> temp_ring_buffer;
 
     if (!this->ring_buffer_.use_count()) {
-      temp_ring_buffer = audio::RingBuffer::create(ring_buffer_size);
+      temp_ring_buffer = RingBuffer::create(ring_buffer_size);
       this->ring_buffer_ = temp_ring_buffer;
     }
 

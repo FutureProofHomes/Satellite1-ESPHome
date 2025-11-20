@@ -1,7 +1,7 @@
 substitutions:
   name: satellite1
   friendly_name: Satellite1
-  xmos_fw_version: "v1.0.2"
+  xmos_fw_version: "v1.0.3"
   
   # OPTIONALLY, set the log level to debug, info, warn, error
   log_level: debug
@@ -14,12 +14,15 @@ esphome:
 packages:
   FutureProofHomes.Satellite1: 
     url: https://github.com/futureproofhomes/satellite1-esphome
-    ref: develop
+    ref: staging # Make sure to also change the ext_comp_repo_ref below 
     refresh: 1s  
     files: 
     # Main config files, don't remove
     - config/satellite1.base.yaml
-    - config/common/components.external.yaml
+    - config/common/dashboard_build.yaml
+    - path: config/common/components.external.yaml
+      vars:
+        ext_comp_repo_ref: staging # Make sure to set this to the same as the ref above
     
     ## OPTIONALLY, uncomment if you have the smaller LD2410 mmWave sensor connected to your HAT.
     #- config/common/mmwave_ld2410.yaml    
@@ -28,7 +31,7 @@ packages:
     #- config/common/mmwave_ld2450.yaml
 
     ## OPTIONALLY, uncomment if want extra memory, wifi and xmos control of the device.
-    #- config/common/debug.yaml 
+    #- config/common/debug.yaml
       
 logger:
   level: ${log_level}
@@ -56,3 +59,13 @@ logger:
 #snapcast:
 #  id: snapcast_client
 #  server_ip: 192.168.178.101
+
+## OPTIONALLY, uncomment the following lines to set a custom micro wake word model
+#micro_wake_word:
+#  id: mww
+#  models:
+#    - id: new_wake_word
+#      model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
+#    # uncomment the following line to remove the default "hey_jarvis" wake word
+#    - id: !remove hey_jarvis
+

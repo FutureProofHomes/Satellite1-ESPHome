@@ -1,74 +1,3 @@
-# This is a developer configuration that enables the UDP stream component and adds switches to toggle between the ASR and Comm microphones.
-# You can read more about how to use this configuration here: https://github.com/FutureProofHomes/Satellite1-ESPHome/tree/develop/tests/mic_streaming
-
-external_components:  
-  - source:
-      type: git
-      url: https://github.com/FutureProofHomes/Satellite1-ESPHome
-      ref: develop
-    components: [ udp_stream ]
-
-
-# Separate UDP Stream configurations for each microphone
-udp_stream:
-  id: udp_streamer
-  microphone: asr_mic  # Default microphone to prevent validation errors
-
-
-# Switches to toggle between ASR and Comm microphones
-switch:
-  - platform: template
-    name: "UDP Stream ASR Mic"
-    entity_category: "diagnostic"
-    id: use_asr_mic
-    icon: mdi:microphone
-    restore_mode: RESTORE_DEFAULT_OFF
-    optimistic: true
-    on_turn_on:
-      - logger.log: "Switching to ASR Mic for UDP stream"
-      - lambda: |-
-          if (id(udp_streamer).is_running()) {
-            id(udp_streamer).request_stop();  // Stop current stream
-            delay(500);  // Wait for stream to stop
-          }
-          id(udp_streamer).set_microphone(id(asr_mic));  // Set ASR mic
-          id(udp_streamer).request_start(true);  // Start stream with ASR mic
-      - switch.turn_off: use_comm_mic         # Turn off the other switch
-
-    on_turn_off:
-      - logger.log: "Turning off ASR Mic UDP stream"
-      - lambda: |-
-          if (id(udp_streamer).is_running()) {
-            id(udp_streamer).request_stop();  // Stop the stream when ASR mic is turned off
-          }
-  - platform: template
-    name: "UDP Stream Comm Mic"
-    entity_category: "diagnostic"
-    id: use_comm_mic
-    icon: mdi:microphone
-    restore_mode: RESTORE_DEFAULT_OFF
-    optimistic: true
-    on_turn_on:
-      - logger.log: "Switching to Comm Mic for UDP stream"
-      - micro_wake_word.stop:
-      - delay: 500ms
-      - lambda: |-
-          if (id(udp_streamer).is_running()) {
-            id(udp_streamer).request_stop();  // Stop current stream
-            delay(500);  // Wait for stream to stop
-          }
-          id(udp_streamer).set_microphone(id(comm_mic));  // Set Comm mic
-          id(udp_streamer).request_start(true);  // Start stream with Comm mic
-      - switch.turn_off: use_asr_mic           # Turn off the other switch
-
-    on_turn_off:
-      - logger.log: "Turning off Comm Mic UDP stream"
-      - lambda: |-
-          if (id(udp_streamer).is_running()) {
-            id(udp_streamer).request_stop();  // Stop the stream when Comm mic is turned off
-          }
-      - delay: 500ms
-      - micro_wake_word.start:
 
 select:
   - platform: template
@@ -106,6 +35,7 @@ select:
               return index.value();
             }
             ESP_LOGI("main", "No amp level selected");
+            return 15;
 
 number:
   - platform: template
