@@ -158,7 +158,7 @@ Don't forget to give the project a star! Thanks again!
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## Customizing the Firmware
-
+### ESPHome Device Builder
 The easiest way to build customized firmware for your Satellite1 is through the ESPHome Device Builder dashboard. For a detailed guide, see https://docs.futureproofhomes.net/satellite1-modifying-the-firmware/. 
 
 >**Note:** Due to breaking changes between ESPHome firmware releases, you must ensure that your ESPHome Device Builder version is compatible with the Satellite1 codebase configured in your YAML file. By default, the codebase targets the latest beta release (`staging` branch).
@@ -172,11 +172,7 @@ Before updating your ESPHome Device Builder, verify that the latest Satellite1 f
 | `main`|![GitHub Release](https://img.shields.io/github/v/release/FutureProofHomes/Satellite1-ESPHome?filter=!*-beta*)|![Dynamic YAML Badge](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fgithub.com%2FFutureProofHomes%2FSatellite1-ESPHome%2Fraw%2Fmain%2F.github%2Fworkflows%2Fbuild_latest.yaml&query=%24..esphome-version&label=ESPHome)| 
 
 
-
-
-
-
-## Developing, Testing & Debugging
+### Terminal Builds
 Create/activate environment by running from project root:
 ```bash
 source scripts/setup_build_env.sh
@@ -192,17 +188,13 @@ Upload firmware to your Core Board:
 esphome upload config/satellite1.yaml
 ```
 
-Connect the device to your wifi network:
-1. Go to: [web.esphome.io](https://web.esphome.io)
-2. Click on "Connect" and select the correct JTAG/serial debug unit
-3. Click on the three dots and select 'Configure WiFi'
-
-Tail the Core Board's Logs:
-1. Go to: [web.esphome.io](https://web.esphome.io) and connect then click logs... or
-2. Tail the ESPHome logs of the Core Board's running firmware from the command line:
+Tail the ESPHome logs:
 ```bash
 esphome logs config/satellite1.yaml
 ```
+For WiFi setup and troubleshooting see also:
+1. [Flashing via usb-c](https://docs.futureproofhomes.net/satellite1-flash-via-usb-c/)
+2. [Troubleshooting](https://docs.futureproofhomes.net/satellite1-troubleshooting/)
 
 ## Home Assistant Voice Assistant Debugging
 
