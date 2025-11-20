@@ -19,20 +19,6 @@
 [![Issues][issues-shield]][issues-url]
 [![MIT License][license-shield]][license-url]
 
-**Latest Release**
-
-![GitHub Release](https://img.shields.io/github/v/release/FutureProofHomes/Satellite1-ESPHome?filter=!*-beta*)
-![Dynamic YAML Badge](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fgithub.com%2FFutureProofHomes%2FSatellite1-ESPHome%2Fraw%2Fmain%2F.github%2Fworkflows%2Fbuild_latest.yaml&query=%24..esphome-version&label=ESPHome)
-
-
-**Latest Beta**
-
-![GitHub Release](https://img.shields.io/github/v/release/FutureProofHomes/Satellite1-ESPHome?filter=*-beta*)
-![Dynamic YAML Badge](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fgithub.com%2FFutureProofHomes%2FSatellite1-ESPHome%2Fraw%2Fstaging%2F.github%2Fworkflows%2Fbuild_latest.yaml&query=%24..esphome-version&label=ESPHome)
-
-
-
-
 <!-- PROJECT LOGO -->
 <br />
 <div align="center">
@@ -170,6 +156,24 @@ Don't forget to give the project a star! Thanks again!
 6. Open a Pull Request
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Customizing the Firmware
+
+The easiest way to build customized firmware for your Satellite1 is through the ESPHome Device Builder dashboard. For a detailed guide, see https://docs.futureproofhomes.net/satellite1-modifying-the-firmware/. 
+
+>**Note:** Due to breaking changes between ESPHome firmware releases, you must ensure that your ESPHome Device Builder version is compatible with the Satellite1 codebase configured in your YAML file. By default, the codebase targets the latest beta release (`staging` branch).
+Before updating your ESPHome Device Builder, verify that the latest Satellite1 firmware beta release officially supports the ESPHome version. Failure to do so may result in build failures or unstable device behavior.
+
+
+|Code Base|FW Release|ESPHome|
+|-----|-----|-----|
+| `develop`|-|![Dynamic YAML Badge](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fgithub.com%2FFutureProofHomes%2FSatellite1-ESPHome%2Fraw%2Fdevelop%2F.github%2Fworkflows%2Fbuild_latest.yaml&query=%24..esphome-version&label=ESPHome)| 
+|`staging` (**default**)|![GitHub Release](https://img.shields.io/github/v/release/FutureProofHomes/Satellite1-ESPHome?filter=*-beta*)|![Dynamic YAML Badge](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fgithub.com%2FFutureProofHomes%2FSatellite1-ESPHome%2Fraw%2Fstaging%2F.github%2Fworkflows%2Fbuild_latest.yaml&query=%24..esphome-version&label=ESPHome)|
+| `main`|![GitHub Release](https://img.shields.io/github/v/release/FutureProofHomes/Satellite1-ESPHome?filter=!*-beta*)|![Dynamic YAML Badge](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fgithub.com%2FFutureProofHomes%2FSatellite1-ESPHome%2Fraw%2Fmain%2F.github%2Fworkflows%2Fbuild_latest.yaml&query=%24..esphome-version&label=ESPHome)| 
+
+
+
+
 
 
 ## Developing, Testing & Debugging
