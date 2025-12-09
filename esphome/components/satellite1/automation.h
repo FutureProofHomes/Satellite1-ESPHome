@@ -9,7 +9,7 @@ namespace satellite1 {
 template<typename... Ts> 
 class XMOSHardwareResetAction : public Action<Ts...>, public Parented<Satellite1> {
  public:
-  void play(Ts... x) override {
+  void play(const Ts&... x) override {
     this->parent_->xmos_hardware_reset();
   }
 };
