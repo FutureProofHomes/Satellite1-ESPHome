@@ -14,7 +14,6 @@ external_components:
         - micro_wake_word
         - mixer
         - pcm5122
-        - psram 
         - resampler 
         - satellite1 
         - snapcast
