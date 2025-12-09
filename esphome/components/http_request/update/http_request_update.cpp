@@ -36,6 +36,9 @@ void HttpRequestUpdate::setup() {
 }
 
 void HttpRequestUpdate::update() {
+  if (!network::is_connected()) {
+    return;
+  }
 #ifdef USE_ESP32
   xTaskCreate(HttpRequestUpdate::update_task, "update_task", 8192, (void *) this, 1, &this->update_task_handle_);
 #else
