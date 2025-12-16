@@ -1,10 +1,11 @@
 substitutions:
   ext_comp_repo_ref: develop
+  ext_comp_repo_url: https://github.com/FutureProofHomes/Satellite1-ESPHome 
 
 external_components:
   - source:
       type: git
-      url: https://github.com/FutureProofHomes/Satellite1-ESPHome
+      url: ${ext_comp_repo_url}
       ref: ${ext_comp_repo_ref}
     components:
         - audio 
