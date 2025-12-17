@@ -1,0 +1,163 @@
+substitutions:
+  friendly_name: "Satellite1"  
+
+  node_name: satellite1
+  company_name: FutureProofHomes
+  project_name: Satellite1
+  
+  esp32_fw_version: dev
+
+
+esphome:
+  name: ${node_name}
+  name_add_mac_suffix: true
+  friendly_name: ${friendly_name}
+  min_version: 2025.11.5
+  
+  platformio_options:
+    board_build.flash_mode: dio
+    board_upload.maximum_size: 16777216
+  
+  project:
+    name: ${company_name}.${project_name}
+    version: ${esp32_fw_version}
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: ESP32S3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+    sdkconfig_options:
+      CONFIG_ESP32_S3_BOX_BOARD: "y"
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ: "240"
+      
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+      CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY: "y"
+      
+      # FreeRTOS
+      CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY: "y"
+
+      # LWIP
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
+      CONFIG_LWIP_IRAM_OPTIMIZATION: "y"
+      CONFIG_LWIP_TCPIP_TASK_PRIO: "23"
+      CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU0: "y" 
+
+      CONFIG_LWIP_TCP_SND_BUF_DEFAULT: "65535"
+      CONFIG_LWIP_TCP_WND_DEFAULT: "65535"
+      CONFIG_LWIP_TCPIP_RECVMBOX_SIZE: "64"
+      CONFIG_LWIP_TCP_RECVMBOX_SIZE: "64"
+      CONFIG_LWIP_UDP_RECVMBOX_SIZE: "64"
+      
+      
+      # WiFi
+      CONFIG_ESP_WIFI_AMPDU_RX_ENABLED: "y"
+      CONFIG_ESP_WIFI_RX_BA_WIN: "32"
+      CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM: "16"
+      CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM: "128"
+      CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM: "64"
+      CONFIG_ESP_WIFI_AMPDU_TX_ENABLED: "y"
+      CONFIG_ESP_WIFI_TX_BA_WIN: "32"
+      
+
+      # BT
+      CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST: "y"
+      CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: "y"
+
+      # MDNS
+      CONFIG_MDNS_MEMORY_ALLOC_SPIRAM: "y"
+
+      # IPERF
+      CONFIG_IPERF_TRAFFIC_TASK_PRIORITY: "23"
+      CONFIG_IPERF_REPORT_TASK_PRIORITY: "24"
+      CONFIG_COMPILER_OPTIMIZATION_PERF: "y"
+
+esp32_improv:
+  authorizer: btn_action
+
+
+binary_sensor:
+  - platform: gpio
+    id: btn_action
+    pin:
+      number: 0
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+      ignore_strapping_warning: true
+    name: "Button Right (Action)"
+    icon: "mdi:gesture-tap"
+    
+
+external_components:
+  - source:
+      type: local
+      path: ../esphome/components
+    components: 
+        - iperf
+        
+logger:
+  deassert_rts_dtr: true
+  hardware_uart : USB_SERIAL_JTAG
+  level: debug
+  logs:
+    ltr_als_ps: WARN
+
+wifi:
+  id: wifi_id
+  power_save_mode: none
+  #output_power: "8.5dB"
+  on_disconnect:
+    - ble.enable:
+  on_connect:
+    - delay: 5s  # Gives time for improv results to be transmitted
+    - ble.disable:
+
+improv_serial:
+
+psram:
+  mode: octal
+  speed: 80MHz
+  ignore_not_found: false
+
+i2c:
+  - id: i2c_0
+    sda: GPIO5
+    scl: GPIO6
+    frequency: 400kHz
+    scan: True
+
+spi:
+  - id: spi_0
+    clk_pin:  GPIO12
+    mosi_pin: GPIO11
+    miso_pin: GPIO13
+    interface: SPI2
+
+ota:
+  - platform: esphome
+    id: ota_esphome
+
+
+api:
+  actions:
+    - action: start_iperf_server
+      then:
+        - iperf.start_server:
+   
+    - action: start_iperf_client
+      variables:
+        server: string
+      then:
+        - iperf.start_client:
+            server: !lambda 'return server;'
+
+
+iperf:
+  high_performance_net: True
+  

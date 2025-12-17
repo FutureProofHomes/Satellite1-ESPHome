@@ -120,6 +120,7 @@ external_components:
         - snapcast
         - speaker
         - tas2780
+        - iperf
         
 
 
@@ -132,4 +133,18 @@ logger:
     
 
 
+iperf:
 
+api:
+  actions:
+    - action: start_iperf_server
+      then:
+        - iperf.start_server:
+   
+    - action: start_iperf_client
+      variables:
+        server: string
+      then:
+        - iperf.start_client:
+            server: !lambda 'return server;'
+  encryption: !remove

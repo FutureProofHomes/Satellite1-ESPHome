@@ -11,6 +11,8 @@ wifi:
     - script.execute: control_leds
   on_disconnect:
     - script.execute: control_leds
+  power_save_mode: none
+  #output_power: "8.5dB"
 
 improv_serial:
 

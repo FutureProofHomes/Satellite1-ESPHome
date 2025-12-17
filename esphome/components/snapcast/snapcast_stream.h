@@ -19,7 +19,9 @@
 
 #pragma once
 
+#include <deque>
 #include <string>
+
 #include "esp_transport.h"
 
 #include "esphome/core/defines.h"
@@ -27,7 +29,6 @@
 #include "esphome/core/component.h"
 
 #include "esphome/components/audio/chunked_ring_buffer.h"
-//#include "esphome/components/audio/timed_ring_buffer.h"
 
 #include "messages.h"
 

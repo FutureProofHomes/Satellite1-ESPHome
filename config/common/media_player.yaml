@@ -67,7 +67,6 @@ binary_sensor:
     
     on_press:
       - dac_proxy.activate_line_out:
-      - lambda: id(jack_plugged_recently) = true;
       - script.execute: control_leds
       - delay: 200ms
       - script.execute:
@@ -75,13 +74,11 @@ binary_sensor:
           priority: false
           sound_file: !lambda return id(jack_connected_sound);
       - delay: 800ms
-      - lambda: id(jack_plugged_recently) = false;
       - script.execute: control_leds
       
     
     on_release:
       - dac_proxy.activate_speaker:
-      - lambda: id(jack_unplugged_recently) = true;
       - script.execute: control_leds
       - delay: 200ms
       - script.execute:
@@ -89,7 +86,6 @@ binary_sensor:
           priority: false
           sound_file: !lambda return id(jack_disconnected_sound);
       - delay: 800ms
-      - lambda: id(jack_unplugged_recently) = false;
       - script.execute: control_leds
 
 
@@ -103,9 +99,6 @@ fusb302b:
           format: "PD contract got accepted: %s"
           args: [ 'id(pd_fusb302b).contract.c_str()' ]
 
-      - text_sensor.template.publish:
-          id: pd_state_text
-          state: !lambda 'return id(pd_fusb302b).contract;'
       - if:
           condition:
             lambda: |-
@@ -189,20 +182,7 @@ media_player:
           decibel_reduction: 20
           duration: 0.0s
     
-    on_state:
-      if:
-        condition:
-          and:
-            - switch.is_off: timer_ringing
-            - not:
-                voice_assistant.is_running:
-            - not:
-                media_player.is_announcing:
-        then:
-          - mixer_speaker.apply_ducking:
-              id: media_mixing_input
-              decibel_reduction: 0
-              duration: 1.0s
+    
 
     files:
       - id: center_button_press_sound
@@ -267,5 +247,4 @@ script:
             - media_player.volume_down:
       - script.execute: control_leds
       - delay: 2s
-      - lambda: id(volume_buttons_touched) = false;
       - script.execute: control_leds
