@@ -203,7 +203,7 @@ static void transport_task_(
         
         int err = connect(sock, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
         if (err != 0) {
-            ESP_LOGE("transport", "Socket unable to connect: errno %d", errno);
+            ESP_LOGE("transport", "Socket unable to connect to %s: errno %d", server.c_str(), errno);
             close(sock);
             xTaskNotify(stream_task_handle, CONNECTION_FAILED_BIT, eSetBits);
             continue;
