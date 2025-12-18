@@ -109,7 +109,6 @@ external_components:
     components: 
         - audio 
         - fusb302b
-        - http_request
         - i2s_audio
         - memory_flasher
         - micro_wake_word
@@ -129,7 +128,5 @@ logger:
   level: debug
   logs:
     ltr_als_ps: WARN
-    
-
 
 
