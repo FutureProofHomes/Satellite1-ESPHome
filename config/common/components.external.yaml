@@ -10,11 +10,11 @@ external_components:
         - audio 
         - fusb302b
         - i2s_audio
+        - http_request
         - memory_flasher
         - micro_wake_word
         - mixer
         - pcm5122
-        - psram 
         - resampler 
         - satellite1 
         - snapcast

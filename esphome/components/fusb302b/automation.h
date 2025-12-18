@@ -10,7 +10,7 @@ template<typename... Ts>
 class PowerDeliveryRequestVoltage : public Action<Ts...>, public Parented<PowerDelivery> {
 public:
   TEMPLATABLE_VALUE(int, voltage)
-  void play(Ts... x) override {this->parent_->request_voltage(this->voltage_.value(x...));}
+  void play(const Ts&... x) override {this->parent_->request_voltage(this->voltage_.value(x...));}
 };
 
 
@@ -61,7 +61,7 @@ using TransitionTrigger = PDStateTrigger<PowerDeliveryState::PD_STATE_TRANSITION
 
 template<typename... Ts> class IsConnectedCondition : public Condition<Ts...>, public Parented<PowerDelivery> {
  public:
-  bool check(Ts... x) override { return this->parent_->state == PowerDeliveryState::PD_STATE_DEFAULT_CONTRACT || this->parent_->state == PowerDeliveryState::PD_STATE_EXPLICIT_SPR_CONTRACT || PowerDeliveryState::PD_STATE_EXPLICIT_EPR_CONTRACT; }
+  bool check(const Ts&... x) override { return this->parent_->state == PowerDeliveryState::PD_STATE_DEFAULT_CONTRACT || this->parent_->state == PowerDeliveryState::PD_STATE_EXPLICIT_SPR_CONTRACT || PowerDeliveryState::PD_STATE_EXPLICIT_EPR_CONTRACT; }
 };
 
 

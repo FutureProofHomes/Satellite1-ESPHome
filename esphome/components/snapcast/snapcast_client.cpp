@@ -35,6 +35,18 @@ static const char *const TAG = "snapcast_client";
 
 
 void SnapcastClient::setup(){
+    this->network_initialized_ = false;
+}
+
+void SnapcastClient::loop(){
+    if (!this->network_initialized_ && network::is_connected()) {
+    // Perform network setup once connected
+    this->on_network_ready_();
+    this->network_initialized_ = true;
+  }
+}
+
+void SnapcastClient::on_network_ready_(){
     this->client_id_ = get_mac_address_pretty();
     this->cntrl_session_.client_id_ = this->client_id_;
     
