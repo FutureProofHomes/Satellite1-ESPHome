@@ -45,10 +45,6 @@ sensor:
     psram:
       name: "Free PSRAM"
       entity_category: "diagnostic"
-  - platform: wifi_signal
-    name: "Wi-Fi Signal Strength"
-    entity_category: "diagnostic"
-    update_interval: 60s
 
   - platform: internal_temperature
     name: "Internal ESP Temperature"
