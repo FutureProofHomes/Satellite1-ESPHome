@@ -63,14 +63,14 @@ void SpeakerMediaPlayer::setup() {
 
   this->pref_ = global_preferences->make_preference<VolumeRestoreState>(this->get_object_id_hash());
 
-  VolumeRestoreState volume_restore_state;
-  if (this->pref_.load(&volume_restore_state)) {
-    this->set_volume_(volume_restore_state.volume);
-    this->set_mute_state_(volume_restore_state.is_muted);
-  } else {
-    this->set_volume_(FIRST_BOOT_DEFAULT_VOLUME);
-    this->set_mute_state_(false);
-  }
+  // VolumeRestoreState volume_restore_state;
+  // if (this->pref_.load(&volume_restore_state)) {
+  //   this->set_volume_(volume_restore_state.volume);
+  //   this->set_mute_state_(volume_restore_state.is_muted);
+  // } else {
+  //   this->set_volume_(FIRST_BOOT_DEFAULT_VOLUME);
+  //   this->set_mute_state_(false);
+  // }
 
 #ifdef USE_OTA
   ota::get_global_ota_callback()->add_on_state_callback(
@@ -532,13 +532,16 @@ void SpeakerMediaPlayer::save_volume_restore_state_() {
   this->pref_.save(&volume_restore_state);
 }
 
-void SpeakerMediaPlayer::set_mute_state_(bool mute_state) {
-  if (this->media_speaker_ != nullptr) {
-    this->media_speaker_->set_mute_state(mute_state);
+void SpeakerMediaPlayer::set_mute_state_(bool mute_state, bool restore_only) {
+  if (!restore_only){
+    if (this->media_speaker_ != nullptr) {
+      this->media_speaker_->set_mute_state(mute_state);
+    }
+    if (this->announcement_speaker_ != nullptr) {
+      this->announcement_speaker_->set_mute_state(mute_state);
+    }
   }
-  if (this->announcement_speaker_ != nullptr) {
-    this->announcement_speaker_->set_mute_state(mute_state);
-  }
+
 
   bool old_mute_state = this->is_muted_;
   this->is_muted_ = mute_state;
@@ -554,17 +557,19 @@ void SpeakerMediaPlayer::set_mute_state_(bool mute_state) {
   }
 }
 
-void SpeakerMediaPlayer::set_volume_(float volume, bool publish) {
+void SpeakerMediaPlayer::set_volume_(float volume, bool publish, bool restore_only) {
   // Remap the volume to fit with in the configured limits
   float bounded_volume = remap<float, float>(volume, 0.0f, 1.0f, this->volume_min_, this->volume_max_);
 
-  if (this->media_speaker_ != nullptr) {
-    this->media_speaker_->set_volume(bounded_volume);
+  if (!restore_only){
+    if (this->media_speaker_ != nullptr) {
+      this->media_speaker_->set_volume(bounded_volume);
+    }
+    if (this->announcement_speaker_ != nullptr) {
+      this->announcement_speaker_->set_volume(bounded_volume);
+    }
   }
-
-  if (this->announcement_speaker_ != nullptr) {
-    this->announcement_speaker_->set_volume(bounded_volume);
-  }
+  
 
   if (publish) {
     this->volume = volume;
