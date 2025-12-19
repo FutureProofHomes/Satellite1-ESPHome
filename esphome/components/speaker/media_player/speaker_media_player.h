@@ -89,18 +89,21 @@ class SpeakerMediaPlayer : public Component, public media_player::MediaPlayer {
 #endif
   void set_playlist_delay_ms(AudioPipelineType pipeline_type, uint32_t delay_ms);
 
- protected:
+  /// @brief Updates this->volume and saves volume/mute state to flash for restortation if publish is true.
+  void set_volume_(float volume, bool publish = true, bool restore_only = false);
+  /// @brief Sets the mute state. Restores previous volume if unmuting. Always saves volume/mute state to flash for
+  /// restoration.
+  /// @param mute_state If true, audio will be muted. If false, audio will be unmuted
+  void set_mute_state_(bool mute_state, bool restore_only = false);
+ 
+  protected:
   // Receives commands from HA or from the voice assistant component
   // Sends commands to the media_control_commanda_queue_
   void control(const media_player::MediaPlayerCall &call) override;
 
-  /// @brief Updates this->volume and saves volume/mute state to flash for restortation if publish is true.
-  void set_volume_(float volume, bool publish = true);
+  
 
-  /// @brief Sets the mute state. Restores previous volume if unmuting. Always saves volume/mute state to flash for
-  /// restoration.
-  /// @param mute_state If true, audio will be muted. If false, audio will be unmuted
-  void set_mute_state_(bool mute_state);
+  
 
   /// @brief Saves the current volume and mute state to the flash for restoration.
   void save_volume_restore_state_();
