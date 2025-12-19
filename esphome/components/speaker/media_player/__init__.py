@@ -22,6 +22,7 @@ from esphome.const import (
     CONF_TASK_STACK_IN_PSRAM,
     CONF_TYPE,
     CONF_URL,
+    CONF_VOLUME,
 )
 from esphome.core import CORE, HexInt
 from esphome.core.entity_helpers import inherit_property_from
@@ -46,6 +47,7 @@ CONF_CODEC_SUPPORT_ENABLED = "codec_support_enabled"
 CONF_ENQUEUE = "enqueue"
 CONF_MEDIA_FILE = "media_file"
 CONF_MEDIA_PIPELINE = "media_pipeline"
+CONF_MUTE = "mute"
 CONF_ON_MUTE = "on_mute"
 CONF_ON_UNMUTE = "on_unmute"
 CONF_ON_VOLUME = "on_volume"
@@ -77,6 +79,9 @@ PlayOnDeviceMediaAction = speaker_ns.class_(
 )
 StopStreamAction = speaker_ns.class_(
     "StopStreamAction", automation.Action, cg.Parented.template(SpeakerMediaPlayer)
+)
+RestoreVolumeAction = speaker_ns.class_(
+    "RestoreVolumeAction", automation.Action, cg.Parented.template(SpeakerMediaPlayer)
 )
 
 
@@ -451,4 +456,25 @@ async def play_on_device_media_media_action(config, action_id, template_arg, arg
     cg.add(var.set_audio_file(media_file))
     cg.add(var.set_announcement(announcement))
     cg.add(var.set_enqueue(enqueue))
+    return var
+
+@automation.register_action(
+    "media_player.speaker.restore_volume",
+    RestoreVolumeAction,
+    cv.maybe_simple_value(
+        {
+            cv.GenerateID(): cv.use_id(SpeakerMediaPlayer),
+            cv.Required(CONF_VOLUME): cv.templatable(cv.percentage),
+            cv.Optional(CONF_MUTE, default=False): cv.templatable(cv.boolean),
+        },
+        key=CONF_VOLUME,
+    ),
+)
+async def restore_volume_action(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    volume = await cg.templatable(config[CONF_VOLUME], args, float)
+    cg.add(var.set_volume(volume))
+    muted = await cg.templatable(config[CONF_MUTE], args, float)
+    cg.add(var.set_muted(muted))
     return var
