@@ -20,6 +20,15 @@ template<typename... Ts> class PlayOnDeviceMediaAction : public Action<Ts...>, p
   }
 };
 
+template<typename... Ts> class RestoreVolumeAction : public Action<Ts...>, public Parented<SpeakerMediaPlayer> {
+  TEMPLATABLE_VALUE(float, volume)
+  TEMPLATABLE_VALUE(bool, muted)
+  void play(const Ts&... x) override {
+    this->parent_->set_volume_(this->volume_.value(x...), true, true);
+    this->parent_->set_mute_state_(this->muted_.value(x...), true);
+  }
+};
+
 
 
 }  // namespace speaker

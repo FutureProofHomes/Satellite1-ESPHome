@@ -10,23 +10,22 @@ audio_dac:
     id: dac_proxy
     speaker_dac: speaker_dac
     line_out_dac: line_out_dac
-    
-    on_line_out_activated:
-        # if line_out was used previously but is not available try speaker
-        - lambda: |
-            if( !id(line_out_sensor).state ){
-              id(dac_proxy).activate_speaker();
-            }
-    
+        
     on_state_change:
-      - media_player.volume_set:
+      - media_player.speaker.restore_volume:
           volume: !lambda return id(dac_proxy).volume();
-      - lambda: |
-           if( id(dac_proxy).is_muted() ){
-              id(external_media_player)->make_call()
-                .set_command(MEDIA_PLAYER_COMMAND_MUTE)
-                .perform();
-           }
+          mute: !lambda return id(dac_proxy).is_muted(); 
+
+api:
+  actions:
+    - action: activate_speaker_dac
+      then:
+        - dac_proxy.activate_speaker:
+
+    - action: activate_lineout_dac
+      then:
+        - dac_proxy.activate_line_out:
+
 
 select:
   - platform: template
