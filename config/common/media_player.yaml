@@ -16,6 +16,17 @@ audio_dac:
           volume: !lambda return id(dac_proxy).volume();
           mute: !lambda return id(dac_proxy).is_muted(); 
 
+api:
+  actions:
+    - action: activate_speaker_dac
+      then:
+        - dac_proxy.activate_speaker:
+
+    - action: activate_lineout_dac
+      then:
+        - dac_proxy.activate_line_out:
+
+
 select:
   - platform: template
     name: Speaker channel output
