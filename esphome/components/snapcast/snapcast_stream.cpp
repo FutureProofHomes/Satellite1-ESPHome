@@ -304,7 +304,7 @@ static void transport_task_(
                 msg->toBytes(tx_buffer);
                 int bytes_written = send(sock, (char*) tx_buffer, msg->getMessageSize(), 0);
                 if (bytes_written > 0 && msg->getMessageType() == message_type::kTime) {
-                    time_stats->set_request_time(tv_t::now());
+                    time_stats->set_request_time(msg->id(), msg->send_time());
                 }
                 delete msg;  // Free the message after serialization
                 
@@ -590,7 +590,8 @@ void SnapcastStream::stream_task_(){
         
         if(this->state_ == StreamState::CONNECTED_IDLE || this->state_ == StreamState::STREAMING){
             this->send_time_sync_();
-            if(this->read_and_process_messages_(stream_package_buffer.get(), 500) == ESP_FAIL){
+            const uint32_t timeout = this->state_ == StreamState::CONNECTED_IDLE ? 10 : 500;
+            if(this->read_and_process_messages_(stream_package_buffer.get(), timeout) == ESP_FAIL){
                 if( this->reconnect_on_error_ ){
                     this->start_after_connecting_ = true;
                     xTaskNotify(transport_task_handle, DISCONNECT_BIT | CONNECT_BIT, eSetBits);  
@@ -665,7 +666,9 @@ void SnapcastStream::send_report_(){
 void SnapcastStream::send_time_sync_(){
     uint32_t sync_interval = TIME_SYNC_INTERVAL_MS;
     if( !this->time_stats_.is_ready() ){
-        sync_interval = 100;
+        sync_interval = 0;
+        SnapcastMessage* time_sync_msg0 = new TimeMessage(); 
+        this->send_message_(time_sync_msg0);
     }
     if (millis() - this->last_time_sync_ > sync_interval){
         SnapcastMessage* time_sync_msg = new TimeMessage(); 
@@ -679,26 +682,30 @@ void SnapcastStream::on_time_msg_(MessageHeader msg, tv_t latency_c2s){
     //latency_s2c = t_client-recv - t_server-sent + t_network_latency
     //time diff between server and client as (latency_c2s - latency_s2c) / 2
     tv_t latency_s2c = msg.received - msg.sent;
-    time_stats_.add_offset( (latency_c2s - latency_s2c) / 2, msg.received );
-    this->est_time_diff_ = time_stats_.get_estimate();
-    
+    time_stats_.add_offset( msg.refersTo, (latency_c2s - latency_s2c) / 2, msg.received );
+    const tv_t est_offset = time_stats_.get_estimate();
+    this->est_time_diff_.store(est_offset, std::memory_order_relaxed); 
 #if SNAPCAST_DEBUG
-    printf( "msg.sent: sec %d, usec: %d\n", msg.sent.sec, msg.sent.usec );
-    printf( "latencey_c2s: %lld\n", latency_c2s.to_millis());
-    printf( "latency_s2c: %lld = %lld - %lld\n", latency_s2c.to_millis(), msg.received.to_millis(), msg.sent.to_millis());    
-    
-    const int64_t server_time = (tv_t::now() + this->est_time_diff_).to_millis();
+    printf( "msg.id: %d, msg.sent: %lld, msg.received: %lld\n", msg.id, msg.sent.to_microseconds(), msg.received.to_microseconds() );
+    printf( "latency_c2s: %lld at-curr-est: %lld\n", latency_c2s.to_microseconds(), (latency_c2s - est_offset).to_microseconds() );
+    printf( "latency_s2c: %lld = %lld - %lld at-curr-est: %lld\n", 
+        latency_s2c.to_microseconds(), 
+        msg.received.to_microseconds(), msg.sent.to_microseconds(),
+        (latency_s2c + est_offset).to_microseconds()
+    );    
+    const tv_t now = tv_t::now();
+    const int64_t server_time = (now + est_offset).to_microseconds();
     static int64_t last_server_time = server_time;
-    static uint32_t last_call = millis();
+    static int64_t last_call = now.to_microseconds();
     
-    int64_t expected_server_time = last_server_time + (millis() - last_call);
+    int64_t expected_server_time = last_server_time + (now.to_microseconds() - last_call);
     int64_t server_diff = server_time - expected_server_time;
 
     last_server_time = server_time;
-    last_call = millis();
+    last_call = now.to_microseconds();
 
     printf("New server time: %" PRId64 " (delta: %" PRId64 ") , expected %" PRId64 ", diff: %" PRId64 "\n",
-         server_time, this->est_time_diff_.to_millis(), expected_server_time, server_diff);
+         server_time, est_offset.to_microseconds(), expected_server_time, server_diff);
 #endif
     
 }
