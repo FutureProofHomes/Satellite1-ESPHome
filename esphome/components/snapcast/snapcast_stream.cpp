@@ -106,9 +106,8 @@ typedef struct {
 
 esp_err_t SnapcastStream::connect(std::string server, uint32_t port){
     this->server_ = server;
-    this->port_ = port;    
+    this->port_ = port;     
     if( this->stream_task_handle_ == nullptr ){
-        ESP_LOGI(TAG, "Heap before task: %u", xPortGetFreeHeapSize());
         RAMAllocator<StackType_t> stack_allocator(RAMAllocator<StackType_t>::ALLOC_INTERNAL);
         this->task_stack_buffer_ = stack_allocator.allocate(TASK_STACK_SIZE);
         if (this->task_stack_buffer_ == nullptr) {
@@ -144,7 +143,9 @@ esp_err_t SnapcastStream::connect(std::string server, uint32_t port){
 
 esp_err_t SnapcastStream::disconnect(){
    // close connection and stop all running tasks
-   xTaskNotify( this->stream_task_handle_, STOP_BIT, eSetValueWithOverwrite);
+   if( this->stream_task_handle_ ){
+      xTaskNotify( this->stream_task_handle_, STOP_BIT, eSetValueWithOverwrite);
+   }
    return ESP_OK; 
 }
 
@@ -253,6 +254,7 @@ static void transport_task_(
             int sel = lwip_select(sock + 1, &read_fds, NULL, NULL, &timeout);
             if (sel < 0) {
                 ESP_LOGE("transport", "select() error: errno %d", errno);
+                xTaskNotify(stream_task_handle, CONNECTION_DROPPED_BIT, eSetBits);
                 break;
             } else if (sel == 0) {
                 // Timeout, nothing ready to read
@@ -529,6 +531,7 @@ void SnapcastStream::stream_task_(){
     constexpr TickType_t IDLE_WAIT = pdMS_TO_TICKS(100);        
     
     uint32_t notify_value;
+    this->set_state_(StreamState::DISCONNECTED);
     while( true ){
         TickType_t wait_time = (this->state_ == StreamState::STREAMING) ? STREAMING_WAIT : IDLE_WAIT;
         if (xTaskNotifyWait(0, 0xFFFFFFFF, &notify_value, wait_time)) {
@@ -558,6 +561,7 @@ void SnapcastStream::stream_task_(){
             }
             
             if (notify_value & CONNECTION_ESTABLISHED_BIT) {
+                this->reconnect_counter_ = 0;
                 this->send_hello_();
                 this->time_stats_.reset();
                 set_state_(StreamState::CONNECTED_IDLE);
@@ -577,9 +581,9 @@ void SnapcastStream::stream_task_(){
             } 
 
             if (notify_value & CONNECTION_FAILED_BIT || notify_value & CONNECTION_DROPPED_BIT) {
-                if( this->reconnect_on_error_ ){
+                if( this->reconnect_on_error_() ){
+                    this->set_state_(StreamState::RECONNECTING);
                     vTaskDelay(pdMS_TO_TICKS(1000));
-                    this->set_state_(StreamState::CONNECTING);
                     xTaskNotify(transport_task_handle, CONNECT_BIT, eSetBits);
                 } else {
                     this->error_msg_ = "Failed to connect or connection dropped";
@@ -590,18 +594,16 @@ void SnapcastStream::stream_task_(){
         
         if(this->state_ == StreamState::CONNECTED_IDLE || this->state_ == StreamState::STREAMING){
             this->send_time_sync_();
-            const uint32_t timeout = this->state_ == StreamState::CONNECTED_IDLE ? 10 : 500;
+            const uint32_t timeout = this->time_stats_.is_ready() ? 500 : 10;
             if(this->read_and_process_messages_(stream_package_buffer.get(), timeout) == ESP_FAIL){
-                if( this->reconnect_on_error_ ){
-                    this->start_after_connecting_ = true;
-                    xTaskNotify(transport_task_handle, DISCONNECT_BIT | CONNECT_BIT, eSetBits);  
-                } else {
-                    this->set_state_(StreamState::ERROR);
-                    this->error_msg_ = "Error reading or processing messages";
-                }
+                this->error_msg_ = "Error reading or processing messages, initiating a new session";
+                this->set_state_(StreamState::RECONNECTING);
+                this->start_after_connecting_ = true;
+                xTaskNotify(transport_task_handle, DISCONNECT_BIT | CONNECT_BIT, eSetBits);  
             }      
         }
     }
+    this->set_state_(StreamState::DESTROYED);
 }
 
 

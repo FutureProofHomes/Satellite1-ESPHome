@@ -40,14 +40,17 @@ namespace snapcast {
 
 
 enum class StreamState {
-  DISCONNECTED,
+  DESTROYED,           // stream_task and transport_task not running
+  DISCONNECTED,        // stream_task is running, not connected yet
   CONNECTING,
+  RECONNECTING,        // Requested to reconnect
   CONNECTED_IDLE,      // Connected but waiting
   STREAMING,           // Receiving data
   ERROR,               // Fatal or recoverable error
   STOPPING             // Requested shutdown
 };
 
+constexpr uint8_t MAX_RECONNECTIONS = 3;
 
 class SnapcastClient;
 
@@ -81,14 +84,18 @@ public:
 
     /// @brief Check if the stream is connected (either idle or actively streaming).
     /// @return `true` if connected, `false` otherwise.
-    bool is_connected() {
+    bool is_connected() const {
         return this->state_ == StreamState::STREAMING || this->state_ == StreamState::CONNECTED_IDLE;
     }
 
     /// @brief Check if the stream is actively receiving data.
     /// @return `true` if streaming is in progress, `false` otherwise.
-    bool is_running() {
+    bool is_running() const {
         return this->state_ == StreamState::STREAMING;
+    }
+
+    bool is_destroyed() const {
+        return this->state_ == StreamState::DESTROYED;
     }
 
     /// @brief Set a callback to be invoked on stream status updates.
@@ -103,6 +110,7 @@ protected:
     friend SnapcastClient;
     void on_server_settings_msg_(const ServerSettingsMessage &msg);
     void on_time_msg_(MessageHeader msg, tv_t time);
+    bool reconnect_on_error_() { return ++(this->reconnect_counter_) < MAX_RECONNECTIONS; }
     
     std::string server_;
     uint32_t port_;
@@ -110,10 +118,9 @@ protected:
     int32_t latency_{0};
     uint8_t volume_{0};
     bool muted_{false};
-    bool reconnect_on_error_{true};
     uint32_t reconnect_counter_{0};
     
-    StreamState state_{StreamState::DISCONNECTED};
+    StreamState state_{StreamState::DESTROYED};
     std::string error_msg_;
     
     tv_t to_local_time_(tv_t server_time) const {

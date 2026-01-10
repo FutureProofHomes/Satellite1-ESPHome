@@ -1,3 +1,21 @@
+/*
+ * This file is part of Snapcast integration for ESPHome.
+ *
+ * Copyright (C) 2025 Mischa Siekmann <FutureProofHomes Inc.>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 #pragma once
 
 #include <algorithm>
@@ -206,10 +224,6 @@ public:
     reset_kalman_state_();
   }
   
-  std::atomic<int64_t> a_last_rtt_us_{0};
-  std::atomic<int64_t> a_min_rtt_us_{0};
-  std::atomic<int64_t> a_sigma_us_{0};
-
 public:
   // ---------------- Configuration ----------------
   Config cfg_;
@@ -257,24 +271,16 @@ public:
   const int64_t rtt_us = std::max<int64_t>(1, rtt.to_microseconds());
   last_rtt_us_ = rtt_us;
 
-  auto publish = [&]() {
-    a_last_rtt_us_.store(last_rtt_us_, std::memory_order_relaxed);
-    a_min_rtt_us_.store(min_rtt_us_, std::memory_order_relaxed);
-    a_sigma_us_.store(current_sigma_us_(), std::memory_order_relaxed);
-  };
-
   if (!rtt_inited_) {
     rtt_inited_ = true;
     min_rtt_us_ = rtt_us;
     excess_ema_ = 0.0;
     absdev_ema_ = 0.0;
-    publish();
     return;
   }
 
   if (rtt_us < min_rtt_us_) {
     min_rtt_us_ = rtt_us;
-    publish();
     return;
   }
 
@@ -288,8 +294,6 @@ public:
 
   const double dev = std::abs(excess - excess_ema_);
   absdev_ema_ = (1.0 - beta) * absdev_ema_ + beta * dev;
-
-  publish();
 }
 
 

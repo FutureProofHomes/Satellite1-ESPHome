@@ -1,5 +1,6 @@
 import esphome.config_validation as cv
 import esphome.codegen as cg
+from esphome import automation
 from esphome.const import CONF_ID
 from esphome.core import CORE
 
@@ -17,6 +18,15 @@ def AUTO_LOAD():
 snapcast_ns = cg.esphome_ns.namespace("snapcast")
 SnapcastClient = snapcast_ns.class_("SnapcastClient", cg.Component)
 
+
+EnableAction = snapcast_ns.class_(
+    "EnableAction", automation.Action, cg.Parented.template(SnapcastClient)
+)
+
+DisableAction = snapcast_ns.class_(
+    "DisableAction", automation.Action, cg.Parented.template(SnapcastClient)
+)
+
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(SnapcastClient),
     cv.Optional(CONF_SERVER_IP) : cv.ipaddress
@@ -30,3 +40,18 @@ async def to_code(config):
     
     cg.add_define("USE_SNAPCAST", True)
     cg.add_define("SNAPCAST_DEBUG", False)
+
+
+SNAPCAST_ACTION_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.use_id(SnapcastClient),
+    }
+)
+
+
+@automation.register_action("snapcast.enable", EnableAction, SNAPCAST_ACTION_SCHEMA)
+@automation.register_action("snapcast.disable", DisableAction, SNAPCAST_ACTION_SCHEMA)
+async def tas2780_action(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var

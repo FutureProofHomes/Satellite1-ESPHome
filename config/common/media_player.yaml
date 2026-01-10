@@ -91,6 +91,22 @@ binary_sensor:
       - lambda: id(jack_unplugged_recently) = false;
       - script.execute: control_leds
 
+switch:
+    # Wake Word Sound Switch.
+  - platform: template
+    id: snapcast_switch
+    name: Snapcast
+    icon: "mdi:cast-audio"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      then:
+        - snapcast.enable:
+    on_turn_off:
+      then:
+        - snapcast.disable:
+
 
 fusb302b:
   id: pd_fusb302b
