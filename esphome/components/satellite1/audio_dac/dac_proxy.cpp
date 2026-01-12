@@ -33,8 +33,8 @@ void DACProxy::setup(){
   }
   else {
     ESP_LOGW(TAG, "Preferences not found, using default settings");
-    this->active_dac = SPEAKER;
-    this->restore_state_.dac_output = SPEAKER;
+    this->active_dac = LINE_OUT;
+    this->restore_state_.dac_output = LINE_OUT;
     this->restore_state_.speaker_volume = .5;
     this->restore_state_.speaker_is_muted = false;
     this->restore_state_.line_out_volume = .5;
