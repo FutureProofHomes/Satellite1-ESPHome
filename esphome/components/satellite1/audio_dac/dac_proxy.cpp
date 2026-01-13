@@ -11,7 +11,7 @@ static const char *const TAG = "dac_proxy";
 
 void DACProxy::setup(){
   ESP_LOGD(TAG, "Setting up DACProxy...");
-  this->pref_ = global_preferences->make_preference<DACProxyRestoreState>(this->get_object_id_hash());
+  this->pref_ = global_preferences->make_preference<DACProxyRestoreState>(this->get_preference_hash());
   
   if (this->pref_.load(&this->restore_state_)) {
     ESP_LOGD(TAG, "Read preferences from flash");
@@ -27,13 +27,14 @@ void DACProxy::setup(){
             this->tas2780_->set_mute_on();
         }
     }
+    ESP_LOGD(TAG, "   active dac: %d", this->restore_state_.dac_output);
     this->active_dac = (DacOutput) this->restore_state_.dac_output;
     this->activate();
   }
   else {
     ESP_LOGW(TAG, "Preferences not found, using default settings");
-    this->active_dac = SPEAKER;
-    this->restore_state_.dac_output = SPEAKER;
+    this->active_dac = LINE_OUT;
+    this->restore_state_.dac_output = LINE_OUT;
     this->restore_state_.speaker_volume = .5;
     this->restore_state_.speaker_is_muted = false;
     this->restore_state_.line_out_volume = .5;
@@ -139,17 +140,22 @@ bool DACProxy::set_mute_off(){
         ESP_LOGD(TAG, "DACProxy::set_mute_off() called before setup()");
         return false;
     }
-    ESP_LOGD(TAG, "set_mute_off: for %s", this->active_dac == LINE_OUT? "Line-Out" : "Speaker");
+    bool has_changed = false;
     bool ret = false;
-    if( this->active_dac == LINE_OUT && this->pcm5122_ ){
+    if( this->active_dac == LINE_OUT && this->pcm5122_ && this->pcm5122_->is_muted()){
         ret = this->pcm5122_->set_mute_off();
         this->restore_state_.line_out_is_muted = false;
+        has_changed = true;
     }
-    if( this->active_dac == SPEAKER && this->tas2780_ ){
+    if( this->active_dac == SPEAKER && this->tas2780_ && this->tas2780_->is_muted()){
         ret = this->tas2780_->set_mute_off();
         this->restore_state_.speaker_is_muted = false;
+        has_changed = true;
     }
-    this->save_volume_restore_state_();
+    if( has_changed ){
+        ESP_LOGD(TAG, "set_mute_off: for %s", this->active_dac == LINE_OUT? "Line-Out" : "Speaker");
+        this->save_volume_restore_state_();
+    }
     return ret;
 }
 
@@ -158,17 +164,22 @@ bool DACProxy::set_mute_on(){
         ESP_LOGD(TAG, "DACProxy::set_mute_on() called before setup()");
         return false;
     }
-    ESP_LOGD(TAG, "set_mute_on: for %s", this->active_dac == LINE_OUT? "Line-Out" : "Speaker");
+    bool has_changed = false;
     bool ret = false;
-    if( this->active_dac == LINE_OUT && this->pcm5122_ ){
+    if( this->active_dac == LINE_OUT && this->pcm5122_ && !this->pcm5122_->is_muted() ){
         ret = this->pcm5122_->set_mute_on();
         this->restore_state_.line_out_is_muted = true;
+        has_changed = true;
     }
-    if( this->active_dac == SPEAKER && this->tas2780_ ){
+    if( this->active_dac == SPEAKER && this->tas2780_ && !this->tas2780_->is_muted()){
         ret = this->tas2780_->set_mute_on();
         this->restore_state_.speaker_is_muted = true;
+        has_changed = true;
     }
-    this->save_volume_restore_state_();
+    if( has_changed ){
+        ESP_LOGD(TAG, "set_mute_on: for %s", this->active_dac == LINE_OUT? "Line-Out" : "Speaker");
+        this->save_volume_restore_state_();
+    }    
     return ret;
 }
 
@@ -177,13 +188,18 @@ bool DACProxy::set_volume(float volume){
         ESP_LOGD(TAG, "DACProxy::set_volume() called before setup()");
         return false;
     }
+    bool has_changed = false;
     bool ret = false;
-    if( this->active_dac == LINE_OUT && this->pcm5122_ ){
+    if( this->active_dac == LINE_OUT && this->pcm5122_ && this->pcm5122_->volume() != volume){
         ret = this->pcm5122_->set_volume(volume);
-    } else if( this->active_dac == SPEAKER && this->tas2780_ ){
+        has_changed = true;
+    } else if( this->active_dac == SPEAKER && this->tas2780_ && this->tas2780_->volume() != volume ){
         ret = this->tas2780_->set_volume(volume);
+        has_changed = true;
     }
-    this->save_volume_restore_state_();
+    if( has_changed ){
+        this->save_volume_restore_state_();
+    }    
     return ret;
 }
 

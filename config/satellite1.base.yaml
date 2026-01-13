@@ -38,19 +38,26 @@ esphome:
   name: ${node_name}
   name_add_mac_suffix: true
   friendly_name: ${friendly_name}
-  min_version: 2025.9.2
+  min_version: 2025.12.0
   
   project:
     name: ${company_name}.${project_name}
     version: ${esp32_fw_version}
   
   on_boot:
-    - priority: 375
+    - priority: -100
       then:
         - logger.log: "${company_name} ${project_name} ${component_name} running ESP firmware: ${esp32_fw_version} and XMOS firmware: ${xmos_fw_version}"
         # Run the script to refresh the LED status
         - script.execute: control_leds
         - delay: 1s
+        
+        # if line_out was used previously but is not available try speaker 
+        - lambda: |    
+            if( !id(line_out_sensor).state && id(dac_proxy).active_dac == 1){
+              id(dac_proxy).activate_speaker();
+            }
+             
         
         # If after 10 minutes, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
         - delay: 10min

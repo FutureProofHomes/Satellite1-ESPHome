@@ -102,8 +102,8 @@ bool HttpImageReader::deinit_reader(){
 
 int HttpImageReader::read_image_block(uint8_t *buffer, size_t block_size){
     int bytes_read = this->container_->read(buffer, block_size);
-    ESP_LOGVV(TAG, "bytes_read_ = %u, body_length_ = %u, bufsize = %i", container->get_bytes_read(),
-              container->content_length, bytes_read);
+    ESP_LOGVV(TAG, "bytes_read_ = %u, body_length_ = %u, bufsize = %i", this->container_->get_bytes_read(),
+              this->container_->content_length, bytes_read);
     return bytes_read;
 } 
 

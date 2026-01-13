@@ -10,7 +10,7 @@ namespace satellite1 {
 template< typename... Ts>
 class ActivateAction : public Action<Ts...>, public Parented<DACProxy> {
  public:
-  void play(Ts... x) override { this->parent_->activate(); }
+  void play(const Ts&... x) override { this->parent_->activate(); }
 };
 
 
@@ -18,13 +18,13 @@ class ActivateAction : public Action<Ts...>, public Parented<DACProxy> {
 template< typename... Ts>
 class ActivateLineOutAction : public Action<Ts...>, public Parented<DACProxy> {
  public:
-  void play(Ts... x) override { this->parent_->activate_line_out(); }
+  void play(const Ts&... x) override { this->parent_->activate_line_out(); }
 };
 
 template< typename... Ts>
 class ActivateSpeakerAction : public Action<Ts...>, public Parented<DACProxy> {
  public:
-  void play(Ts... x) override { this->parent_->activate_speaker(); }
+  void play(const Ts&... x) override { this->parent_->activate_speaker(); }
 };
 
 
