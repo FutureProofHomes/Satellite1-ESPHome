@@ -12,4 +12,4 @@ update:
   - platform: http_request
     name: None
     id: !extend update_http_request
-    source: https://automation.home.prettybaked.com/local/satellite1/satellite1.doa.json
+    source: https://raw.githubusercontent.com/ConstructorFleet/Satellite1-ESPHome/refs/heads/main/satellite1.doa.json
