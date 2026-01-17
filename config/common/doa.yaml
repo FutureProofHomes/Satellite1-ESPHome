@@ -1,0 +1,10 @@
+sensor:
+  - platform: satellite1
+    satellite1: satellite1_core
+    azimuth:
+      name: "DoA Azimuth"
+    confidence:
+      name: "DoA Confidence"
+      disabled_by_default: true
+    # Optional: per-mic delay offsets in samples (relative to mic 0)
+    # delay_offsets_samples: [0.0, -0.2, 0.05, 0.12]

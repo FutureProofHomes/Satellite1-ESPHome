@@ -30,6 +30,9 @@ packages:
     ## OPTIONALLY, uncomment if you have the larger LD2450 mmWave sensor connected to your HAT.
     #- config/common/mmwave_ld2450.yaml
 
+    ## OPTIONALLY, uncomment if you want Direction of Arrival (DoA) sensors from XMOS.
+    #- config/common/doa.yaml
+
     ## OPTIONALLY, uncomment if want extra memory, wifi and xmos control of the device.
     #- config/common/debug.yaml
       
@@ -68,4 +71,3 @@ logger:
 #      model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
 #    # uncomment the following line to remove the default "hey_jarvis" wake word
 #    - id: !remove hey_jarvis
-
