@@ -19,6 +19,7 @@ static const uint8_t GPIO_SERVICER_RESID_PORT_IN_B = 212;
 static const uint8_t GPIO_SERVICER_RESID_PORT_OUT_A = 221;
 
 static const uint8_t DFU_CONTROLLER_SERVICER_RESID = 240; 
+static const uint8_t DOA_SERVICER_RESID = 230;
 
 static const uint8_t MAX_CONNECTION_ATTEMPTS = 3;
 
@@ -28,7 +29,8 @@ enum dc_resource_enum {
     DFU_CONTROLLER = DFU_CONTROLLER_SERVICER_RESID,
     GPIO_PORT_IN_A = GPIO_SERVICER_RESID_PORT_IN_A,
     GPIO_PORT_IN_B = GPIO_SERVICER_RESID_PORT_IN_B,
-    GPIO_PORT_OUT_A = GPIO_SERVICER_RESID_PORT_OUT_A
+    GPIO_PORT_OUT_A = GPIO_SERVICER_RESID_PORT_OUT_A,
+    DOA = DOA_SERVICER_RESID
 };
 }
 
@@ -55,6 +57,14 @@ namespace DC_DFU_CMD {
 enum dc_dfu_cmd_id {
    GET_VERSION = (88 | CONTROL_CMD_READ_BIT),
 };  
+}
+
+namespace DC_DOA_CMD {
+enum dc_doa_cmd_id {
+   GET_RESULT = (0 | CONTROL_CMD_READ_BIT),
+   GET_CAPS = (1 | CONTROL_CMD_READ_BIT),
+   SET_OFFSETS = (2),
+};
 }
 
 

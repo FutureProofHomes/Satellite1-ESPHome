@@ -1,0 +1,15 @@
+packages:
+  base_image: !include satellite1.yaml
+  doa: !include common/doa.yaml
+
+esphome:
+  name: ${node_name}
+  project:
+    name: ${company_name}.${project_name}
+    version: ${esp32_fw_version}+doa
+
+update:
+  - platform: http_request
+    name: None
+    id: !extend update_http_request
+    source: https://raw.githubusercontent.com/ConstructorFleet/Satellite1-Documentation/refs/heads/main/manifest/satellite1.doa.json
