@@ -39,10 +39,19 @@ void SnapcastClient::setup(){
 }
 
 void SnapcastClient::loop(){
-    if (!this->network_initialized_ && network::is_connected()) {
-    // Perform network setup once connected
+  if( !this->enabled_){
+    return;
+  }
+  if (!this->network_initialized_ && network::is_connected()) {
+    // Perform network setup once connected to wifi
     this->on_network_ready_();
     this->network_initialized_ = true;
+  } 
+  else if (this->network_initialized_ && this->stream_.is_destroyed() && this->cfg_server_ip_.empty())
+  {
+    if( millis() > this->mdns_last_scan_ + this->mdns_scan_interval_ms_ ){
+        this->mdns_scan_connect_();
+    }
   }
 }
 
@@ -50,18 +59,11 @@ void SnapcastClient::on_network_ready_(){
     this->client_id_ = get_mac_address_pretty();
     this->cntrl_session_.client_id_ = this->client_id_;
     
-    if(this->server_ip_.empty()){
-        //start mDNS task and search for the MA Snapcast server
-        if (this->mdns_task_handle_ == nullptr) {
-            xTaskCreate([](void *param) {
-            auto *client = static_cast<SnapcastClient *>(param);
-            client->connect_via_mdns();
-            vTaskDelete(nullptr);
-            }, "snap_mdns_task", 4096, this, 5, &this->mdns_task_handle_);
-        }
+    if(this->cfg_server_ip_.empty()){
+        this->mdns_scan_connect_();
     } else {
         //use provided server ip instead
-        this->connect_to_server( this->server_ip_ );    
+        this->connect_to_server( this->cfg_server_ip_ );    
     }
     
     //callback on status changes, received from the snapcast (binary) stream
@@ -102,10 +104,13 @@ void SnapcastClient::report_volume(float volume, bool muted){
 
 void SnapcastClient::on_stream_state_update(StreamState state, uint8_t volume, bool muted){
     ESP_LOGD( TAG, "Stream component changed to state %d.", state );
-    if( state == StreamState::ERROR || state == StreamState::DISCONNECTED ){
+    if( state == StreamState::ERROR || state == StreamState::RECONNECTING ){
         ESP_LOGE(TAG, "stream: %s", this->stream_.error_msg_.c_str() );
-        if( this->stream_.reconnect_on_error_ ){
+        if( state == StreamState::RECONNECTING ){
             ESP_LOGI(TAG, "Reconnecting after error...");
+        } else {
+            this->stream_.disconnect();
+            this->cntrl_session_.disconnect();
         }
         return;
     } 
@@ -222,9 +227,9 @@ std::string resolve_mdns_host(const char * host_name)
     return std::string(buffer);
 }
 
-
-error_t SnapcastClient::connect_via_mdns()
+error_t SnapcastClient::mdns_task_()
 {
+    this->mdns_last_scan_ = millis();
     mdns_result_t *results = nullptr;
 
     // PTR query: _snapcast._tcp.local
@@ -294,8 +299,21 @@ error_t SnapcastClient::connect_via_mdns()
         return ESP_OK;
     }
 
-    ESP_LOGW(TAG, "Couldn't find any reachable Snapcast server via mDNS.");
+    ESP_LOGD(TAG, "Couldn't find any reachable Snapcast server via mDNS.");
     return ESP_FAIL;
+}
+
+error_t SnapcastClient::mdns_scan_connect_(){
+    //start mDNS task and search for the MA Snapcast server
+    if (this->mdns_task_handle_ == nullptr) {
+        xTaskCreate([](void *param) {
+        auto *client = static_cast<SnapcastClient *>(param);
+        client->mdns_task_();
+        client->mdns_task_handle_ = nullptr;
+        vTaskDelete(nullptr);
+        }, "snap_mdns_task", 4096, this, 5, &this->mdns_task_handle_);
+    }
+    return ESP_OK;
 }
 
 

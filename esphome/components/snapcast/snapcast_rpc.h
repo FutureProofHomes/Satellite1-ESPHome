@@ -131,7 +131,6 @@ public:
         this->on_stream_update_ = std::move(cb);
     }
 
-
 protected:
     friend SnapcastClient;
     void send_rpc_request_(const std::string &method, std::function<void(JsonObject)> fill_params, uint32_t id);

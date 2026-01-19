@@ -254,8 +254,8 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
       
 #if SNAPCAST_DEBUG      
       bool stamp_off = false;
-      if( desired_playout_time_us - last_time_stamp > 24000 ){
-        printf( "packet stamp off by %" PRId64 " us\n", desired_playout_time_us - last_time_stamp );
+      if( desired_playout_time_us - last_time_stamp != 24000 ){
+        printf( "packet stamp off by %" PRId64 " us\n", desired_playout_time_us - last_time_stamp - 24000 );
         stamp_off = true;
       }
       last_time_stamp = desired_playout_time_us;
@@ -268,21 +268,20 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
       if(playout_at > 0 && desired_playout_time_us && ms_since_last_adjustment > 20){
         int64_t now = esp_timer_get_time();  
         int64_t delta_us = desired_playout_time_us - playout_at;
+#if SNAPCAST_DEBUG            
+        if( delta_us != 0 ){
+          printf( "detla_us %" PRId64 " (Now: %" PRId64 ")\n", delta_us, now);
+          printf( "TimeStamp: %" PRId64 ", in %" PRId64 " us \n", 
+            desired_playout_time_us, 
+            desired_playout_time_us - now
+          );
+        }
+#endif
         
         const size_t frame_size = audio_stream_info.frames_to_bytes(1);
         const size_t total_frames = audio_stream_info.bytes_to_frames(this->available());
-        if( delta_us > 1000 ){
+        if( delta_us > 20 ){
             last_adjustment_at_ = static_cast<uint32_t>(desired_playout_time_us / 1000);
-#if 0            
-            if( delta_us > 10000 ){
-              printf( "detla_us %" PRId64 " (Now: %" PRId64 ")\n", delta_us, now);
-              printf( "TimeStamp: %" PRId64 ", in %" PRId64 " us %s \n", 
-                desired_playout_time_us, 
-                desired_playout_time_us - now,
-                stamp_off ? "(off)" :""
-              );
-            }
-#endif
             if( delta_us >= 24 * 1000 ){
               this->speaker_->play_silence( std::min( static_cast<int32_t>(delta_us / 1000), (int32_t) 1000) );
   
@@ -315,7 +314,7 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
           this->decrease_buffer_length(available);
           return available;
         } 
-        else if ( delta_us < -1000 ){
+        else if ( delta_us < -20 ){
           last_adjustment_at_ = static_cast<uint32_t>(desired_playout_time_us / 1000);
           size_t drop_frames = 1;
           if( delta_us < -50 * 1000) {
@@ -335,12 +334,6 @@ esp_err_t TimedAudioSinkTransferBuffer::transfer_data_to_sink(TickType_t ticks_t
           uint32_t drop_bytes = audio_stream_info.frames_to_bytes(drop_frames);
           this->buffer_length_ -= drop_bytes;
           this->current_time_stamp_ += tv_t::from_microseconds(audio_stream_info.bytes_to_us(drop_bytes));
-#if 0
-          if( delta_us < - 10000 ){
-            printf( "detla_us %" PRId64 " (Now: %" PRId64 ")\n", delta_us, now);
-            printf( "TimeStamp: %" PRId64 ", in %" PRId64 " us\n", desired_playout_time_us, desired_playout_time_us - now);
-          }
-#endif          
         }
       }
 

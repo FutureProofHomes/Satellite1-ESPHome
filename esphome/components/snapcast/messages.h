@@ -21,6 +21,7 @@
 
 #include "esphome/core/defines.h"
 #include "esphome/core/helpers.h"
+#include "esphome/components/audio/audio.h"
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/network/util.h"
 #include "esphome/core/hal.h"
@@ -220,6 +221,14 @@ public:
     message_type getMessageType() const {
         return this->header_.getMessageType();
     }
+
+    uint16_t id() const {
+        return this->header_.id;
+    }
+
+    tv_t send_time() const {
+        return this->header_.sent;
+    }
     
     virtual size_t toBytes(uint8_t* dest) const {
         uint8_t* pos = dest;
@@ -238,10 +247,11 @@ protected:
 };
 
 class TimeMessage : public SnapcastMessage {
+static std::atomic<uint16_t> msg_cnter;
 public:
     TimeMessage() : SnapcastMessage(message_type::kTime) {
         this->header_.typed_message_size = sizeof(tv_t);
-        this->set_send_time();
+        this->header_.id = msg_cnter.fetch_add(1, std::memory_order_relaxed);
     }
 };
 

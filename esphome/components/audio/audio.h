@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome/core/defines.h"
+#include <cmath>
 
 #include <cstddef>
 #include <cstdint>
@@ -276,8 +277,7 @@ struct tv_t {
     }
 
     tv_t operator*(float multiplicant) const {
-        int64_t total_usec = to_microseconds();
-        total_usec *= multiplicant;
+        int64_t total_usec = (int64_t) llround((double)to_microseconds() * multiplicant);
         return tv_t::from_microseconds(total_usec);
     }
     
