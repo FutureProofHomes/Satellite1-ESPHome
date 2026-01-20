@@ -235,6 +235,7 @@ script:
 
 select:
   - platform: template
+    id: mww_sensitivity_select 
     name: "Wake word sensitivity"
     optimistic: true
     initial_option: Slightly sensitive
