@@ -35,21 +35,35 @@ static const char *const TAG = "snapcast_client";
 
 
 void SnapcastClient::setup(){
+    this->network_initialized_ = false;
+}
+
+void SnapcastClient::loop(){
+  if( !this->enabled_){
+    return;
+  }
+  if (!this->network_initialized_ && network::is_connected()) {
+    // Perform network setup once connected to wifi
+    this->on_network_ready_();
+    this->network_initialized_ = true;
+  } 
+  else if (this->network_initialized_ && this->stream_.is_destroyed() && this->cfg_server_ip_.empty())
+  {
+    if( millis() > this->mdns_last_scan_ + this->mdns_scan_interval_ms_ ){
+        this->mdns_scan_connect_();
+    }
+  }
+}
+
+void SnapcastClient::on_network_ready_(){
     this->client_id_ = get_mac_address_pretty();
     this->cntrl_session_.client_id_ = this->client_id_;
     
-    if(this->server_ip_.empty()){
-        //start mDNS task and search for the MA Snapcast server
-        if (this->mdns_task_handle_ == nullptr) {
-            xTaskCreate([](void *param) {
-            auto *client = static_cast<SnapcastClient *>(param);
-            client->connect_via_mdns();
-            vTaskDelete(nullptr);
-            }, "snap_mdns_task", 4096, this, 5, &this->mdns_task_handle_);
-        }
+    if(this->cfg_server_ip_.empty()){
+        this->mdns_scan_connect_();
     } else {
         //use provided server ip instead
-        this->connect_to_server( this->server_ip_ );    
+        this->connect_to_server( this->cfg_server_ip_ );    
     }
     
     //callback on status changes, received from the snapcast (binary) stream
@@ -90,10 +104,13 @@ void SnapcastClient::report_volume(float volume, bool muted){
 
 void SnapcastClient::on_stream_state_update(StreamState state, uint8_t volume, bool muted){
     ESP_LOGD( TAG, "Stream component changed to state %d.", state );
-    if( state == StreamState::ERROR || state == StreamState::DISCONNECTED ){
+    if( state == StreamState::ERROR || state == StreamState::RECONNECTING ){
         ESP_LOGE(TAG, "stream: %s", this->stream_.error_msg_.c_str() );
-        if( this->stream_.reconnect_on_error_ ){
+        if( state == StreamState::RECONNECTING ){
             ESP_LOGI(TAG, "Reconnecting after error...");
+        } else {
+            this->stream_.disconnect();
+            this->cntrl_session_.disconnect();
         }
         return;
     } 
@@ -168,6 +185,31 @@ static void mdns_print_results(mdns_result_t *results)
     }
 }
 
+
+static bool test_tcp_connect(const esp_ip4_addr_t &ip, uint16_t port, uint32_t timeout_ms)
+{
+    int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+    if (sock < 0) {
+        return false;
+    }
+
+    struct timeval tv;
+    tv.tv_sec  = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    struct sockaddr_in dest = {};
+    dest.sin_family      = AF_INET;
+    dest.sin_port        = htons(port);
+    dest.sin_addr.s_addr = ip.addr;   // esp_ip4_addr_t has .addr
+
+    bool ok = (connect(sock, (struct sockaddr*)&dest, sizeof(dest)) == 0);
+    close(sock);
+    return ok;
+}
+
+
 std::string resolve_mdns_host(const char * host_name)
 {
     esp_ip4_addr_t addr;
@@ -185,64 +227,93 @@ std::string resolve_mdns_host(const char * host_name)
     return std::string(buffer);
 }
 
+error_t SnapcastClient::mdns_task_()
+{
+    this->mdns_last_scan_ = millis();
+    mdns_result_t *results = nullptr;
 
-error_t SnapcastClient::connect_via_mdns(){
-    // search for the snapcast server that has `is_mass` in its .txt entries 
-    mdns_result_t * results = nullptr;
-    esp_err_t err = mdns_query_ptr( "_snapcast", "_tcp", 6000, 20,  &results);
-    if(err){
-        ESP_LOGE(TAG, "mDNS query Failed");
-        return ESP_OK;
+    // PTR query: _snapcast._tcp.local
+    esp_err_t err = mdns_query_ptr("_snapcast", "_tcp", 6000, 20, &results);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "mDNS query failed: %s", esp_err_to_name(err));
+        return ESP_FAIL;
     }
-    if(!results){
+    if (!results) {
         ESP_LOGW(TAG, "No Snapcast server found via mDNS!");
-        return ESP_OK;
+        return ESP_FAIL;
     }
 
 #if SNAPCAST_DEBUG    
     mdns_print_results(results);
 #endif    
+
+    std::string chosen_hostname;
+    std::string chosen_ip;
+    uint32_t chosen_port = 0;
+    bool found_mass = false;
+
+    for (mdns_result_t *r = results; r != nullptr; r = r->next) {
+
+        // If we already found a reachable MA server, we can break early
+        if (found_mass) {
+            break;
+        }
+
+        // Snapcast advertised port
+        uint16_t port = r->port;
     
-    std::string ma_snapcast_hostname;
-    std::string ma_snapcast_ip;
-    uint32_t port = 0;
-    mdns_result_t *r = results;
-    while(r){
-        std::string check_ip;
-        if( r->addr && r->addr->addr.type == ESP_IPADDR_TYPE_V4 ){
-            mdns_ip_addr_t *a = r->addr;
-            char buffer[16];  // Enough for "255.255.255.255\0"
-            snprintf(buffer, sizeof(buffer), IPSTR, IP2STR(&(a->addr.u_addr.ip4)));
-            check_ip = std::string(buffer);   
-        } else {
-            check_ip = resolve_mdns_host( r->hostname);
-        }
-        if(!check_ip.empty()){
-            ma_snapcast_ip = check_ip;
-            ma_snapcast_hostname = std::string(r->hostname) + ".local";
-            port = r->port;
-        }
-        if (r->txt_count) {
-            for (int t = 0; t < r->txt_count; t++) {
-                if( strcmp(r->txt[t].key, "is_mass") == 0){
-                    // if music assistant snapcast server is among found servers, take it
-                    if(!check_ip.empty()) break;
+        for (mdns_ip_addr_t *a = r->addr; a != nullptr; a = a->next) {
+            if (a->addr.type != ESP_IPADDR_TYPE_V4) {
+                continue;
+            }
+
+            esp_ip4_addr_t ip4 = a->addr.u_addr.ip4;
+
+            if (test_tcp_connect(ip4, port, 1000)) {
+                char buf[16];
+                snprintf(buf, sizeof(buf), IPSTR, IP2STR(&ip4));
+                chosen_ip       = buf;
+                chosen_hostname = std::string(r->hostname) + ".local";
+                chosen_port     = port;
+
+                // TXT handling stays the same
+                if (r->txt_count) {
+                    for (int t = 0; t < r->txt_count; t++) {
+                        if (strcmp(r->txt[t].key, "is_mass") == 0) {
+                            found_mass = true;
+                            break;
+                        }
+                    }
                 }
+                break; // found a reachable IP for this result
             }
         }
-        r = r->next;
     }
+
     mdns_query_results_free(results);
 
-    if( !ma_snapcast_ip.empty() ){
-        ESP_LOGI(TAG, "MA-Snapcast server found: %s:%d", ma_snapcast_hostname.c_str(), port );
-        ESP_LOGI(TAG, "resolved: %s:%d\n", ma_snapcast_ip.c_str(), port );
-        
-        this->connect_to_server( ma_snapcast_ip, port, 1705);
+    if (!chosen_ip.empty()) {
+        ESP_LOGI(TAG, "Snapcast server found: %s:%d", chosen_hostname.c_str(), chosen_port);
+        ESP_LOGI(TAG, "resolved reachable IP: %s:%d", chosen_ip.c_str(), chosen_port);
+        this->connect_to_server(chosen_ip, chosen_port, 1705);
         return ESP_OK;
     }
-    ESP_LOGW(TAG, "Couldn't find MA-Snapcast server.");
+
+    ESP_LOGD(TAG, "Couldn't find any reachable Snapcast server via mDNS.");
     return ESP_FAIL;
+}
+
+error_t SnapcastClient::mdns_scan_connect_(){
+    //start mDNS task and search for the MA Snapcast server
+    if (this->mdns_task_handle_ == nullptr) {
+        xTaskCreate([](void *param) {
+        auto *client = static_cast<SnapcastClient *>(param);
+        client->mdns_task_();
+        client->mdns_task_handle_ = nullptr;
+        vTaskDelete(nullptr);
+        }, "snap_mdns_task", 4096, this, 5, &this->mdns_task_handle_);
+    }
+    return ESP_OK;
 }
 
 

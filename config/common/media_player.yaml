@@ -10,23 +10,22 @@ audio_dac:
     id: dac_proxy
     speaker_dac: speaker_dac
     line_out_dac: line_out_dac
-    
-    on_line_out_activated:
-        # if line_out was used previously but is not available try speaker
-        - lambda: |
-            if( !id(line_out_sensor).state ){
-              id(dac_proxy).activate_speaker();
-            }
-    
+        
     on_state_change:
-      - media_player.volume_set:
+      - media_player.speaker.restore_volume:
           volume: !lambda return id(dac_proxy).volume();
-      - lambda: |
-           if( id(dac_proxy).is_muted() ){
-              id(external_media_player)->make_call()
-                .set_command(MEDIA_PLAYER_COMMAND_MUTE)
-                .perform();
-           }
+          mute: !lambda return id(dac_proxy).is_muted(); 
+
+api:
+  actions:
+    - action: activate_speaker_dac
+      then:
+        - dac_proxy.activate_speaker:
+
+    - action: activate_lineout_dac
+      then:
+        - dac_proxy.activate_line_out:
+
 
 select:
   - platform: template
@@ -91,6 +90,22 @@ binary_sensor:
       - delay: 800ms
       - lambda: id(jack_unplugged_recently) = false;
       - script.execute: control_leds
+
+switch:
+    # Wake Word Sound Switch.
+  - platform: template
+    id: snapcast_switch
+    name: Snapcast
+    icon: "mdi:cast-audio"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      then:
+        - snapcast.enable:
+    on_turn_off:
+      then:
+        - snapcast.disable:
 
 
 fusb302b:

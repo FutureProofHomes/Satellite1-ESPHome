@@ -28,36 +28,36 @@ namespace snapcast {
 
 static const char *const TAG = "snapcast_rpc";
 
+enum RPCTaskBits : uint32_t {
+  DISCONNECT_BIT = (1 << 0),
+  RECONNECT_BIT  = (1 << 1),
+};
+
 esp_err_t SnapcastControlSession::connect(std::string server, uint32_t port){
     this->server_ = server;
     this->port_ = port;
     
     // Start the notification handling task
     this->notification_task_should_run_ = true;
-    xTaskCreate([](void *param) {
-        auto *session = static_cast<SnapcastControlSession *>(param);
-        session->notification_loop();
-        vTaskDelete(nullptr);
-    }, "snapcast_notify", 4096, this, 5, &this->notification_task_handle_);
-
+    if(this->notification_task_handle_ == nullptr){
+      xTaskCreate([](void *param) {
+          auto *session = static_cast<SnapcastControlSession *>(param);
+          session->notification_loop();
+          session->notification_task_handle_ = nullptr;
+          vTaskDelete(nullptr);
+      }, "snapcast_notify", 4096, this, 5, &this->notification_task_handle_);
+    } else {
+      xTaskNotify(this->notification_task_handle_, RECONNECT_BIT, eSetBits);
+    }
     return ESP_OK;
 }
 
 esp_err_t SnapcastControlSession::disconnect(){
-    if( this->transport_ != nullptr ){
-        esp_transport_close(this->transport_);
-        esp_transport_destroy(this->transport_);
-        this->transport_ = nullptr;
-        this->notification_task_should_run_ = false;
-        vTaskDelay(pdMS_TO_TICKS(50));
-
-        // Then delete the task if still running
-        if (this->notification_task_handle_ != nullptr) {
-            vTaskDelete(this->notification_task_handle_);
-            this->notification_task_handle_ = nullptr;
-        }
-    }
-    return ESP_OK;
+  this->notification_task_should_run_ = false;
+  if( this->notification_task_handle_ ){
+    xTaskNotify(this->notification_task_handle_, DISCONNECT_BIT, eSetBits);  
+  }
+  return ESP_OK;
 }
 
 
@@ -118,8 +118,13 @@ void SnapcastControlSession::notification_loop() {
       },
       static_cast<uint32_t>(RequestId::GetServerStatus)
     );  
-
-    while (this->notification_task_should_run_) {
+    
+    while (true) {
+      uint32_t notify_value = 0;
+      if (xTaskNotifyWait( 0, RECONNECT_BIT, &notify_value, 0) > 0) {
+        break;
+      }
+      
       char chunk[128];  // small read buffer
       int len = esp_transport_read(this->transport_, chunk, sizeof(chunk), 100);
       if( len < 0 ){
@@ -143,13 +148,9 @@ void SnapcastControlSession::notification_loop() {
                           case RequestId::GetServerStatus:
                               {
                                   ClientState &state = this->client_state_;
-                                  if( state.from_groups_json( root["result"]["server"]["groups"], get_mac_address_pretty()) ){
-                                      //printf( "group_id: %s stream_id: %s\n", state.group_id.c_str(), state.stream_id.c_str() );
-                                  }
+                                  state.from_groups_json(root["result"]["server"]["groups"], this->client_id_);
                                   StreamInfo sInfo;
-                                  if( sInfo.from_streams_json( root["result"]["server"]["streams"], state.stream_id )){
-                                      //printf( "stream: %s state: %s\n", sInfo.id.c_str(), sInfo.status.c_str() );
-                                  }
+                                  sInfo.from_streams_json(root["result"]["server"]["streams"], state.stream_id);
                                   this->update_from_server_obj_(root["result"]["server"].as<JsonObject>());
                               }
                               break;
@@ -165,43 +166,33 @@ void SnapcastControlSession::notification_loop() {
                         
                         JsonObject params = root["params"];
                         if(params["id"].as<std::string>() == this->client_state_.stream_id){
-                              StreamInfo sInfo;
-                              if( sInfo.from_json( params["stream"])){
-                                  //printf( "stream: %s state: %s\n", sInfo.id.c_str(), sInfo.status.c_str() );
-                              }
-                              if (this->on_stream_update_) {
-                                  //printf( "Calling on_stream_update callback from OnUpdate message\n" ); 
-                                  this->on_stream_update_(sInfo);
-                              }
+                          StreamInfo sInfo;
+                          sInfo.from_json( params["stream"]);
+                          if (this->on_stream_update_) {
+                            this->on_stream_update_(sInfo);
+                          }
                         } 
-                        else {
-                          //printf( "got id: %s, requested: %s\n", params["id"].as<std::string>().c_str(), this->client_state_.stream_id.c_str());
-                        }
                       } else if (method == "Stream.OnProperties"){
                         JsonObject params = root["params"];
                         if(params["id"].as<std::string>() == this->client_state_.stream_id){
-                              StreamInfo sInfo;
-                              if( sInfo.from_stream_properties( params["properties"])){
-                                  //printf( "stream: %s state: %s\n", sInfo.id.c_str(), sInfo.status.c_str() );
-                              }
-                              if (this->on_stream_update_) {
-                                  //printf( "Calling on_stream_update callback from OnProperties message\n" ); 
-                                  this->on_stream_update_(sInfo);
-                              }
+                            StreamInfo sInfo;
+                            sInfo.from_stream_properties(params["properties"]);
+                            if (this->on_stream_update_) {
+                                this->on_stream_update_(sInfo);
+                            }
                           }
                       } else if (method == "Group.OnStreamChanged"){
                         JsonObject params = root["params"]; 
                         if(params["id"].as<std::string>() == this->client_state_.group_id){
-                              if(this->client_state_.stream_id != params["stream_id"].as<std::string>()){
-                                this->client_state_.stream_id = params["stream_id"].as<std::string>();  
-                                StreamInfo& sInfo = this->known_streams_[this->client_state_.stream_id];
-                                if (sInfo.id.empty()){
-                                  sInfo.set_id(this->client_state_.stream_id);
-                                }
-                                if(this->on_stream_update_)
-                                {
-                                  this->on_stream_update_(sInfo);
-                                }
+                          if(this->client_state_.stream_id != params["stream_id"].as<std::string>()){
+                            this->client_state_.stream_id = params["stream_id"].as<std::string>();  
+                            StreamInfo& sInfo = this->known_streams_[this->client_state_.stream_id];
+                            if (sInfo.id.empty()){
+                              sInfo.set_id(this->client_state_.stream_id);
+                            }
+                            if(this->on_stream_update_){
+                              this->on_stream_update_(sInfo);
+                            }
                           }
                         }
                       } else if (method == "Stream.OnUpdate"){
@@ -209,9 +200,8 @@ void SnapcastControlSession::notification_loop() {
                         StreamInfo& sInfo = this->known_streams_[params["id"].as<std::string>()];
                         sInfo.from_json(params["stream"]);  
                         if(sInfo.id == this->client_state_.stream_id && this->on_stream_update_){
-                                this->on_stream_update_(sInfo);
-                        }
-                      
+                          this->on_stream_update_(sInfo);
+                        }                      
                       } else if (method == "Client.OnConnect"){
                         JsonObject params = root["params"]; 
                         if(params["id"].as<std::string>() == this->client_id_){
@@ -230,11 +220,13 @@ void SnapcastControlSession::notification_loop() {
       }
     }
   }
+  
+  if( this->transport_ != nullptr ){
+    esp_transport_close(this->transport_);
+    esp_transport_destroy(this->transport_);
+    this->transport_ = nullptr;
+  }
 }
-
-
-
-
 
 void SnapcastControlSession::send_rpc_request_(const std::string &method, std::function<void(JsonObject)> fill_params, uint32_t id) {
   JsonDocument doc;
@@ -249,7 +241,6 @@ void SnapcastControlSession::send_rpc_request_(const std::string &method, std::f
   json_buf[len++] = '\n';
   esp_transport_write(this->transport_, json_buf, len, 1000);
 }
-
 
 }
 }

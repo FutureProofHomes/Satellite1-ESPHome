@@ -106,9 +106,8 @@ typedef struct {
 
 esp_err_t SnapcastStream::connect(std::string server, uint32_t port){
     this->server_ = server;
-    this->port_ = port;    
+    this->port_ = port;     
     if( this->stream_task_handle_ == nullptr ){
-        ESP_LOGI(TAG, "Heap before task: %u", xPortGetFreeHeapSize());
         RAMAllocator<StackType_t> stack_allocator(RAMAllocator<StackType_t>::ALLOC_INTERNAL);
         this->task_stack_buffer_ = stack_allocator.allocate(TASK_STACK_SIZE);
         if (this->task_stack_buffer_ == nullptr) {
@@ -144,7 +143,9 @@ esp_err_t SnapcastStream::connect(std::string server, uint32_t port){
 
 esp_err_t SnapcastStream::disconnect(){
    // close connection and stop all running tasks
-   xTaskNotify( this->stream_task_handle_, STOP_BIT, eSetValueWithOverwrite);
+   if( this->stream_task_handle_ ){
+      xTaskNotify( this->stream_task_handle_, STOP_BIT, eSetValueWithOverwrite);
+   }
    return ESP_OK; 
 }
 
@@ -203,7 +204,7 @@ static void transport_task_(
         
         int err = connect(sock, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
         if (err != 0) {
-            ESP_LOGE("transport", "Socket unable to connect: errno %d", errno);
+            ESP_LOGE("transport", "Socket unable to connect to %s: errno %d", server.c_str(), errno);
             close(sock);
             xTaskNotify(stream_task_handle, CONNECTION_FAILED_BIT, eSetBits);
             continue;
@@ -253,6 +254,7 @@ static void transport_task_(
             int sel = lwip_select(sock + 1, &read_fds, NULL, NULL, &timeout);
             if (sel < 0) {
                 ESP_LOGE("transport", "select() error: errno %d", errno);
+                xTaskNotify(stream_task_handle, CONNECTION_DROPPED_BIT, eSetBits);
                 break;
             } else if (sel == 0) {
                 // Timeout, nothing ready to read
@@ -304,7 +306,7 @@ static void transport_task_(
                 msg->toBytes(tx_buffer);
                 int bytes_written = send(sock, (char*) tx_buffer, msg->getMessageSize(), 0);
                 if (bytes_written > 0 && msg->getMessageType() == message_type::kTime) {
-                    time_stats->set_request_time(tv_t::now());
+                    time_stats->set_request_time(msg->id(), msg->send_time());
                 }
                 delete msg;  // Free the message after serialization
                 
@@ -529,6 +531,7 @@ void SnapcastStream::stream_task_(){
     constexpr TickType_t IDLE_WAIT = pdMS_TO_TICKS(100);        
     
     uint32_t notify_value;
+    this->set_state_(StreamState::DISCONNECTED);
     while( true ){
         TickType_t wait_time = (this->state_ == StreamState::STREAMING) ? STREAMING_WAIT : IDLE_WAIT;
         if (xTaskNotifyWait(0, 0xFFFFFFFF, &notify_value, wait_time)) {
@@ -558,6 +561,7 @@ void SnapcastStream::stream_task_(){
             }
             
             if (notify_value & CONNECTION_ESTABLISHED_BIT) {
+                this->reconnect_counter_ = 0;
                 this->send_hello_();
                 this->time_stats_.reset();
                 set_state_(StreamState::CONNECTED_IDLE);
@@ -577,9 +581,9 @@ void SnapcastStream::stream_task_(){
             } 
 
             if (notify_value & CONNECTION_FAILED_BIT || notify_value & CONNECTION_DROPPED_BIT) {
-                if( this->reconnect_on_error_ ){
+                if( this->reconnect_on_error_() ){
+                    this->set_state_(StreamState::RECONNECTING);
                     vTaskDelay(pdMS_TO_TICKS(1000));
-                    this->set_state_(StreamState::CONNECTING);
                     xTaskNotify(transport_task_handle, CONNECT_BIT, eSetBits);
                 } else {
                     this->error_msg_ = "Failed to connect or connection dropped";
@@ -590,17 +594,16 @@ void SnapcastStream::stream_task_(){
         
         if(this->state_ == StreamState::CONNECTED_IDLE || this->state_ == StreamState::STREAMING){
             this->send_time_sync_();
-            if(this->read_and_process_messages_(stream_package_buffer.get(), 500) == ESP_FAIL){
-                if( this->reconnect_on_error_ ){
-                    this->start_after_connecting_ = true;
-                    xTaskNotify(transport_task_handle, DISCONNECT_BIT | CONNECT_BIT, eSetBits);  
-                } else {
-                    this->set_state_(StreamState::ERROR);
-                    this->error_msg_ = "Error reading or processing messages";
-                }
+            const uint32_t timeout = this->time_stats_.is_ready() ? 500 : 10;
+            if(this->read_and_process_messages_(stream_package_buffer.get(), timeout) == ESP_FAIL){
+                this->error_msg_ = "Error reading or processing messages, initiating a new session";
+                this->set_state_(StreamState::RECONNECTING);
+                this->start_after_connecting_ = true;
+                xTaskNotify(transport_task_handle, DISCONNECT_BIT | CONNECT_BIT, eSetBits);  
             }      
         }
     }
+    this->set_state_(StreamState::DESTROYED);
 }
 
 
@@ -665,7 +668,9 @@ void SnapcastStream::send_report_(){
 void SnapcastStream::send_time_sync_(){
     uint32_t sync_interval = TIME_SYNC_INTERVAL_MS;
     if( !this->time_stats_.is_ready() ){
-        sync_interval = 100;
+        sync_interval = 0;
+        SnapcastMessage* time_sync_msg0 = new TimeMessage(); 
+        this->send_message_(time_sync_msg0);
     }
     if (millis() - this->last_time_sync_ > sync_interval){
         SnapcastMessage* time_sync_msg = new TimeMessage(); 
@@ -679,26 +684,30 @@ void SnapcastStream::on_time_msg_(MessageHeader msg, tv_t latency_c2s){
     //latency_s2c = t_client-recv - t_server-sent + t_network_latency
     //time diff between server and client as (latency_c2s - latency_s2c) / 2
     tv_t latency_s2c = msg.received - msg.sent;
-    time_stats_.add_offset( (latency_c2s - latency_s2c) / 2, msg.received );
-    this->est_time_diff_ = time_stats_.get_estimate();
-    
+    time_stats_.add_offset( msg.refersTo, (latency_c2s - latency_s2c) / 2, msg.received );
+    const tv_t est_offset = time_stats_.get_estimate();
+    this->est_time_diff_.store(est_offset, std::memory_order_relaxed); 
 #if SNAPCAST_DEBUG
-    printf( "msg.sent: sec %d, usec: %d\n", msg.sent.sec, msg.sent.usec );
-    printf( "latencey_c2s: %lld\n", latency_c2s.to_millis());
-    printf( "latency_s2c: %lld = %lld - %lld\n", latency_s2c.to_millis(), msg.received.to_millis(), msg.sent.to_millis());    
-    
-    const int64_t server_time = (tv_t::now() + this->est_time_diff_).to_millis();
+    printf( "msg.id: %d, msg.sent: %lld, msg.received: %lld\n", msg.id, msg.sent.to_microseconds(), msg.received.to_microseconds() );
+    printf( "latency_c2s: %lld at-curr-est: %lld\n", latency_c2s.to_microseconds(), (latency_c2s - est_offset).to_microseconds() );
+    printf( "latency_s2c: %lld = %lld - %lld at-curr-est: %lld\n", 
+        latency_s2c.to_microseconds(), 
+        msg.received.to_microseconds(), msg.sent.to_microseconds(),
+        (latency_s2c + est_offset).to_microseconds()
+    );    
+    const tv_t now = tv_t::now();
+    const int64_t server_time = (now + est_offset).to_microseconds();
     static int64_t last_server_time = server_time;
-    static uint32_t last_call = millis();
+    static int64_t last_call = now.to_microseconds();
     
-    int64_t expected_server_time = last_server_time + (millis() - last_call);
+    int64_t expected_server_time = last_server_time + (now.to_microseconds() - last_call);
     int64_t server_diff = server_time - expected_server_time;
 
     last_server_time = server_time;
-    last_call = millis();
+    last_call = now.to_microseconds();
 
     printf("New server time: %" PRId64 " (delta: %" PRId64 ") , expected %" PRId64 ", diff: %" PRId64 "\n",
-         server_time, this->est_time_diff_.to_millis(), expected_server_time, server_diff);
+         server_time, est_offset.to_microseconds(), expected_server_time, server_diff);
 #endif
     
 }

@@ -68,4 +68,6 @@ logger:
 #      model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
 #    # uncomment the following line to remove the default "hey_jarvis" wake word
 #    - id: !remove hey_jarvis
-
+# you also want to remove the sensitivity selector as it is hard coded to the provided models
+#select:
+#  id: !remove mww_sensitivity_select
