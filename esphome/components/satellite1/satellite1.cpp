@@ -21,12 +21,13 @@ void Satellite1::setup() {
   this->dfu_get_fw_version_();
 }
 
-void Satellite1::dump_config() {
-  esph_log_config(TAG, "Satellite1 config:");
-  if (this->xmos_rst_pin_) {
+
+void Satellite1::dump_config(){
+  ESP_LOGCONFIG(TAG, "Satellite1 config:");
+  if( this->xmos_rst_pin_ ){
     this->xmos_rst_pin_->dump_summary();
   } else {
-    esph_log_config(TAG, "    xmos_rst_pin not set up properly.");
+    ESP_LOGCONFIG(TAG, "    xmos_rst_pin not set up properly.");
   }
 }
 
