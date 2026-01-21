@@ -4,14 +4,6 @@
 # # https://deploy-preview-3327--esphome.netlify.app/components/sensor/ld2450.html?highlight=ld2450
 # ===========================================================================================
 
-external_components:
-  - source:
-      type: git
-      url: https://github.com/hareeshmu/esphome
-      ref: ld2450
-    components: [ ld2450 ]
-
-
 uart:
   id: uart_ld2450
   tx_pin: GPIO43
@@ -24,7 +16,6 @@ uart:
 ld2450:
   id: ld2450_radar
   uart_id: uart_ld2450
-  throttle: 1000ms
 
 
 binary_sensor:
