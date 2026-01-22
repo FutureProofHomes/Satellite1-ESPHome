@@ -112,9 +112,11 @@ esp_err_t SnapcastStream::connect(std::string server, uint32_t port){
         this->task_stack_buffer_ = stack_allocator.allocate(TASK_STACK_SIZE);
         if (this->task_stack_buffer_ == nullptr) {
             ESP_LOGE(TAG, "Failed to allocate memory.");
+            this->set_state_(StreamState::ERROR);
             return ESP_ERR_NO_MEM;
         }
         
+        this->set_state_(StreamState::CONNECTING);
         this->stream_task_handle_ =
           xTaskCreateStatic([](void *param) {
                 auto *stream = static_cast<SnapcastStream *>(param);
@@ -132,7 +134,7 @@ esp_err_t SnapcastStream::connect(std::string server, uint32_t port){
 
         if (this->stream_task_handle_ == nullptr) {
             ESP_LOGE(TAG, "Failed to create snapcast stream task.");
-            this->stream_task_handle_ = nullptr;  // Ensure it's reset
+            this->set_state_(StreamState::ERROR);
             return ESP_FAIL;
         }
         
@@ -145,6 +147,8 @@ esp_err_t SnapcastStream::disconnect(){
    // close connection and stop all running tasks
    if( this->stream_task_handle_ ){
       xTaskNotify( this->stream_task_handle_, STOP_BIT, eSetValueWithOverwrite);
+   } else {
+    this->set_state_(StreamState::DESTROYED);
    }
    return ESP_OK; 
 }

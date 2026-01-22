@@ -36,6 +36,14 @@
 namespace esphome {
 namespace snapcast {
 
+
+struct SnapcastServer {
+  std::string server_ip;
+  uint32_t stream_port=1704;
+  uint32_t rpc_port=1705;
+};
+
+
 /*
 ESPHome Snapcast client, this component manages connections to the Snapcast server and controls the media_player component.
 */
@@ -55,7 +63,7 @@ public:
   void on_stream_update_msg(const StreamInfo &info);
   void on_stream_state_update(StreamState state, uint8_t volume, bool muted);
 
-  void enable(){ this->enabled_ = true;};
+  void enable(){ this->enabled_ = true; this->enable_loop();};
   void disable(){ this->enabled_ = false; this->stream_.disconnect(); this->cntrl_session_.disconnect();};
   error_t connect_to_url(std::string url){ return ESP_OK; }
   bool is_snapcast_url(std::string url){ return url.starts_with("snapcast://"); }
@@ -66,12 +74,15 @@ protected:
   bool network_initialized_{false}; 
   void on_network_ready_();
   
-  error_t mdns_scan_connect_();
+  error_t start_mdns_scan_();
   error_t mdns_task_();
   TaskHandle_t mdns_task_handle_{nullptr};
   uint32_t mdns_scan_interval_ms_{30000};
   uint32_t mdns_last_scan_{0};
+  std::string found_ip_;
 
+  std::optional<SnapcastServer> server_;
+  
   std::string cfg_server_ip_;
   std::string client_id_;
   

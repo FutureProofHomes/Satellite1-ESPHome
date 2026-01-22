@@ -40,6 +40,7 @@ void SnapcastClient::setup(){
 
 void SnapcastClient::loop(){
   if( !this->enabled_){
+    this->disable_loop();
     return;
   }
   if (!this->network_initialized_ && network::is_connected()) {
@@ -47,10 +48,16 @@ void SnapcastClient::loop(){
     this->on_network_ready_();
     this->network_initialized_ = true;
   } 
-  else if (this->network_initialized_ && this->stream_.is_destroyed() && this->cfg_server_ip_.empty())
+  else if (this->network_initialized_ && this->stream_.is_destroyed())
   {
-    if( millis() > this->mdns_last_scan_ + this->mdns_scan_interval_ms_ ){
-        this->mdns_scan_connect_();
+    if (this->server_){
+        auto& s = *this->server_;
+        this->connect_to_server(s.server_ip, s.stream_port, s.rpc_port);
+    } else if ( !this->cfg_server_ip_.empty() ){
+        this->server_.emplace(SnapcastServer{.server_ip=this->cfg_server_ip_});
+    } 
+    else if( millis() > this->mdns_last_scan_ + this->mdns_scan_interval_ms_ ){
+       this->start_mdns_scan_();
     }
   }
 }
@@ -58,14 +65,7 @@ void SnapcastClient::loop(){
 void SnapcastClient::on_network_ready_(){
     this->client_id_ = get_mac_address_pretty();
     this->cntrl_session_.client_id_ = this->client_id_;
-    
-    if(this->cfg_server_ip_.empty()){
-        this->mdns_scan_connect_();
-    } else {
-        //use provided server ip instead
-        this->connect_to_server( this->cfg_server_ip_ );    
-    }
-    
+        
     //callback on status changes, received from the snapcast (binary) stream
     this->stream_.set_on_status_update_callback([this](StreamState state, uint8_t volume, bool muted){
         this->defer([this, state, volume, muted](){
@@ -83,7 +83,9 @@ void SnapcastClient::on_network_ready_(){
 
 error_t SnapcastClient::connect_to_server(std::string url, uint32_t stream_port, uint32_t rpc_port){
     // establish a binary stream connection to the snapcast server, MA only shows connected clients as players
-    this->stream_.connect(url, stream_port);
+    err_t res = this->stream_.connect(url, stream_port);
+    if( res != ESP_OK ) return res;
+    
     // register for snapcast control events, used to control the media player component
     this->cntrl_session_.connect(url, rpc_port);
     
@@ -111,10 +113,21 @@ void SnapcastClient::on_stream_state_update(StreamState state, uint8_t volume, b
         } else {
             this->stream_.disconnect();
             this->cntrl_session_.disconnect();
+            this->server_.reset();
+            this->enable_loop();
         }
         return;
-    } 
-    if (this->media_player_ != nullptr && volume >= 0 && volume <= 100) {
+    }
+    if( state == StreamState::CONNECTED_IDLE){
+        ESP_LOGD( TAG, "Disabling loop.");
+        this->disable_loop();
+    }
+    if ( state == StreamState::DESTROYED && this->enabled_){
+        ESP_LOGD( TAG, "Enabling loop.");
+        this->enable_loop();
+    }
+    if ( (state == StreamState::STREAMING || state == StreamState::CONNECTED_IDLE) &&
+        this->media_player_ != nullptr && volume >= 0 && volume <= 100 ) {
         this->media_player_->make_call()
             .set_volume( volume / 100.)
             .set_command( muted ? media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_MUTE : media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_UNMUTE)
@@ -295,7 +308,10 @@ error_t SnapcastClient::mdns_task_()
     if (!chosen_ip.empty()) {
         ESP_LOGI(TAG, "Snapcast server found: %s:%d", chosen_hostname.c_str(), chosen_port);
         ESP_LOGI(TAG, "resolved reachable IP: %s:%d", chosen_ip.c_str(), chosen_port);
-        this->connect_to_server(chosen_ip, chosen_port, 1705);
+        this->server_.emplace(SnapcastServer{
+            .server_ip=chosen_ip,
+            .stream_port=chosen_port
+        });
         return ESP_OK;
     }
 
@@ -303,7 +319,7 @@ error_t SnapcastClient::mdns_task_()
     return ESP_FAIL;
 }
 
-error_t SnapcastClient::mdns_scan_connect_(){
+error_t SnapcastClient::start_mdns_scan_(){
     //start mDNS task and search for the MA Snapcast server
     if (this->mdns_task_handle_ == nullptr) {
         xTaskCreate([](void *param) {
