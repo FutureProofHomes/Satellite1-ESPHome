@@ -1,4 +1,4 @@
-from esphome import pins
+from esphome import pins, automation
 import esphome.codegen as cg
 from esphome.components import audio, esp32, microphone
 from esphome.components.adc import ESP32_VARIANT_ADC1_PIN_TO_CHANNEL, validate_adc_pin
@@ -10,6 +10,7 @@ from esphome.const import (
     CONF_NUM_CHANNELS,
     CONF_NUMBER,
     CONF_SAMPLE_RATE,
+    CONF_TRIGGER_ID,
 )
 from esphome.components.i2s_audio import (
     CONF_I2S_DIN_PIN,
@@ -32,6 +33,11 @@ CONF_ADC_PIN = "adc_pin"
 CONF_ADC_TYPE = "adc_type"
 CONF_CORRECT_DC_OFFSET = "correct_dc_offset"
 CONF_PDM = "pdm"
+CONF_ON_PCM_DATA = "on_pcm_data"
+PCMDataTrigger = microphone_ns.class_(
+    "PCMDataTrigger",
+    automation.Trigger.template(cg.std_vector.template(cg.uint8).operator("ref")),
+)
 
 
 Sat1Microphone = i2s_audio_ns.class_("Sat1Microphone", I2SAudioIn, microphone.Microphone, cg.Component)
@@ -102,6 +108,11 @@ BASE_SCHEMA = microphone.MICROPHONE_SCHEMA.extend(
     ).extend(
         {
             cv.Optional(CONF_CORRECT_DC_OFFSET, default=False): cv.boolean,
+            cv.Optional(CONF_ON_PCM_DATA): automation.validate_automation(
+            {
+                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(PCMDataTrigger),
+            }
+        ),
         }
     )
 ).extend(cv.COMPONENT_SCHEMA)
@@ -147,6 +158,13 @@ async def to_code(config):
     await cg.register_component(var, config)
     await register_i2s_audio_component(var, config)
     await microphone.register_microphone(var, config)
+    for conf in config.get(CONF_ON_PCM_DATA, []):
+        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+        await automation.build_automation(
+            trigger,
+            [(cg.std_vector.template(cg.uint8).operator("ref").operator("const"), "x")],
+            conf,
+        )
 
     if config[CONF_ADC_TYPE] == "internal":
         variant = esp32.get_esp32_variant()

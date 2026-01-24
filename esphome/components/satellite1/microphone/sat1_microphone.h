@@ -8,6 +8,7 @@
 #include "esphome/components/i2s_audio/i2s_audio.h"
 #include "esphome/components/microphone/microphone.h"
 #include "esphome/core/component.h"
+#include "esphome/core/helpers.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
@@ -25,6 +26,8 @@ class Sat1Microphone : public I2SAudioIn, public microphone::Microphone, public 
   void stop();
 
   void loop() override;
+
+  void add_pcm_data_callback(std::function<void(const std::vector<uint8_t> &)> &&pcm_data_callback);
 
   void set_correct_dc_offset(bool correct_dc_offset) { this->correct_dc_offset_ = correct_dc_offset; }
 
@@ -53,6 +56,8 @@ class Sat1Microphone : public I2SAudioIn, public microphone::Microphone, public 
   TaskHandle_t task_handle_{nullptr};
   bool correct_dc_offset_;
   int32_t dc_offset_{0};
+
+  CallbackManager<void(const std::vector<uint8_t> &)> data_callbacks_{};
 };
 
 
