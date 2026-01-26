@@ -185,7 +185,6 @@ static void transport_task_(
                 TimeStats* time_stats ){
     
     constexpr size_t HEADER_SIZE = sizeof(MessageHeader);
-    ESP_LOGI("transport", "Starting task!");
     volatile bool stop_requested = false;
     while( !stop_requested ){
         uint32_t notify_value = 0;
