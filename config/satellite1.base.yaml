@@ -36,8 +36,8 @@ esphome:
   name: ${node_name}
   name_add_mac_suffix: true
   friendly_name: ${friendly_name}
-  min_version: 2025.12.0
-
+  min_version: 2026.1.0
+  
   project:
     name: ${company_name}.${project_name}
     version: ${esp32_fw_version}
