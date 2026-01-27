@@ -80,7 +80,7 @@ jobs:
         config/satellite1.yaml
         config/satellite1.ld2410.yaml
         config/satellite1.ld2450.yaml
-      esphome-version: 2025.12.5
+      esphome-version: 2026.1.2
       release-version: ${{ needs.prepare.outputs.next_tag }}
 
   push-tag:
