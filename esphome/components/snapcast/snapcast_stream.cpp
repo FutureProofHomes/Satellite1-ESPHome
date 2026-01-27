@@ -112,9 +112,11 @@ esp_err_t SnapcastStream::connect(std::string server, uint32_t port){
         this->task_stack_buffer_ = stack_allocator.allocate(TASK_STACK_SIZE);
         if (this->task_stack_buffer_ == nullptr) {
             ESP_LOGE(TAG, "Failed to allocate memory.");
+            this->set_state_(StreamState::ERROR);
             return ESP_ERR_NO_MEM;
         }
         
+        this->set_state_(StreamState::CONNECTING);
         this->stream_task_handle_ =
           xTaskCreateStatic([](void *param) {
                 auto *stream = static_cast<SnapcastStream *>(param);
@@ -132,7 +134,7 @@ esp_err_t SnapcastStream::connect(std::string server, uint32_t port){
 
         if (this->stream_task_handle_ == nullptr) {
             ESP_LOGE(TAG, "Failed to create snapcast stream task.");
-            this->stream_task_handle_ = nullptr;  // Ensure it's reset
+            this->set_state_(StreamState::ERROR);
             return ESP_FAIL;
         }
         
@@ -145,6 +147,8 @@ esp_err_t SnapcastStream::disconnect(){
    // close connection and stop all running tasks
    if( this->stream_task_handle_ ){
       xTaskNotify( this->stream_task_handle_, STOP_BIT, eSetValueWithOverwrite);
+   } else {
+    this->set_state_(StreamState::DESTROYED);
    }
    return ESP_OK; 
 }
@@ -181,13 +185,16 @@ static void transport_task_(
                 TimeStats* time_stats ){
     
     constexpr size_t HEADER_SIZE = sizeof(MessageHeader);
-    
-    while( true ){
+    volatile bool stop_requested = false;
+    while( !stop_requested ){
         uint32_t notify_value = 0;
-        xTaskNotifyWait(0, CONNECT_BIT | STOP_BIT, &notify_value, portMAX_DELAY);
-        if (notify_value & STOP_BIT) break;
-        if (!(notify_value & CONNECT_BIT)) continue;
-        
+        xTaskNotifyWait(0, 0xFFFFFFFFUL, &notify_value, portMAX_DELAY);
+        if (notify_value & STOP_BIT){
+            break;
+        } 
+        if (!(notify_value & CONNECT_BIT)){
+            continue;
+        } 
         
         // === Create socket and connect ===
         int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
@@ -227,14 +234,17 @@ static void transport_task_(
         xTaskNotify(stream_task_handle, CONNECTION_ESTABLISHED_BIT, eSetBits);
         rx_buffer_length = 0;
         bool time_set = false;
+
         while (true) {
             // Check for shutdown signal
-            uint32_t notify_value;
-            if (xTaskNotifyWait( 0, DISCONNECT_BIT, &notify_value, 0) > 0) {
-                break;
+            uint32_t notify_value = 0;
+            if (xTaskNotifyWait(0, DISCONNECT_BIT | STOP_BIT, &notify_value, 0) == pdTRUE) {
+                if (notify_value & STOP_BIT) { stop_requested = true; break; }
+                if (notify_value & DISCONNECT_BIT) { break; }
             }
-
+            
             if (!ring_buffer) {
+                ESP_LOGE("transport", "ring_buffer_not_set");
                 break;
             }
             size_t to_read = 0;
@@ -315,7 +325,6 @@ static void transport_task_(
         close(sock);
         xTaskNotify(stream_task_handle, CONNECTION_CLOSED_BIT, eSetBits);
     }
-    
     xTaskNotify(stream_task_handle, TASK_CLOSING_BIT, eSetBits);
 }
 
