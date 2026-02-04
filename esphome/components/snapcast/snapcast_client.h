@@ -36,44 +36,49 @@
 namespace esphome {
 namespace snapcast {
 
-
 struct SnapcastServer {
   std::string server_ip;
-  uint32_t stream_port=1704;
-  uint32_t rpc_port=1705;
+  uint32_t stream_port = 1704;
+  uint32_t rpc_port = 1705;
 };
 
-
 /*
-ESPHome Snapcast client, this component manages connections to the Snapcast server and controls the media_player component.
+ESPHome Snapcast client, this component manages connections to the Snapcast server and controls the media_player
+component.
 */
 class SnapcastClient : public Component {
-public:
+ public:
   void setup() override;
   float get_setup_priority() const override { return setup_priority::AFTER_CONNECTION + 10; }
   void loop() override;
 
-  error_t connect_to_server(std::string url, uint32_t stream_port=1704, uint32_t rpc_port=1705);
-  void set_media_player(esphome::speaker::SpeakerMediaPlayer* media_player){ this->media_player_ = media_player; }  
-  void set_server_ip(std::string server_ip){ this->cfg_server_ip_ = server_ip; }
-  SnapcastStream* get_stream(){ return &this->stream_; }
-  
-  //report volume to the snapcast server via the binary stream connection
+  error_t connect_to_server(std::string url, uint32_t stream_port = 1704, uint32_t rpc_port = 1705);
+  void set_media_player(esphome::speaker::SpeakerMediaPlayer *media_player) { this->media_player_ = media_player; }
+  void set_server_ip(std::string server_ip) { this->cfg_server_ip_ = server_ip; }
+  SnapcastStream *get_stream() { return &this->stream_; }
+
+  // report volume to the snapcast server via the binary stream connection
   void report_volume(float volume, bool muted);
   void on_stream_update_msg(const StreamInfo &info);
   void on_stream_state_update(StreamState state, uint8_t volume, bool muted);
 
-  void enable(){ this->enabled_ = true; this->enable_loop();};
-  void disable(){ this->enabled_ = false; this->stream_.disconnect(); this->cntrl_session_.disconnect();};
-  error_t connect_to_url(std::string url){ return ESP_OK; }
-  bool is_snapcast_url(std::string url){ return url.starts_with("snapcast://"); }
+  void enable() {
+    this->enabled_ = true;
+    this->enable_loop();
+  };
+  void disable() {
+    this->enabled_ = false;
+    this->stream_.disconnect();
+    this->cntrl_session_.disconnect();
+  };
+  error_t connect_to_url(std::string url) { return ESP_OK; }
+  bool is_snapcast_url(std::string url) { return url.starts_with("snapcast://"); }
 
-  
-protected:
+ protected:
   bool enabled_{true};
-  bool network_initialized_{false}; 
+  bool network_initialized_{false};
   void on_network_ready_();
-  
+
   error_t start_mdns_scan_();
   error_t mdns_task_();
   TaskHandle_t mdns_task_handle_{nullptr};
@@ -82,18 +87,15 @@ protected:
   std::string found_ip_;
 
   std::optional<SnapcastServer> server_;
-  
+
   std::string cfg_server_ip_;
   std::string client_id_;
-  
+
   SnapcastUrl curr_server_url_;
   SnapcastStream stream_;
   SnapcastControlSession cntrl_session_;
-  esphome::speaker::SpeakerMediaPlayer* media_player_;
+  esphome::speaker::SpeakerMediaPlayer *media_player_;
 };
 
-
-
-
-}
-}
+}  // namespace snapcast
+}  // namespace esphome

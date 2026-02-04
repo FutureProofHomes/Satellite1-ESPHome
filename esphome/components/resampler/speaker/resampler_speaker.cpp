@@ -42,7 +42,6 @@ void ResamplerSpeaker::setup() {
     this->mark_failed();
     return;
   }
-
 }
 
 void ResamplerSpeaker::loop() {
@@ -185,16 +184,16 @@ esp_err_t ResamplerSpeaker::start_task_() {
   return ESP_OK;
 }
 
-void ResamplerSpeaker::stop() { 
+void ResamplerSpeaker::stop() {
   this->finishing_ = false;
-  this->state_ = speaker::STATE_STOPPING; 
+  this->state_ = speaker::STATE_STOPPING;
 }
 
 void ResamplerSpeaker::stop_() {
   if (this->task_handle_ != nullptr) {
     xEventGroupSetBits(this->event_group_, ResamplingEventGroupBits::COMMAND_STOP);
   }
-  if( this->finishing_ ) {
+  if (this->finishing_) {
     this->output_speaker_->finish();
   } else {
     this->output_speaker_->stop();
@@ -224,7 +223,7 @@ esp_err_t ResamplerSpeaker::delete_task_() {
 }
 
 void ResamplerSpeaker::finish() {
-  this->finishing_ = true; 
+  this->finishing_ = true;
   this->state_ = speaker::STATE_STOPPING;
 }
 

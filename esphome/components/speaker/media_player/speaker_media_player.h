@@ -9,7 +9,6 @@
 #include "esphome/components/media_player/media_player.h"
 #include "esphome/components/speaker/speaker.h"
 
-
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 #include "esphome/core/preferences.h"
@@ -20,7 +19,7 @@
 
 namespace esphome {
 
-#if USE_SNAPCAST  
+#if USE_SNAPCAST
 namespace snapcast {
 class SnapcastClient;
 }  // namespace snapcast
@@ -74,17 +73,18 @@ class SpeakerMediaPlayer : public Component, public media_player::MediaPlayer {
     this->media_format_ = media_format;
   }
 
-#if USE_SNAPCAST  
-  void set_snapcast_client(esphome::snapcast::SnapcastClient* snapcast_client){ this->snapcast_client_ = snapcast_client; } 
-#endif   
-
+#if USE_SNAPCAST
+  void set_snapcast_client(esphome::snapcast::SnapcastClient *snapcast_client) {
+    this->snapcast_client_ = snapcast_client;
+  }
+#endif
 
   Trigger<> *get_mute_trigger() const { return this->mute_trigger_; }
   Trigger<> *get_unmute_trigger() const { return this->unmute_trigger_; }
   Trigger<float> *get_volume_trigger() const { return this->volume_trigger_; }
 
   void play_file(audio::AudioFile *media_file, bool announcement, bool enqueue);
-#if USE_SNAPCAST  
+#if USE_SNAPCAST
   void play_snapcast_stream(const std::string &server_uri);
 #endif
   void set_playlist_delay_ms(AudioPipelineType pipeline_type, uint32_t delay_ms);
@@ -95,15 +95,11 @@ class SpeakerMediaPlayer : public Component, public media_player::MediaPlayer {
   /// restoration.
   /// @param mute_state If true, audio will be muted. If false, audio will be unmuted
   void set_mute_state_(bool mute_state, bool restore_only = false);
- 
-  protected:
+
+ protected:
   // Receives commands from HA or from the voice assistant component
   // Sends commands to the media_control_commanda_queue_
   void control(const media_player::MediaPlayerCall &call) override;
-
-  
-
-  
 
   /// @brief Saves the current volume and mute state to the flash for restoration.
   void save_volume_restore_state_();
@@ -119,7 +115,7 @@ class SpeakerMediaPlayer : public Component, public media_player::MediaPlayer {
   std::unique_ptr<AudioPipeline> media_pipeline_;
   Speaker *media_speaker_{nullptr};
   Speaker *announcement_speaker_{nullptr};
-#if USE_SNAPCAST  
+#if USE_SNAPCAST
   snapcast::SnapcastClient *snapcast_client_{nullptr};
 #endif
   optional<media_player::MediaPlayerSupportedFormat> media_format_;
@@ -136,9 +132,9 @@ class SpeakerMediaPlayer : public Component, public media_player::MediaPlayer {
 
   std::deque<PlaylistItem> announcement_playlist_;
   std::deque<PlaylistItem> media_playlist_;
-  optional<PlaylistItem> curr_media_item_; 
-  optional<PlaylistItem> curr_announce_item_; 
-  
+  optional<PlaylistItem> curr_media_item_;
+  optional<PlaylistItem> curr_announce_item_;
+
   size_t buffer_size_;
 
   bool task_stack_in_psram_;

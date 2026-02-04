@@ -136,10 +136,10 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
     // Transfer decoded out
     if (!this->pause_output_) {
       // Never shift the data in the output transfer buffer to avoid unnecessary, slow data moves
-      esp_err_t bytes_written =
-          this->output_transfer_buffer_->transfer_data_to_sink(pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS*10), skip_next_frames, false );
-      if( this->output_transfer_buffer_->available() ){
-        //only decode next frame, when last one has been completely written to the output
+      esp_err_t bytes_written = this->output_transfer_buffer_->transfer_data_to_sink(
+          pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS * 10), skip_next_frames, false);
+      if (this->output_transfer_buffer_->available()) {
+        // only decode next frame, when last one has been completely written to the output
         return AudioDecoderState::DECODING;
       }
       if (this->audio_stream_info_.has_value()) {
@@ -147,10 +147,10 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
         this->playback_ms_ +=
             this->audio_stream_info_.value().frames_to_milliseconds_with_remainder(&this->accumulated_frames_written_);
       }
-    } else if ( this->get_audio_stream_info().has_value() ) {
-        // If paused, block to avoid wasting CPU resources
-        delay(READ_WRITE_TIMEOUT_MS);
-        return AudioDecoderState::DECODING;
+    } else if (this->get_audio_stream_info().has_value()) {
+      // If paused, block to avoid wasting CPU resources
+      delay(READ_WRITE_TIMEOUT_MS);
+      return AudioDecoderState::DECODING;
     }
 
     // Do we need this?
@@ -160,17 +160,17 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
     }
 
     // when time syncing needs dropping frames, save cpu time by skipping frames that have not been decoded yet
-    while( skip_next_frames > 0 ){
+    while (skip_next_frames > 0) {
       // Only shift data on the first loop iteration to avoid unnecessary, slow moves
       size_t bytes_read = this->input_transfer_buffer_->transfer_data_from_source(pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS),
                                                                                   first_loop_iteration);
-      this->input_transfer_buffer_->decrease_buffer_length(bytes_read);                                                                            
+      this->input_transfer_buffer_->decrease_buffer_length(bytes_read);
       skip_next_frames--;
-      printf( "decoder: skipped 1 frame (%d) bytes\n", bytes_read );
+      printf("decoder: skipped 1 frame (%d) bytes\n", bytes_read);
     }
 
     // Decode more audio
-    
+
     // Only shift data on the first loop iteration to avoid unnecessary, slow moves
     size_t bytes_read = this->input_transfer_buffer_->transfer_data_from_source(pdMS_TO_TICKS(READ_WRITE_TIMEOUT_MS),
                                                                                 first_loop_iteration);
@@ -182,7 +182,7 @@ AudioDecoderState AudioDecoder::decode(bool stop_gracefully) {
       // called
 
       // only meaningful if data is not already chunked correctly
-      if( this->input_transfer_buffer_->get_current_time_stamp() == tv_t(0,0) ){
+      if (this->input_transfer_buffer_->get_current_time_stamp() == tv_t(0, 0)) {
         break;
       }
     }
@@ -275,28 +275,28 @@ FileDecoderState AudioDecoder::decode_flac_() {
   }
 
   uint32_t output_samples = 0;
-  
-#if SNAPCAST_DEBUG  
+
+#if SNAPCAST_DEBUG
   uint32_t start_time_stamp = micros();
   static int64_t time_acc = 0;
   static uint32_t counter = 0;
 #endif
-  
+
   auto result = this->flac_decoder_->decode_frame(
       this->input_transfer_buffer_->get_buffer_start(), this->input_transfer_buffer_->available(),
       reinterpret_cast<int16_t *>(this->output_transfer_buffer_->get_buffer_end()), &output_samples);
-  
-#if SNAPCAST_DEBUG    
+
+#if SNAPCAST_DEBUG
   time_acc += micros() - start_time_stamp;
   counter++;
-  if( counter % 1000 == 0 ){
-    printf( "decoder: avg decode time: %" PRId64 " us\n", time_acc / counter );
+  if (counter % 1000 == 0) {
+    printf("decoder: avg decode time: %" PRId64 " us\n", time_acc / counter);
     time_acc = 0;
     counter = 0;
   }
 #endif
-  
-  this->output_transfer_buffer_->set_current_time_stamp( this->input_transfer_buffer_->get_current_time_stamp());
+
+  this->output_transfer_buffer_->set_current_time_stamp(this->input_transfer_buffer_->get_current_time_stamp());
   if (result == esp_audio_libs::flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
     // Not an issue, just needs more data that we'll get next time.
     return FileDecoderState::POTENTIALLY_FAILED;
@@ -305,8 +305,7 @@ FileDecoderState AudioDecoder::decode_flac_() {
   size_t bytes_consumed = this->flac_decoder_->get_bytes_index();
   this->input_transfer_buffer_->decrease_buffer_length(bytes_consumed);
 
-  
-if (result > esp_audio_libs::flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
+  if (result > esp_audio_libs::flac::FLAC_DECODER_ERROR_OUT_OF_DATA) {
     // Corrupted frame, don't retry with current buffer content, wait for new sync
     return FileDecoderState::POTENTIALLY_FAILED;
   }
@@ -350,7 +349,7 @@ FileDecoderState AudioDecoder::decode_mp3_() {
   if (err) {
     switch (err) {
       case esp_audio_libs::helix_decoder::ERR_MP3_OUT_OF_MEMORY:
-         [[fallthrough]];
+        [[fallthrough]];
       case esp_audio_libs::helix_decoder::ERR_MP3_NULL_POINTER:
         return FileDecoderState::FAILED;
         break;

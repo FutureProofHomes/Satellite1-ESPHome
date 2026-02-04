@@ -1,4 +1,3 @@
-
 audio_dac:
   - platform: pcm5122
     id: line_out_dac
@@ -10,11 +9,11 @@ audio_dac:
     id: dac_proxy
     speaker_dac: speaker_dac
     line_out_dac: line_out_dac
-        
+
     on_state_change:
       - media_player.speaker.restore_volume:
           volume: !lambda return id(dac_proxy).volume();
-          mute: !lambda return id(dac_proxy).is_muted(); 
+          mute: !lambda return id(dac_proxy).is_muted();
 
 api:
   actions:
@@ -26,16 +25,15 @@ api:
       then:
         - dac_proxy.activate_line_out:
 
-
 select:
   - platform: template
     name: Speaker channel output
     id: tas_mode_select
     icon: "mdi:speaker-multiple"
     options:
-     - "Mono (Left + Right)"
-     - "Left Channel Only"
-     - "Right Channel Only"
+      - "Mono (Left + Right)"
+      - "Left Channel Only"
+      - "Right Channel Only"
     initial_option: "Mono (Left + Right)"
     entity_category: config
     optimistic: true
@@ -50,12 +48,11 @@ select:
             ESP_LOGI("main", "No channel selected");
             return 0;
 
-
 binary_sensor:
   - platform: gpio
     id: line_out_sensor
     pin:
-      pcm5122: 
+      pcm5122:
       pin: 4
       inverted: false
     name: "Line-Out Connected"
@@ -63,7 +60,7 @@ binary_sensor:
     filters:
       - delayed_on: 200ms
       - delayed_off: 200ms
-    
+
     on_press:
       - dac_proxy.activate_line_out:
       - lambda: id(jack_plugged_recently) = true;
@@ -76,8 +73,7 @@ binary_sensor:
       - delay: 800ms
       - lambda: id(jack_plugged_recently) = false;
       - script.execute: control_leds
-      
-    
+
     on_release:
       - dac_proxy.activate_speaker:
       - lambda: id(jack_unplugged_recently) = true;
@@ -92,7 +88,7 @@ binary_sensor:
       - script.execute: control_leds
 
 switch:
-    # Wake Word Sound Switch.
+  # Wake Word Sound Switch.
   - platform: template
     id: snapcast_switch
     name: Snapcast
@@ -107,16 +103,15 @@ switch:
       then:
         - snapcast.disable:
 
-
 fusb302b:
   id: pd_fusb302b
   irq_pin: GPIO1
   request_voltage: 20
   on_power_ready:
     then:
-      - logger.log: 
+      - logger.log:
           format: "PD contract got accepted: %s"
-          args: [ 'id(pd_fusb302b).contract.c_str()' ]
+          args: ['id(pd_fusb302b).contract.c_str()']
 
       - text_sensor.template.publish:
           id: pd_state_text
@@ -142,9 +137,9 @@ speaker:
     channel: stereo
     timeout: never
     audio_dac: dac_proxy
-    #buffer_duration: 100ms
+    # buffer_duration: 100ms
 
-# Virtual speakers to combine the announcement and media streams together into one output
+  # Virtual speakers to combine the announcement and media streams together into one output
   - platform: mixer
     id: mixing_speaker
     output_speaker: i2s_audio_speaker
@@ -190,20 +185,20 @@ media_player:
       format: FLAC     # FLAC is the least processor intensive codec
       num_channels: 2
       sample_rate: 48000
-    
+
     on_mute:
       - script.execute: control_leds
     on_unmute:
       - script.execute: control_leds
     on_volume:
       - script.execute: control_leds
-    
+
     on_announcement:
       - mixer_speaker.apply_ducking:
           id: media_mixing_input
           decibel_reduction: 20
           duration: 0.0s
-    
+
     on_state:
       if:
         condition:
@@ -243,8 +238,7 @@ media_player:
       - id: jack_connected_sound
         file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/jack_connected.flac
       - id: jack_disconnected_sound
-        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/jack_disconnected.flac    
-
+        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/jack_disconnected.flac
 
 script:
   # Script executed when we want to play sounds on the device.
@@ -265,8 +259,8 @@ script:
             id(external_media_player)
               ->play_file(sound_file, true, false);
           }
-  
-  # Script to increased/decreased volume  
+
+  # Script to increased/decreased volume
   - id: control_volume
     mode: restart
     parameters:

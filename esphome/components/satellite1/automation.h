@@ -6,15 +6,10 @@
 namespace esphome {
 namespace satellite1 {
 
-template<typename... Ts> 
-class XMOSHardwareResetAction : public Action<Ts...>, public Parented<Satellite1> {
+template<typename... Ts> class XMOSHardwareResetAction : public Action<Ts...>, public Parented<Satellite1> {
  public:
-  void play(const Ts&... x) override {
-    this->parent_->xmos_hardware_reset();
-  }
+  void play(const Ts &...x) override { this->parent_->xmos_hardware_reset(); }
 };
-
-
 
 template<Satellite1State State> class Satellite1StateTrigger : public Trigger<> {
  public:
@@ -33,13 +28,11 @@ class XMOSNoResponseStateTrigger : public Trigger<> {
  public:
   explicit XMOSNoResponseStateTrigger(Satellite1 *sat1) {
     sat1->add_on_state_callback([this, sat1]() {
-      if (sat1->state == SAT_DETACHED_STATE && sat1->connection_attempts == MAX_CONNECTION_ATTEMPTS )
+      if (sat1->state == SAT_DETACHED_STATE && sat1->connection_attempts == MAX_CONNECTION_ATTEMPTS)
         this->trigger();
     });
   }
 };
 
-
-
-}
-}
+}  // namespace satellite1
+}  // namespace esphome

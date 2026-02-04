@@ -36,9 +36,7 @@ void I2SAudioMicrophone::setup() {
     }
   }
 }
-void I2SAudioMicrophone::dump_config() {
-  this->dump_i2s_settings();
-}
+void I2SAudioMicrophone::dump_config() { this->dump_i2s_settings(); }
 
 void I2SAudioMicrophone::start() {
   if (this->is_failed())
@@ -53,13 +51,13 @@ void I2SAudioMicrophone::start_() {
   }
 
 #ifdef I2S_EXTERNAL_ADC
-  if( this->external_adc_ != nullptr ){
+  if (this->external_adc_ != nullptr) {
     this->external_adc_->init_device();
   }
 #endif
 
-i2s_driver_config_t config = this->get_i2s_cfg();
-//config.mode = (i2s_mode_t) (I2S_MODE_MASTER | I2S_MODE_RX);
+  i2s_driver_config_t config = this->get_i2s_cfg();
+  // config.mode = (i2s_mode_t) (I2S_MODE_MASTER | I2S_MODE_RX);
 
 #if SOC_I2S_SUPPORTS_ADC
   if (this->use_internal_adc_) {
@@ -75,11 +73,10 @@ i2s_driver_config_t config = this->get_i2s_cfg();
       config.mode = (i2s_mode_t) (config.mode | I2S_MODE_PDM);
 
     this->install_i2s_driver(config);
-
   }
 
 #ifdef I2S_EXTERNAL_ADC
-  if( this->external_adc_ != nullptr ){
+  if (this->external_adc_ != nullptr) {
     this->external_adc_->apply_i2s_settings(config);
   }
 #endif
@@ -115,7 +112,7 @@ size_t I2SAudioMicrophone::read(int16_t *buf, size_t len) {
   }
 
   if (bytes_read == 0) {
-     return 0;
+    return 0;
   }
   this->status_clear_warning();
   if (this->bits_per_sample_ == I2S_BITS_PER_SAMPLE_16BIT) {
@@ -123,7 +120,7 @@ size_t I2SAudioMicrophone::read(int16_t *buf, size_t len) {
   } else if (this->bits_per_sample_ == I2S_BITS_PER_SAMPLE_32BIT) {
     std::vector<int16_t> samples;
     size_t samples_read = bytes_read / sizeof(int32_t);
-    uint8_t shift = 16 - this->gain_log2_ ;
+    uint8_t shift = 16 - this->gain_log2_;
     samples.resize(samples_read);
     for (size_t i = 0; i < samples_read; i++) {
       int32_t temp = reinterpret_cast<int32_t *>(buf)[i] >> shift;

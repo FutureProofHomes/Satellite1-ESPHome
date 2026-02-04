@@ -26,13 +26,13 @@ namespace esphome {
 namespace snapcast {
 
 struct SnapcastUrl {
-    std::string server_ip;
-    std::optional<int> stream_port;
-    std::optional<std::string> stream_name;
-    std::optional<int> rpc_port;
+  std::string server_ip;
+  std::optional<int> stream_port;
+  std::optional<std::string> stream_name;
+  std::optional<int> rpc_port;
 
-    // Converts the SnapcastUrl back into a Snapcast-formatted URL string
-    std::string to_str() const;
+  // Converts the SnapcastUrl back into a Snapcast-formatted URL string
+  std::string to_str() const;
 };
 
 /**
@@ -56,7 +56,7 @@ struct SnapcastUrl {
  * Returns:
  *   std::optional<SnapcastUrl> – parsed result if valid, std::nullopt otherwise
  */
-std::optional<SnapcastUrl> parseSnapcastUrl(const std::string& url);
+std::optional<SnapcastUrl> parseSnapcastUrl(const std::string &url);
 
-}
-}
+}  // namespace snapcast
+}  // namespace esphome

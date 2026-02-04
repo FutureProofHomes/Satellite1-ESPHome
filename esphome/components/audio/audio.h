@@ -25,7 +25,7 @@ class AudioStreamInfo {
    */
  public:
   AudioStreamInfo()
-      : AudioStreamInfo(16, 1, 16000){};  // Default values represent ESPHome's audio components historical values
+      : AudioStreamInfo(16, 1, 16000) {};  // Default values represent ESPHome's audio components historical values
   AudioStreamInfo(uint8_t bits_per_sample, uint8_t channels, uint32_t sample_rate);
 
   uint8_t get_bits_per_sample() const { return this->bits_per_sample_; }
@@ -39,7 +39,7 @@ class AudioStreamInfo {
   uint32_t bytes_to_ms(size_t bytes) const {
     return bytes * 1000 / (this->sample_rate_ * this->bytes_per_sample_ * this->channels_);
   }
-  
+
   /// @brief Convert bytes to duration in microseconds.
   /// @param bytes Number of bytes to convert
   /// @return Duration in milliseconds that will store `bytes` bytes of audio. May round down for certain sample rates
@@ -47,7 +47,7 @@ class AudioStreamInfo {
   int64_t bytes_to_us(size_t bytes) const {
     const int64_t num = static_cast<int64_t>(bytes) * 1000000LL;
     const int64_t den = static_cast<int64_t>(this->sample_rate_) * this->bytes_per_sample_ * this->channels_;
-    return (num + den/2) / den;
+    return (num + den / 2) / den;
   }
 
   /// @brief Convert bytes to frames.
@@ -198,124 +198,103 @@ inline void pack_q31_as_audio_sample(int32_t sample, uint8_t *data, size_t bytes
 
 #pragma pack(push, 1)  // Prevent padding
 struct tv_t {
-    int32_t sec;   ///< seconds
-    int32_t usec;  ///< microseconds (always normalized to 0–999,999)
+  int32_t sec;   ///< seconds
+  int32_t usec;  ///< microseconds (always normalized to 0–999,999)
 
-    // Default constructor
-    tv_t() : sec(0), usec(0) {}
+  // Default constructor
+  tv_t() : sec(0), usec(0) {}
 
-    // Constructor from components
-    tv_t(int32_t _sec, int32_t _usec) : sec(_sec), usec(_usec) {
-        normalize();
+  // Constructor from components
+  tv_t(int32_t _sec, int32_t _usec) : sec(_sec), usec(_usec) { normalize(); }
+
+  /// Normalize microseconds to be within 0–999999
+  void normalize() {
+    if (usec >= 1000000) {
+      sec += usec / 1000000;
+      usec %= 1000000;
+    } else if (usec < 0) {
+      int32_t borrow = (-usec + 999999) / 1000000;
+      sec -= borrow;
+      usec += borrow * 1000000;
     }
+  }
 
-    /// Normalize microseconds to be within 0–999999
-    void normalize() {
-        if (usec >= 1000000) {
-            sec += usec / 1000000;
-            usec %= 1000000;
-        } else if (usec < 0) {
-            int32_t borrow = (-usec + 999999) / 1000000;
-            sec -= borrow;
-            usec += borrow * 1000000;
-        }
-    }
+  // Create from milliseconds
+  static tv_t from_millis(int64_t millis) {
+    return tv_t(static_cast<int32_t>(millis / 1000), static_cast<int32_t>((millis % 1000) * 1000));
+  }
 
-    // Create from milliseconds
-    static tv_t from_millis(int64_t millis) {
-        return tv_t(static_cast<int32_t>(millis / 1000),
-                    static_cast<int32_t>((millis % 1000) * 1000));
-    }
+  // Create from microseconds
+  static tv_t from_microseconds(int64_t microsec) {
+    return tv_t(static_cast<int32_t>(microsec / 1000000), static_cast<int32_t>(microsec % 1000000));
+  }
 
-    // Create from microseconds
-    static tv_t from_microseconds(int64_t microsec) {
-        return tv_t(static_cast<int32_t>(microsec / 1000000),
-                    static_cast<int32_t>(microsec % 1000000));
-    }
-
-    // Get current time (approximate, based on micros())
-    static tv_t now() {
+  // Get current time (approximate, based on micros())
+  static tv_t now() {
     int64_t usec_now = esp_timer_get_time();
-    return tv_t(static_cast<int32_t>(usec_now / 1000000),
-                static_cast<int32_t>(usec_now % 1000000));
-    }
+    return tv_t(static_cast<int32_t>(usec_now / 1000000), static_cast<int32_t>(usec_now % 1000000));
+  }
 
-    // Convert (and round) to milliseconds
-    int64_t to_millis() const {
-        int64_t total_us = static_cast<int64_t>(sec) * 1000000 + usec; 
-        if( total_us >= 0 ) {
-          return (total_us + 500) / 1000;
-        } else {
-          return (total_us - 500) / 1000;
-        }
+  // Convert (and round) to milliseconds
+  int64_t to_millis() const {
+    int64_t total_us = static_cast<int64_t>(sec) * 1000000 + usec;
+    if (total_us >= 0) {
+      return (total_us + 500) / 1000;
+    } else {
+      return (total_us - 500) / 1000;
     }
+  }
 
-    // Convert to microseconds
-    int64_t to_microseconds() const {
-        return static_cast<int64_t>(sec) * 1000000 + usec;
-    }
+  // Convert to microseconds
+  int64_t to_microseconds() const { return static_cast<int64_t>(sec) * 1000000 + usec; }
 
-    // Arithmetic: addition
-    tv_t operator+(const tv_t &other) const {
-        tv_t result(sec + other.sec, usec + other.usec);
-        result.normalize();
-        return result;
-    }
+  // Arithmetic: addition
+  tv_t operator+(const tv_t &other) const {
+    tv_t result(sec + other.sec, usec + other.usec);
+    result.normalize();
+    return result;
+  }
 
-    // Arithmetic: subtraction
-    tv_t operator-(const tv_t &other) const {
-        tv_t result(sec - other.sec, usec - other.usec);
-        result.normalize();
-        return result;
-    }
+  // Arithmetic: subtraction
+  tv_t operator-(const tv_t &other) const {
+    tv_t result(sec - other.sec, usec - other.usec);
+    result.normalize();
+    return result;
+  }
 
-    // Division by scalar
-    tv_t operator/(int32_t divisor) const {
-        int64_t total_usec = to_microseconds();
-        total_usec /= divisor;
-        return tv_t::from_microseconds(total_usec);
-    }
+  // Division by scalar
+  tv_t operator/(int32_t divisor) const {
+    int64_t total_usec = to_microseconds();
+    total_usec /= divisor;
+    return tv_t::from_microseconds(total_usec);
+  }
 
-    tv_t operator*(float multiplicant) const {
-        int64_t total_usec = (int64_t) llround((double)to_microseconds() * multiplicant);
-        return tv_t::from_microseconds(total_usec);
-    }
-    
-    tv_t &operator+=(const tv_t &other) {
-        this->sec += other.sec;
-        this->usec += other.usec;
-        this->normalize();
-        return *this;
-    }
+  tv_t operator*(float multiplicant) const {
+    int64_t total_usec = (int64_t) llround((double) to_microseconds() * multiplicant);
+    return tv_t::from_microseconds(total_usec);
+  }
 
-    // Comparisons
-    bool operator<(const tv_t &other) const {
-        return (sec < other.sec) || (sec == other.sec && usec < other.usec);
-    }
+  tv_t &operator+=(const tv_t &other) {
+    this->sec += other.sec;
+    this->usec += other.usec;
+    this->normalize();
+    return *this;
+  }
 
-    bool operator==(const tv_t &other) const {
-        return sec == other.sec && usec == other.usec;
-    }
+  // Comparisons
+  bool operator<(const tv_t &other) const { return (sec < other.sec) || (sec == other.sec && usec < other.usec); }
 
-    bool operator!=(const tv_t &other) const {
-        return !(*this == other);
-    }
+  bool operator==(const tv_t &other) const { return sec == other.sec && usec == other.usec; }
 
-    bool operator<=(const tv_t &other) const {
-        return *this < other || *this == other;
-    }
+  bool operator!=(const tv_t &other) const { return !(*this == other); }
 
-    bool operator>(const tv_t &other) const {
-        return !(*this <= other);
-    }
+  bool operator<=(const tv_t &other) const { return *this < other || *this == other; }
 
-    bool operator>=(const tv_t &other) const {
-        return !(*this < other);
-    }
+  bool operator>(const tv_t &other) const { return !(*this <= other); }
+
+  bool operator>=(const tv_t &other) const { return !(*this < other); }
 };
 #pragma pack(pop)
-
-
 
 }  // namespace audio
 }  // namespace esphome

@@ -304,7 +304,7 @@ void MicroWakeWord::loop() {
         }
 
         xTaskCreatePinnedToCore(MicroWakeWord::inference_task, "mww", INFERENCE_TASK_STACK_SIZE, (void *) this,
-                    INFERENCE_TASK_PRIORITY, &this->inference_task_handle_, 1);
+                                INFERENCE_TASK_PRIORITY, &this->inference_task_handle_, 1);
 
         if (this->inference_task_handle_ == nullptr) {
           FrontendFreeStateContents(&this->frontend_state_);  // Deallocate frontend state

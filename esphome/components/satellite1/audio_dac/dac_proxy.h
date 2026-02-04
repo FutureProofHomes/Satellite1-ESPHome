@@ -8,15 +8,12 @@
 namespace esphome {
 namespace satellite1 {
 
-
 static const uint8_t AUDIO_SERVICER_CMD_SET_DAC = 0x00;
 
 enum DacOutput : uint8_t {
   SPEAKER = 0,
   LINE_OUT,
 };
-
-
 
 struct DACProxyRestoreState {
   uint8_t dac_output;
@@ -26,12 +23,7 @@ struct DACProxyRestoreState {
   bool line_out_is_muted;
 };
 
-
-class DACProxy : public audio_dac::AudioDac,
-                 public Component,
-                 public Satellite1SPIService,
-                 public EntityBase {
- 
+class DACProxy : public audio_dac::AudioDac, public Component, public Satellite1SPIService, public EntityBase {
  public:
   void setup() override;
   void dump_config() override;
@@ -44,32 +36,29 @@ class DACProxy : public audio_dac::AudioDac,
   bool is_muted() override;
   float volume() override;
 
-  void set_lineout_dac(audio_dac::AudioDac* pcm5122){ this->pcm5122_ = pcm5122; }
-  void set_speaker_dac(audio_dac::AudioDac* tas2780){ this->tas2780_ = tas2780; }
+  void set_lineout_dac(audio_dac::AudioDac *pcm5122) { this->pcm5122_ = pcm5122; }
+  void set_speaker_dac(audio_dac::AudioDac *tas2780) { this->tas2780_ = tas2780; }
   void add_on_state_callback(std::function<void()> &&callback);
-  
+
   void activate();
   void activate_line_out();
-  void activate_speaker();  
+  void activate_speaker();
 
   DacOutput active_dac{SPEAKER};
-protected:
+
+ protected:
   bool setup_was_called_{false};
   ESPPreferenceObject pref_;
   DACProxyRestoreState restore_state_;
   void save_volume_restore_state_();
-  
-  void send_selected_dac_(){}
-  
-  audio_dac::AudioDac* pcm5122_{nullptr};
-  audio_dac::AudioDac* tas2780_{nullptr};  
 
-  CallbackManager<void()> state_callback_{};  
+  void send_selected_dac_() {}
+
+  audio_dac::AudioDac *pcm5122_{nullptr};
+  audio_dac::AudioDac *tas2780_{nullptr};
+
+  CallbackManager<void()> state_callback_{};
 };
 
-
-
-
-
-}
-}
+}  // namespace satellite1
+}  // namespace esphome

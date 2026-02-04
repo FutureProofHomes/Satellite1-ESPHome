@@ -38,7 +38,7 @@ class Speaker {
   virtual size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait, bool write_partial = false) {
     return this->play(data, length);
   };
-  virtual size_t play_silence(size_t length_ms){ return 0; } 
+  virtual size_t play_silence(size_t length_ms) { return 0; }
 #endif
 
   /// @brief Plays the provided audio data.
@@ -103,10 +103,10 @@ class Speaker {
 
   audio::AudioStreamInfo &get_audio_stream_info() { return this->audio_stream_info_; }
 
-  virtual int64_t get_playout_time( int64_t self_buffer_us ) const { return 0; }
-  virtual bool update_buffer_states(int32_t bytes_transfered ) { return true; }
- 
-  protected:
+  virtual int64_t get_playout_time(int64_t self_buffer_us) const { return 0; }
+  virtual bool update_buffer_states(int32_t bytes_transfered) { return true; }
+
+ protected:
   State state_{STATE_STOPPED};
   audio::AudioStreamInfo audio_stream_info_;
   float volume_{1.0f};
@@ -115,7 +115,6 @@ class Speaker {
 #ifdef USE_AUDIO_DAC
   audio_dac::AudioDac *audio_dac_{nullptr};
 #endif
-
 };
 
 }  // namespace speaker
