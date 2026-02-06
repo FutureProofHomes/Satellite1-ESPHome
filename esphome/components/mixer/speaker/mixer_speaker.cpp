@@ -74,7 +74,8 @@ void SourceSpeaker::loop() {
             this->status_set_error(LOG_STR("Failed to start mixer: unsupported bits per sample"));
             break;
           case ESP_ERR_INVALID_ARG:
-            this->status_set_error(LOG_STR("Failed to start mixer: audio stream isn't compatible with the other audio stream."));
+            this->status_set_error(
+                LOG_STR("Failed to start mixer: audio stream isn't compatible with the other audio stream."));
             break;
           case ESP_ERR_INVALID_STATE:
             this->status_set_error(LOG_STR("Failed to start mixer: mixer task failed to start"));
