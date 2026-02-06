@@ -129,7 +129,7 @@ void I2SAudioSpeaker::loop() {
   }
 
   if (event_group_bits & SpeakerEventGroupBits::ERR_TASK_FAILED_TO_START) {
-    this->status_set_error("Failed to start speaker task");
+    this->status_set_error(LOG_STR("Failed to start speaker task"));
     xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::ERR_TASK_FAILED_TO_START);
   }
 
@@ -140,7 +140,7 @@ void I2SAudioSpeaker::loop() {
   }
 
   if (event_group_bits & SpeakerEventGroupBits::ERR_ESP_NOT_SUPPORTED) {
-    this->status_set_error("Failed to adjust I2S bus to match the incoming audio");
+    this->status_set_error(LOG_STR("Failed to adjust I2S bus to match the incoming audio"));
     ESP_LOGE(TAG,
              "Incompatible audio format: sample rate = %" PRIu32 ", channels = %" PRIu8 ", bits per sample = %" PRIu8,
              this->audio_stream_info_.get_sample_rate(), this->audio_stream_info_.get_channels(),
