@@ -8,17 +8,15 @@ namespace memory_flasher {
 
 static const char *const TAG = "memory_flasher";
 
-
-void MemoryFlasher::dump_config(){
-    if( this->has_image_embedded()){
-        ESP_LOGCONFIG(TAG, "Embedded Image:" );
-        ImageVersion v = this->embedded_image_.version;
-        ESP_LOGCONFIG(TAG, "    Version: %d.%d.%d", v.major, v.minor, v.patch );
-    }
-    
+void MemoryFlasher::dump_config() {
+  if (this->has_image_embedded()) {
+    ESP_LOGCONFIG(TAG, "Embedded Image:");
+    ImageVersion v = this->embedded_image_.version;
+    ESP_LOGCONFIG(TAG, "    Version: %d.%d.%d", v.major, v.minor, v.patch);
+  }
 }
 
-bool MemoryFlasher::http_get_md5_(){
+bool MemoryFlasher::http_get_md5_() {
   if (this->md5_url_.empty()) {
     return false;
   }
@@ -53,8 +51,7 @@ bool MemoryFlasher::http_get_md5_(){
   return read_len == MD5_SIZE;
 }
 
-
-bool MemoryFlasher::validate_url_(const std::string &url){
+bool MemoryFlasher::validate_url_(const std::string &url) {
   // t.b.d.
   return true;
 }
@@ -76,37 +73,35 @@ void MemoryFlasher::set_md5_url(const std::string &url) {
   this->md5_expected_.clear();  // to be retrieved later
 }
 
-bool HttpImageReader::init_reader(){
+bool HttpImageReader::init_reader() {
   auto url_with_auth = this->url_;
-    if (url_with_auth.empty() || this->http_request_ == nullptr) {
-        return false;
-    }
-    
-    ESP_LOGVV(TAG, "url_with_auth: %s", url_with_auth.c_str());
-    ESP_LOGI(TAG, "Connecting to: %s", this->url_.c_str());
-    
-    this->container_ = this->http_request_->get(url_with_auth);
-    if (this->container_ == nullptr) {
-      return false;
-    }
-    return true;
+  if (url_with_auth.empty() || this->http_request_ == nullptr) {
+    return false;
+  }
+
+  ESP_LOGVV(TAG, "url_with_auth: %s", url_with_auth.c_str());
+  ESP_LOGI(TAG, "Connecting to: %s", this->url_.c_str());
+
+  this->container_ = this->http_request_->get(url_with_auth);
+  if (this->container_ == nullptr) {
+    return false;
+  }
+  return true;
 }
 
-bool HttpImageReader::deinit_reader(){
-    if( this->container_ != nullptr ){
-      this->container_->end();
-    }
-    return true;
+bool HttpImageReader::deinit_reader() {
+  if (this->container_ != nullptr) {
+    this->container_->end();
+  }
+  return true;
 }
 
-
-int HttpImageReader::read_image_block(uint8_t *buffer, size_t block_size){
-    int bytes_read = this->container_->read(buffer, block_size);
-    ESP_LOGVV(TAG, "bytes_read_ = %u, body_length_ = %u, bufsize = %i", this->container_->get_bytes_read(),
-              this->container_->content_length, bytes_read);
-    return bytes_read;
-} 
-
-
+int HttpImageReader::read_image_block(uint8_t *buffer, size_t block_size) {
+  int bytes_read = this->container_->read(buffer, block_size);
+  ESP_LOGVV(TAG, "bytes_read_ = %u, body_length_ = %u, bufsize = %i", this->container_->get_bytes_read(),
+            this->container_->content_length, bytes_read);
+  return bytes_read;
 }
-}
+
+}  // namespace memory_flasher
+}  // namespace esphome

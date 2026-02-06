@@ -4,13 +4,13 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
-  
+
   # Global variable tracking if the action button was recently touched.
   - id: action_button_touched
     type: bool
     restore_value: no
     initial_value: 'false'
-  
+
   - id: factory_reset_requested
     type: bool
     restore_value: no
@@ -30,12 +30,11 @@ event:
       - triple_press
       - long_press
 
-
 binary_sensor:
   - platform: gpio
     id: btn_up
     pin:
-      satellite1: 
+      satellite1:
       port: INPUT_A
       pin: 0
       inverted: true
@@ -47,11 +46,11 @@ binary_sensor:
         - script.execute:
             id: control_volume
             increase_volume: true
-  
+
   - platform: gpio
     id: btn_down
     pin:
-      satellite1: 
+      satellite1:
       port: INPUT_A
       pin: 2
       inverted: true
@@ -63,11 +62,11 @@ binary_sensor:
         - script.execute:
             id: control_volume
             increase_volume: false
-  
+
   - platform: gpio
     id: btn_left
     pin:
-      satellite1: 
+      satellite1:
       port: INPUT_A
       pin: 3
       inverted: false
@@ -223,7 +222,7 @@ binary_sensor:
                 - event.trigger:
                     id: action_button_press_event
                     event_type: "long_press"
-      
+
       # Factory Reset Warning
       #  . Audible and Visible warning.
       - timing:
@@ -248,7 +247,7 @@ binary_sensor:
                     id: play_sound
                     priority: true
                     sound_file: !lambda return id(factory_reset_cancelled_sound);
-      
+
       # Factory Reset
       - timing:
           - ON for at least 22s
@@ -265,5 +264,3 @@ binary_sensor:
                       - memory_flasher.erase:
                     else:
                       - button.press: factory_reset_button
-                
-

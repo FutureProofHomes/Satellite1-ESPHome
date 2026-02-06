@@ -44,8 +44,8 @@ class SourceSpeaker : public speaker::Speaker, public Component {
 
   size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait, bool write_partial = false) override;
   size_t play(const uint8_t *data, size_t length) override { return this->play(data, length, 0); }
-  size_t play_silence(size_t length_ms) override; 
-  
+  size_t play_silence(size_t length_ms) override;
+
   void start() override;
   void stop() override;
   void finish() override;
@@ -78,10 +78,10 @@ class SourceSpeaker : public speaker::Speaker, public Component {
   void set_timeout(uint32_t ms) { this->timeout_ms_ = ms; }
 
   std::weak_ptr<audio::AudioSourceTransferBuffer> get_transfer_buffer() { return this->transfer_buffer_; }
-  int64_t get_playout_time( int64_t self_buffer_us ) const override; 
-  bool update_buffer_states(int32_t bytes_transfered ) override;
-  
-  protected:
+  int64_t get_playout_time(int64_t self_buffer_us) const override;
+  bool update_buffer_states(int32_t bytes_transfered) override;
+
+ protected:
   friend class MixerSpeaker;
   esp_err_t start_();
   void stop_();
@@ -118,7 +118,6 @@ class SourceSpeaker : public speaker::Speaker, public Component {
   int8_t db_change_per_ducking_step_{1};
   uint32_t ducking_transition_samples_remaining_{0};
   uint32_t samples_per_ducking_step_{0};
-
 };
 
 class MixerSpeaker : public Component {
@@ -128,12 +127,12 @@ class MixerSpeaker : public Component {
   void loop() override;
 
   void add_source_speaker(SourceSpeaker *source_speaker) { this->source_speakers_.push_back(source_speaker); }
-  size_t play_silence(size_t length_ms){ 
-    if(this->output_speaker_) {
+  size_t play_silence(size_t length_ms) {
+    if (this->output_speaker_) {
       return this->output_speaker_->play_silence(length_ms);
-    } else  
-      return 0; 
-    }
+    } else
+      return 0;
+  }
   /// @brief Starts the mixer task. Called by a source speaker giving the current audio stream information
   /// @param stream_info The calling source speakers audio stream information
   /// @return ESP_ERR_NOT_SUPPORTED if the incoming stream is incompatible due to unsupported bits per sample

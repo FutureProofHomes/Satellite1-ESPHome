@@ -24,7 +24,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 
-
 #include "esp_transport.h"
 
 #include "esphome/core/defines.h"
@@ -38,7 +37,6 @@ enum class RequestId : uint32_t {
   GetGroupStatus = 2,
   // etc.
 };
-
 
 struct ClientState {
   std::string group_id;
@@ -60,10 +58,9 @@ struct ClientState {
         }
       }
     }
-    return false; 
+    return false;
   }
 };
-
 
 struct StreamInfo {
   std::string id;
@@ -75,7 +72,8 @@ struct StreamInfo {
   bool canGoPrevious;
 
   bool from_json(JsonObject stream_obj) {
-    if (!stream_obj["id"].is<std::string>()) return false;
+    if (!stream_obj["id"].is<std::string>())
+      return false;
 
     id = stream_obj["id"].as<std::string>();
     status = stream_obj["status"].as<std::string>();
@@ -89,14 +87,14 @@ struct StreamInfo {
 
   bool from_streams_json(JsonArray streams, std::string stream_id) {
     for (JsonObject stream_obj : streams) {
-        if (stream_obj["id"].as<std::string>() == stream_id) {
-            return this->from_json(stream_obj);
-         }
+      if (stream_obj["id"].as<std::string>() == stream_id) {
+        return this->from_json(stream_obj);
+      }
     }
-    return false; 
+    return false;
   }
 
-  bool from_stream_properties(JsonObject properties){
+  bool from_stream_properties(JsonObject properties) {
     status = properties["playbackStatus"].as<std::string>();
     canPlay = properties["canPlay"].as<bool>();
     canPause = properties["canPause"].as<bool>();
@@ -106,48 +104,42 @@ struct StreamInfo {
     return true;
   }
 
-  bool set_id(std::string stream_id){
+  bool set_id(std::string stream_id) {
     id = stream_id;
     status = "idle";
     return true;
   }
-  
-  bool set_to_default(){
-    return this->set_id("default");
-  }
 
+  bool set_to_default() { return this->set_id("default"); }
 };
 
 class SnapcastClient;
 
 class SnapcastControlSession {
-public:
-    esp_err_t connect(std::string server, uint32_t port);
-    esp_err_t disconnect();
-    
-    void notification_loop();
+ public:
+  esp_err_t connect(std::string server, uint32_t port);
+  esp_err_t disconnect();
 
-    void set_on_stream_update(std::function<void(const StreamInfo &)> cb) {
-        this->on_stream_update_ = std::move(cb);
-    }
+  void notification_loop();
 
-protected:
-    friend SnapcastClient;
-    void send_rpc_request_(const std::string &method, std::function<void(JsonObject)> fill_params, uint32_t id);
-    void update_from_server_obj_(const JsonObject &server_obj);
-    
-    std::string server_;
-    uint32_t port_;
-    std::string client_id_;
-    esp_transport_handle_t transport_{nullptr};
-    bool notification_task_should_run_{false};
-    TaskHandle_t notification_task_handle_{nullptr};
-    std::string recv_buffer_;
-    ClientState client_state_;
-    std::map<std::string,StreamInfo> known_streams_;
-    std::function<void(const StreamInfo &)> on_stream_update_;
+  void set_on_stream_update(std::function<void(const StreamInfo &)> cb) { this->on_stream_update_ = std::move(cb); }
+
+ protected:
+  friend SnapcastClient;
+  void send_rpc_request_(const std::string &method, std::function<void(JsonObject)> fill_params, uint32_t id);
+  void update_from_server_obj_(const JsonObject &server_obj);
+
+  std::string server_;
+  uint32_t port_;
+  std::string client_id_;
+  esp_transport_handle_t transport_{nullptr};
+  bool notification_task_should_run_{false};
+  TaskHandle_t notification_task_handle_{nullptr};
+  std::string recv_buffer_;
+  ClientState client_state_;
+  std::map<std::string, StreamInfo> known_streams_;
+  std::function<void(const StreamInfo &)> on_stream_update_;
 };
 
-
-}
-}
+}  // namespace snapcast
+}  // namespace esphome

@@ -22,17 +22,20 @@ class ResamplerSpeaker : public Component, public speaker::Speaker {
 
   size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait, bool write_partial = false) override;
   size_t play(const uint8_t *data, size_t length) override { return this->play(data, length, 0); }
-  size_t play_silence(size_t length_ms) override { 
-    if (!this->output_speaker_) return 0;
-    return this->output_speaker_->play_silence(length_ms); 
+  size_t play_silence(size_t length_ms) override {
+    if (!this->output_speaker_)
+      return 0;
+    return this->output_speaker_->play_silence(length_ms);
   }
-  int64_t get_playout_time( int64_t self_buffer_us ) const override { 
-    if (!this->output_speaker_) return 0;
-    return this->output_speaker_->get_playout_time(self_buffer_us); 
+  int64_t get_playout_time(int64_t self_buffer_us) const override {
+    if (!this->output_speaker_)
+      return 0;
+    return this->output_speaker_->get_playout_time(self_buffer_us);
   }
 
-  bool update_buffer_states(int32_t bytes_transfered ) override {
-    if (!this->output_speaker_) return true;
+  bool update_buffer_states(int32_t bytes_transfered) override {
+    if (!this->output_speaker_)
+      return true;
     return this->output_speaker_->update_buffer_states(bytes_transfered);
   }
 
@@ -45,7 +48,8 @@ class ResamplerSpeaker : public Component, public speaker::Speaker {
 
   bool has_buffered_data() const override;
   bool is_stopped() const override {
-    return this->state_ == esphome::speaker::STATE_STOPPED && (this->output_speaker_ == nullptr || this->output_speaker_->is_stopped());
+    return this->state_ == esphome::speaker::STATE_STOPPED &&
+           (this->output_speaker_ == nullptr || this->output_speaker_->is_stopped());
   }
 
   /// @brief Mute state changes are passed to the parent's output speaker
@@ -116,7 +120,6 @@ class ResamplerSpeaker : public Component, public speaker::Speaker {
   uint32_t target_sample_rate_;
 
   uint32_t buffer_duration_ms_;
-  
 };
 
 }  // namespace resampler

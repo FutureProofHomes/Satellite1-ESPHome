@@ -7,4 +7,4 @@ namespace snapcast {
 std::atomic<uint16_t> TimeMessage::msg_cnter{0};
 
 }
-}
+}  // namespace esphome

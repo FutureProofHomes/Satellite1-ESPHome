@@ -12,11 +12,9 @@ uart:
   parity: NONE
   stop_bits: 1
 
-
 ld2450:
   id: ld2450_radar
   uart_id: uart_ld2450
-
 
 binary_sensor:
   - platform: ld2450
@@ -27,7 +25,6 @@ binary_sensor:
       name: Moving Target
     has_still_target:
       name: Still Target
-
 
 number:
   - platform: ld2450
@@ -62,7 +59,6 @@ number:
       y2:
         name: Zone-3 Y2
 
-
 switch:
   - platform: ld2450
     ld2450_id: ld2450_radar
@@ -71,7 +67,6 @@ switch:
     multi_target:
       name: "Multi Target Tracking"
 
-
 select:
   - platform: ld2450
     ld2450_id: ld2450_radar
@@ -79,7 +74,6 @@ select:
       name: "Baud rate"
     zone_type:
       name: "Zone Type"
-
 
 button:
   - platform: ld2450
@@ -90,7 +84,6 @@ button:
     restart:
       name: "LD2450 Restart"
       entity_category: "config"
-
 
 text_sensor:
   - platform: ld2450
@@ -108,7 +101,6 @@ text_sensor:
     target_3:
       direction:
         name: "Target-3 Direction"
-
 
 sensor:
   - platform: ld2450

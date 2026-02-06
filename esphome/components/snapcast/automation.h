@@ -6,18 +6,15 @@
 namespace esphome {
 namespace snapcast {
 
-template< typename... Ts>
-class EnableAction : public Action<Ts...>, public Parented<SnapcastClient> {
+template<typename... Ts> class EnableAction : public Action<Ts...>, public Parented<SnapcastClient> {
  public:
   void play(const Ts &...x) override { this->parent_->enable(); }
 };
 
-template< typename... Ts>
-class DisableAction : public Action<Ts...>, public Parented<SnapcastClient> {
+template<typename... Ts> class DisableAction : public Action<Ts...>, public Parented<SnapcastClient> {
  public:
   void play(const Ts &...x) override { this->parent_->disable(); }
 };
 
-
-}
-}
+}  // namespace snapcast
+}  // namespace esphome

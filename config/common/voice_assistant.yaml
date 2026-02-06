@@ -33,14 +33,13 @@ microphone:
     adc_type: external
     i2s_audio_id: i2s_shared
 
-
 micro_wake_word:
   id: mww
   models:
     - model: hey_jarvis
       id: hey_jarvis
     - model: okay_nabu
-      id: okay_nabu    
+      id: okay_nabu
     - model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
       id: stop
       internal: true
@@ -91,14 +90,12 @@ micro_wake_word:
                             - voice_assistant.start:
                                 wake_word: !lambda return wake_word;
 
-
-
 voice_assistant:
   id: va
   microphone:
     microphone: sat1_mics
     channels: 0
-  
+
   media_player: external_media_player
   micro_wake_word: mww
   use_wake_word: false
@@ -128,7 +125,7 @@ voice_assistant:
         id: media_mixing_input
         decibel_reduction: 0   # 0 dB means no reduction
         duration: 1.0s
-  
+
   # When the voice assistant starts: Play a wake up sound, duck audio.
   on_start:
     - mixer_speaker.apply_ducking:
@@ -181,7 +178,7 @@ voice_assistant:
         condition:
           switch.is_off: timer_ringing
         then:
-          # - lambda: id(stop).disable();
+    # - lambda: id(stop).disable();
     # If the end happened because of an error, let the error phase on for a second
     - if:
         condition:
@@ -191,7 +188,7 @@ voice_assistant:
     # Reset the voice assistant phase id and reset the LED animations.
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
-    
+
   on_timer_finished:
     - switch.turn_on: timer_ringing
   on_timer_started:
@@ -202,7 +199,6 @@ voice_assistant:
     - script.execute: control_leds
   on_timer_tick:
     - script.execute: control_leds
-
 
 script:
   # Script used activate the stop word if the TTS step is long.
@@ -235,7 +231,7 @@ script:
 
 select:
   - platform: template
-    id: mww_sensitivity_select 
+    id: mww_sensitivity_select
     name: "Wake word sensitivity"
     optimistic: true
     initial_option: Slightly sensitive
