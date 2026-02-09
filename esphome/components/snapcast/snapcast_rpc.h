@@ -136,6 +136,7 @@ class SnapcastControlSession {
   bool notification_task_should_run_{false};
   TaskHandle_t notification_task_handle_{nullptr};
   std::string recv_buffer_;
+  std::string line_buffer_;
   ClientState client_state_;
   std::map<std::string, StreamInfo> known_streams_;
   std::function<void(const StreamInfo &)> on_stream_update_;
