@@ -1,2 +1,4 @@
 esphome==2026.1.2
 setuptools
+yamllint
+pre-commit
