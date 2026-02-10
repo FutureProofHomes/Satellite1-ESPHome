@@ -42,6 +42,14 @@ struct SnapcastServer {
   uint32_t rpc_port = 1705;
 };
 
+enum class SnapcastClientState {
+  DISCONNECTED,
+  CONNECTING,
+  IDLE,
+  PLAYING,
+  DISCONNECTING,
+};
+
 /*
 ESPHome Snapcast client, this component manages connections to the Snapcast server and controls the media_player
 component.
@@ -78,6 +86,8 @@ class SnapcastClient : public Component {
   bool enabled_{true};
   bool network_initialized_{false};
   void on_network_ready_();
+  SnapcastClientState state_{SnapcastClientState::DISCONNECTED};
+  bool play_requested_{false};
 
   error_t start_mdns_scan_();
   error_t mdns_task_();

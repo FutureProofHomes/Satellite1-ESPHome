@@ -200,29 +200,28 @@ void SourceSpeaker::set_volume(float volume) {
 float SourceSpeaker::get_volume() { return this->parent_->get_output_speaker()->get_volume(); }
 
 size_t SourceSpeaker::process_data_from_source(TickType_t ticks_to_wait) {
-  if (!this->transfer_buffer_.use_count()) {
+  auto transfer = this->transfer_buffer_;
+  if (!transfer) {
     return 0;
   }
 
   // Store current offset, as these samples are already ducked
   // !! need to make sure that buffer is frame aligned !!
-  const size_t samples_already_processed =
-      this->audio_stream_info_.bytes_to_samples(this->transfer_buffer_->available());
+  const size_t samples_already_processed = this->audio_stream_info_.bytes_to_samples(transfer->available());
 
   static int64_t last_call = esp_timer_get_time();
 
   size_t bytes_read = 0;
   if (xSemaphoreTake(this->parent_->lock_, pdMS_TO_TICKS(10))) {
-    bytes_read = this->transfer_buffer_->transfer_data_from_source(ticks_to_wait);
+    bytes_read = transfer->transfer_data_from_source(ticks_to_wait);
     this->bytes_in_ringbuffer_ -= bytes_read;
     xSemaphoreGive(this->parent_->lock_);
   }
   uint32_t samples_to_duck =
-      this->audio_stream_info_.bytes_to_samples(this->transfer_buffer_->available()) - samples_already_processed;
+      this->audio_stream_info_.bytes_to_samples(transfer->available()) - samples_already_processed;
   if (samples_to_duck > 0) {
-    int16_t *current_buffer =
-        reinterpret_cast<int16_t *>(this->transfer_buffer_->get_buffer_start() +
-                                    this->audio_stream_info_.samples_to_bytes(samples_already_processed));
+    int16_t *current_buffer = reinterpret_cast<int16_t *>(
+        transfer->get_buffer_start() + this->audio_stream_info_.samples_to_bytes(samples_already_processed));
 
     duck_samples(current_buffer, samples_to_duck, &this->current_ducking_db_reduction_,
                  &this->ducking_transition_samples_remaining_, this->samples_per_ducking_step_,
@@ -564,15 +563,15 @@ void MixerSpeaker::audio_mixer_task(void *params) {
     std::vector<std::shared_ptr<audio::AudioSourceTransferBuffer>> transfer_buffers_with_data;
 
     for (auto &speaker : this_mixer->source_speakers_) {
-      if (speaker->get_transfer_buffer().use_count() > 0) {
-        std::shared_ptr<audio::AudioSourceTransferBuffer> transfer_buffer = speaker->get_transfer_buffer().lock();
-        speaker->process_data_from_source(0);  // Transfers and ducks audio from source ring buffers
-
-        if ((transfer_buffer->available() > 0) && !speaker->get_pause_state()) {
-          // Store the locked transfer buffers in their own vector to avoid releasing ownership until after the loop
-          transfer_buffers_with_data.push_back(transfer_buffer);
-          speakers_with_data.push_back(speaker);
-        }
+      auto transfer_buffer = speaker->get_transfer_buffer().lock();
+      if (!transfer_buffer) {
+        continue;
+      }
+      speaker->process_data_from_source(0);  // Transfers and ducks audio from source ring buffers
+      if ((transfer_buffer->available() > 0) && !speaker->get_pause_state()) {
+        // Store the locked transfer buffers in their own vector to avoid releasing ownership until after the loop
+        transfer_buffers_with_data.push_back(transfer_buffer);
+        speakers_with_data.push_back(speaker);
       }
     }
 

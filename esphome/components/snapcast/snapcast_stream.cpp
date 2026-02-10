@@ -170,16 +170,17 @@ static void transport_task_(std::string server, uint32_t port, std::shared_ptr<C
                             TaskHandle_t stream_task_handle, TimeStats *time_stats) {
   constexpr size_t HEADER_SIZE = sizeof(MessageHeader);
   volatile bool stop_requested = false;
+  volatile bool restart_requested = false;
   while (!stop_requested) {
     uint32_t notify_value = 0;
     xTaskNotifyWait(0, 0xFFFFFFFFUL, &notify_value, portMAX_DELAY);
     if (notify_value & STOP_BIT) {
       break;
     }
-    if (!(notify_value & CONNECT_BIT)) {
+    if (!(notify_value & CONNECT_BIT) && !restart_requested) {
       continue;
     }
-
+    restart_requested = false;
     // === Create socket and connect ===
     int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     if (sock < 0) {
@@ -219,12 +220,22 @@ static void transport_task_(std::string server, uint32_t port, std::shared_ptr<C
     rx_buffer_length = 0;
     bool time_set = false;
 
+    SnapcastMessage *hello_msg = new HelloMessage();
+    hello_msg->set_send_time();
+    hello_msg->toBytes(tx_buffer);
+    int bytes_written = send(sock, (char *) tx_buffer, hello_msg->getMessageSize(), 0);
+    delete hello_msg;
+
     while (true) {
       // Check for shutdown signal
       uint32_t notify_value = 0;
       if (xTaskNotifyWait(0, DISCONNECT_BIT | STOP_BIT, &notify_value, 0) == pdTRUE) {
         if (notify_value & STOP_BIT) {
           stop_requested = true;
+          break;
+        }
+        if (notify_value & CONNECT_BIT) {
+          restart_requested = true;
           break;
         }
         if (notify_value & DISCONNECT_BIT) {
@@ -261,8 +272,32 @@ static void transport_task_(std::string server, uint32_t port, std::shared_ptr<C
         tv_t now = tv_t::now();
 
         int len = recv(sock, (char *) rx_buffer + rx_buffer_length, to_read, 0);
-        if (len <= 0) {
-          // Handle reconnect or exit
+        if (len < 0) {
+          int err = errno;
+          ESP_LOGW("transport", "recv() returned -1, errno=%d (%s)", err, strerror(err));
+
+          if (err == EAGAIN || err == EWOULDBLOCK) {
+            // Non-blocking socket: no data available right now.
+            // Just continue the loop.
+            continue;
+          }
+
+          int so_err = 0;
+          socklen_t so_err_len = sizeof(so_err);
+          if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &so_err, &so_err_len) == 0) {
+            ESP_LOGE("transport", "SO_ERROR=%d (%s)", so_err, strerror(so_err));
+          } else {
+            ESP_LOGE("transport", "getsockopt(SO_ERROR) failed: errno=%d (%s)", errno, strerror(errno));
+          }
+
+          // Real error -> treat as disconnect
+          xTaskNotify(stream_task_handle, CONNECTION_DROPPED_BIT, eSetBits);
+          break;
+        }
+
+        if (len == 0) {
+          // Peer closed gracefully (FIN)
+          ESP_LOGI("transport", "recv() EOF (peer closed)");
           xTaskNotify(stream_task_handle, CONNECTION_DROPPED_BIT, eSetBits);
           break;
         }
@@ -565,6 +600,7 @@ void SnapcastStream::stream_task_() {
 
       if (notify_value & CONNECTION_FAILED_BIT || notify_value & CONNECTION_DROPPED_BIT) {
         if (this->reconnect_on_error_()) {
+          this->error_msg_ = "Failed to connect or connection dropped";
           this->set_state_(StreamState::RECONNECTING);
           vTaskDelay(pdMS_TO_TICKS(1000));
           xTaskNotify(transport_task_handle, CONNECT_BIT, eSetBits);
@@ -609,7 +645,7 @@ void SnapcastStream::start_streaming_() {
   }
   auto rb = this->write_ring_buffer_.lock();
   if (!rb) {
-    this->error_msg_ = "Ringer buffer not set yet, but trying to start streaming...";
+    this->error_msg_ = "Ring-buffer not set yet, but trying to start streaming...";
     this->set_state_(StreamState::ERROR);
     return;
   }

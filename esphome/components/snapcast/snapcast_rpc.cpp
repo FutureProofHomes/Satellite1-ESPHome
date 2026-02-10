@@ -64,7 +64,9 @@ esp_err_t SnapcastControlSession::disconnect() {
 void SnapcastControlSession::update_from_server_obj_(const JsonObject &server_obj) {
   ClientState &state = this->client_state_;
   if (state.from_groups_json(server_obj["groups"], get_mac_address_pretty())) {
+#if SNAPCAST_DEBUG
     printf("group_id: %s stream_id: %s\n", state.group_id.c_str(), state.stream_id.c_str());
+#endif
   }
 
   JsonArray streams = server_obj["streams"];
@@ -83,6 +85,7 @@ void SnapcastControlSession::update_from_server_obj_(const JsonObject &server_ob
 }
 
 void SnapcastControlSession::notification_loop() {
+  this->line_buffer_.reserve(1024);
   while (this->notification_task_should_run_) {
     // Initialize transport
     if (this->transport_ != nullptr) {
@@ -119,6 +122,9 @@ void SnapcastControlSession::notification_loop() {
         },
         static_cast<uint32_t>(RequestId::GetServerStatus));
 
+    bool skipping_oversize_ = false;
+    size_t dropped_bytes_ = 0;
+    static constexpr size_t MAX_LINE = 16 * 1024;
     while (true) {
       uint32_t notify_value = 0;
       if (xTaskNotifyWait(0, RECONNECT_BIT, &notify_value, 0) > 0) {
@@ -132,87 +138,121 @@ void SnapcastControlSession::notification_loop() {
         break;
       }
       if (len > 0) {
-        this->recv_buffer_.append(chunk, len);
-        size_t pos;
-        while ((pos = this->recv_buffer_.find('\n')) != std::string::npos) {
-          std::string json_line = this->recv_buffer_.substr(0, pos);
-#if SNAPCAST_DEBUG
-          printf("JSON: %s\n", json_line.c_str());
-#endif
-          this->recv_buffer_.erase(0, pos + 1);
-
-          json::parse_json(json_line, [this](JsonObject root) -> bool {
-            if (root["result"].is<JsonObject>() && root["id"].is<uint32_t>()) {
-              uint32_t id = root["id"];
-              switch (static_cast<RequestId>(id)) {
-                case RequestId::GetServerStatus: {
-                  ClientState &state = this->client_state_;
-                  state.from_groups_json(root["result"]["server"]["groups"], this->client_id_);
-                  StreamInfo sInfo;
-                  sInfo.from_streams_json(root["result"]["server"]["streams"], state.stream_id);
-                  this->update_from_server_obj_(root["result"]["server"].as<JsonObject>());
-                } break;
-                default:
-                  ESP_LOGW(TAG, "Unknown request ID: %u", id);
+        if (skipping_oversize_) {
+          for (int i = 0; i < len; i++) {
+            if (chunk[i] == '\n') {
+              skipping_oversize_ = false;
+              dropped_bytes_ = 0;
+              // resume after newline: anything after it belongs to next message
+              if (i + 1 < len) {
+                recv_buffer_.append(&chunk[i + 1], len - (i + 1));
               }
+              break;
+            } else {
+              dropped_bytes_++;
+            }
+          }
+        } else {
+          // Normal mode: append
+          recv_buffer_.append(chunk, len);
+        }
 
-            } else if (root["method"].is<std::string>()) {
-              std::string method = root["method"].as<std::string>();
-              if (method == "Server.OnUpdate") {
-                this->update_from_server_obj_(root["params"]["server"].as<JsonObject>());
-              } else if (method == "Stream.OnUpdate") {
-                JsonObject params = root["params"];
-                if (params["id"].as<std::string>() == this->client_state_.stream_id) {
-                  StreamInfo sInfo;
-                  sInfo.from_json(params["stream"]);
-                  if (this->on_stream_update_) {
-                    this->on_stream_update_(sInfo);
-                  }
+        if (!skipping_oversize_ && recv_buffer_.size() > MAX_LINE) {
+          ESP_LOGW(TAG, "Oversized JSON line (%u+ bytes). Skipping until newline.", (unsigned) recv_buffer_.size());
+          recv_buffer_.clear();
+          skipping_oversize_ = true;
+          dropped_bytes_ = 0;
+          // don't parse anything this iteration
+          continue;
+        }
+        if (!skipping_oversize_) {
+          size_t pos;
+          while ((pos = this->recv_buffer_.find('\n')) != std::string::npos) {
+            this->line_buffer_.assign(this->recv_buffer_, 0, pos);
+
+#if SNAPCAST_DEBUG
+            printf("JSON: %s\n", this->line_buffer_.c_str());
+#endif
+            this->recv_buffer_.erase(0, pos + 1);
+
+            json::parse_json(this->line_buffer_, [this](JsonObject root) -> bool {
+              if (root["result"].is<JsonObject>() && root["id"].is<uint32_t>()) {
+                uint32_t id = root["id"];
+                switch (static_cast<RequestId>(id)) {
+                  case RequestId::GetServerStatus: {
+                    ClientState &state = this->client_state_;
+                    state.from_groups_json(root["result"]["server"]["groups"], this->client_id_);
+                    StreamInfo sInfo;
+                    sInfo.from_streams_json(root["result"]["server"]["streams"], state.stream_id);
+                    this->update_from_server_obj_(root["result"]["server"].as<JsonObject>());
+                  } break;
+                  default:
+                    ESP_LOGW(TAG, "Unknown request ID: %u", id);
                 }
-              } else if (method == "Stream.OnProperties") {
-                JsonObject params = root["params"];
-                if (params["id"].as<std::string>() == this->client_state_.stream_id) {
-                  StreamInfo sInfo;
-                  sInfo.from_stream_properties(params["properties"]);
-                  if (this->on_stream_update_) {
-                    this->on_stream_update_(sInfo);
-                  }
-                }
-              } else if (method == "Group.OnStreamChanged") {
-                JsonObject params = root["params"];
-                if (params["id"].as<std::string>() == this->client_state_.group_id) {
-                  if (this->client_state_.stream_id != params["stream_id"].as<std::string>()) {
-                    this->client_state_.stream_id = params["stream_id"].as<std::string>();
-                    StreamInfo &sInfo = this->known_streams_[this->client_state_.stream_id];
-                    if (sInfo.id.empty()) {
-                      sInfo.set_id(this->client_state_.stream_id);
-                    }
+
+              } else if (root["method"].is<std::string>()) {
+                std::string method = root["method"].as<std::string>();
+                if (method == "Server.OnUpdate") {
+                  this->update_from_server_obj_(root["params"]["server"].as<JsonObject>());
+                } else if (method == "Stream.OnUpdate") {
+                  JsonObject params = root["params"];
+                  if (params["id"].as<std::string>() == this->client_state_.stream_id) {
+                    StreamInfo sInfo;
+                    sInfo.from_json(params["stream"]);
                     if (this->on_stream_update_) {
                       this->on_stream_update_(sInfo);
                     }
                   }
-                }
-              } else if (method == "Stream.OnUpdate") {
-                JsonObject params = root["params"];
-                StreamInfo &sInfo = this->known_streams_[params["id"].as<std::string>()];
-                sInfo.from_json(params["stream"]);
-                if (sInfo.id == this->client_state_.stream_id && this->on_stream_update_) {
-                  this->on_stream_update_(sInfo);
-                }
-              } else if (method == "Client.OnConnect") {
-                JsonObject params = root["params"];
-                if (params["id"].as<std::string>() == this->client_id_) {
-                  this->send_rpc_request_(
-                      "Server.GetStatus",
-                      [](JsonObject params) {
-                        // no params
-                      },
-                      static_cast<uint32_t>(RequestId::GetServerStatus));
+                } else if (method == "Stream.OnProperties") {
+                  JsonObject params = root["params"];
+                  if (params["id"].as<std::string>() == this->client_state_.stream_id) {
+                    StreamInfo sInfo;
+                    sInfo.from_stream_properties(params["properties"]);
+                    if (this->on_stream_update_) {
+                      this->on_stream_update_(sInfo);
+                    }
+                  }
+                } else if (method == "Group.OnStreamChanged") {
+                  JsonObject params = root["params"];
+                  if (params["id"].as<std::string>() == this->client_state_.group_id) {
+                    if (this->client_state_.stream_id != params["stream_id"].as<std::string>()) {
+                      this->client_state_.stream_id = params["stream_id"].as<std::string>();
+                      StreamInfo &sInfo = this->known_streams_[this->client_state_.stream_id];
+                      if (sInfo.id.empty()) {
+                        sInfo.set_id(this->client_state_.stream_id);
+                        this->send_rpc_request_(
+                            "Server.GetStatus",
+                            [](JsonObject params) {
+                              // no params
+                            },
+                            static_cast<uint32_t>(RequestId::GetServerStatus));
+                      } else if (this->on_stream_update_) {
+                        this->on_stream_update_(sInfo);
+                      }
+                    }
+                  }
+                } else if (method == "Stream.OnUpdate") {
+                  JsonObject params = root["params"];
+                  StreamInfo &sInfo = this->known_streams_[params["id"].as<std::string>()];
+                  sInfo.from_json(params["stream"]);
+                  if (sInfo.id == this->client_state_.stream_id && this->on_stream_update_) {
+                    this->on_stream_update_(sInfo);
+                  }
+                } else if (method == "Client.OnConnect") {
+                  JsonObject params = root["params"];
+                  if (params["id"].as<std::string>() == this->client_id_) {
+                    this->send_rpc_request_(
+                        "Server.GetStatus",
+                        [](JsonObject params) {
+                          // no params
+                        },
+                        static_cast<uint32_t>(RequestId::GetServerStatus));
+                  }
                 }
               }
-            }
-            return true;
-          });
+              return true;
+            });
+          }
         }
       }
     }

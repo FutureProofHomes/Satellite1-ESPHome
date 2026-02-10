@@ -40,13 +40,20 @@ void SnapcastClient::loop() {
     this->disable_loop();
     return;
   }
-  if (!this->network_initialized_ && network::is_connected()) {
-    // Perform network setup once connected to wifi
-    this->on_network_ready_();
-    this->network_initialized_ = true;
-  } else if (this->network_initialized_ && this->stream_.is_destroyed()) {
+
+  if (!this->network_initialized_) {
+    if (network::is_connected()) {
+      // Perform network setup once connected to wifi
+      this->on_network_ready_();
+      this->network_initialized_ = true;
+    }
+    return;
+  }
+
+  if (this->state_ == SnapcastClientState::DISCONNECTED) {
     if (this->server_) {
       auto &s = *this->server_;
+      this->state_ = SnapcastClientState::CONNECTING;
       this->connect_to_server(s.server_ip, s.stream_port, s.rpc_port);
     } else if (!this->cfg_server_ip_.empty()) {
       this->server_.emplace(SnapcastServer{.server_ip = this->cfg_server_ip_});
@@ -93,30 +100,46 @@ void SnapcastClient::report_volume(float volume, bool muted) {
   }
 }
 
-void SnapcastClient::on_stream_state_update(StreamState state, uint8_t volume, bool muted) {
-  ESP_LOGD(TAG, "Stream component changed to state %d.", state);
-  if (state == StreamState::ERROR || state == StreamState::RECONNECTING) {
-    ESP_LOGE(TAG, "stream: %s", this->stream_.error_msg_.c_str());
-    if (state == StreamState::RECONNECTING) {
-      ESP_LOGI(TAG, "Reconnecting after error...");
-    } else {
+void SnapcastClient::on_stream_state_update(StreamState stream_state, uint8_t volume, bool muted) {
+  ESP_LOGD(TAG, "Stream component changed to state %d.", stream_state);
+
+  switch (stream_state) {
+    case StreamState::ERROR:
+      ESP_LOGE(TAG, "stream: %s", this->stream_.error_msg_.c_str());
       this->stream_.disconnect();
       this->cntrl_session_.disconnect();
       this->server_.reset();
       this->enable_loop();
-    }
-    return;
+      this->state_ = SnapcastClientState::DISCONNECTING;
+      break;
+    case StreamState::RECONNECTING:
+      ESP_LOGI(TAG, "Reconnecting after error: %s", this->stream_.error_msg_.c_str());
+      this->state_ = SnapcastClientState::CONNECTING;
+      break;
+    case StreamState::DESTROYED:
+      this->state_ = SnapcastClientState::DISCONNECTED;
+      if (this->enabled_) {
+        this->enable_loop();
+      }
+      break;
+    case StreamState::CONNECTED_IDLE:
+      this->state_ = SnapcastClientState::IDLE;
+      if (this->play_requested_) {
+        this->media_player_->make_call().set_media_url(this->curr_server_url_.to_str()).perform();
+        this->play_requested_ = false;
+      }
+      ESP_LOGD(TAG, "Disabling loop.");
+      this->disable_loop();
+      break;
+    case StreamState::STREAMING:
+      this->state_ = SnapcastClientState::PLAYING;
+      break;
+    default:
+      break;
   }
-  if (state == StreamState::CONNECTED_IDLE) {
-    ESP_LOGD(TAG, "Disabling loop.");
-    this->disable_loop();
-  }
-  if (state == StreamState::DESTROYED && this->enabled_) {
-    ESP_LOGD(TAG, "Enabling loop.");
-    this->enable_loop();
-  }
-  if ((state == StreamState::STREAMING || state == StreamState::CONNECTED_IDLE) && this->media_player_ != nullptr &&
-      volume >= 0 && volume <= 100) {
+
+  if ((stream_state == StreamState::STREAMING || stream_state == StreamState::CONNECTED_IDLE) &&
+      this->media_player_ != nullptr && volume >= 0 && volume <= 100) {
     this->media_player_->make_call()
         .set_volume(volume / 100.)
         .set_command(muted ? media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_MUTE
@@ -127,19 +150,24 @@ void SnapcastClient::on_stream_state_update(StreamState state, uint8_t volume, b
 
 void SnapcastClient::on_stream_update_msg(const StreamInfo &info) {
   ESP_LOGI(TAG, "Snapcast-stream updated: status=%s", info.status.c_str());
-  static std::string last_state = "unknown";
+  if (info.status == "unknown") {
+    return;
+  }
   if (this->media_player_ != nullptr) {
-    if (info.status == "playing" && last_state != "playing") {
+    if (info.status == "playing") {
       ESP_LOGI(TAG, "Playing stream: %s\n", info.id.c_str());
       this->curr_server_url_.stream_name = info.id;
-      this->media_player_->make_call().set_media_url(this->curr_server_url_.to_str()).perform();
-      last_state = "playing";
-    } else if (info.status != "playing" && last_state == "playing") {
+      if (this->state_ == SnapcastClientState::IDLE) {
+        this->media_player_->make_call().set_media_url(this->curr_server_url_.to_str()).perform();
+      } else {
+        this->play_requested_ = true;
+      }
+    } else if (info.status != "playing") {
+      this->play_requested_ = false;
       this->media_player_->make_call()
           .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_STOP)
           .perform();
       ESP_LOGI(TAG, "Stopping stream: %s\n", info.id.c_str());
-      last_state = info.status;
     }
   }
 }
