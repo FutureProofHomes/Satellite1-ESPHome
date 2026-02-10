@@ -202,7 +202,7 @@ def i2s_audio_component_schema(
 
 def use_legacy():
     framework_version = CORE.data[KEY_CORE][KEY_FRAMEWORK_VERSION]
-    if CORE.using_esp_idf and framework_version >= cv.Version(5, 0, 0):
+    if CORE.is_esp32 and framework_version >= cv.Version(5, 0, 0):
         if not _use_legacy_driver:
             return False
     return True
