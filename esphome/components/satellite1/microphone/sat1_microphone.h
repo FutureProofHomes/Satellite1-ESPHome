@@ -20,7 +20,7 @@ namespace i2s_audio {
 class Sat1Microphone : public I2SAudioIn, public microphone::Microphone, public Component {
  public:
   void setup() override;
-  void dump_config() override {this->dump_i2s_settings();}
+  void dump_config() override { this->dump_i2s_settings(); }
   void start();
   void stop();
 
@@ -54,7 +54,6 @@ class Sat1Microphone : public I2SAudioIn, public microphone::Microphone, public 
   bool correct_dc_offset_;
   int32_t dc_offset_{0};
 };
-
 
 }  // namespace i2s_audio
 }  // namespace esphome

@@ -8,7 +8,6 @@ globals:
     type: bool
     restore_value: false
 
-
 switch:
   # Internal switch to track when a timer is ringing on the device.
   - platform: template
@@ -50,7 +49,6 @@ switch:
       - delay: 15min
       - switch.turn_off: timer_ringing
 
-
 script:
   # Script executed when the timer is ringing, to playback sounds.
   - id: ring_timer
@@ -85,7 +83,6 @@ script:
               .perform();
             id(external_media_player)->set_playlist_delay_ms(speaker::AudioPipelineType::ANNOUNCEMENT, 0);
 
-
   # Script used to fetch the first active timer (Stored in global first_active_timer)
   - id: fetch_first_active_timer
     then:
@@ -113,4 +110,3 @@ script:
             }
           }
           id(is_timer_active) = output;
-

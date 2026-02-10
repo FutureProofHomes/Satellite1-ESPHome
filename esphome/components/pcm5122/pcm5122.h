@@ -9,9 +9,7 @@
 namespace esphome {
 namespace pcm5122 {
 
-class PCM5122 : public audio_dac::AudioDac,
-                public Component,
-                public i2c::I2CDevice {
+class PCM5122 : public audio_dac::AudioDac, public Component, public i2c::I2CDevice {
  public:
   void setup() override;
   void dump_config() override;
@@ -31,5 +29,5 @@ class PCM5122 : public audio_dac::AudioDac,
   float volume_{0};
 };
 
-} // namespace pcm5122
-} // namespace esphome
+}  // namespace pcm5122
+}  // namespace esphome

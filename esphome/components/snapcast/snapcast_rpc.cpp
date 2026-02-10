@@ -22,7 +22,6 @@
 #include "esphome/core/log.h"
 #include "esphome/components/network/util.h"
 
-
 namespace esphome {
 namespace snapcast {
 
@@ -30,205 +29,204 @@ static const char *const TAG = "snapcast_rpc";
 
 enum RPCTaskBits : uint32_t {
   DISCONNECT_BIT = (1 << 0),
-  RECONNECT_BIT  = (1 << 1),
+  RECONNECT_BIT = (1 << 1),
 };
 
-esp_err_t SnapcastControlSession::connect(std::string server, uint32_t port){
-    this->server_ = server;
-    this->port_ = port;
-    
-    // Start the notification handling task
-    this->notification_task_should_run_ = true;
-    if(this->notification_task_handle_ == nullptr){
-      xTaskCreate([](void *param) {
+esp_err_t SnapcastControlSession::connect(std::string server, uint32_t port) {
+  this->server_ = server;
+  this->port_ = port;
+
+  // Start the notification handling task
+  this->notification_task_should_run_ = true;
+  if (this->notification_task_handle_ == nullptr) {
+    xTaskCreate(
+        [](void *param) {
           auto *session = static_cast<SnapcastControlSession *>(param);
           session->notification_loop();
           session->notification_task_handle_ = nullptr;
           vTaskDelete(nullptr);
-      }, "snapcast_notify", 4096, this, 5, &this->notification_task_handle_);
-    } else {
-      xTaskNotify(this->notification_task_handle_, RECONNECT_BIT, eSetBits);
-    }
-    return ESP_OK;
-}
-
-esp_err_t SnapcastControlSession::disconnect(){
-  this->notification_task_should_run_ = false;
-  if( this->notification_task_handle_ ){
-    xTaskNotify(this->notification_task_handle_, DISCONNECT_BIT, eSetBits);  
+        },
+        "snapcast_notify", 4096, this, 5, &this->notification_task_handle_);
+  } else {
+    xTaskNotify(this->notification_task_handle_, RECONNECT_BIT, eSetBits);
   }
   return ESP_OK;
 }
 
+esp_err_t SnapcastControlSession::disconnect() {
+  this->notification_task_should_run_ = false;
+  if (this->notification_task_handle_) {
+    xTaskNotify(this->notification_task_handle_, DISCONNECT_BIT, eSetBits);
+  }
+  return ESP_OK;
+}
 
-void SnapcastControlSession::update_from_server_obj_(const JsonObject &server_obj){
-    ClientState &state = this->client_state_;
-    if( state.from_groups_json( server_obj["groups"], get_mac_address_pretty()) ){
-        printf( "group_id: %s stream_id: %s\n", state.group_id.c_str(), state.stream_id.c_str() );
-    }
-    
-    JsonArray streams = server_obj["streams"];
-    known_streams_.clear();
-    for (JsonObject stream_obj : streams ) {
-        if (!stream_obj["id"].is<std::string>()) continue;  
-        StreamInfo sInfo;
-        sInfo.from_json(stream_obj);
-        this->known_streams_[stream_obj["id"].as<std::string>()] = sInfo;
-    }
-    auto it = this->known_streams_.find( state.stream_id);
-    if (it != this->known_streams_.end() && this->on_stream_update_ ){
-      this->on_stream_update_(it->second);
-    }
+void SnapcastControlSession::update_from_server_obj_(const JsonObject &server_obj) {
+  ClientState &state = this->client_state_;
+  if (state.from_groups_json(server_obj["groups"], get_mac_address_pretty())) {
+    printf("group_id: %s stream_id: %s\n", state.group_id.c_str(), state.stream_id.c_str());
+  }
+
+  JsonArray streams = server_obj["streams"];
+  known_streams_.clear();
+  for (JsonObject stream_obj : streams) {
+    if (!stream_obj["id"].is<std::string>())
+      continue;
+    StreamInfo sInfo;
+    sInfo.from_json(stream_obj);
+    this->known_streams_[stream_obj["id"].as<std::string>()] = sInfo;
+  }
+  auto it = this->known_streams_.find(state.stream_id);
+  if (it != this->known_streams_.end() && this->on_stream_update_) {
+    this->on_stream_update_(it->second);
+  }
 }
 
 void SnapcastControlSession::notification_loop() {
-  
-  while( this->notification_task_should_run_ ){
+  while (this->notification_task_should_run_) {
     // Initialize transport
-    if( this->transport_ != nullptr ){
+    if (this->transport_ != nullptr) {
       esp_transport_close(this->transport_);
       esp_transport_destroy(this->transport_);
     }
     this->transport_ = esp_transport_tcp_init();
-    
+
     if (this->transport_ == nullptr) {
       ESP_LOGE(TAG, "Failed to initialize transport");
-      vTaskDelay( pdMS_TO_TICKS(10000) );
+      vTaskDelay(pdMS_TO_TICKS(10000));
       continue;
     }
     esp_transport_keep_alive_t keep_alive_config = {
-          .keep_alive_enable = true,
-          .keep_alive_idle = 10000, // 10 seconds
-          .keep_alive_interval = 5000, // 5 seconds
-          .keep_alive_count = 5, // Number of keep-alive probes to send before considering the connection dead
-      };
+        .keep_alive_enable = true,
+        .keep_alive_idle = 10000,     // 10 seconds
+        .keep_alive_interval = 5000,  // 5 seconds
+        .keep_alive_count = 5,        // Number of keep-alive probes to send before considering the connection dead
+    };
     esp_transport_tcp_set_keep_alive(this->transport_, &keep_alive_config);
     // Try to connect
     error_t err = esp_transport_connect(this->transport_, this->server_.c_str(), this->port_, -1);
     if (err != 0) {
       ESP_LOGE(TAG, "Connection failed with error: %d", errno);
-      vTaskDelay( pdMS_TO_TICKS(10000) );
+      vTaskDelay(pdMS_TO_TICKS(10000));
       continue;
     }
 
     // Send initial request after connecting
-    this->send_rpc_request_("Server.GetStatus",
-      [](JsonObject params) {
-        // no params
-      },
-      static_cast<uint32_t>(RequestId::GetServerStatus)
-    );  
-    
+    this->send_rpc_request_(
+        "Server.GetStatus",
+        [](JsonObject params) {
+          // no params
+        },
+        static_cast<uint32_t>(RequestId::GetServerStatus));
+
     while (true) {
       uint32_t notify_value = 0;
-      if (xTaskNotifyWait( 0, RECONNECT_BIT, &notify_value, 0) > 0) {
+      if (xTaskNotifyWait(0, RECONNECT_BIT, &notify_value, 0) > 0) {
         break;
       }
-      
+
       char chunk[128];  // small read buffer
       int len = esp_transport_read(this->transport_, chunk, sizeof(chunk), 100);
-      if( len < 0 ){
-          vTaskDelay(pdMS_TO_TICKS(1000));
-          break;   
+      if (len < 0) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        break;
       }
       if (len > 0) {
-          this->recv_buffer_.append(chunk, len);
-          size_t pos;
-          while ((pos = this->recv_buffer_.find('\n')) != std::string::npos) {
-              std::string json_line = this->recv_buffer_.substr(0, pos);
-#if SNAPCAST_DEBUG              
-              printf( "JSON: %s\n", json_line.c_str() );
-#endif              
-              this->recv_buffer_.erase(0, pos + 1);
+        this->recv_buffer_.append(chunk, len);
+        size_t pos;
+        while ((pos = this->recv_buffer_.find('\n')) != std::string::npos) {
+          std::string json_line = this->recv_buffer_.substr(0, pos);
+#if SNAPCAST_DEBUG
+          printf("JSON: %s\n", json_line.c_str());
+#endif
+          this->recv_buffer_.erase(0, pos + 1);
 
-              json::parse_json(json_line, [this](JsonObject root) -> bool {
-                  if(root["result"].is<JsonObject>() && root["id"].is<uint32_t>()){ 
-                    uint32_t id = root["id"]; 
-                    switch (static_cast<RequestId>(id)) {
-                          case RequestId::GetServerStatus:
-                              {
-                                  ClientState &state = this->client_state_;
-                                  state.from_groups_json(root["result"]["server"]["groups"], this->client_id_);
-                                  StreamInfo sInfo;
-                                  sInfo.from_streams_json(root["result"]["server"]["streams"], state.stream_id);
-                                  this->update_from_server_obj_(root["result"]["server"].as<JsonObject>());
-                              }
-                              break;
-                          default:
-                              ESP_LOGW(TAG, "Unknown request ID: %u", id);
-                      }           
+          json::parse_json(json_line, [this](JsonObject root) -> bool {
+            if (root["result"].is<JsonObject>() && root["id"].is<uint32_t>()) {
+              uint32_t id = root["id"];
+              switch (static_cast<RequestId>(id)) {
+                case RequestId::GetServerStatus: {
+                  ClientState &state = this->client_state_;
+                  state.from_groups_json(root["result"]["server"]["groups"], this->client_id_);
+                  StreamInfo sInfo;
+                  sInfo.from_streams_json(root["result"]["server"]["streams"], state.stream_id);
+                  this->update_from_server_obj_(root["result"]["server"].as<JsonObject>());
+                } break;
+                default:
+                  ESP_LOGW(TAG, "Unknown request ID: %u", id);
+              }
 
-                  } else if(root["method"].is<std::string>()){
-                      std::string method = root["method"].as<std::string>();    
-                      if (method == "Server.OnUpdate" ){
-                          this->update_from_server_obj_(root["params"]["server"].as<JsonObject>());
-                      } else if( method == "Stream.OnUpdate"){
-                        
-                        JsonObject params = root["params"];
-                        if(params["id"].as<std::string>() == this->client_state_.stream_id){
-                          StreamInfo sInfo;
-                          sInfo.from_json( params["stream"]);
-                          if (this->on_stream_update_) {
-                            this->on_stream_update_(sInfo);
-                          }
-                        } 
-                      } else if (method == "Stream.OnProperties"){
-                        JsonObject params = root["params"];
-                        if(params["id"].as<std::string>() == this->client_state_.stream_id){
-                            StreamInfo sInfo;
-                            sInfo.from_stream_properties(params["properties"]);
-                            if (this->on_stream_update_) {
-                                this->on_stream_update_(sInfo);
-                            }
-                          }
-                      } else if (method == "Group.OnStreamChanged"){
-                        JsonObject params = root["params"]; 
-                        if(params["id"].as<std::string>() == this->client_state_.group_id){
-                          if(this->client_state_.stream_id != params["stream_id"].as<std::string>()){
-                            this->client_state_.stream_id = params["stream_id"].as<std::string>();  
-                            StreamInfo& sInfo = this->known_streams_[this->client_state_.stream_id];
-                            if (sInfo.id.empty()){
-                              sInfo.set_id(this->client_state_.stream_id);
-                            }
-                            if(this->on_stream_update_){
-                              this->on_stream_update_(sInfo);
-                            }
-                          }
-                        }
-                      } else if (method == "Stream.OnUpdate"){
-                        JsonObject params = root["params"];
-                        StreamInfo& sInfo = this->known_streams_[params["id"].as<std::string>()];
-                        sInfo.from_json(params["stream"]);  
-                        if(sInfo.id == this->client_state_.stream_id && this->on_stream_update_){
-                          this->on_stream_update_(sInfo);
-                        }                      
-                      } else if (method == "Client.OnConnect"){
-                        JsonObject params = root["params"]; 
-                        if(params["id"].as<std::string>() == this->client_id_){
-                          this->send_rpc_request_("Server.GetStatus",
-                                [](JsonObject params) {
-                                // no params
-                                },
-                                static_cast<uint32_t>(RequestId::GetServerStatus)
-                          );  
-                        }
-                      }   
+            } else if (root["method"].is<std::string>()) {
+              std::string method = root["method"].as<std::string>();
+              if (method == "Server.OnUpdate") {
+                this->update_from_server_obj_(root["params"]["server"].as<JsonObject>());
+              } else if (method == "Stream.OnUpdate") {
+                JsonObject params = root["params"];
+                if (params["id"].as<std::string>() == this->client_state_.stream_id) {
+                  StreamInfo sInfo;
+                  sInfo.from_json(params["stream"]);
+                  if (this->on_stream_update_) {
+                    this->on_stream_update_(sInfo);
                   }
-                  return true;
-              });
-          }
+                }
+              } else if (method == "Stream.OnProperties") {
+                JsonObject params = root["params"];
+                if (params["id"].as<std::string>() == this->client_state_.stream_id) {
+                  StreamInfo sInfo;
+                  sInfo.from_stream_properties(params["properties"]);
+                  if (this->on_stream_update_) {
+                    this->on_stream_update_(sInfo);
+                  }
+                }
+              } else if (method == "Group.OnStreamChanged") {
+                JsonObject params = root["params"];
+                if (params["id"].as<std::string>() == this->client_state_.group_id) {
+                  if (this->client_state_.stream_id != params["stream_id"].as<std::string>()) {
+                    this->client_state_.stream_id = params["stream_id"].as<std::string>();
+                    StreamInfo &sInfo = this->known_streams_[this->client_state_.stream_id];
+                    if (sInfo.id.empty()) {
+                      sInfo.set_id(this->client_state_.stream_id);
+                    }
+                    if (this->on_stream_update_) {
+                      this->on_stream_update_(sInfo);
+                    }
+                  }
+                }
+              } else if (method == "Stream.OnUpdate") {
+                JsonObject params = root["params"];
+                StreamInfo &sInfo = this->known_streams_[params["id"].as<std::string>()];
+                sInfo.from_json(params["stream"]);
+                if (sInfo.id == this->client_state_.stream_id && this->on_stream_update_) {
+                  this->on_stream_update_(sInfo);
+                }
+              } else if (method == "Client.OnConnect") {
+                JsonObject params = root["params"];
+                if (params["id"].as<std::string>() == this->client_id_) {
+                  this->send_rpc_request_(
+                      "Server.GetStatus",
+                      [](JsonObject params) {
+                        // no params
+                      },
+                      static_cast<uint32_t>(RequestId::GetServerStatus));
+                }
+              }
+            }
+            return true;
+          });
+        }
       }
     }
   }
-  
-  if( this->transport_ != nullptr ){
+
+  if (this->transport_ != nullptr) {
     esp_transport_close(this->transport_);
     esp_transport_destroy(this->transport_);
     this->transport_ = nullptr;
   }
 }
 
-void SnapcastControlSession::send_rpc_request_(const std::string &method, std::function<void(JsonObject)> fill_params, uint32_t id) {
+void SnapcastControlSession::send_rpc_request_(const std::string &method, std::function<void(JsonObject)> fill_params,
+                                               uint32_t id) {
   JsonDocument doc;
   doc["jsonrpc"] = "2.0";
   doc["id"] = id;
@@ -242,8 +240,5 @@ void SnapcastControlSession::send_rpc_request_(const std::string &method, std::f
   esp_transport_write(this->transport_, json_buf, len, 1000);
 }
 
-}
-}
-
-
-  
+}  // namespace snapcast
+}  // namespace esphome

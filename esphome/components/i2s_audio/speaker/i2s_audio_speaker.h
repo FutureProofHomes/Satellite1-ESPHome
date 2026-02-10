@@ -25,7 +25,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
 
   void setup() override;
   void loop() override;
-  void dump_config() override {this->dump_i2s_settings();}
+  void dump_config() override { this->dump_i2s_settings(); }
 
   void set_buffer_duration(uint32_t buffer_duration_ms) { this->buffer_duration_ms_ = buffer_duration_ms; }
   void set_timeout(uint32_t ms) { this->timeout_ = ms; }
@@ -45,14 +45,13 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   /// @return The number of bytes that were actually written to the ring buffer.
   size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait, bool write_partial = false) override;
   size_t play(const uint8_t *data, size_t length) override { return play(data, length, 0); }
-  
-  
+
   /// @brief Inserts silence by delaying audio readout and filling the DMA buffer with zeros.
   /// This function writes zeros to the DMA buffer instead of audio data for a specified duration.
   /// @param length_ms Duration of silence to insert, in milliseconds.
   /// @return Total number of zero frames that are currently in the queue.
   size_t play_silence(size_t length_ms) override;
- 
+
   bool has_buffered_data() const override;
 
   /// @brief Sets the volume of the speaker. Uses the speaker's configured audio dac component. If unavailble, it is
@@ -66,9 +65,9 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   /// Q15 fixed-point factor.
   /// @param mute_state true for muting, false for unmuting
   void set_mute_state(bool mute_state) override;
-  
-  int64_t get_playout_time( int64_t self_buffer_us ) const override;
-  bool update_buffer_states(int32_t bytes_transfered ) override;
+
+  int64_t get_playout_time(int64_t self_buffer_us) const override;
+  bool update_buffer_states(int32_t bytes_transfered) override;
 
  protected:
   /// @brief Function for the FreeRTOS task handling audio output.
@@ -107,13 +106,13 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   ///         ESP_ERR_NO_MEM if the driver fails to install due to a memory allocation error.
   ///         ESP_FAIL if setting the data out pin fails due to an IO error ESP_OK if successful
   esp_err_t start_i2s_driver_(audio::AudioStreamInfo &audio_stream_info);
-  
+
   /// @brief Deletes the speaker's task.
   /// Deallocates the data_buffer_ and audio_ring_buffer_, if necessary, and deletes the task. Should only be called by
   /// the speaker_task itself.
   /// @param buffer_size The allocated size of the data_buffer_.
   void delete_task_(size_t buffer_size);
-  
+
 #ifndef USE_I2S_LEGACY
   /// @brief Callback function used to send playback timestamps the to the speaker task.
   /// @param handle (i2s_chan_handle_t)
@@ -137,7 +136,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   bool pause_state_{false};
 
   int16_t q15_volume_factor_{INT16_MAX};
-  
+
   int64_t last_dma_write_{0};
   size_t padded_zero_frames_{0};
   size_t bytes_in_ringbuffer_{0};

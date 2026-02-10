@@ -9,12 +9,7 @@
 namespace esphome {
 namespace tas2780 {
 
-enum ChannelSelect : uint8_t {
-  MONO_DWN_MIX,
-  LEFT_CHANNEL,
-  RIGHT_CHANNEL
-};  
-
+enum ChannelSelect : uint8_t { MONO_DWN_MIX, LEFT_CHANNEL, RIGHT_CHANNEL };
 
 class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDevice {
  public:
@@ -22,10 +17,10 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::DATA; }
   void loop() override;
-  
-  void init();  
+
+  void init();
   void reset();
-  void activate(uint8_t power_mode=2);
+  void activate(uint8_t power_mode = 2);
   void deactivate();
   void update_register();
   void log_error_states();
@@ -35,12 +30,12 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   bool set_volume(float volume) override;
 
   bool is_muted() override;
-  float volume() override;  
+  float volume() override;
 
-  void set_amp_level(uint8_t amp_level){this->amp_level_ = amp_level;}
-  void set_vol_range_min(float min_val){this->vol_range_min_ = min_val;}
-  void set_vol_range_max(float max_val){this->vol_range_max_ = max_val;}
-  void set_selected_channel(ChannelSelect channel) {this->selected_channel_ = channel;}
+  void set_amp_level(uint8_t amp_level) { this->amp_level_ = amp_level; }
+  void set_vol_range_min(float min_val) { this->vol_range_min_ = min_val; }
+  void set_vol_range_max(float max_val) { this->vol_range_max_ = max_val; }
+  void set_selected_channel(ChannelSelect channel) { this->selected_channel_ = channel; }
 
  protected:
   void set_power_mode_(const uint8_t power_mode);
@@ -53,8 +48,7 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   float vol_range_min_{.3};
   float vol_range_max_{1.};
   ChannelSelect selected_channel_{MONO_DWN_MIX};
-
 };
 
-}
-}
+}  // namespace tas2780
+}  // namespace esphome

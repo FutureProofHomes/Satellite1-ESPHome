@@ -2,7 +2,7 @@ substitutions:
   company_name: FutureProofHomes
   project_name: Satellite1
 
-  #set this version by GHA at build time
+  # set this version by GHA at build time
   esp32_fw_version: dev
 
 packages:
@@ -17,14 +17,14 @@ packages:
         - wait_until:
             not: memory_flasher.in_progress
         - delay: 2s
-    
+
     wifi:
       on_disconnect:
         - ble.enable:
       on_connect:
         - delay: 5s  # Gives time for improv results to be transmitted
         - ble.disable:
-    
+
     satellite1:
       on_xmos_no_response:
         then:
@@ -34,12 +34,12 @@ packages:
                 - lambda: return id(xflash).has_image_embedded();
               then:
                 - memory_flasher.write_embedded_image:
-      
+
       on_xmos_connected:
         then:
           - delay: 1s
           - script.execute: control_leds
-          - if: 
+          - if:
               condition:
                 - lambda: return id(init_in_progress);
                 - lambda: return id(xflash).has_image_embedded();
@@ -49,13 +49,10 @@ packages:
 
   home-assistant-voice: !include satellite1.base.yaml
 
-
 esphome:
   project:
     name: ${company_name}.${project_name}
     version: ${esp32_fw_version}
-
-
 
 esp32_improv:
   authorizer: btn_action
@@ -69,8 +66,6 @@ esp32_improv:
     - lambda: id(improv_ble_in_progress) = false;
     - script.execute: control_leds
 
-
-
 http_request:
 
 ota:
@@ -82,7 +77,6 @@ update:
     name: None
     id: update_http_request
     source: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/manifest.json
-
 
 switch:
   - platform: template
@@ -101,32 +95,27 @@ switch:
       - lambda: id(update_http_request).set_source_url("https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/manifest.json");
       - component.update: update_http_request
 
-
 external_components:
   - source:
       type: local
       path: ../esphome/components
-    components: 
-        - audio 
-        - fusb302b
-        - i2s_audio
-        - memory_flasher
-        - micro_wake_word
-        - mixer
-        - pcm5122
-        - resampler 
-        - satellite1 
-        - snapcast
-        - speaker
-        - tas2780
-        
-
+    components:
+      - audio
+      - fusb302b
+      - i2s_audio
+      - memory_flasher
+      - micro_wake_word
+      - mixer
+      - pcm5122
+      - resampler
+      - satellite1
+      - snapcast
+      - speaker
+      - tas2780
 
 logger:
   deassert_rts_dtr: true
-  hardware_uart : USB_SERIAL_JTAG
+  hardware_uart: USB_SERIAL_JTAG
   level: debug
   logs:
     ltr_als_ps: WARN
-
-

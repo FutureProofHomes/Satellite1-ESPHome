@@ -2,7 +2,7 @@ substitutions:
   name: satellite1
   friendly_name: Satellite1
   xmos_fw_version: "v1.0.3"
-  
+
   # OPTIONALLY, set the log level to debug, info, warn, error
   log_level: debug
 
@@ -12,62 +12,64 @@ esphome:
   friendly_name: ${friendly_name}
 
 packages:
-  FutureProofHomes.Satellite1: 
+  FutureProofHomes.Satellite1:
     url: https://github.com/futureproofhomes/satellite1-esphome
-    ref: staging # Make sure to also change the ext_comp_repo_ref below 
-    refresh: 1s  
-    files: 
-    # Main config files, don't remove
-    - config/satellite1.base.yaml
-    - config/common/dashboard_build.yaml
-    - path: config/common/components.external.yaml
-      vars:
-        ext_comp_repo_ref: staging # Make sure to set this to the same as the ref above
-    
-    ## OPTIONALLY, uncomment if you have the smaller LD2410 mmWave sensor connected to your HAT.
-    #- config/common/mmwave_ld2410.yaml    
-    
-    ## OPTIONALLY, uncomment if you have the larger LD2450 mmWave sensor connected to your HAT.
-    #- config/common/mmwave_ld2450.yaml
+    ref: staging  # Make sure to also change the ext_comp_repo_ref below
+    refresh: 1s
+    files:
+      # Main config files, don't remove
+      - config/satellite1.base.yaml
+      - config/common/dashboard_build.yaml
+      - path: config/common/components.external.yaml
+        vars:
+          ext_comp_repo_ref: staging  # Make sure to set this to the same as the ref above
 
-    ## OPTIONALLY, uncomment if want extra memory, wifi and xmos control of the device.
-    #- config/common/debug.yaml
-      
+      # yamllint disable rule:comments-indentation
+      # OPTIONALLY, uncomment if you have the smaller LD2410 mmWave sensor connected to your HAT.
+      # - config/common/mmwave_ld2410.yaml
+
+      ## OPTIONALLY, uncomment if you have the larger LD2450 mmWave sensor connected to your HAT.
+      # - config/common/mmwave_ld2450.yaml
+
+      ## OPTIONALLY, uncomment if want extra memory, wifi and xmos control of the device.
+      # - config/common/debug.yaml
+      # yamllint enable rule:comments-indentation
+
 logger:
   level: ${log_level}
 
-## OPTIONALLY, enable transport encryption for the API layer by uncommenting the following lines 
+## OPTIONALLY, enable transport encryption for the API layer by uncommenting the following lines
 ## and replacing "REPLACE_BY_32_BIT_RANDOM_KEY" with a 32-character random key.
 ## For more information, refer to the ESPHome documentation:
 ## https://esphome.io/components/api.html
 ## Note: The documentation also provides a tool to generate a random key
 
-#api:
-#  encryption:
-#    key: REPLACE_BY_32_BIT_RANDOM_KEY
+# api:
+#   encryption:
+#     key: REPLACE_BY_32_BIT_RANDOM_KEY
 
-## OPTIONALLY, override the default Wi-Fi credentials provisioned on the Satellite1 device 
-## during setup by using your Wi-Fi credentials stored in the `secrets.yaml` file of the 
-## ESPHome dashboard. Uncomment the below lines to enable this feature, allowing you 
+## OPTIONALLY, override the default Wi-Fi credentials provisioned on the Satellite1 device
+## during setup by using your Wi-Fi credentials stored in the `secrets.yaml` file of the
+## ESPHome dashboard. Uncomment the below lines to enable this feature, allowing you
 ## to manage Wi-Fi credentials centrally for all your devices.
 
-#wifi:
-#  ssid: !secret wifi_ssid
-#  password: !secret wifi_password
+# wifi:
+#   ssid: !secret wifi_ssid
+#   password: !secret wifi_password
 
 ## OPTIONALLY, uncomment the following lines to customize the Snapcast server to connect to.
-#snapcast:
-#  id: snapcast_client
-#  server_ip: 192.168.178.101
+# snapcast:
+#   id: snapcast_client
+#   server_ip: 192.168.178.101
 
 ## OPTIONALLY, uncomment the following lines to set a custom micro wake word model
-#micro_wake_word:
-#  id: mww
-#  models:
-#    - id: new_wake_word
-#      model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
-#    # uncomment the following line to remove the default "hey_jarvis" wake word
-#    - id: !remove hey_jarvis
+# micro_wake_word:
+#   id: mww
+#   models:
+#     - id: new_wake_word
+#       model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
+#     # uncomment the following line to remove the default "hey_jarvis" wake word
+#     - id: !remove hey_jarvis
 # you also want to remove the sensitivity selector as it is hard coded to the provided models
-#select:
-#  id: !remove mww_sensitivity_select
+# select:
+#   id: !remove mww_sensitivity_select

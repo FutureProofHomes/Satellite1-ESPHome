@@ -28,26 +28,24 @@
 #include "esphome/core/component.h"
 
 #include "esphome/components/audio/chunked_ring_buffer.h"
-//#include "esphome/components/audio/timed_ring_buffer.h"
+// #include "esphome/components/audio/timed_ring_buffer.h"
 
 #include "messages.h"
 #include "time_stats.h"
-
 
 namespace esphome {
 using namespace audio;
 namespace snapcast {
 
-
 enum class StreamState {
-  DESTROYED,           // stream_task and transport_task not running
-  DISCONNECTED,        // stream_task is running, not connected yet
+  DESTROYED,     // stream_task and transport_task not running
+  DISCONNECTED,  // stream_task is running, not connected yet
   CONNECTING,
-  RECONNECTING,        // Requested to reconnect
-  CONNECTED_IDLE,      // Connected but waiting
-  STREAMING,           // Receiving data
-  ERROR,               // Fatal or recoverable error
-  STOPPING             // Requested shutdown
+  RECONNECTING,    // Requested to reconnect
+  CONNECTED_IDLE,  // Connected but waiting
+  STREAMING,       // Receiving data
+  ERROR,           // Fatal or recoverable error
+  STOPPING         // Requested shutdown
 };
 
 constexpr uint8_t MAX_RECONNECTIONS = 3;
@@ -55,107 +53,102 @@ constexpr uint8_t MAX_RECONNECTIONS = 3;
 class SnapcastClient;
 
 class SnapcastStream {
-public:
-    /// @brief Establish a connection to the Snapcast server.
-    /// @param server The hostname or IP address of the Snapcast server.
-    /// @param port The TCP port to connect to on the server.
-    /// @return `ESP_OK` on success, or an appropriate error code.
-    esp_err_t connect(std::string server, uint32_t port);
+ public:
+  /// @brief Establish a connection to the Snapcast server.
+  /// @param server The hostname or IP address of the Snapcast server.
+  /// @param port The TCP port to connect to on the server.
+  /// @return `ESP_OK` on success, or an appropriate error code.
+  esp_err_t connect(std::string server, uint32_t port);
 
-    /// @brief Disconnect from the Snapcast server.
-    /// @return `ESP_OK` on success, or an appropriate error code.
-    esp_err_t disconnect();
+  /// @brief Disconnect from the Snapcast server.
+  /// @return `ESP_OK` on success, or an appropriate error code.
+  esp_err_t disconnect();
 
-    /// @brief Start receiving and processing audio/data from the server.
-    /// @param ring_buffer The buffer where received audio samples are written.
-    /// @param notification_task A FreeRTOS task to be notified on status changes.
-    /// @return `ESP_OK` on success, or an appropriate error code.
-    esp_err_t start_with_notify(std::weak_ptr<esphome::TimedRingBuffer> ring_buffer, TaskHandle_t notification_task);
+  /// @brief Start receiving and processing audio/data from the server.
+  /// @param ring_buffer The buffer where received audio samples are written.
+  /// @param notification_task A FreeRTOS task to be notified on status changes.
+  /// @return `ESP_OK` on success, or an appropriate error code.
+  esp_err_t start_with_notify(std::weak_ptr<esphome::TimedRingBuffer> ring_buffer, TaskHandle_t notification_task);
 
-    /// @brief Stop the audio/data stream and return to an idle state.
-    /// @return `ESP_OK` on success, or an appropriate error code.
-    esp_err_t stop_streaming();
+  /// @brief Stop the audio/data stream and return to an idle state.
+  /// @return `ESP_OK` on success, or an appropriate error code.
+  esp_err_t stop_streaming();
 
-    /// @brief Report volume and mute status to the Snapcast server.
-    /// @param volume The volume level to report (0–100).
-    /// @param muted Whether the stream is muted.
-    /// @return `ESP_OK` on success, or an appropriate error code.
-    esp_err_t report_volume(uint8_t volume, bool muted);
+  /// @brief Report volume and mute status to the Snapcast server.
+  /// @param volume The volume level to report (0–100).
+  /// @param muted Whether the stream is muted.
+  /// @return `ESP_OK` on success, or an appropriate error code.
+  esp_err_t report_volume(uint8_t volume, bool muted);
 
-    /// @brief Check if the stream is connected (either idle or actively streaming).
-    /// @return `true` if connected, `false` otherwise.
-    bool is_connected() const {
-        return this->state_ == StreamState::STREAMING || this->state_ == StreamState::CONNECTED_IDLE;
-    }
+  /// @brief Check if the stream is connected (either idle or actively streaming).
+  /// @return `true` if connected, `false` otherwise.
+  bool is_connected() const {
+    return this->state_ == StreamState::STREAMING || this->state_ == StreamState::CONNECTED_IDLE;
+  }
 
-    /// @brief Check if the stream is actively receiving data.
-    /// @return `true` if streaming is in progress, `false` otherwise.
-    bool is_running() const {
-        return this->state_ == StreamState::STREAMING;
-    }
+  /// @brief Check if the stream is actively receiving data.
+  /// @return `true` if streaming is in progress, `false` otherwise.
+  bool is_running() const { return this->state_ == StreamState::STREAMING; }
 
-    bool is_destroyed() const {
-        return this->state_ == StreamState::DESTROYED;
-    }
+  bool is_destroyed() const { return this->state_ == StreamState::DESTROYED; }
 
-    /// @brief Set a callback to be invoked on stream status updates.
-    /// @param cb A function receiving state, volume, and mute information.
-    void set_on_status_update_callback(std::function<void(StreamState state, uint8_t volume, bool muted)> cb) {
-        this->on_status_update_ = std::move(cb);
-    }
-    
-    
+  /// @brief Set a callback to be invoked on stream status updates.
+  /// @param cb A function receiving state, volume, and mute information.
+  void set_on_status_update_callback(std::function<void(StreamState state, uint8_t volume, bool muted)> cb) {
+    this->on_status_update_ = std::move(cb);
+  }
 
-protected:
-    friend SnapcastClient;
-    void on_server_settings_msg_(const ServerSettingsMessage &msg);
-    void on_time_msg_(MessageHeader msg, tv_t time);
-    bool reconnect_on_error_() { return ++(this->reconnect_counter_) < MAX_RECONNECTIONS; }
-    
-    std::string server_;
-    uint32_t port_;
-    uint32_t server_buffer_size_{0};
-    int32_t latency_{0};
-    uint8_t volume_{0};
-    bool muted_{false};
-    uint32_t reconnect_counter_{0};
-    
-    StreamState state_{StreamState::DESTROYED};
-    std::string error_msg_;
-    
-    tv_t to_local_time_(tv_t server_time) const {
-        return server_time - this->est_time_diff_.load(std::memory_order_relaxed) + tv_t::from_millis(this->server_buffer_size_ + this->latency_);
-    }
-    uint32_t last_time_sync_{0};
-    TimeStats time_stats_;
-    std::atomic<tv_t> est_time_diff_;
-    
-    std::weak_ptr<esphome::TimedRingBuffer> write_ring_buffer_;
-    
-    TaskHandle_t notification_target_{nullptr};
-    std::function<void(StreamState state, uint8_t volume, bool muted)> on_status_update_;
+ protected:
+  friend SnapcastClient;
+  void on_server_settings_msg_(const ServerSettingsMessage &msg);
+  void on_time_msg_(MessageHeader msg, tv_t time);
+  bool reconnect_on_error_() { return ++(this->reconnect_counter_) < MAX_RECONNECTIONS; }
 
-private:    
-    TaskHandle_t stream_task_handle_{nullptr};
-    StaticTask_t task_stack_;
-    StackType_t *task_stack_buffer_{nullptr};
-    
-    void stream_task_();
+  std::string server_;
+  uint32_t port_;
+  uint32_t server_buffer_size_{0};
+  int32_t latency_{0};
+  uint8_t volume_{0};
+  bool muted_{false};
+  uint32_t reconnect_counter_{0};
 
-    void start_streaming_();
-    void stop_streaming_();
-    void set_state_(StreamState new_state);
+  StreamState state_{StreamState::DESTROYED};
+  std::string error_msg_;
 
-    void send_message_(SnapcastMessage *msg);
-    void send_hello_();
-    void send_report_();
-    void send_time_sync_();
-    
-    esp_err_t read_and_process_messages_(ChunkedRingBuffer* read_ring_buffer, uint32_t timeout_ms);
-    
-    bool start_after_connecting_{false};
-    bool codec_header_sent_{false};
+  tv_t to_local_time_(tv_t server_time) const {
+    return server_time - this->est_time_diff_.load(std::memory_order_relaxed) +
+           tv_t::from_millis(this->server_buffer_size_ + this->latency_);
+  }
+  uint32_t last_time_sync_{0};
+  TimeStats time_stats_;
+  std::atomic<tv_t> est_time_diff_;
+
+  std::weak_ptr<esphome::TimedRingBuffer> write_ring_buffer_;
+
+  TaskHandle_t notification_target_{nullptr};
+  std::function<void(StreamState state, uint8_t volume, bool muted)> on_status_update_;
+
+ private:
+  TaskHandle_t stream_task_handle_{nullptr};
+  StaticTask_t task_stack_;
+  StackType_t *task_stack_buffer_{nullptr};
+
+  void stream_task_();
+
+  void start_streaming_();
+  void stop_streaming_();
+  void set_state_(StreamState new_state);
+
+  void send_message_(SnapcastMessage *msg);
+  void send_hello_();
+  void send_report_();
+  void send_time_sync_();
+
+  esp_err_t read_and_process_messages_(ChunkedRingBuffer *read_ring_buffer, uint32_t timeout_ms);
+
+  bool start_after_connecting_{false};
+  bool codec_header_sent_{false};
 };
 
-}
-}
+}  // namespace snapcast
+}  // namespace esphome

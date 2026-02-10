@@ -176,8 +176,8 @@ jobs:
         run: |
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.SECOND_REPO_PAT }}" \
+            -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
             https://api.github.com/repos/FutureProofHomes/Documentation/actions/workflows/update-binaries-esp32.yaml/dispatches \
             -d '{"ref":"main", "inputs": {"esphome_release_tag": "${{ needs.prepare.outputs.next_tag }}"}}'
         env:
-          SECOND_REPO_PAT: ${{ secrets.SECOND_REPO_PAT }}
+          SECOND_REPO_PAT: ${{ secrets.PAT_TOKEN }}
