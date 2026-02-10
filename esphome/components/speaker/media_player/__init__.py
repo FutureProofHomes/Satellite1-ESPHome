@@ -320,7 +320,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_SNAPCAST_CLIENT): cv.use_id(snapcast.SnapcastClient)
         }
     ),
-    cv.only_with_esp_idf,
+    cv.only_on_esp32,
     _validate_repeated_speaker,
     _request_high_performance_networking,
 )
