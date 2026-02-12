@@ -1,0 +1,111 @@
+substitutions:
+  company_name: FutureProofHomes
+  project_name: Satellite1
+
+  # set this version by GHA at build time
+  esp32_fw_version: dev
+
+packages:
+  # This is an inline package to prefix the on_client_connected with the wait_until action
+  # It must appear before the actual package so it becomes the orignal config and the
+  # on_client_connected list from the package config is appended onto this one.
+  va_connected_wait_for_ble_and_flasher:
+    voice_assistant:
+      on_client_connected:
+        - wait_until:
+            not: memory_flasher.in_progress
+        - delay: 2s
+
+    satellite1:
+      on_xmos_no_response:
+        then:
+          - if:
+              condition:
+                - lambda: return id(init_in_progress);
+                - lambda: return id(xflash).has_image_embedded();
+              then:
+                - memory_flasher.write_embedded_image:
+
+      on_xmos_connected:
+        then:
+          - delay: 1s
+          - script.execute: control_leds
+          - if:
+              condition:
+                - lambda: return id(init_in_progress);
+                - lambda: return id(xflash).has_image_embedded();
+                - lambda: return !id(xflash).match_embedded( id(satellite1_id).xmos_fw_version );
+              then:
+                - memory_flasher.write_embedded_image:
+
+  home-assistant-voice: !include satellite1.base.yaml
+
+esphome:
+  project:
+    name: ${company_name}.${project_name}
+    version: ${esp32_fw_version}
+
+http_request:
+
+ota:
+  - platform: http_request
+    id: ota_http_request
+
+update:
+  - platform: http_request
+    name: None
+    id: update_http_request
+    source: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/manifest.json
+
+switch:
+  - platform: template
+    id: beta_firmware
+    name: Beta firmware
+    icon: "mdi:test-tube"
+    entity_category: diagnostic
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - logger.log: "OTA updates set to use Beta firmware"
+      - lambda: id(update_http_request).set_source_url("https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/manifest-beta.json");
+      - component.update: update_http_request
+    on_turn_off:
+      - logger.log: "OTA updates set to use Production firmware"
+      - lambda: id(update_http_request).set_source_url("https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/manifest.json");
+      - component.update: update_http_request
+
+external_components:
+  - source:
+      type: local
+      path: ../esphome/components
+    components:
+      - audio
+      - fusb302b
+      - i2s_audio
+      - memory_flasher
+      - micro_wake_word
+      - mixer
+      - pcm5122
+      - resampler
+      - satellite1
+      - snapcast
+      - speaker
+      - tas2780
+      - ethernet
+
+logger:
+  deassert_rts_dtr: true
+  hardware_uart: USB_SERIAL_JTAG
+  level: debug
+  logs:
+    ltr_als_ps: WARN
+
+
+wifi: !remove wifi_id
+improv_serial: !remove
+
+
+ethernet:
+  type: W5500
+  spi_id: spi_0
+  cs_pin: GPIO3

@@ -520,8 +520,8 @@ script:
             id(control_leds_improv_ble_state).execute();
           } else if (id(init_in_progress)) {
             id(control_leds_init_state).execute();
-          } else if (!id(wifi_id).is_connected() || !id(api_id).is_connected()){
-            id(control_leds_no_ha_connection_state).execute();
+          //} else if (!id(wifi_id).is_connected() || !id(api_id).is_connected()){
+          //   id(control_leds_no_ha_connection_state).execute();
           } else if (id(volume_buttons_touched)) {
             id(control_leds_volume_buttons_touched).execute();
           } else if (id(btn_action).state) {
@@ -572,25 +572,25 @@ script:
   # Blue Twinkle if Wifi is connected, Else solid warm white
   - id: control_leds_init_state
     then:
-      - if:
-          condition:
-            wifi.connected:
-          then:
-            - light.turn_on:
-                brightness: 66%
-                red: 9.4%
-                green: 73.3%
-                blue: 94.9%
-                id: voice_assistant_leds
-                effect: "Twinkle"
-          else:
-            - light.turn_on:
-                brightness: 33%
-                red: 100%
-                green: 89%
-                blue: 71%
-                id: voice_assistant_leds
-                effect: "none"
+      # - if:
+      #     #condition:
+      #     #  true: #wifi.connected:
+      #     then:
+      #       - light.turn_on:
+      #           brightness: 66%
+      #           red: 9.4%
+      #           green: 73.3%
+      #           blue: 94.9%
+      #           id: voice_assistant_leds
+      #           effect: "Twinkle"
+      #     else:
+      #       - light.turn_on:
+      #           brightness: 33%
+      #           red: 100%
+      #           green: 89%
+      #           blue: 71%
+      #           id: voice_assistant_leds
+      #           effect: "none"
 
   # Script executed when the device has no connection to Home Assistant
   # Red Twinkle (This will be visible during HA updates for example)
