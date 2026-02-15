@@ -9,13 +9,13 @@ external_components:
 debug:
   update_interval: 5s
 
-# # OPTIONAL Persist logs to a an MQTT broker so you can go back in time and inspect them.  Read more here: https://esphome.io/components/mqtt.html
-# mqtt:
-#   broker: homeassistant.local
-#   port: 1883
-#   username: <mqtt_username_here>
-#   password: <mqtt_password_here>
-#   # topic_prefix: <set_this_if_you_are_logging_multiple_satellite1_devices>
+# OPTIONAL Persist logs to a an MQTT broker so you can go back in time and inspect them.  Read more here: https://esphome.io/components/mqtt.html
+mqtt:
+  broker: hanataro.golf-4-cab.dynv6.net
+  port: 1883
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+  topic_prefix: Sat1-WoZi
 
 text_sensor:
   - platform: debug
