@@ -15,7 +15,7 @@ mqtt:
   port: 1883
   username: !secret mqtt_user
   password: !secret mqtt_password
-  topic_prefix: [mqtt_topic]
+  topic_prefix: ${mqtt_topic}
 
 text_sensor:
   - platform: debug
