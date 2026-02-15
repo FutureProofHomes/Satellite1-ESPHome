@@ -10,12 +10,12 @@ debug:
   update_interval: 5s
 
 # OPTIONAL Persist logs to a an MQTT broker so you can go back in time and inspect them.  Read more here: https://esphome.io/components/mqtt.html
-mqtt:
-  broker: !secret mqtt_broker
-  port: 1883
-  username: !secret mqtt_user
-  password: !secret mqtt_password
-  topic_prefix: Sat1-WoZi
+# mqtt:
+#   broker: !secret mqtt_broker
+#   port: 1883
+#   username: !secret mqtt_user
+#   password: !secret mqtt_password
+#   topic_prefix: Sat1-WoZi
 
 text_sensor:
   - platform: debug
