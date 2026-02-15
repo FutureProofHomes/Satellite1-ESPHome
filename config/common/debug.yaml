@@ -77,19 +77,19 @@ button:
   #           md5_url: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
 
   # Flashes Sat1 HAT with XMOS firmware embedded in the ESP32
-  - platform: template
-    id: flash_embedded
-    name: "XMOS Flash Embedded FW"
-    entity_category: diagnostic
-    on_press:
-      then:
-        - memory_flasher.write_embedded_image:
+  # - platform: template
+  #   id: flash_embedded
+  #   name: "XMOS Flash Embedded FW"
+  #   entity_category: diagnostic
+  #   on_press:
+  #     then:
+  #       - memory_flasher.write_embedded_image:
 
   # Wipes the Satellite1 HAT XMOS Chip
-  - platform: template
-    id: erase_xmos_flash
-    name: "XMOS Erase Chip"
-    entity_category: diagnostic
-    on_press:
-      then:
-        - memory_flasher.erase:
+  # - platform: template
+  #   id: erase_xmos_flash
+  #   name: "XMOS Erase Chip"
+  #   entity_category: diagnostic
+  #   on_press:
+  #     then:
+  #       - memory_flasher.erase:
