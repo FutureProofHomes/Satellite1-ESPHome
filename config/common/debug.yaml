@@ -9,13 +9,13 @@ external_components:
 debug:
   update_interval: 5s
 
-# # OPTIONAL Persist logs to a an MQTT broker so you can go back in time and inspect them.  Read more here: https://esphome.io/components/mqtt.html
-# mqtt:
-#   broker: homeassistant.local
-#   port: 1883
-#   username: <mqtt_username_here>
-#   password: <mqtt_password_here>
-#   # topic_prefix: <set_this_if_you_are_logging_multiple_satellite1_devices>
+# OPTIONAL Persist logs to a an MQTT broker so you can go back in time and inspect them.  Read more here: https://esphome.io/components/mqtt.html
+mqtt:
+  broker: !secret mqtt_broker
+  port: 1883
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+  topic_prefix: ${mqtt_topic}
 
 text_sensor:
   - platform: debug
@@ -65,31 +65,31 @@ button:
         - satellite1.xmos_hardware_reset
 
   # Flashes Sat1 HAT with specific XMOS firmware
-  - platform: template
-    id: flash_satellite
-    name: "XMOS Flash ${xmos_fw_version}"
-    entity_category: diagnostic
-    on_press:
-      then:
-        - memory_flasher.write_image:
-            image_version: ${xmos_fw_version}
-            image_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
-            md5_url: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
+  # - platform: template
+  #   id: flash_satellite
+  #   name: "XMOS Flash ${xmos_fw_version}"
+  #   entity_category: diagnostic
+  #   on_press:
+  #     then:
+  #       - memory_flasher.write_image:
+  #           image_version: ${xmos_fw_version}
+  #           image_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
+  #           md5_url: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
 
   # Flashes Sat1 HAT with XMOS firmware embedded in the ESP32
-  - platform: template
-    id: flash_embedded
-    name: "XMOS Flash Embedded FW"
-    entity_category: diagnostic
-    on_press:
-      then:
-        - memory_flasher.write_embedded_image:
+  # - platform: template
+  #   id: flash_embedded
+  #   name: "XMOS Flash Embedded FW"
+  #   entity_category: diagnostic
+  #   on_press:
+  #     then:
+  #       - memory_flasher.write_embedded_image:
 
   # Wipes the Satellite1 HAT XMOS Chip
-  - platform: template
-    id: erase_xmos_flash
-    name: "XMOS Erase Chip"
-    entity_category: diagnostic
-    on_press:
-      then:
-        - memory_flasher.erase:
+  # - platform: template
+  #   id: erase_xmos_flash
+  #   name: "XMOS Erase Chip"
+  #   entity_category: diagnostic
+  #   on_press:
+  #     then:
+  #       - memory_flasher.erase:
