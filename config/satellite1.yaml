@@ -1,5 +1,5 @@
 substitutions:
-  company_name: FutureProofHomes
+  company_name: Hacked By ArtFix
   project_name: Satellite1
 
   # set this version by GHA at build time
