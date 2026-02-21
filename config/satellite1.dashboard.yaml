@@ -13,7 +13,7 @@ esphome:
 
 packages:
   FutureProofHomes.Satellite1:
-    url: https://github.com/futureproofhomes/satellite1-esphome
+    url: https://github.com/artfix/satellite1-esphome
     ref: staging  # Make sure to also change the ext_comp_repo_ref below
     refresh: 1s
     files:
@@ -63,13 +63,16 @@ logger:
 #   server_ip: 192.168.178.101
 
 ## OPTIONALLY, uncomment the following lines to set a custom micro wake word model
-# micro_wake_word:
-#   id: mww
-#   models:
-#     - id: new_wake_word
-#       model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
-#     # uncomment the following line to remove the default "hey_jarvis" wake word
-#     - id: !remove hey_jarvis
+ micro_wake_word:
+   id: mww
+   models:
+     - id: kira
+       model: https://raw.githubusercontent.com/artfix/microWakeWord/main/microWakeWord/kira.json
+     - id: hey_kira
+       model: https://raw.githubusercontent.com/artfix/microWakeWord/main/microWakeWord/hey_kira.json
+     # uncomment the following line to remove the default "hey_jarvis" and "okay_nabu" wake word
+     - id: !remove hey_jarvis
+     - id: !remove okay_nabu
 # you also want to remove the sensitivity selector as it is hard coded to the provided models
-# select:
-#   id: !remove mww_sensitivity_select
+ select:
+   id: !remove mww_sensitivity_select
