@@ -63,16 +63,16 @@ logger:
 #   server_ip: 192.168.178.101
 
 ## OPTIONALLY, uncomment the following lines to set a custom micro wake word model
- micro_wake_word:
-   id: mww
-   models:
-     - id: kira
-       model: https://raw.githubusercontent.com/artfix/microWakeWord/main/microWakeWord/kira.json
-     - id: hey_kira
-       model: https://raw.githubusercontent.com/artfix/microWakeWord/main/microWakeWord/hey_kira.json
+# micro_wake_word:
+#   id: mww
+#   models:
+#     - id: kira
+#       model: https://raw.githubusercontent.com/artfix/microWakeWord/main/microWakeWord/kira.json
+#     - id: hey_kira
+#       model: https://raw.githubusercontent.com/artfix/microWakeWord/main/microWakeWord/hey_kira.json
      # uncomment the following line to remove the default "hey_jarvis" and "okay_nabu" wake word
-     - id: !remove hey_jarvis
-     - id: !remove okay_nabu
+#     - id: !remove hey_jarvis
+#     - id: !remove okay_nabu
 # you also want to remove the sensitivity selector as it is hard coded to the provided models
- select:
-   id: !remove mww_sensitivity_select
+# select:
+#   id: !remove mww_sensitivity_select
