@@ -8,7 +8,7 @@ substitutions:
 
   # Recommend leaving the following unchanged
   node_name: satellite1
-  company_name: Hacked By ArtFix
+  company_name: ArtFix
   project_name: Satellite1
   component_name: Core
 
