@@ -47,7 +47,7 @@ micro_wake_word:
   microphone:
     microphone: sat1_mics
     channels: 1
-    gain_factor: 8
+    gain_factor: 7
   stop_after_detection: false
   on_wake_word_detected:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
