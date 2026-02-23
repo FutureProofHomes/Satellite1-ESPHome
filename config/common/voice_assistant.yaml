@@ -23,9 +23,9 @@ globals:
     # initial_value: ${voice_assist_not_ready_phase_id}
 
 #-------------------------------------------------------------
-  - id: saved_volume
-    type: float
-    restore_value: no
+#  - id: saved_volume
+#    type: float
+#    restore_value: no
 #-------------------------------------------------------------
 
 microphone:
@@ -89,30 +89,30 @@ micro_wake_word:
                                   switch.is_on: wake_sound
                                 then:
 # -------------------------------------------------------------------------------------------------                  
-                                  - lambda: |-
-                                      id(saved_volume) = id(external_media_player).volume;
-                                  
-                                  - media_player.volume_set:
-                                      id: external_media_player
-                                      volume: 1.0   # try 0.9 if too loud
-                                  
-                                  - script.execute:
-                                      id: play_sound
-                                      priority: true
-                                      sound_file: !lambda return id(wake_word_triggered_sound);
-                                  
-                                  - delay: 300ms
-
-                                  - media_player.volume_set:
-                                      id: external_media_player
-                                      volume: !lambda return id(saved_volume);
-
-# --------------------------------------------------------------------------------------------------                                   
+#                                  - lambda: |-
+#                                      id(saved_volume) = id(external_media_player).volume;
+#                                  
+#                                  - media_player.volume_set:
+#                                      id: external_media_player
+#                                      volume: 1.0   # try 0.9 if too loud
+#                                  
 #                                  - script.execute:
 #                                      id: play_sound
 #                                      priority: true
 #                                      sound_file: !lambda return id(wake_word_triggered_sound);
+#                                  
 #                                  - delay: 300ms
+#
+#                                  - media_player.volume_set:
+#                                      id: external_media_player
+#                                      volume: !lambda return id(saved_volume);
+
+# --------------------------------------------------------------------------------------------------                                   
+                                  - script.execute:
+                                      id: play_sound
+                                      priority: true
+                                      sound_file: !lambda return id(wake_word_triggered_sound);
+                                  - delay: 300ms
 
                             - voice_assistant.start:
                                 wake_word: !lambda return wake_word;
