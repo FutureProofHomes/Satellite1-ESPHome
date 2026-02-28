@@ -42,10 +42,14 @@ microphone:
 micro_wake_word:
   id: mww
   models:
-    - model: hey_jarvis
-      id: hey_jarvis
-    - model: https://github.com/kahrendt/microWakeWord/releases/download/okay_nabu_20241226.3/okay_nabu.json
-      id: okay_nabu
+    - model: https://raw.githubusercontent.com/artfix/microWakeWords/main/microWakeWords/kira.json
+      id: kira
+    - model: https://raw.githubusercontent.com/artfix/microWakeWords/main/microWakeWords/hey_kira.json
+      id: hey_kira
+#    - model: hey_jarvis
+#      id: hey_jarvis
+#    - model: https://github.com/kahrendt/microWakeWord/releases/download/okay_nabu_20241226.3/okay_nabu.json
+#      id: okay_nabu
     - model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
       id: stop
       internal: true
@@ -256,31 +260,37 @@ script:
                 then:
                   - micro_wake_word.disable_model: stop
 
-#select:
-#  - platform: template
-#    id: mww_sensitivity_select
-#    name: "Wake word sensitivity"
-#    optimistic: true
-#    initial_option: Slightly sensitive
-#    restore_value: true
-#    entity_category: config
-#    options:
-#      - Slightly sensitive
-#      - Moderately sensitive
-#      - Very sensitive
-#    on_value:
-#      # Sets specific wake word probabilities computed for each particular model
-#      # Note probability cutoffs are set as a quantized uint8 value, each comment has the corresponding floating point cutoff
-#      # False Accepts per Hour values are tested against all units and channels from the Dinner Party Corpus.
-#      # These cutoffs apply only to the specific models included in the firmware: okay_nabu@20241226.3, hey_jarvis@v2, hey_mycroft@v2
-#      lambda: |-
-#        if (x == "Slightly sensitive") {
+select:
+  - platform: template
+    id: mww_sensitivity_select
+    name: "Wake word sensitivity"
+    optimistic: true
+    initial_option: Slightly sensitive
+    restore_value: true
+    entity_category: config
+    options:
+      - Slightly sensitive
+      - Moderately sensitive
+      - Very sensitive
+    on_value:
+      # Sets specific wake word probabilities computed for each particular model
+      # Note probability cutoffs are set as a quantized uint8 value, each comment has the corresponding floating point cutoff
+      # False Accepts per Hour values are tested against all units and channels from the Dinner Party Corpus.
+      # These cutoffs apply only to the specific models included in the firmware: okay_nabu@20241226.3, hey_jarvis@v2, hey_mycroft@v2
+      lambda: |-
+        if (x == "Slightly sensitive") {
 #          id(okay_nabu).set_probability_cutoff(217);    // 0.85 -> 0.000 FAPH on DipCo (Manifest's default)
+          id(kira).set_probability_cutoff(210);    // 0.82 -> ~0.05 FAPH in TV environment (very strict)
+          id(hey_kira).set_probability_cutoff(210);    // 0.82 -> ~0.05 FAPH in TV environment (very strict)
 #          id(hey_jarvis).set_probability_cutoff(247);   // 0.97 -> 0.563 FAPH on DipCo (Manifest's default)
-#        } else if (x == "Moderately sensitive") {
+        } else if (x == "Moderately sensitive") {
 #          id(okay_nabu).set_probability_cutoff(176);    // 0.69 -> 0.376 FAPH on DipCo
+          id(kira).set_probability_cutoff(190);    // 0.74 -> ~0.20 FAPH in TV environment (recommended balance)
+          id(hey_kira).set_probability_cutoff(190);    // 0.74 -> ~0.20 FAPH in TV environment (recommended balance)
 #          id(hey_jarvis).set_probability_cutoff(235);   // 0.92 -> 0.939 FAPH on DipCo
-#        } else if (x == "Very sensitive") {
+        } else if (x == "Very sensitive") {
 #          id(okay_nabu).set_probability_cutoff(143);    // 0.56 -> 0.751 FAPH on DipCo
+          id(kira).set_probability_cutoff(170);    // 0.66 -> ~0.60 FAPH in TV environment (higher responsiveness)
+          id(hey_kira).set_probability_cutoff(170);    // 0.66 -> ~0.60 FAPH in TV environment (higher responsiveness)
 #          id(hey_jarvis).set_probability_cutoff(212);   // 0.83 -> 1.502 FAPH on DipCo
-#        }
+        }
