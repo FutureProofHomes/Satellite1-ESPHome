@@ -265,7 +265,7 @@ select:
     id: mww_sensitivity_select
     name: "Wake word sensitivity"
     optimistic: true
-    initial_option: Moderately sensitive
+    initial_option: "Moderately sensitive (210)"
     restore_value: true
     entity_category: config
     options:
@@ -286,37 +286,37 @@ select:
       # These cutoffs apply only to the specific models included in the firmware: kira, hey_kira
       # If you add more mww, you will need to add there names down here or replace kira and hey_kira
       lambda: |-
-        if (x == "Ultra insensitive") {
+        if (x == "Ultra insensitive (250)") {
           id(kira).set_probability_cutoff(250);    // 0.98 -> ~0.01 FAPH in TV environment (extremely strict)
           id(hey_kira).set_probability_cutoff(250);
-        } else if (x == "Maximum insensitive") {
+        } else if (x == "Maximum insensitive (240)") {
           id(kira).set_probability_cutoff(240);    // 0.94 -> ~0.02 FAPH in TV environment (very strict)
           id(hey_kira).set_probability_cutoff(240);
-        } else if (x == "Less insensitive") {
+        } else if (x == "Less insensitive (235)") {
           id(kira).set_probability_cutoff(235);    // 0.92 -> ~0.03 FAPH in TV environment (strict)
           id(hey_kira).set_probability_cutoff(235);
-        } else if (x == "Slightly insensitive") {
+        } else if (x == "Slightly insensitive (230)") {
           id(kira).set_probability_cutoff(230);    // 0.90 -> ~0.04 FAPH in TV environment (fairly strict)
           id(hey_kira).set_probability_cutoff(230);
-        } else if (x == "Least insensitive") {
+        } else if (x == "Least insensitive (225)") {
           id(kira).set_probability_cutoff(225);    // 0.88 -> ~0.045 FAPH in TV environment (slightly strict)
           id(hey_kira).set_probability_cutoff(225);
-        } else if (x == "Moderately sensitive") {
+        } else if (x == "Moderately sensitive (210)") {
           id(kira).set_probability_cutoff(210);    // 0.82 -> ~0.05 FAPH in TV environment (very strict)
           id(hey_kira).set_probability_cutoff(210);
-        } else if (x == "Slightly sensitive") {
+        } else if (x == "Slightly sensitive (200)") {
           id(kira).set_probability_cutoff(200);    // 0.78 -> ~0.10 FAPH in TV environment (strict)
           id(hey_kira).set_probability_cutoff(200);
-        } else if (x == "Least sensitive") {
+        } else if (x == "Least sensitive (190)") {
           id(kira).set_probability_cutoff(190);    // 0.74 -> ~0.20 FAPH in TV environment (recommended balance)
           id(hey_kira).set_probability_cutoff(190);
-        } else if (x == "Very sensitive") {
+        } else if (x == "Very sensitive (180)") {
           id(kira).set_probability_cutoff(180);    // 0.70 -> ~0.35 FAPH in TV environment (responsive)
           id(hey_kira).set_probability_cutoff(180);
-        } else if (x == "Extremely sensitive") {
+        } else if (x == "Extremely sensitive (170)") {
           id(kira).set_probability_cutoff(170);    // 0.66 -> ~0.60 FAPH in TV environment (higher responsiveness)
           id(hey_kira).set_probability_cutoff(170);
-        } else if (x == "Maximum sensitive") {
+        } else if (x == "Maximum sensitive (160)") {
           id(kira).set_probability_cutoff(160);    // 0.62 -> ~1.0 FAPH in TV environment (maximum responsiveness)
           id(hey_kira).set_probability_cutoff(160);
         }
