@@ -265,26 +265,26 @@ select:
     id: mww_sensitivity_select
     name: "Wake word sensitivity"
     optimistic: true
-    initial_option: Slightly sensitive
+    initial_option: Least sensitive
     restore_value: true
     entity_category: config
     options:
-      - Slightly sensitive
+      - Least sensitive
+      - Less sensitive
       - Moderately sensitive
       - Very sensitive
     on_value:
-      # Sets specific wake word probabilities computed for each particular model
-      # Note probability cutoffs are set as a quantized uint8 value, each comment has the corresponding floating point cutoff
-      # False Accepts per Hour values are tested against all units and channels from the Dinner Party Corpus.
-      # These cutoffs apply only to the specific models included in the firmware: okay_nabu@20241226.3, hey_jarvis@v2, hey_mycroft@v2
       lambda: |-
-        if (x == "Slightly sensitive") {
-          id(kira).set_probability_cutoff(210);    // 0.82 -> ~0.05 FAPH in TV environment (very strict)
-          id(hey_kira).set_probability_cutoff(210);    // 0.82 -> ~0.05 FAPH in TV environment (very strict)
+        if (x == "Least sensitive") {
+          id(kira).set_probability_cutoff(230);    // 0.90 -> Extremely strict, lowest false triggers
+          id(hey_kira).set_probability_cutoff(230);
+        } else if (x == "Less sensitive") {
+          id(kira).set_probability_cutoff(220);    // 0.86 -> Very strict, minimal false triggers
+          id(hey_kira).set_probability_cutoff(220);
         } else if (x == "Moderately sensitive") {
-          id(kira).set_probability_cutoff(190);    // 0.74 -> ~0.20 FAPH in TV environment (recommended balance)
-          id(hey_kira).set_probability_cutoff(190);    // 0.74 -> ~0.20 FAPH in TV environment (recommended balance)
+          id(kira).set_probability_cutoff(210);    // 0.82 -> ~0.05 FAPH (original slight sensitive)
+          id(hey_kira).set_probability_cutoff(210);
         } else if (x == "Very sensitive") {
-          id(kira).set_probability_cutoff(170);    // 0.66 -> ~0.60 FAPH in TV environment (higher responsiveness)
-          id(hey_kira).set_probability_cutoff(170);    // 0.66 -> ~0.60 FAPH in TV environment (higher responsiveness)
+          id(kira).set_probability_cutoff(190);    // 0.74 -> ~0.20 FAPH (original moderate)
+          id(hey_kira).set_probability_cutoff(190);
         }
