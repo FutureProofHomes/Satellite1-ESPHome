@@ -22,12 +22,6 @@ globals:
     restore_value: no
     # initial_value: ${voice_assist_not_ready_phase_id}
 
-#-------------------------------------------------------------
-#  - id: saved_volume
-#    type: float
-#    restore_value: no
-#-------------------------------------------------------------
-
 microphone:
   - platform: satellite1
     id: sat1_mics
@@ -46,10 +40,6 @@ micro_wake_word:
       id: kira
     - model: https://raw.githubusercontent.com/artfix/microWakeWords/main/microWakeWords/hey_kira.json
       id: hey_kira
-#    - model: hey_jarvis
-#      id: hey_jarvis
-#    - model: https://github.com/kahrendt/microWakeWord/releases/download/okay_nabu_20241226.3/okay_nabu.json
-#      id: okay_nabu
     - model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
       id: stop
       internal: true
@@ -57,7 +47,7 @@ micro_wake_word:
   microphone:
     microphone: sat1_mics
     channels: 1
-    gain_factor: 7
+    gain_factor: 8
   stop_after_detection: false
   on_wake_word_detected:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
@@ -91,27 +81,7 @@ micro_wake_word:
                             - if:
                                 condition:
                                   switch.is_on: wake_sound
-                                then:
-# -------------------------------------------------------------------------------------------------                  
-#                                  - lambda: |-
-#                                      id(saved_volume) = id(external_media_player).volume;
-#                                  
-#                                  - media_player.volume_set:
-#                                      id: external_media_player
-#                                      volume: 1.0   # try 0.9 if too loud
-#                                  
-#                                  - script.execute:
-#                                      id: play_sound
-#                                      priority: true
-#                                      sound_file: !lambda return id(wake_word_triggered_sound);
-#                                  
-#                                  - delay: 300ms
-#
-#                                  - media_player.volume_set:
-#                                      id: external_media_player
-#                                      volume: !lambda return id(saved_volume);
-
-# --------------------------------------------------------------------------------------------------                                   
+                                then:                                  
                                   - script.execute:
                                       id: play_sound
                                       priority: true
@@ -132,7 +102,7 @@ voice_assistant:
   use_wake_word: false
   noise_suppression_level: 0
   auto_gain: 0 dbfs
-  volume_multiplier: 1.5
+  volume_multiplier: 1.6
   on_client_connected:
     - lambda: id(init_in_progress) = false;
     - micro_wake_word.start:
@@ -261,10 +231,10 @@ script:
                   - micro_wake_word.disable_model: stop
 
 select:
-  # Selector for "kira" wake word
+  # Selector for micro wake word 1
   - platform: template
     id: mww_sensitivity_select_1
-    name: "WW sensitivity 1"
+    name: "MWW sensitivity 1"
     optimistic: true
     initial_option: "Moderately sensitive (210)"
     restore_value: true
@@ -282,6 +252,10 @@ select:
       - Extremely sensitive (170)     # Most responsive
       - Maximum sensitive (160)       # Ultra responsive
     on_value:
+      # Sets specific wake word probabilities computed for each particular model
+      # Note probability cutoffs are set as a quantized uint8 value, each comment has the corresponding floating point cutoff
+      # These cutoffs apply only to the specific models included in the firmware: kira, hey_kira
+      # If you add more mww, you will need to add there names down here or replace kira and hey_kira
       lambda: |-
         if (x == "Ultra insensitive (250)") {
           id(kira).set_probability_cutoff(250);
@@ -307,10 +281,10 @@ select:
           id(kira).set_probability_cutoff(160);
         }
 
-  # Selector for "hey_kira" wake word  
+  # Selector for micro wake word 2
   - platform: template
     id: mww_sensitivity_select_2
-    name: "WW sensitivity 2"
+    name: "MWW sensitivity 2"
     optimistic: true
     initial_option: "Moderately sensitive (210)"
     restore_value: true
@@ -328,6 +302,10 @@ select:
       - Extremely sensitive (170)
       - Maximum sensitive (160)
     on_value:
+      # Sets specific wake word probabilities computed for each particular model
+      # Note probability cutoffs are set as a quantized uint8 value, each comment has the corresponding floating point cutoff
+      # These cutoffs apply only to the specific models included in the firmware: kira, hey_kira
+      # If you add more mww, you will need to add there names down here or replace kira and hey_kira
       lambda: |-
         if (x == "Ultra insensitive (250)") {
           id(hey_kira).set_probability_cutoff(250);
