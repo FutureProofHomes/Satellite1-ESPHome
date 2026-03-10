@@ -70,9 +70,12 @@ logger:
 #       model: https://raw.githubusercontent.com/artfix/microWakeWord/main/microWakeWord/kira.json
 #     - id: hey_kira
 #       model: https://raw.githubusercontent.com/artfix/microWakeWord/main/microWakeWord/hey_kira.json
-     # uncomment the following line to remove the default "hey_jarvis" and "okay_nabu" wake word
+
+## Uncomment the following line to remove the default "hey_jarvis" and "okay_nabu" wake word
 #     - id: !remove hey_jarvis
 #     - id: !remove okay_nabu
-# you also want to remove the sensitivity selector as it is hard coded to the provided models
-# select:
-#   id: !remove mww_sensitivity_select
+
+## You also want to remove the sensitivity selector as it is hard coded to the provided models
+#select:
+#  id: !remove mww_sensitivity_select_1
+#  id: !remove mww_sensitivity_select_2
