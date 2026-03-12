@@ -4,7 +4,7 @@ substitutions:
 external_components:
   - source:
       type: git
-      url: https://github.com/CaptBlackbeard/Satellite1-ESPHome
+      url: https://github.com/FutureProofHomes/Satellite1-ESPHome
       ref: ${ext_comp_repo_ref}
     components:
       - audio
