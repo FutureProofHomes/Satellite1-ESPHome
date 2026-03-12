@@ -290,7 +290,7 @@ static void transport_task_(SnapcastStream *self, std::shared_ptr<ChunkedRingBuf
     }
 
     // === Create socket and connect ===
-    int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+    int sock = lwip_socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     if (sock < 0) {
       ESP_LOGE("transport", "Failed to create socket: errno %d", errno);
       xTaskNotify(stream_task_handle, CONNECTION_CLOSED_BIT, eSetBits);

@@ -247,7 +247,7 @@ static void mdns_print_results(mdns_result_t *results) {
 }
 
 static bool test_tcp_connect(const esp_ip4_addr_t &ip, uint16_t port, uint32_t timeout_ms) {
-  int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+  int sock = lwip_socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
   if (sock < 0) {
     return false;
   }

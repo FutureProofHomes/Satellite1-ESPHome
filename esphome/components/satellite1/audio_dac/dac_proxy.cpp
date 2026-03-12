@@ -10,7 +10,7 @@ static const char *const TAG = "dac_proxy";
 
 void DACProxy::setup() {
   ESP_LOGD(TAG, "Setting up DACProxy...");
-  this->pref_ = global_preferences->make_preference<DACProxyRestoreState>(this->get_preference_hash());
+  this->pref_ = this->make_entity_preference<DACProxyRestoreState>();
 
   if (this->pref_.load(&this->restore_state_)) {
     ESP_LOGD(TAG, "Read preferences from flash");
