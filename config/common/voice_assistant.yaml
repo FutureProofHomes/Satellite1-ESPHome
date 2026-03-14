@@ -343,3 +343,4 @@ text:
     entity_category: config
     optimistic: true
     restore_value: true
+    mode: text
