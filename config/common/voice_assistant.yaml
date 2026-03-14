@@ -84,7 +84,16 @@ micro_wake_word:
                                 then:
                                   - lambda: |-
                                       std::string url = id(wake_word_sound_url).state;
-                                      if (!url.empty() && url != "unknown" && url != "none") {
+                                      // Log the URL for debugging (remove after testing)
+                                      ESP_LOGI("wake_word", "URL from box: '%s'", url.c_str());
+                                      
+                                      // Check if URL is valid (not empty and looks like a URL)
+                                      if (!url.empty() && 
+                                          url != "unknown" && 
+                                          url != "none" &&
+                                          (url.find("http://") == 0 || 
+                                           url.find("https://") == 0 || 
+                                           url.find("www.") == 0)) {
                                         // Play the URL directly
                                         id(external_media_player)->make_call()
                                           .set_media_url(url)
