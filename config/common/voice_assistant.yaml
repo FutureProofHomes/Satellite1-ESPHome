@@ -83,9 +83,9 @@ micro_wake_word:
                                     switch.is_on: wake_sound
                                   then:
                                     - media_player.play_media: !lambda |-
-                                        // If the text box is empty, play the default sound
+                                        // If the text box is empty, play the default sound file
                                         if (id(wake_word_sound_url).state.empty()) {
-                                          return id(wake_word_triggered_sound).c_str();
+                                          return id(wake_word_triggered_sound);
                                         } else {
                                           // Otherwise, play the URL from the text box
                                           return id(wake_word_sound_url).state.c_str();
