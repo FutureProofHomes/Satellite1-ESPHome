@@ -50,52 +50,54 @@ micro_wake_word:
     gain_factor: 8
   stop_after_detection: false
   on_wake_word_detected:
-    # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
-    - if:
-        condition:
-          switch.is_off: master_mute_switch
-        then:
-          # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
-          - if:
-              condition:
-                switch.is_on: timer_ringing
-              then:
-                - switch.turn_off: timer_ringing
-              # Stop voice assistant if running
-              else:
-                - if:
-                    condition:
-                      voice_assistant.is_running:
-                    then:
-                      voice_assistant.stop:
-                    # Stop any other media player announcement
-                    else:
-                      - if:
-                          condition:
-                            media_player.is_announcing:
-                          then:
-                            - media_player.stop:
-                                announcement: true
-                          # Start the voice assistant and play the wake sound, if enabled
-                          else:
-                            - if:
-                                condition:
-                                  switch.is_on: wake_sound
-                                then:                                  
-                                  - script.execute:
-                                      id: play_sound
-                                      priority: true
-                                      sound_file: !lambda |-
-                                        if (id(wake_word_sound_url).state.empty()) {
-                                          return id(wake_word_triggered_sound);
-                                        } else {
-                                          // Use the file from the media_player's files list
-                                          return new AudioFile(id(wake_word_sound_url).state.c_str(), id(wake_word_sound_url).state.length());
-                                        }
-                                  - delay: 300ms
+     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
+      - if:
+          condition:
+            switch.is_off: master_mute_switch
+          then:
+            # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
+            - if:
+                condition:
+                  switch.is_on: timer_ringing
+                then:
+                  - switch.turn_off: timer_ringing
+                # Stop voice assistant if running
+                else:
+                  - if:
+                      condition:
+                        voice_assistant.is_running:
+                      then:
+                        voice_assistant.stop:
+                      # Stop any other media player announcement
+                      else:
+                        - if:
+                            condition:
+                              media_player.is_announcing:
+                            then:
+                              - media_player.stop:
+                                  announcement: true
+                            # Start the voice assistant and play the wake sound, if enabled
+                            else:
+                              - if:
+                                  condition:
+                                    switch.is_on: wake_sound
+                                  then:
+                                    - script.execute:
+                                        id: play_sound
+                                        priority: true
+                                        sound_file: !lambda |-
+                                            // Check if user has set a custom URL
+                                            std::string url = id(wake_word_sound_url).state;
+                                            if (!url.empty()) {
+                                                // Return a new AudioFile from the URL
+                                                return new AudioFile(url.c_str());
+                                            }
+                                            // Fallback to default sound
+                                            return id(wake_word_triggered_sound);
+                                    - delay: 300ms
 
-                            - voice_assistant.start:
-                                wake_word: !lambda return wake_word;
+                              - voice_assistant.start:
+                                  wake_word: !lambda return wake_word;
 
 voice_assistant:
   id: va
