@@ -82,28 +82,10 @@ micro_wake_word:
                                 condition:
                                   switch.is_on: wake_sound
                                 then:
-                                  - lambda: |-
-                                      std::string url = id(wake_word_sound_url).state;
-                                      
-                                      ESP_LOGI("wake_word", "Raw URL from box: '%s'", url.c_str());
-                                      ESP_LOGI("wake_word", "URL length: %d", url.length());
-                                      
-                                      bool has_valid_state = id(wake_word_sound_url).has_state();
-                                      bool is_valid_url = (url.find("http://") == 0 || url.find("https://") == 0);
-                                      
-                                      if (has_valid_state && url.length() > 8 && is_valid_url) {
-                                        ESP_LOGI("wake_word", "Playing custom URL: %s", url.c_str());
-                                        id(external_media_player)->make_call()
-                                          .set_media_url(url)
-                                          .set_announcement(true)
-                                          .perform();
-                                      } else {
-                                        ESP_LOGI("wake_word", "No valid URL, playing default sound");
-                                        id(external_media_player)->make_call()
-                                          .set_media_url("wake_word_triggered_sound")
-                                          .set_announcement(true)
-                                          .perform();
-                                      }
+                                  - script.execute:
+                                      id: play_sound
+                                      priority: true
+                                      sound_file: !lambda return id(wake_word_triggered_sound);
                                   - delay: 300ms
                             - voice_assistant.start:
                                 wake_word: !lambda return wake_word;
@@ -347,13 +329,3 @@ select:
         } else if (x == "Maximum sensitive (160)") {
           id(yoko).set_probability_cutoff(160);
         }
-
-text:
-  - platform: template
-    name: "Wake Word Sound URL"
-    id: wake_word_sound_url
-    entity_category: config
-    optimistic: true
-    restore_value: true
-    mode: text
-    initial_value: "https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac"
