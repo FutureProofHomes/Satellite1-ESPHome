@@ -77,22 +77,22 @@ micro_wake_word:
                               - media_player.stop:
                                   announcement: true
                             # Start the voice assistant and play the wake sound, if enabled
-                              else:
-                                - if:
+                            else:
+                              - if:
                                   condition:
                                     switch.is_on: wake_sound
                                   then:
                                     - media_player.play_media: !lambda |-
-                                      // If the text box is empty, play the default sound
-                                      if (id(wake_word_sound_url).state.empty()) {
-                                        return id(wake_word_triggered_sound_file).c_str();
-                                      } else {
-                                        // Otherwise, play the URL from the text box
-                                        return id(wake_word_sound_url).state.c_str();
-                                      }
+                                        // If the text box is empty, play the default sound
+                                        if (id(wake_word_sound_url).state.empty()) {
+                                          return id(wake_word_triggered_sound).c_str();
+                                        } else {
+                                          // Otherwise, play the URL from the text box
+                                          return id(wake_word_sound_url).state.c_str();
+                                        }
                                     - delay: 300ms
-                                - voice_assistant.start:
-                                    wake_word: !lambda return wake_word;
+                              - voice_assistant.start:
+                                  wake_word: !lambda return wake_word;
 
 voice_assistant:
   id: va
