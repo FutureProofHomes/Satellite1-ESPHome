@@ -86,10 +86,16 @@ micro_wake_word:
                                       std::string url = id(wake_word_sound_url).state;
                                       if (!url.empty() && url != "unknown" && url != "none") {
                                         // Play the URL directly
-                                        id(external_media_player)->play_media(url.c_str(), false);
+                                        id(external_media_player)->make_call()
+                                          .set_media_url(url)
+                                          .set_announcement(true)
+                                          .perform();
                                       } else {
                                         // Play the default sound file
-                                        id(external_media_player)->play_file(id(wake_word_triggered_sound), false, false);
+                                        id(external_media_player)->make_call()
+                                          .set_media_url("wake_word_triggered_sound")
+                                          .set_announcement(true)
+                                          .perform();
                                       }
                                   - delay: 300ms
                             - voice_assistant.start:
