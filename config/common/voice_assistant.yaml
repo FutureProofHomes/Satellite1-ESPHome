@@ -89,16 +89,8 @@ micro_wake_word:
                                         if (id(wake_word_sound_url).state.empty()) {
                                           return id(wake_word_triggered_sound);
                                         } else {
-                                          // Create a temporary file from the URL string
-                                          static std::string last_url;
-                                          static std::unique_ptr<AudioFile> dynamic_file;
-    
-                                          std::string current_url = id(wake_word_sound_url).state;
-                                          if (current_url != last_url) {
-                                            last_url = current_url;
-                                            dynamic_file = make_unique<AudioFile>(current_url.c_str());
-                                          }
-                                          return dynamic_file.get();
+                                          // Use the file from the media_player component
+                                          return id(external_media_player)->create_file(id(wake_word_sound_url).state.c_str());
                                         }
                                   - delay: 300ms
 
