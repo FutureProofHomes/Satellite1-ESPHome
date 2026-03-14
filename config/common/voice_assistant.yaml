@@ -38,8 +38,8 @@ micro_wake_word:
   models:
     - model: https://raw.githubusercontent.com/artfix/microWakeWords/main/microWakeWords/kira.json
       id: kira
-    - model: https://raw.githubusercontent.com/artfix/microWakeWords/main/microWakeWords/hey_kira.json
-      id: hey_kira
+    - model: https://raw.githubusercontent.com/artfix/microWakeWords/main/microWakeWordsV2/yoko.json
+      id: yoko
     - model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
       id: stop
       internal: true
@@ -47,7 +47,7 @@ micro_wake_word:
   microphone:
     microphone: sat1_mics
     channels: 1
-    gain_factor: 8
+    gain_factor: 7
   stop_after_detection: false
   on_wake_word_detected:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
@@ -94,7 +94,6 @@ micro_wake_word:
                                       bool has_valid_state = id(wake_word_sound_url).has_state();
                                       bool is_valid_url = (url.find("http://") == 0 || url.find("https://") == 0);
                                       
-                                      // CRITICAL FIX: Check if the string is actually usable
                                       if (has_valid_state && url.length() > 8 && is_valid_url) {
                                         // This is a real URL - play it
                                         ESP_LOGI("wake_word", "Playing custom URL: %s", url.c_str());
@@ -331,27 +330,27 @@ select:
       # If you add more mww, you will need to add there names down here or replace kira and hey_kira
       lambda: |-
         if (x == "Ultra insensitive (250)") {
-          id(hey_kira).set_probability_cutoff(250);
+          id(yoko).set_probability_cutoff(250);
         } else if (x == "Maximum insensitive (240)") {
-          id(hey_kira).set_probability_cutoff(240);
+          id(yoko).set_probability_cutoff(240);
         } else if (x == "Less insensitive (235)") {
-          id(hey_kira).set_probability_cutoff(235);
+          id(yoko).set_probability_cutoff(235);
         } else if (x == "Slightly insensitive (230)") {
-          id(hey_kira).set_probability_cutoff(230);
+          id(yoko).set_probability_cutoff(230);
         } else if (x == "Least insensitive (225)") {
-          id(hey_kira).set_probability_cutoff(225);
+          id(yoko).set_probability_cutoff(225);
         } else if (x == "Moderately sensitive (210)") {
-          id(hey_kira).set_probability_cutoff(210);
+          id(yoko).set_probability_cutoff(210);
         } else if (x == "Slightly sensitive (200)") {
-          id(hey_kira).set_probability_cutoff(200);
+          id(yoko).set_probability_cutoff(200);
         } else if (x == "Least sensitive (190)") {
-          id(hey_kira).set_probability_cutoff(190);
+          id(yoko).set_probability_cutoff(190);
         } else if (x == "Very sensitive (180)") {
-          id(hey_kira).set_probability_cutoff(180);
+          id(yoko).set_probability_cutoff(180);
         } else if (x == "Extremely sensitive (170)") {
-          id(hey_kira).set_probability_cutoff(170);
+          id(yoko).set_probability_cutoff(170);
         } else if (x == "Maximum sensitive (160)") {
-          id(hey_kira).set_probability_cutoff(160);
+          id(yoko).set_probability_cutoff(160);
         }
 
 text:
@@ -362,3 +361,4 @@ text:
     optimistic: true
     restore_value: true
     mode: text
+    initial_value: "https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/wake_word_triggered.flac"
