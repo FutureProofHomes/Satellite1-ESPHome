@@ -86,14 +86,9 @@ micro_wake_word:
                                         id: play_sound
                                         priority: true
                                         sound_file: !lambda |-
-                                            // Check if user has set a custom URL
-                                            std::string url = id(wake_word_sound_url).state;
-                                            if (!url.empty()) {
-                                                // Return a new AudioFile from the URL
-                                                return new AudioFile(url.c_str());
-                                            }
-                                            // Fallback to default sound
+                                          if (id(wake_word_sound_url).state.empty())
                                             return id(wake_word_triggered_sound);
+                                          return id(external_media_player)->get_file(id(wake_word_sound_url).state.c_str());
                                     - delay: 300ms
 
                               - voice_assistant.start:
