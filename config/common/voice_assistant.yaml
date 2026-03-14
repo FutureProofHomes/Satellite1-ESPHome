@@ -89,8 +89,8 @@ micro_wake_word:
                                         if (id(wake_word_sound_url).state.empty()) {
                                           return id(wake_word_triggered_sound);
                                         } else {
-                                          // Use the file from the media_player component
-                                          return id(external_media_player)->create_file(id(wake_word_sound_url).state.c_str());
+                                          // Use the file from the media_player's files list
+                                          return new AudioFile(id(wake_word_sound_url).state.c_str(), id(wake_word_sound_url).state.length());
                                         }
                                   - delay: 300ms
 
