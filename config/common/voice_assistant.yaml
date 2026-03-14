@@ -85,7 +85,7 @@ micro_wake_word:
                                   - script.execute:
                                       id: play_sound
                                       priority: true
-                                      sound_file: !lambda return id(wake_word_triggered_sound);
+                                      sound_file: !lambda return id(wake_word_sound_url).state.empty() ? id(wake_word_triggered_sound) : new AudioFile(id(wake_word_sound_url).state.c_str());
                                   - delay: 300ms
 
                             - voice_assistant.start:
@@ -330,3 +330,11 @@ select:
         } else if (x == "Maximum sensitive (160)") {
           id(hey_kira).set_probability_cutoff(160);
         }
+
+text:
+  - platform: template
+    name: "Wake Word Sound URL"
+    id: wake_word_sound_url
+    entity_category: config
+    optimistic: true
+    restore_value: true
