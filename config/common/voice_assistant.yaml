@@ -83,24 +83,28 @@ micro_wake_word:
                                   switch.is_on: wake_sound
                                 then:
                                   - lambda: |-
+                                      // Get the URL from the text box
                                       std::string url = id(wake_word_sound_url).state;
-                                      // Log the URL for debugging (remove after testing)
-                                      ESP_LOGI("wake_word", "URL from box: '%s'", url.c_str());
                                       
-                                      // Check if URL is valid (not empty and looks like a URL)
-                                      if (!url.empty() && 
-                                          url != "unknown" && 
-                                          url != "none" &&
-                                          (url.find("http://") == 0 || 
-                                           url.find("https://") == 0 || 
-                                           url.find("www.") == 0)) {
-                                        // Play the URL directly
+                                      // Log what we actually have (for debugging)
+                                      ESP_LOGI("wake_word", "Raw URL from box: '%s'", url.c_str());
+                                      ESP_LOGI("wake_word", "URL length: %d", url.length());
+                                      
+                                      // Check if the text component has a valid state AND it's a real URL
+                                      bool has_valid_state = id(wake_word_sound_url).has_state();
+                                      bool is_valid_url = (url.find("http://") == 0 || url.find("https://") == 0);
+                                      
+                                      // CRITICAL FIX: Check if the string is actually usable
+                                      if (has_valid_state && url.length() > 8 && is_valid_url) {
+                                        // This is a real URL - play it
+                                        ESP_LOGI("wake_word", "Playing custom URL: %s", url.c_str());
                                         id(external_media_player)->make_call()
                                           .set_media_url(url)
                                           .set_announcement(true)
                                           .perform();
                                       } else {
-                                        // Play the default sound file
+                                        // Fall back to default sound
+                                        ESP_LOGI("wake_word", "No valid URL, playing default sound");
                                         id(external_media_player)->make_call()
                                           .set_media_url("wake_word_triggered_sound")
                                           .set_announcement(true)
