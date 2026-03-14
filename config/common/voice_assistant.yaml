@@ -83,12 +83,17 @@ micro_wake_word:
                                     switch.is_on: wake_sound
                                   then:
                                     - media_player.play_media: !lambda |-
-                                        // If the text box is empty, play the default sound by name
-                                        if (id(wake_word_sound_url).state.empty()) {
+                                        // Get the text from the box
+                                        std::string url = id(wake_word_sound_url).state;
+                                        
+                                        // Check if the box has a value AND it's not just an empty string
+                                        // Also, check if it's the literal string "unknown" or similar
+                                        if (url.empty() || url == "unknown" || url == "none") {
+                                          // No valid URL, use the default sound by its string ID
                                           return "wake_word_triggered_sound";
                                         } else {
-                                          // Otherwise, play the URL from the text box
-                                          return id(wake_word_sound_url).state.c_str();
+                                          // A URL is present, play it
+                                          return url.c_str();
                                         }
                                     - delay: 300ms
                               - voice_assistant.start:
