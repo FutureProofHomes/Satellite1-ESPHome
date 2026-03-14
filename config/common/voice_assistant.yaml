@@ -82,19 +82,23 @@ micro_wake_word:
                                   condition:
                                     switch.is_on: wake_sound
                                   then:
-                                    - media_player.play_media: !lambda |-
-                                        // Get the text from the box
-                                        std::string url = id(wake_word_sound_url).state;
-                                        
-                                        // Check if the box has a value AND it's not just an empty string
-                                        // Also, check if it's the literal string "unknown" or similar
-                                        if (url.empty() || url == "unknown" || url == "none") {
-                                          // No valid URL, use the default sound by its string ID
-                                          return "wake_word_triggered_sound";
-                                        } else {
-                                          // A URL is present, play it
-                                          return url.c_str();
-                                        }
+                                    - script.execute:
+                                        id: play_sound
+                                        priority: true
+                                        sound_file: !lambda |-
+                                          // Get the URL from the text box
+                                          std::string url = id(wake_word_sound_url).state;
+                                          
+                                          // Check if box has a valid URL
+                                          if (!url.empty() && url != "unknown" && url != "none") {
+                                            // Create a temporary audio file from the URL
+                                            static std::unique_ptr<AudioFile> custom_sound;
+                                            custom_sound = make_unique<AudioFile>(url.c_str());
+                                            return custom_sound.get();
+                                          } else {
+                                            // Box is empty/invalid - use the default sound file ID
+                                            return id(wake_word_triggered_sound);
+                                          }
                                     - delay: 300ms
                               - voice_assistant.start:
                                   wake_word: !lambda return wake_word;
