@@ -38,8 +38,8 @@ micro_wake_word:
   models:
     - model: https://raw.githubusercontent.com/artfix/microWakeWords/main/microWakeWords/kira.json
       id: kira
-    - model: https://raw.githubusercontent.com/artfix/microWakeWords/main/microWakeWordsV2/yoko.json
-      id: yoko
+    - model: https://raw.githubusercontent.com/artfix/microWakeWords/main/microWakeWordsV2/frenzy.json
+      id: frenzy
     - model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
       id: stop
       internal: true
@@ -307,25 +307,25 @@ select:
       # If you add more mww, you will need to add there names down here or replace kira and hey_kira
       lambda: |-
         if (x == "Ultra insensitive (250)") {
-          id(yoko).set_probability_cutoff(250);
+          id(frenzy).set_probability_cutoff(250);
         } else if (x == "Maximum insensitive (240)") {
-          id(yoko).set_probability_cutoff(240);
+          id(frenzy).set_probability_cutoff(240);
         } else if (x == "Less insensitive (235)") {
-          id(yoko).set_probability_cutoff(235);
+          id(frenzy).set_probability_cutoff(235);
         } else if (x == "Slightly insensitive (230)") {
-          id(yoko).set_probability_cutoff(230);
+          id(frenzy).set_probability_cutoff(230);
         } else if (x == "Least insensitive (225)") {
-          id(yoko).set_probability_cutoff(225);
+          id(frenzy).set_probability_cutoff(225);
         } else if (x == "Moderately sensitive (210)") {
-          id(yoko).set_probability_cutoff(210);
+          id(frenzy).set_probability_cutoff(210);
         } else if (x == "Slightly sensitive (200)") {
-          id(yoko).set_probability_cutoff(200);
+          id(frenzy).set_probability_cutoff(200);
         } else if (x == "Least sensitive (190)") {
-          id(yoko).set_probability_cutoff(190);
+          id(frenzy).set_probability_cutoff(190);
         } else if (x == "Very sensitive (180)") {
-          id(yoko).set_probability_cutoff(180);
+          id(frenzy).set_probability_cutoff(180);
         } else if (x == "Extremely sensitive (170)") {
-          id(yoko).set_probability_cutoff(170);
+          id(frenzy).set_probability_cutoff(170);
         } else if (x == "Maximum sensitive (160)") {
-          id(yoko).set_probability_cutoff(160);
+          id(frenzy).set_probability_cutoff(160);
         }
