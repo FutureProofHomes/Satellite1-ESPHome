@@ -1,14 +1,14 @@
 substitutions:
-  name: satellite1
+  name: satellite1-c58548
   friendly_name: Satellite1
-  xmos_fw_version: "v1.0.3"
+  xmos_fw_version: v1.0.3
 
   # OPTIONALLY, set the log level to debug, info, warn, error
   log_level: debug
 
 esphome:
   name: ${name}
-  name_add_mac_suffix: true
+  name_add_mac_suffix: false
   friendly_name: ${friendly_name}
 
 packages:
@@ -18,11 +18,11 @@ packages:
     refresh: 1s
     files:
       # Main config files, don't remove
-      - config/satellite1.base.yaml
-      - config/common/dashboard_build.yaml
-      - path: config/common/components.external.yaml
-        vars:
-          ext_comp_repo_ref: staging  # Make sure to set this to the same as the ref above
+    - config/satellite1.base.yaml
+    - config/common/dashboard_build.yaml
+    - path: config/common/components.external.yaml
+      vars:
+        ext_comp_repo_ref: staging    # Make sure to set this to the same as the ref above
 
       # yamllint disable rule:comments-indentation
       # OPTIONALLY, uncomment if you have the smaller LD2410 mmWave sensor connected to your HAT.
@@ -53,9 +53,9 @@ logger:
 ## ESPHome dashboard. Uncomment the below lines to enable this feature, allowing you
 ## to manage Wi-Fi credentials centrally for all your devices.
 
-# wifi:
-#   ssid: !secret wifi_ssid
-#   password: !secret wifi_password
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
 
 ## OPTIONALLY, uncomment the following lines to customize the Snapcast server to connect to.
 # snapcast:
@@ -66,16 +66,126 @@ logger:
 # micro_wake_word:
 #   id: mww
 #   models:
-#     - id: kira
-#       model: https://raw.githubusercontent.com/artfix/microWakeWord/main/microWakeWord/kira.json
-#     - id: hey_kira
-#       model: https://raw.githubusercontent.com/artfix/microWakeWord/main/microWakeWord/hey_kira.json
-
-## Uncomment the following line to remove the default "hey_jarvis" and "okay_nabu" wake word
+#     - id: new_wake_word
+#       model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
+#     # uncomment the following line to remove the default "hey_jarvis" wake word
 #     - id: !remove hey_jarvis
-#     - id: !remove okay_nabu
+# you also want to remove the sensitivity selector as it is hard coded to the provided models
+# select:
+#   id: !remove mww_sensitivity_select
 
-## You also want to remove the sensitivity selector as it is hard coded to the provided models
-#select:
-#  id: !remove mww_sensitivity_select_1
-#  id: !remove mww_sensitivity_select_2
+# ============================================
+# OVERRIDES TO THE PACKAGE CONFIGURATION
+# ============================================
+
+# ============================================
+# MICRO WAKE WORD CONFIGURATION
+# ============================================
+micro_wake_word:
+  id: mww
+  models:
+    # ADD YOUR CUSTOM WAKE WORDS
+    - id: kira
+      model: github://artfix/microWakeWords/microWakeWords/kira.json@main
+    - id: frenzy
+      model: github://artfix/microWakeWords/microWakeWordsV2/frenzy.json@main
+    
+    # Remove the defaults
+    - id: !remove hey_jarvis
+    - id: !remove okay_nabu
+
+# ============================================
+# SENSITIVITY SELECTORS (SEPARATE BLOCK)
+# ============================================
+select:
+  # Replacement selector for Kira
+  - platform: template
+    id: mww_sensitivity_select_1
+    name: "Kira Wake Word Sensitivity"
+    optimistic: true
+    initial_option: "Moderately sensitive (210)"
+    restore_value: true
+    entity_category: config
+    options:
+      - Ultra insensitive (250)
+      - Maximum insensitive (240)
+      - Less insensitive (235)
+      - Slightly insensitive (230)
+      - Least insensitive (225)
+      - Moderately sensitive (210)
+      - Slightly sensitive (200)
+      - Least sensitive (190)
+      - Very sensitive (180)
+      - Extremely sensitive (170)
+      - Maximum sensitive (160)
+    on_value:
+      lambda: |-
+        if (x == "Ultra insensitive (250)") {
+          id(kira).set_probability_cutoff(250);
+        } else if (x == "Maximum insensitive (240)") {
+          id(kira).set_probability_cutoff(240);
+        } else if (x == "Less insensitive (235)") {
+          id(kira).set_probability_cutoff(235);
+        } else if (x == "Slightly insensitive (230)") {
+          id(kira).set_probability_cutoff(230);
+        } else if (x == "Least insensitive (225)") {
+          id(kira).set_probability_cutoff(225);
+        } else if (x == "Moderately sensitive (210)") {
+          id(kira).set_probability_cutoff(210);
+        } else if (x == "Slightly sensitive (200)") {
+          id(kira).set_probability_cutoff(200);
+        } else if (x == "Least sensitive (190)") {
+          id(kira).set_probability_cutoff(190);
+        } else if (x == "Very sensitive (180)") {
+          id(kira).set_probability_cutoff(180);
+        } else if (x == "Extremely sensitive (170)") {
+          id(kira).set_probability_cutoff(170);
+        } else if (x == "Maximum sensitive (160)") {
+          id(kira).set_probability_cutoff(160);
+        }
+
+  # Replacement selector for Frenzy
+  - platform: template
+    id: mww_sensitivity_select_2
+    name: "Frenzy Wake Word Sensitivity"
+    optimistic: true
+    initial_option: "Moderately sensitive (210)"
+    restore_value: true
+    entity_category: config
+    options:
+      - Ultra insensitive (250)
+      - Maximum insensitive (240)
+      - Less insensitive (235)
+      - Slightly insensitive (230)
+      - Least insensitive (225)
+      - Moderately sensitive (210)
+      - Slightly sensitive (200)
+      - Least sensitive (190)
+      - Very sensitive (180)
+      - Extremely sensitive (170)
+      - Maximum sensitive (160)
+    on_value:
+      lambda: |-
+        if (x == "Ultra insensitive (250)") {
+          id(frenzy).set_probability_cutoff(250);
+        } else if (x == "Maximum insensitive (240)") {
+          id(frenzy).set_probability_cutoff(240);
+        } else if (x == "Less insensitive (235)") {
+          id(frenzy).set_probability_cutoff(235);
+        } else if (x == "Slightly insensitive (230)") {
+          id(frenzy).set_probability_cutoff(230);
+        } else if (x == "Least insensitive (225)") {
+          id(frenzy).set_probability_cutoff(225);
+        } else if (x == "Moderately sensitive (210)") {
+          id(frenzy).set_probability_cutoff(210);
+        } else if (x == "Slightly sensitive (200)") {
+          id(frenzy).set_probability_cutoff(200);
+        } else if (x == "Least sensitive (190)") {
+          id(frenzy).set_probability_cutoff(190);
+        } else if (x == "Very sensitive (180)") {
+          id(frenzy).set_probability_cutoff(180);
+        } else if (x == "Extremely sensitive (170)") {
+          id(frenzy).set_probability_cutoff(170);
+        } else if (x == "Maximum sensitive (160)") {
+          id(frenzy).set_probability_cutoff(160);
+        }
