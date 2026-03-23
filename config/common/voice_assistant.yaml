@@ -36,10 +36,10 @@ microphone:
 micro_wake_word:
   id: mww
   models:
-    - model: https://raw.githubusercontent.com/artfix/microWakeWords/main/microWakeWords/kira.json
-      id: kira
-    - model: https://raw.githubusercontent.com/artfix/microWakeWords/main/microWakeWordsV2/frenzy.json
-      id: frenzy
+    - model: hey_jarvis
+      id: hey_jarvis
+    - model: https://github.com/kahrendt/microWakeWord/releases/download/okay_nabu_20241226.3/okay_nabu.json
+      id: okay_nabu
     - model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
       id: stop
       internal: true
@@ -229,103 +229,103 @@ script:
                 then:
                   - micro_wake_word.disable_model: stop
 
-select:
-  # Selector for micro wake word 1
-  - platform: template
-    id: mww_sensitivity_select_1
-    name: "MWW sensitivity 1"
-    optimistic: true
-    initial_option: "Moderately sensitive (210)"
-    restore_value: true
-    entity_category: config
-    options:
-      - Ultra insensitive (250)       # Extremely strict
-      - Maximum insensitive (240)     # Very strict
-      - Less insensitive (235)        # Strict
-      - Slightly insensitive (230)    # A bit strict
-      - Least insensitive (225)       # Barely strict
-      - Moderately sensitive (210)    # Balanced
-      - Slightly sensitive (200)      # A bit responsive
-      - Least sensitive (190)         # Responsive
-      - Very sensitive (180)          # Very responsive
-      - Extremely sensitive (170)     # Most responsive
-      - Maximum sensitive (160)       # Ultra responsive
-    on_value:
-      # Sets specific wake word probabilities computed for each particular model
-      # Note probability cutoffs are set as a quantized uint8 value, each comment has the corresponding floating point cutoff
-      # These cutoffs apply only to the specific models included in the firmware: kira, hey_kira
-      # If you add more mww, you will need to add there names down here or replace kira and hey_kira
-      lambda: |-
-        if (x == "Ultra insensitive (250)") {
-          id(kira).set_probability_cutoff(250);
-        } else if (x == "Maximum insensitive (240)") {
-          id(kira).set_probability_cutoff(240);
-        } else if (x == "Less insensitive (235)") {
-          id(kira).set_probability_cutoff(235);
-        } else if (x == "Slightly insensitive (230)") {
-          id(kira).set_probability_cutoff(230);
-        } else if (x == "Least insensitive (225)") {
-          id(kira).set_probability_cutoff(225);
-        } else if (x == "Moderately sensitive (210)") {
-          id(kira).set_probability_cutoff(210);
-        } else if (x == "Slightly sensitive (200)") {
-          id(kira).set_probability_cutoff(200);
-        } else if (x == "Least sensitive (190)") {
-          id(kira).set_probability_cutoff(190);
-        } else if (x == "Very sensitive (180)") {
-          id(kira).set_probability_cutoff(180);
-        } else if (x == "Extremely sensitive (170)") {
-          id(kira).set_probability_cutoff(170);
-        } else if (x == "Maximum sensitive (160)") {
-          id(kira).set_probability_cutoff(160);
-        }
-
-  # Selector for micro wake word 2
-  - platform: template
-    id: mww_sensitivity_select_2
-    name: "MWW sensitivity 2"
-    optimistic: true
-    initial_option: "Moderately sensitive (210)"
-    restore_value: true
-    entity_category: config
-    options:
-      - Ultra insensitive (250)
-      - Maximum insensitive (240)
-      - Less insensitive (235)
-      - Slightly insensitive (230)
-      - Least insensitive (225)
-      - Moderately sensitive (210)
-      - Slightly sensitive (200)
-      - Least sensitive (190)
-      - Very sensitive (180)
-      - Extremely sensitive (170)
-      - Maximum sensitive (160)
-    on_value:
-      # Sets specific wake word probabilities computed for each particular model
-      # Note probability cutoffs are set as a quantized uint8 value, each comment has the corresponding floating point cutoff
-      # These cutoffs apply only to the specific models included in the firmware: kira, hey_kira
-      # If you add more mww, you will need to add there names down here or replace kira and hey_kira
-      lambda: |-
-        if (x == "Ultra insensitive (250)") {
-          id(frenzy).set_probability_cutoff(250);
-        } else if (x == "Maximum insensitive (240)") {
-          id(frenzy).set_probability_cutoff(240);
-        } else if (x == "Less insensitive (235)") {
-          id(frenzy).set_probability_cutoff(235);
-        } else if (x == "Slightly insensitive (230)") {
-          id(frenzy).set_probability_cutoff(230);
-        } else if (x == "Least insensitive (225)") {
-          id(frenzy).set_probability_cutoff(225);
-        } else if (x == "Moderately sensitive (210)") {
-          id(frenzy).set_probability_cutoff(210);
-        } else if (x == "Slightly sensitive (200)") {
-          id(frenzy).set_probability_cutoff(200);
-        } else if (x == "Least sensitive (190)") {
-          id(frenzy).set_probability_cutoff(190);
-        } else if (x == "Very sensitive (180)") {
-          id(frenzy).set_probability_cutoff(180);
-        } else if (x == "Extremely sensitive (170)") {
-          id(frenzy).set_probability_cutoff(170);
-        } else if (x == "Maximum sensitive (160)") {
-          id(frenzy).set_probability_cutoff(160);
-        }
+#select:
+#  # Selector for micro wake word 1
+#  - platform: template
+#    id: mww_sensitivity_select_1
+#    name: "MWW sensitivity 1"
+#    optimistic: true
+#    initial_option: "Moderately sensitive (210)"
+#    restore_value: true
+#    entity_category: config
+#    options:
+#      - Ultra insensitive (250)       # Extremely strict
+#      - Maximum insensitive (240)     # Very strict
+#      - Less insensitive (235)        # Strict
+#      - Slightly insensitive (230)    # A bit strict
+#      - Least insensitive (225)       # Barely strict
+#      - Moderately sensitive (210)    # Balanced
+#      - Slightly sensitive (200)      # A bit responsive
+#      - Least sensitive (190)         # Responsive
+#      - Very sensitive (180)          # Very responsive
+#      - Extremely sensitive (170)     # Most responsive
+#      - Maximum sensitive (160)       # Ultra responsive
+#    on_value:
+#      # Sets specific wake word probabilities computed for each particular model
+#      # Note probability cutoffs are set as a quantized uint8 value, each comment has the corresponding floating point cutoff
+#      # These cutoffs apply only to the specific models included in the firmware: kira, hey_kira
+#      # If you add more mww, you will need to add there names down here or replace kira and hey_kira
+#      lambda: |-
+#        if (x == "Ultra insensitive (250)") {
+#          id(kira).set_probability_cutoff(250);
+#        } else if (x == "Maximum insensitive (240)") {
+#          id(kira).set_probability_cutoff(240);
+#        } else if (x == "Less insensitive (235)") {
+#          id(kira).set_probability_cutoff(235);
+#        } else if (x == "Slightly insensitive (230)") {
+#          id(kira).set_probability_cutoff(230);
+#        } else if (x == "Least insensitive (225)") {
+#          id(kira).set_probability_cutoff(225);
+#        } else if (x == "Moderately sensitive (210)") {
+#          id(kira).set_probability_cutoff(210);
+#        } else if (x == "Slightly sensitive (200)") {
+#          id(kira).set_probability_cutoff(200);
+#        } else if (x == "Least sensitive (190)") {
+#          id(kira).set_probability_cutoff(190);
+#        } else if (x == "Very sensitive (180)") {
+#          id(kira).set_probability_cutoff(180);
+#        } else if (x == "Extremely sensitive (170)") {
+#          id(kira).set_probability_cutoff(170);
+#        } else if (x == "Maximum sensitive (160)") {
+#          id(kira).set_probability_cutoff(160);
+#        }
+#
+#  # Selector for micro wake word 2
+#  - platform: template
+#    id: mww_sensitivity_select_2
+#    name: "MWW sensitivity 2"
+#    optimistic: true
+#    initial_option: "Moderately sensitive (210)"
+#    restore_value: true
+#    entity_category: config
+#    options:
+#      - Ultra insensitive (250)
+#      - Maximum insensitive (240)
+#      - Less insensitive (235)
+#      - Slightly insensitive (230)
+#      - Least insensitive (225)
+#      - Moderately sensitive (210)
+#      - Slightly sensitive (200)
+#      - Least sensitive (190)
+#      - Very sensitive (180)
+#      - Extremely sensitive (170)
+#      - Maximum sensitive (160)
+#    on_value:
+#      # Sets specific wake word probabilities computed for each particular model
+#      # Note probability cutoffs are set as a quantized uint8 value, each comment has the corresponding floating point cutoff
+#      # These cutoffs apply only to the specific models included in the firmware: kira, hey_kira
+#      # If you add more mww, you will need to add there names down here or replace kira and hey_kira
+#      lambda: |-
+#        if (x == "Ultra insensitive (250)") {
+#          id(frenzy).set_probability_cutoff(250);
+#        } else if (x == "Maximum insensitive (240)") {
+#          id(frenzy).set_probability_cutoff(240);
+#        } else if (x == "Less insensitive (235)") {
+#          id(frenzy).set_probability_cutoff(235);
+#        } else if (x == "Slightly insensitive (230)") {
+#          id(frenzy).set_probability_cutoff(230);
+#        } else if (x == "Least insensitive (225)") {
+#          id(frenzy).set_probability_cutoff(225);
+#        } else if (x == "Moderately sensitive (210)") {
+#          id(frenzy).set_probability_cutoff(210);
+#        } else if (x == "Slightly sensitive (200)") {
+#          id(frenzy).set_probability_cutoff(200);
+#        } else if (x == "Least sensitive (190)") {
+#          id(frenzy).set_probability_cutoff(190);
+#        } else if (x == "Very sensitive (180)") {
+#          id(frenzy).set_probability_cutoff(180);
+#        } else if (x == "Extremely sensitive (170)") {
+#          id(frenzy).set_probability_cutoff(170);
+#        } else if (x == "Maximum sensitive (160)") {
+#          id(frenzy).set_probability_cutoff(160);
+#        }
