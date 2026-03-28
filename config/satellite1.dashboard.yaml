@@ -2,7 +2,7 @@ substitutions:
   name: satellite1
   friendly_name: Satellite1
   xmos_fw_version: "v1.0.3"
-  log_level: debug # (debug, info, warn, error)
+  log_level: debug  # (debug, info, warn, error)
   repo_url: &repo_url "https://github.com/futureproofhomes/satellite1-esphome"
   repo_ref: &repo_ref "staging"
 
