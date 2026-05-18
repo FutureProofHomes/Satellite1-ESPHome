@@ -86,6 +86,7 @@ packages:
   spk: !include common/speaker.yaml
   mp: !include common/media_player.yaml
   va: !include common/voice_assistant.yaml
+  tts_routing: !include common/tts_routing.yaml
   timer: !include common/timer.yaml
   led_ring: !include common/led_ring.yaml
   mmwave: !include common/mmwave.yaml

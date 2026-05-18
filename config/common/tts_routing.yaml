@@ -1,0 +1,76 @@
+globals:
+  - id: tts_routing_to_remote
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+text:
+  - platform: template
+    id: tts_target_media_player
+    name: "TTS Target Media Player"
+    icon: "mdi:cast-audio"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    mode: text
+    min_length: 0
+    max_length: 128
+
+voice_assistant:
+  on_start:
+    - if:
+        condition:
+          lambda: 'return !id(tts_target_media_player).state.empty();'
+        then:
+          - lambda: |-
+              id(tts_routing_to_remote) = true;
+              ESP_LOGI("tts_routing", "Remote TTS routing enabled, target: %s", id(tts_target_media_player).state.c_str());
+          - mixer_speaker.apply_ducking:
+              id: announcement_mixing_input
+              decibel_reduction: 51
+              duration: 0.0s
+        else:
+          - lambda: 'id(tts_routing_to_remote) = false;'
+
+  on_tts_end:
+    - if:
+        condition:
+          lambda: 'return id(tts_routing_to_remote);'
+        then:
+          - lambda: 'ESP_LOGI("tts_routing", "Routing TTS to remote player, URL: %s", x.c_str());'
+          - homeassistant.service:
+              service: media_player.play_media
+              data:
+                media_content_type: music
+                announce: "true"
+              data_template:
+                entity_id: "{{ target_entity }}"
+                media_content_id: "{{ tts_url }}"
+              variables:
+                target_entity: !lambda 'return id(tts_target_media_player).state;'
+                tts_url: !lambda 'return x;'
+
+  on_end:
+    - if:
+        condition:
+          lambda: 'return id(tts_routing_to_remote);'
+        then:
+          - lambda: 'ESP_LOGI("tts_routing", "Restoring announcement ducking");'
+          - mixer_speaker.apply_ducking:
+              id: announcement_mixing_input
+              decibel_reduction: 0
+              duration: 0.0s
+          - lambda: 'id(tts_routing_to_remote) = false;'
+
+  on_error:
+    - if:
+        condition:
+          lambda: 'return id(tts_routing_to_remote);'
+        then:
+          - lambda: 'ESP_LOGI("tts_routing", "Error during remote routing, restoring announcement ducking");'
+          - mixer_speaker.apply_ducking:
+              id: announcement_mixing_input
+              decibel_reduction: 0
+              duration: 0.0s
+          - lambda: 'id(tts_routing_to_remote) = false;'
