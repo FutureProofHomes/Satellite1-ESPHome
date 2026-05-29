@@ -25,6 +25,36 @@ esp32:
       CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
       CONFIG_MBEDTLS_SSL_PROTO_TLS1_3: "y"  # TLS1.3 support isn't enabled by default in IDF 5.1.5
 
+      # Network + memory tuning that exists on `develop` but was dropped during
+      # the sendspin migration (c9e0f999). Without it the ESP32-S3 falls back to
+      # tiny default LWIP/WiFi buffers, causing unstable Wi-Fi and unreliable OTA
+      # on the Satellite1. Restores the network keys only; does not touch the
+      # cache / MBEDTLS options added in the 2026.5 migration.
+      # SPIRAM placement for wifi+lwip
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
+      # LWIP
+      CONFIG_LWIP_IRAM_OPTIMIZATION: "y"
+      CONFIG_LWIP_TCPIP_TASK_PRIO: "18"
+      CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU0: "y"
+      CONFIG_LWIP_TCP_SND_BUF_DEFAULT: "65535"
+      CONFIG_LWIP_TCP_WND_DEFAULT: "65535"
+      CONFIG_LWIP_TCPIP_RECVMBOX_SIZE: "64"
+      CONFIG_LWIP_TCP_RECVMBOX_SIZE: "64"
+      CONFIG_LWIP_UDP_RECVMBOX_SIZE: "64"
+      CONFIG_LWIP_TCP_RTO_TIME: "500"
+      CONFIG_LWIP_TCP_SACK_OUT: "y"
+      CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS: "8"
+      # WiFi
+      CONFIG_ESP_WIFI_AMPDU_RX_ENABLED: "y"
+      CONFIG_ESP_WIFI_RX_BA_WIN: "32"
+      CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM: "16"
+      CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM: "128"
+      CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM: "64"
+      CONFIG_ESP_WIFI_AMPDU_TX_ENABLED: "y"
+      CONFIG_ESP_WIFI_TX_BA_WIN: "32"
+      # MDNS
+      CONFIG_MDNS_MEMORY_ALLOC_SPIRAM: "y"
+
 psram:
   mode: octal
   speed: 80MHz
