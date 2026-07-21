@@ -1,4 +1,11 @@
 substitutions:
+  # IP address of the machine running the wake-word training-data collector (listens for raw
+  # int16/16kHz/mono PCM over UDP). Override this to point at your recording server.
+  wake_audio_stream_host: "192.168.1.100"
+  wake_audio_stream_port: "6056"
+  # HTTP port of the ingest service's FastAPI app (the /wake_event endpoint).
+  wake_event_http_port: "8000"
+
   # Phases of the Voice Assistant
   # The voice assistant is ready to be triggered by a wake word
   voice_assist_idle_phase_id: '1'
@@ -49,7 +56,22 @@ micro_wake_word:
     channels: 1
     gain_factor: 6
   stop_after_detection: false
+  # Forward the exact audio the wake-word models process to the training-data collector. The stream
+  # component only buffers/sends when its capture switch is on, so this trigger is cheap when idle.
+  on_audio_data:
+    - lambda: id(wake_audio_streamer).push_audio(x);
   on_wake_word_detected:
+    # When capturing training data, tell the ingest service a wake word fired so it can extract a
+    # clip from the UDP audio it is already buffering. Omitting assistant_id lets the service key
+    # the clip by this device's IP, matching how it buffers the UDP audio stream.
+    - if:
+        condition:
+          switch.is_on: wake_audio_capture
+        then:
+          - http_request.post:
+              url: !lambda |-
+                return "http://${wake_audio_stream_host}:${wake_event_http_port}/wake_event?wake_word=" + wake_word;
+              capture_response: false
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
     - if:
         condition:
@@ -233,6 +255,15 @@ script:
                 then:
                   - micro_wake_word.disable_model: stop
 
+# Streams the raw wake-word audio over UDP so it can be recorded and labeled as training data
+# (false positive / false negative / background noise / etc.).
+wake_audio_stream:
+  id: wake_audio_streamer
+  ip_address: ${wake_audio_stream_host}
+  port: ${wake_audio_stream_port}
+  buffer_duration: 500ms
+  enabled_on_boot: false
+
 select:
   - platform: template
     id: mww_sensitivity_select
@@ -261,3 +292,20 @@ select:
           id(okay_nabu).set_probability_cutoff(143);    // 0.56 -> 0.751 FAPH on DipCo
           id(hey_jarvis).set_probability_cutoff(212);   // 0.83 -> 1.502 FAPH on DipCo
         }
+
+switch:
+  # Toggle capturing wake-word audio for training data. When on, the raw PCM microWakeWord processes
+  # is streamed over UDP to the configured collector; when off, nothing is buffered or sent.
+  - platform: template
+    id: wake_audio_capture
+    name: "Capture wake-word audio"
+    icon: "mdi:record-rec"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - wake_audio_stream.start:
+          id: wake_audio_streamer
+    on_turn_off:
+      - wake_audio_stream.stop:
+          id: wake_audio_streamer

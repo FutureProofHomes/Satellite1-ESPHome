@@ -101,10 +101,12 @@ external_components:
       - fusb302b
       - i2s_audio
       - memory_flasher
+      - micro_wake_word
       - pcm5122
       - satellite1
       - satellite1_radar
       - tas2780
+      - wake_audio_stream
 
   - source:
       # https://github.com/esphome/esphome/pull/12429
