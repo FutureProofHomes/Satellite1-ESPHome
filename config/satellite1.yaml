@@ -5,6 +5,16 @@ substitutions:
   # set this version by GHA at build time
   esp32_fw_version: dev
 
+globals:
+  - id: network_setup_completed
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: improv_ble_in_progress
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
 packages:
   # This is an inline package to prefix the on_client_connected with the wait_until action
   # It must appear before the actual package so it becomes the original config and the
@@ -103,6 +113,7 @@ external_components:
       - memory_flasher
       - satellite1
       - satellite1_radar
+      - ethernet
       - tas2780
 
 logger:

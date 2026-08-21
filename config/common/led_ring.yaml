@@ -475,7 +475,7 @@ script:
             id(control_leds_improv_ble_state).execute();
           } else if (id(init_in_progress)) {
             id(control_leds_init_state).execute();
-          } else if (!id(wifi_id).is_connected() || !id(api_id).is_connected()){
+          } else if ((!id(wifi_id).is_connected() && !id(network_setup_completed)) || !id(api_id).is_connected()){
             id(control_leds_no_ha_connection_state).execute();
           } else if (id(volume_buttons_touched)) {
             id(control_leds_volume_buttons_touched).execute();
@@ -529,7 +529,9 @@ script:
     then:
       - if:
           condition:
-            wifi.connected:
+            or:
+              - wifi.connected:
+              - lambda: 'return id(network_setup_completed);'
           then:
             - light.turn_on:
                 brightness: 66%

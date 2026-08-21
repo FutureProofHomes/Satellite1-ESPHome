@@ -1,0 +1,21 @@
+network:
+  priority:
+    - ethernet
+    - wifi
+
+ethernet:
+  id: ethernet_id
+  type: W5500
+  spi_id: spi_0
+  interrupt_pin: GPIO38
+  cs_pin:
+    number: GPIO3
+    ignore_strapping_warning: true
+
+  on_connect:
+    # Script disables WiFi and BLE when ethernet has IP (voice_assistant can then use micro_wake_word)
+    - lambda: |-
+        id(network_setup_completed) = true;
+    # - script.execute: control_leds
+    # - tas2780.activate:
+    #     mode: 2
