@@ -16,6 +16,6 @@ ethernet:
     # Script disables WiFi and BLE when ethernet has IP (voice_assistant can then use micro_wake_word)
     - lambda: |-
         id(network_setup_completed) = true;
-    # - script.execute: control_leds
-    # - tas2780.activate:
-    #     mode: 2
+    - script.execute: control_leds
+    - tas2780.activate:
+        mode: 2

@@ -23,7 +23,12 @@ packages:
     voice_assistant:
       on_client_connected:
         - wait_until:
-            not: ble.enabled
+            condition:
+              any:
+                - not:
+                    ble.enabled:
+                - lambda: |-
+                    return id(network_setup_completed);
         - wait_until:
             not: memory_flasher.in_progress
         - delay: 2s
