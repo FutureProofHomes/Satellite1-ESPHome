@@ -61,8 +61,8 @@ enum Satellite1State : uint8_t {
 };
 
 class Satellite1 : public Component,
-                   public spi::SPIDevice<spi::BIT_ORDER_MSB_FIRST, spi::CLOCK_POLARITY_LOW, spi::CLOCK_PHASE_LEADING,
-                                         spi::DATA_RATE_200KHZ> {
+                   public spi::SPIDevice<spi::BIT_ORDER_MSB_FIRST, spi::CLOCK_POLARITY_HIGH, spi::CLOCK_PHASE_TRAILING,
+                                         spi::DATA_RATE_8MHZ> {
  public:
   Satellite1State state{SAT_DETACHED_STATE};
   uint8_t xmos_fw_version[5];
