@@ -20,13 +20,17 @@ sensor:
     entity_category: "diagnostic"
     update_interval: 60s
 
-  - platform: ltr_als_ps
-    address: 0x29
-    type: ALS
-    update_interval: 60s
-
-    # short variant of sensor definition:
-    ambient_light: "Ambient Light"
+  # Disabled 2026-08-30: ltr_als_ps auto-gain sweep (~13s blocking I2C loop every
+  # 60s update_interval) was causing periodic Sendspin/audio streaming drops.
+  # Confirmed via correlated timestamps in device logs; matches known upstream
+  # issues #362 and #536. Sensor is physically obstructed on this unit anyway.
+  # - platform: ltr_als_ps
+  #   address: 0x29
+  #   type: ALS
+  #   update_interval: 60s
+  #
+  #   # short variant of sensor definition:
+  #   ambient_light: "Ambient Light"
 
 number:
   # Dynamically adjust the temperature and humidity offset.  Credit goes to Lewis over @ EverythingSmartHome.  I admire your work and hope to meet someday.  Beers on me.
