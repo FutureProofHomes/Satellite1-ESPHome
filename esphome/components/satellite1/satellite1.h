@@ -101,6 +101,7 @@ class Satellite1 : public Component,
    * @param payload_len  Length of the payload buffer in bytes.
    * @param status_report_received Optional output set when this transfer copied a controller
    *                                status-register report.
+   * @param retry        Whether ignored commands should be retried.
    *
    * @return             A boolean value indicating the success or failure of the operation:
    *                     - `true`: The operation was successful. The payload buffer and/or status
@@ -114,7 +115,7 @@ class Satellite1 : public Component,
    *   is updated.
    */
   bool transfer(uint8_t resource_id, uint8_t command, uint8_t *payload, uint8_t payload_len,
-                bool *status_report_received = nullptr);
+                bool *status_report_received = nullptr, bool retry = true);
 
   /**
    * @brief Requests an update to the XMOS device controller's status registers.
@@ -128,7 +129,7 @@ class Satellite1 : public Component,
    *                     - `false`: The update request failed, potentially due to communication
    *                       issues or ignored commands.
    */
-  bool request_status_register_update();
+  bool request_status_register_update(bool retry = true);
 
   /// Returns false until a controller status-register report has been cached.
   /// @param value Non-null output pointer for the cached register value.
