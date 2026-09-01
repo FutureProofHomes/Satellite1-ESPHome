@@ -33,6 +33,7 @@ event:
 binary_sensor:
   - platform: gpio
     id: btn_up
+    use_interrupt: false
     pin:
       satellite1:
       port: INPUT_A
@@ -49,6 +50,7 @@ binary_sensor:
 
   - platform: gpio
     id: btn_down
+    use_interrupt: false
     pin:
       satellite1:
       port: INPUT_A
@@ -65,6 +67,7 @@ binary_sensor:
 
   - platform: gpio
     id: btn_left
+    use_interrupt: false
     pin:
       satellite1:
       port: INPUT_A
@@ -95,6 +98,7 @@ binary_sensor:
 
   - platform: gpio
     id: btn_action
+    use_interrupt: false
     pin:
       number: 0
       inverted: true
