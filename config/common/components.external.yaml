@@ -9,6 +9,7 @@ external_components:
       ref: ${ext_comp_repo_ref}
     refresh: 1s
     components:
+      - ethernet
       - fusb302b
       - i2s_audio
       - memory_flasher
