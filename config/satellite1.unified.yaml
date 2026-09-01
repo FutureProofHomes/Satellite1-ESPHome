@@ -1,0 +1,21 @@
+packages:
+  sat1: !include
+    file: satellite1.yaml
+    vars:
+      network: unified
+
+wifi:
+  enable_on_boot: False
+
+esp32_ble:
+  enable_on_boot: false
+
+ethernet:
+  connect_timeout: 15s
+
+  on_disable:
+    - ble.enable:
+    - wifi.enable:
+
+  on_connect_timeout:
+    - ethernet.disable:

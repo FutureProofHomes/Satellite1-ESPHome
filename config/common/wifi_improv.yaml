@@ -1,10 +1,54 @@
 wifi:
   id: wifi_id
+  # enable_on_boot: False
   on_connect:
+    - delay: 5s  # Gives time for improv results to be transmitted
+    - ble.disable:
     - lambda: id(improv_ble_in_progress) = false;
     - script.execute: control_leds
+    - script.execute: set_wifi_connection_str
+    - lambda: |-
+        id(network_setup_completed) = true;
+
   on_disconnect:
     - script.execute: control_leds
+    - script.execute: set_wifi_connection_str
+    - ble.enable:
 
 improv_serial:
+esp32_improv:
+  authorizer: btn_action
+  on_start:
+    - lambda: id(improv_ble_in_progress) = true;
+    - script.execute: control_leds
+  on_provisioned:
+    - lambda: id(improv_ble_in_progress) = false;
+    - script.execute: control_leds
+  on_stop:
+    - lambda: id(improv_ble_in_progress) = false;
+    - script.execute: control_leds
+script:
+  - id: set_wifi_connection_str
+    then:
+      - lambda: |-
+          if (esphome::wifi::global_wifi_component != nullptr) {
+            auto wifi_ips = esphome::wifi::global_wifi_component->get_ip_addresses();
+            for (auto &ip : wifi_ips) {
+              if (ip.is_set() && ip != esphome::network::IPAddress(0, 0, 0, 0)) {
+                char ip_buf[esphome::network::IP_ADDRESS_BUFFER_SIZE];
+                ip.str_to(ip_buf);
+                id(network_status_str) = std::string("WiFi: ") + ip_buf;
+                return;
+              }
+            }
+          }
+          id(network_status_str) = "Disconnected";
+      - text_sensor.template.publish:
+          id: network_status_sensor
+          state: !lambda 'return id(network_status_str);'
 
+sensor:
+  - platform: wifi_signal
+    name: "Wi-Fi Signal Strength"
+    entity_category: "diagnostic"
+    update_interval: 60s

@@ -1,3 +1,8 @@
+globals:
+  - id: network_status_str
+    type: std::string
+    restore_value: no
+    initial_value: '"Disconnected"'
 api:
   id: api_id
   on_client_connected:
@@ -62,6 +67,15 @@ switch:
       - script.execute: control_leds
 
 text_sensor:
+  - platform: template
+    id: network_status_sensor
+    name: "Network Status"
+    icon: "mdi:ip-network"
+    entity_category: "diagnostic"
+    update_interval: never
+    lambda: |-
+      return id(network_status_str);
+
   - platform: template
     id: pd_state_text
     name: "USB-C Power Supply"

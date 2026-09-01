@@ -1,7 +1,7 @@
-network:
-  priority:
-    - ethernet
-    - wifi
+# network:
+#   priority:
+#     - ethernet
+#     - wifi
 
 ethernet:
   id: ethernet_id
@@ -12,10 +12,35 @@ ethernet:
     number: GPIO3
     ignore_strapping_warning: true
 
-  # on_connect:
-  #   # Script disables WiFi and BLE when ethernet has IP (voice_assistant can then use micro_wake_word)
-  #   - lambda: |-
-  #       id(network_setup_completed) = true;
-  #   - script.execute: control_leds
-  #   - tas2780.activate:
-  #       mode: 2
+  on_connect:
+    # Script disables WiFi and BLE when ethernet has IP (voice_assistant can then use micro_wake_word)
+    - lambda: |-
+        id(network_setup_completed) = true;
+    - script.execute: control_leds
+    - script.execute: set_network_connection_str
+    - tas2780.activate:
+        mode: 2
+  on_disconnect:
+    - script.execute: set_network_connection_str
+
+script:
+  - id: set_network_connection_str
+    then:
+      - lambda: |-
+          auto ips = id(ethernet_id).get_ip_addresses();
+          for (auto &ip : ips) {
+            if (ip.is_set() && ip != esphome::network::IPAddress(0, 0, 0, 0)) {
+              char ip_buf[esphome::network::IP_ADDRESS_BUFFER_SIZE];
+              ip.str_to(ip_buf);
+              auto speed = id(ethernet_id).get_link_speed() == ETH_SPEED_100M ? "100" : "10";
+              auto duplex = id(ethernet_id).get_duplex_mode() == ETH_DUPLEX_FULL ? "Full" : "Half";
+              char buf[96];
+              snprintf(buf, sizeof(buf), "Eth: %s\n%s Mbps %s Duplex", ip_buf, speed, duplex);
+              id(network_status_str) = std::string(buf);
+              return;
+            }
+          }
+          id(network_status_str) = "Disconnected";
+      - text_sensor.template.publish:
+          id: network_status_sensor
+          state: !lambda 'return id(network_status_str);'

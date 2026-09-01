@@ -4,6 +4,13 @@ substitutions:
 
   # set this version by GHA at build time
   esp32_fw_version: dev
+  wifi_config: !include
+    file: common/wifi_improv.yaml
+  ethernet_config: !include
+    file: common/ethernet.yaml
+
+  # select network [wifi|ethernet]
+  network: wifi
 
 globals:
   - id: network_setup_completed
@@ -14,7 +21,7 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
-    
+
 packages:
   # This is an inline package to prefix the on_client_connected with the wait_until action
   # It must appear before the actual package so it becomes the original config and the
@@ -23,17 +30,11 @@ packages:
     voice_assistant:
       on_client_connected:
         - wait_until:
-            not: ble.enabled
+            lambda: |-
+              return id(network_setup_completed);
         - wait_until:
             not: memory_flasher.in_progress
         - delay: 2s
-
-    wifi:
-      on_disconnect:
-        - ble.enable:
-      on_connect:
-        - delay: 5s  # Gives time for improv results to be transmitted
-        - ble.disable:
 
     satellite1:
       on_xmos_no_response:
@@ -57,24 +58,15 @@ packages:
               then:
                 - memory_flasher.write_embedded_image:
 
-  home-assistant-voice: !include satellite1.base.yaml
+  base: !include satellite1.base.yaml
+  wifi: ${ wifi_config if network == "wifi" or network == "unified" else {} }
+  ethernet: ${ ethernet_config if network == "ethernet" or network == "unified" else {} }
 
 esphome:
   project:
     name: ${company_name}.${project_name}
     version: ${esp32_fw_version}
-
-esp32_improv:
-  authorizer: btn_action
-  on_start:
-    - lambda: id(improv_ble_in_progress) = true;
-    - script.execute: control_leds
-  on_provisioned:
-    - lambda: id(improv_ble_in_progress) = false;
-    - script.execute: control_leds
-  on_stop:
-    - lambda: id(improv_ble_in_progress) = false;
-    - script.execute: control_leds
+http_request:
 
 ota:
   - platform: http_request
