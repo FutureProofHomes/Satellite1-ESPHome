@@ -14,7 +14,7 @@ light:
     id: hw_led_ring
     pin: GPIO21
     num_leds: 24
-    rgb_order: GRB
+    channel_colors: GRB
     chipset: WS2812
 
   # User facing LED ring. Remapping of the hardware LEDs.
