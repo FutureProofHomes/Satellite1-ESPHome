@@ -6,6 +6,10 @@
 #include "esphome/core/log.h"
 #include "esphome/core/version.h"
 
+#ifdef USE_ETHERNET
+#include "esphome/components/ethernet/ethernet_component.h"
+#endif
+
 namespace esphome {
 namespace improv_serial {
 
@@ -27,6 +31,35 @@ void ImprovSerialComponent::setup() {
 }
 
 void ImprovSerialComponent::dump_config() { ESP_LOGCONFIG(TAG, "Improv Serial:"); }
+
+bool ImprovSerialComponent::handle_network_action_(const ExtAction &action) {
+  const auto &name = action.get_action();
+#ifdef USE_WIFI
+  if (name == "ENABLE_WIFI") {
+    wifi::global_wifi_component->enable();
+    this->send_action_status(name, 0);
+    return true;
+  }
+  if (name == "DISABLE_WIFI") {
+    wifi::global_wifi_component->disable();
+    this->send_action_status(name, 0);
+    return true;
+  }
+#endif
+#ifdef USE_ETHERNET
+  if (name == "ENABLE_ETHERNET") {
+    ethernet::global_eth_component->enable();
+    this->send_action_status(name, 0);
+    return true;
+  }
+  if (name == "DISABLE_ETHERNET") {
+    ethernet::global_eth_component->disable();
+    this->send_action_status(name, 0);
+    return true;
+  }
+#endif
+  return false;
+}
 
 optional<uint8_t> ImprovSerialComponent::read_byte_() {
   optional<uint8_t> byte;
@@ -232,7 +265,10 @@ bool ImprovSerialComponent::parse_improv_payload_(manufacturer_improv_ext::Impro
     }
     case manufacturer_improv_ext::TRIGGER_ACTION: {
       ExtAction action(command);
-      this->defer([this, action]() { this->action_request_trigger_->trigger(action); });
+      this->defer([this, action]() {
+        if (!this->handle_network_action_(action))
+          this->action_request_trigger_->trigger(action);
+      });
       auto data =
           manufacturer_improv_ext::build_rpc_response(manufacturer_improv_ext::TRIGGER_ACTION, {"received"}, false);
       this->send_response_(data);

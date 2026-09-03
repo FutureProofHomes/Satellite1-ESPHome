@@ -68,6 +68,7 @@ class ImprovSerialComponent : public Component, public improv_base::ImprovBase {
   Trigger<ExtAction> *get_action_request_trigger() { return this->action_request_trigger_; }
 
  protected:
+  bool handle_network_action_(const ExtAction &action);
   bool parse_improv_serial_byte_(uint8_t byte);
   bool parse_improv_payload_(manufacturer_improv_ext::ImprovCommand &command);
   void set_state_(manufacturer_improv_ext::State state);
