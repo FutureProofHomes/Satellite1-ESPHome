@@ -80,6 +80,7 @@ dashboard_import:
 
 packages:
   core_board: !include common/core_board.yaml
+  ethernet: !include common/ethernet.yaml
   wifi: !include common/wifi_improv.yaml
   sensors: !include common/hat_sensors.yaml
   buttons: !include common/buttons.yaml
