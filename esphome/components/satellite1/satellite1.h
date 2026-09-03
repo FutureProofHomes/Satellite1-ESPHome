@@ -53,6 +53,21 @@ enum dc_dfu_cmd_id {
 };
 }
 
+namespace DC_AUDIO_PIPELINE {
+static const uint8_t MIC_OUTPUT_SETTINGS_RES_ID = 230;
+static const uint8_t SPEAKER_SETTINGS_RES_ID = 231;
+static const uint8_t MIC_INPUT_SETTINGS_RES_ID = 232;
+
+static const uint8_t CMD_GET_SETTINGS = (0 | CONTROL_CMD_READ_BIT);
+static const uint8_t CMD_SET_SETTINGS_PARTIAL = 1;
+
+static const uint32_t MIC_OUTPUT_FIELD_PACK_EXTRA_UPSAMPLE_CHANNELS = 1 << 2;
+static const uint32_t MIC_OUTPUT_FIELD_I2S_CHANNEL_MAP = 1 << 3;
+static const uint32_t MIC_OUTPUT_FIELD_UPSAMPLE_CHANNEL_MAP = 1 << 4;
+static const uint32_t MIC_OUTPUT_FIELD_OVERWRITE_REF_WITH_IC_NS_OUTPUT = 1 << 9;
+static const uint32_t MIC_INPUT_FIELD_MIC_GAIN = 1 << 0;
+}
+
 enum Satellite1State : uint8_t {
   SAT_DETACHED_STATE,
   SAT_XMOS_CONNECTED_STATE,
@@ -153,6 +168,13 @@ class Satellite1 : public Component,
   }
 
   void xmos_hardware_reset();
+  void read_xmos_firmware() { this->dfu_get_fw_version_(); }
+
+  bool set_mic_gain(int mic_gain);
+  bool get_mic_gain(int *mic_gain_out);
+  bool set_mic_output_i2s_channel_map(uint8_t left, uint8_t right);
+  bool get_mic_output_i2s_channel_map(uint8_t *left, uint8_t *right);
+  bool set_mic_output_pack_extra_upsample_channels(bool enabled);
 
  protected:
   bool dfu_get_fw_version_();

@@ -1,0 +1,488 @@
+substitutions:
+  node_name: satellite1
+  friendly_name: Satellite1 Manufacturer Testing
+  log_level: debug
+  # build_esphome_firmware.sh replaces these with the locally built XMOS test
+  # image and checksum. The defaults retain standalone config validation.
+  xmos_fw_bin: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
+  xmos_fw_md5: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
+  test_sweep_file: https://raw.githubusercontent.com/FutureProofHomes/Satellite1-ESPHome/82820f24d611d7fbd571e617817d28852e9d5d11/esphome/components/online_testing/sweep_512.wav
+
+packages:
+  base: !include satellite1.base.yaml
+
+external_components:
+  - source:
+      type: local
+      path: ../esphome/components
+    components:
+      - fusb302b
+      - i2s_audio
+      - memory_flasher
+      - satellite1
+      - satellite1_radar
+      - tas2780
+      - improv_serial
+      - online_testing
+
+logger:
+  level: ${log_level}
+  deassert_rts_dtr: true
+  hardware_uart: USB_SERIAL_JTAG
+
+# TestOrbit connects without the production API encryption and must not have its
+# connection state overwrite explicit test-ring commands.
+api:
+  encryption: !remove
+  on_client_connected: !remove
+  on_client_disconnected: !remove
+
+wifi:
+  on_connect: !remove
+  on_disconnect: !remove
+
+# The harness owns the microphone while sweep detection is enabled. Remove local
+# button automations that can start production audio or reset flows during a test.
+binary_sensor:
+  - id: !extend btn_up
+    on_press:
+      - logger.log: "Button Up - pressed"
+  - id: !extend btn_down
+    on_press:
+      - logger.log: "Button Down - pressed"
+  - id: !extend btn_left
+    on_state:
+      - logger.log: "Button Left - pressed"
+  - id: !extend btn_action
+    on_press:
+      - logger.log: "Button Right - pressed"
+    on_release: !remove
+    on_multi_click: !remove
+
+audio_file:
+  - id: audio_test_sweep
+    file: ${test_sweep_file}
+
+memory_flasher:
+  - id: !extend xflash
+    embed_flash_image:
+      image_version: ${xmos_fw_version}
+      image_file: ${xmos_fw_bin}
+      md5_file: ${xmos_fw_md5}
+    on_flashing_success:
+      then:
+        - improv_serial.send_action_status:
+            action: "FLASH_XMOS_EMBEDDED"
+            status: 0
+    on_flashing_failed:
+      then:
+        - improv_serial.send_action_status:
+            action: "FLASH_XMOS_EMBEDDED"
+            status: 1
+    on_erasing_done:
+      then:
+        - improv_serial.send_action_status:
+            action: "ERASE_XMOS_FLASH"
+            status: 0
+
+online_testing:
+  id: mic_tester
+  microphone: sat1_mics
+  media_file: audio_test_sweep
+  channel: 0
+  on_detected:
+    then:
+      - logger.log: "Sweep detected"
+      - improv_serial.send_action_status:
+          action: "SWEEP_DETECTED"
+          status: 0
+
+improv_serial:
+  on_action:
+    then:
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("RESET_XMOS");
+          then:
+            - satellite1.xmos_hardware_reset:
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("ERASE_XMOS_FLASH");
+          then:
+            - memory_flasher.erase:
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("FLASH_XMOS_EMBEDDED");
+          then:
+            - memory_flasher.write_embedded_image:
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("READ_XMOS_FIRMWARE");
+          then:
+            - logger.log: "Reading XMOS firmware version via SPI"
+            - lambda: id(satellite1_id).read_xmos_firmware();
+
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("ENABLE_LED_RING");
+          then:
+            - light.turn_on:
+                id: voice_assistant_leds
+                brightness: 33%
+                red: 100%
+                green: 100%
+                blue: 100%
+                effect: None
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("SET_TEST_FAILED_STATE");
+          then:
+            - light.turn_on:
+                id: voice_assistant_leds
+                brightness: 33%
+                red: 100%
+                green: 0%
+                blue: 0%
+                effect: None
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("SET_WAITING_FOR_LINE_OUT");
+          then:
+            - light.turn_on:
+                id: voice_assistant_leds
+                brightness: 33%
+                red: 100%
+                green: 100%
+                blue: 100%
+                effect: "Jack Unplugged"
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("DISABLE_LED_RING");
+          then:
+            - lambda: id(test_instructions) = 0;
+            - light.turn_off: voice_assistant_leds
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("LED_INSTRUCTION_UP_BUTTON");
+          then:
+            - lambda: id(test_instructions) = 1;
+            - script.execute: control_leds_test_instructions
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("LED_INSTRUCTION_DOWN_BUTTON");
+          then:
+            - lambda: id(test_instructions) = 3;
+            - script.execute: control_leds_test_instructions
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("LED_INSTRUCTION_LEFT_BUTTON");
+          then:
+            - lambda: id(test_instructions) = 4;
+            - script.execute: control_leds_test_instructions
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("LED_INSTRUCTION_RIGHT_BUTTON");
+          then:
+            - lambda: id(test_instructions) = 2;
+            - script.execute: control_leds_test_instructions
+
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("LOG_CURR_TEMP_HUMIDITY");
+          then:
+            - logger.log:
+                format: "The AHT20 reports temperature %.1f and humidity %.1f"
+                args: ['id(temperature_sensor).state', 'id(humidity_sensor).state']
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("LOG_CURR_LIGHT_SENSOR");
+          then:
+            - logger.log:
+                format: "The light sensor reports: %.1f"
+                args: ['id(ambient_light).state']
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("LOG_LINE_OUT_STATE");
+          then:
+            - logger.log:
+                format: "The line out reports: %s"
+                args: ['id(line_out_sensor).state ? "connected" : "disconnected"']
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("LOG_MUTE_STATE");
+          then:
+            - logger.log:
+                format: "The hardware mute reports: %s"
+                args: ['id(btn_left).state ? "muted" : "unmuted"']
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("LOG_NETWORK_STATE");
+          then:
+            - if:
+                condition:
+                  wifi.connected:
+                then:
+                  - logger.log: "WiFi is connected"
+                else:
+                  - logger.log: "WiFi is NOT connected"
+
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("MEASURE_MIC_ENERGY");
+          then:
+            - lambda: |-
+                float energy = id(mic_tester).get_mic_energy();
+                ESP_LOGI("mic_energy", "Mic energy (ch=%d): %.6f", id(mic_tester).get_channel(), energy);
+
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("SET_UDP_AUDIO_TARGET");
+          then:
+            - lambda: |-
+                if (!x.get_url().has_value()) {
+                  ESP_LOGW("udp_audio", "SET_UDP_AUDIO_TARGET missing url");
+                  return;
+                }
+                std::string target = *x.get_url();
+                size_t colon = target.find(':');
+                if (colon == std::string::npos) {
+                  ESP_LOGW("udp_audio", "Invalid UDP target: %s", target.c_str());
+                  return;
+                }
+                std::string host = target.substr(0, colon);
+                int port = std::stoi(target.substr(colon + 1));
+                if (port <= 0 || port > 65535) {
+                  ESP_LOGW("udp_audio", "Invalid UDP port: %d", port);
+                  return;
+                }
+                id(mic_tester).set_udp_stream_target(host, static_cast<uint16_t>(port));
+                id(mic_tester).set_udp_stream_enabled(true);
+                ESP_LOGI("udp_audio", "UDP audio target set to %s:%d", host.c_str(), port);
+
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("STOP_UDP_STREAMING");
+          then:
+            - lambda: |-
+                id(mic_tester).set_udp_stream_enabled(false);
+                ESP_LOGI("udp_audio", "UDP audio streaming disabled");
+
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("SET_MIC_GAIN");
+          then:
+            - lambda: |-
+                if (!x.get_url().has_value()) {
+                  ESP_LOGW("mic_gain", "SET_MIC_GAIN missing url");
+                  return;
+                }
+                const std::string query = *x.get_url();
+                auto get_param = [](const std::string &src, const std::string &key, std::string *out) -> bool {
+                  const std::string needle = key + "=";
+                  size_t start = src.find(needle);
+                  if (start == std::string::npos)
+                    return false;
+                  start += needle.size();
+                  size_t end = src.find('&', start);
+                  if (end == std::string::npos)
+                    end = src.size();
+                  *out = src.substr(start, end - start);
+                  return true;
+                };
+                std::string value;
+                if (!get_param(query, "mic_gain", &value)) {
+                  ESP_LOGW("mic_gain", "SET_MIC_GAIN missing mic_gain");
+                  return;
+                }
+                char *end = nullptr;
+                long gain_long = std::strtol(value.c_str(), &end, 10);
+                if (end == value.c_str() || *end != '\0') {
+                  ESP_LOGW("mic_gain", "SET_MIC_GAIN invalid mic_gain: %s", value.c_str());
+                  return;
+                }
+                int gain = static_cast<int>(gain_long);
+                if (!id(satellite1_id).set_mic_gain(gain)) {
+                  ESP_LOGW("mic_gain", "SET_MIC_GAIN failed");
+                  return;
+                }
+                ESP_LOGI("mic_gain", "Mic gain set to %d", gain);
+
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("GET_MIC_GAIN");
+          then:
+            - lambda: |-
+                int gain = 0;
+                if (!id(satellite1_id).get_mic_gain(&gain)) {
+                  ESP_LOGW("mic_gain", "GET_MIC_GAIN failed");
+                  return;
+                }
+                ESP_LOGI("mic_gain", "Mic gain is %d", gain);
+
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("SET_I2S_CHANNEL_MAP");
+          then:
+            - lambda: |-
+                if (!x.get_url().has_value()) {
+                  ESP_LOGW("mic_i2s_map", "SET_I2S_CHANNEL_MAP missing url");
+                  return;
+                }
+                const std::string query = *x.get_url();
+                auto get_param = [](const std::string &src, const std::string &key, std::string *out) -> bool {
+                  const std::string needle = key + "=";
+                  size_t start = src.find(needle);
+                  if (start == std::string::npos)
+                    return false;
+                  start += needle.size();
+                  size_t end = src.find('&', start);
+                  if (end == std::string::npos)
+                    end = src.size();
+                  *out = src.substr(start, end - start);
+                  return true;
+                };
+                std::string left_value;
+                std::string right_value;
+                if (!get_param(query, "left", &left_value) || !get_param(query, "right", &right_value)) {
+                  ESP_LOGW("mic_i2s_map", "SET_I2S_CHANNEL_MAP missing left/right");
+                  return;
+                }
+                char *end_left = nullptr;
+                char *end_right = nullptr;
+                long left_long = std::strtol(left_value.c_str(), &end_left, 10);
+                long right_long = std::strtol(right_value.c_str(), &end_right, 10);
+                if (end_left == left_value.c_str() || *end_left != '\0' || end_right == right_value.c_str() || *end_right != '\0') {
+                  ESP_LOGW("mic_i2s_map", "SET_I2S_CHANNEL_MAP invalid values: %s/%s", left_value.c_str(), right_value.c_str());
+                  return;
+                }
+                int left = static_cast<int>(left_long);
+                int right = static_cast<int>(right_long);
+                if (left < 0 || left > 7 || right < 0 || right > 7) {
+                  ESP_LOGW("mic_i2s_map", "SET_I2S_CHANNEL_MAP out of range: %d/%d", left, right);
+                  return;
+                }
+                if (!id(satellite1_id).set_mic_output_i2s_channel_map(static_cast<uint8_t>(left), static_cast<uint8_t>(right))) {
+                  ESP_LOGW("mic_i2s_map", "SET_I2S_CHANNEL_MAP failed");
+                  return;
+                }
+                ESP_LOGI("mic_i2s_map", "I2S channel map set to left=%d right=%d", left, right);
+
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("GET_I2S_CHANNEL_MAP");
+          then:
+            - lambda: |-
+                uint8_t left = 0;
+                uint8_t right = 0;
+                if (!id(satellite1_id).get_mic_output_i2s_channel_map(&left, &right)) {
+                  ESP_LOGW("mic_i2s_map", "GET_I2S_CHANNEL_MAP failed");
+                  return;
+                }
+                ESP_LOGI("mic_i2s_map", "I2S channel map is left=%u right=%u", left, right);
+
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("SET_PACK_EXTRA_UPSAMPLE_CHANNELS");
+          then:
+            - lambda: |-
+                if (!x.get_url().has_value()) {
+                  ESP_LOGW("mic_i2s_map", "SET_PACK_EXTRA_UPSAMPLE_CHANNELS missing url");
+                  return;
+                }
+                const std::string query = *x.get_url();
+                auto get_param = [](const std::string &src, const std::string &key, std::string *out) -> bool {
+                  const std::string needle = key + "=";
+                  size_t start = src.find(needle);
+                  if (start == std::string::npos)
+                    return false;
+                  start += needle.size();
+                  size_t end = src.find('&', start);
+                  if (end == std::string::npos)
+                    end = src.size();
+                  *out = src.substr(start, end - start);
+                  return true;
+                };
+                std::string value;
+                if (!get_param(query, "enabled", &value)) {
+                  ESP_LOGW("mic_i2s_map", "SET_PACK_EXTRA_UPSAMPLE_CHANNELS missing enabled");
+                  return;
+                }
+                char *end = nullptr;
+                long enabled_long = std::strtol(value.c_str(), &end, 10);
+                if (end == value.c_str() || *end != '\0') {
+                  ESP_LOGW("mic_i2s_map", "SET_PACK_EXTRA_UPSAMPLE_CHANNELS invalid enabled: %s", value.c_str());
+                  return;
+                }
+                bool enabled = enabled_long != 0;
+                if (!id(satellite1_id).set_mic_output_pack_extra_upsample_channels(enabled)) {
+                  ESP_LOGW("mic_i2s_map", "SET_PACK_EXTRA_UPSAMPLE_CHANNELS failed");
+                  return;
+                }
+                ESP_LOGI("mic_i2s_map", "Pack extra upsample channels set to %s", enabled ? "true" : "false");
+
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("PLAY_SWEEP_SOUND");
+          then:
+            - script.execute:
+                id: play_sound
+                priority: false
+                sound_file: audio_test_sweep
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("SET_TO_LINE_OUT");
+          then:
+            - script.execute: activate_line_out
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("SET_TO_BUILT_IN_SPEAKER");
+          then:
+            - script.execute: activate_internal_speaker
+      - if:
+          condition:
+            lambda: return x.get_action().substr(0, 11) == std::string("SET_VOLUME_");
+          then:
+            - lambda: |-
+                const int volume_pct = std::stoi(x.get_action().substr(11));
+                id(external_media_player)->make_call().set_volume(volume_pct / 100.0f).perform();
+
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("ENABLE_SWEEP_DETECTED_LEFT");
+          then:
+            - delay: 500ms
+            - lambda: |-
+                id(mic_tester).set_microphone(id(sat1_mics));
+                id(mic_tester).set_channel(0);
+                if (!id(mic_tester).is_running()) {
+                  id(mic_tester).request_start(true);
+                } else {
+                  id(mic_tester).pause_detection();
+                  id(mic_tester).reset_detection();
+                  id(mic_tester).request_start(true);
+                }
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("DISABLE_SWEEP_DETECTED_LEFT");
+          then:
+            - lambda: id(mic_tester).pause_detection();
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("ENABLE_SWEEP_DETECTED_RIGHT");
+          then:
+            - delay: 500ms
+            - lambda: |-
+                id(mic_tester).set_channel(1);
+                id(mic_tester).set_microphone(id(sat1_mics));
+                if (!id(mic_tester).is_running()) {
+                  id(mic_tester).request_start(true);
+                } else {
+                  id(mic_tester).pause_detection();
+                  id(mic_tester).reset_detection();
+                  id(mic_tester).request_start(true);
+                }
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("DISABLE_SWEEP_DETECTED_RIGHT");
+          then:
+            - lambda: id(mic_tester).pause_detection();

@@ -1,4 +1,9 @@
 globals:
+  # Used by the manufacturer test overlay to reserve the ring for button instructions.
+  - id: test_instructions
+    type: int
+    restore_value: no
+    initial_value: '0'
   # Global index for our LEDs. So that switching between different animation does not lead to unwanted effects.
   - id: global_led_animation_index
     type: int
@@ -457,6 +462,29 @@ light:
               }
             }
             index = (index + 1);
+      - addressable_lambda:
+          name: "Test Instructions"
+          update_interval: 100ms
+          lambda: |-
+            Color indication_color(255, 255, 255);
+            it.all() = Color::BLACK;
+            if (id(test_instructions) == 1) {
+              it[23] = indication_color;
+              it[0] = indication_color;
+              it[1] = indication_color;
+            } else if (id(test_instructions) == 2) {
+              it[5] = indication_color;
+              it[6] = indication_color;
+              it[7] = indication_color;
+            } else if (id(test_instructions) == 3) {
+              it[11] = indication_color;
+              it[12] = indication_color;
+              it[13] = indication_color;
+            } else if (id(test_instructions) == 4) {
+              it[17] = indication_color;
+              it[18] = indication_color;
+              it[19] = indication_color;
+            }
 
 script:
   # Master script controlling the LEDs, based on different conditions : initialization in progress, wifi and api connected and voice assistant phase.
@@ -473,6 +501,8 @@ script:
             id(control_leds_xmos_flasher_state_update).execute();
           } else if (id(improv_ble_in_progress)) {
             id(control_leds_improv_ble_state).execute();
+          } else if (id(test_instructions) > 0) {
+            id(control_leds_test_instructions).execute();
           } else if (id(init_in_progress)) {
             id(control_leds_init_state).execute();
           } else if (!id(wifi_id).is_connected() || !id(api_id).is_connected()){
@@ -736,3 +766,10 @@ script:
             - delay: 1s
             - light.turn_off:
                 id: voice_assistant_leds
+
+  - id: control_leds_test_instructions
+    then:
+      - light.turn_on:
+          brightness: !lambda return min(max(id(led_ring).current_values.get_brightness(), 0.2f) + 0.1f, 1.0f);
+          id: voice_assistant_leds
+          effect: "Test Instructions"

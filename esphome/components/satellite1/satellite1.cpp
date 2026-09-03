@@ -2,10 +2,28 @@
 #include "esp_rom_gpio.h"
 #include "esphome/core/log.h"
 
+#include <cstdint>
+
 namespace esphome {
 namespace satellite1 {
 
 static const char *TAG = "Satellite1";
+
+static inline void write_u32_le(uint8_t *dst, uint32_t value) {
+  dst[0] = value & 0xFF;
+  dst[1] = (value >> 8) & 0xFF;
+  dst[2] = (value >> 16) & 0xFF;
+  dst[3] = (value >> 24) & 0xFF;
+}
+
+static inline void write_i32_le(uint8_t *dst, int32_t value) {
+  write_u32_le(dst, static_cast<uint32_t>(value));
+}
+
+static inline int32_t read_i32_le(const uint8_t *src) {
+  return static_cast<int32_t>(static_cast<uint32_t>(src[0]) | (static_cast<uint32_t>(src[1]) << 8) |
+                              (static_cast<uint32_t>(src[2]) << 16) | (static_cast<uint32_t>(src[3]) << 24));
+}
 
 void Satellite1::setup() {
   this->spi_setup();
@@ -94,14 +112,18 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
   }
 
   uint8_t send_recv_buf[256 + 3] = {0};
-  int status_report_dummies = std::max<int>(0, DC_STATUS_REGISTER::REGISTER_LEN - payload_len - 1);
+  const bool is_read = (command & CONTROL_CMD_READ_BIT) != 0;
+  const uint8_t read_request_len = payload_len + (is_read ? 1 : 0);
+  int status_report_dummies = std::max<int>(0, DC_STATUS_REGISTER::REGISTER_LEN - read_request_len - 1);
 
   int attempts = 3;
   do {
     send_recv_buf[0] = resource_id;
     send_recv_buf[1] = command;
-    send_recv_buf[2] = payload_len + !!(command & CONTROL_CMD_READ_BIT);
-    memcpy(&send_recv_buf[3], payload, payload_len);
+    send_recv_buf[2] = read_request_len;
+    if (payload_len > 0 && payload != nullptr) {
+      memcpy(&send_recv_buf[3], payload, payload_len);
+    }
     this->enable();
     this->transfer_array(&send_recv_buf[0], payload_len + 3 + status_report_dummies);
     this->disable();
@@ -123,21 +145,44 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
     uint8_t *arr = this->dc_status_register_;
   }
 
-  if (command & CONTROL_CMD_READ_BIT) {
-    attempts = 3;
+  if (is_read) {
+    attempts = 10;
     do {
-      memset(send_recv_buf, 0, payload_len + 3);
+      const uint8_t read_len = std::max<uint8_t>(3, read_request_len);
+      memset(send_recv_buf, 0, read_len);
       this->enable();
-      this->transfer_array(&send_recv_buf[0], payload_len + 3);
+      this->transfer_array(&send_recv_buf[0], read_len);
       this->disable();
-      vTaskDelay(1);
-    } while (send_recv_buf[0] == CONTROL_COMMAND_IGNORED_IN_DEVICE && attempts-- > 0);
 
-    if (send_recv_buf[0] == CONTROL_COMMAND_IGNORED_IN_DEVICE) {
-      return false;
-    }
+      if (send_recv_buf[0] == CONTROL_COMMAND_IGNORED_IN_DEVICE) {
+        vTaskDelay(1);
+        continue;
+      }
 
-    memcpy(payload, &send_recv_buf[1], payload_len);
+      const bool payload_available = (send_recv_buf[0] == DC_RET_STATUS::PAYLOAD_AVAILABLE);
+      const bool legacy_dfu_payload = (resource_id == DC_RESOURCE::DFU_CONTROLLER && command == DC_DFU_CMD::GET_VERSION &&
+                                       send_recv_buf[0] == 0);
+      const bool legacy_audio_payload = (send_recv_buf[0] == 0 &&
+                                         (resource_id == DC_AUDIO_PIPELINE::MIC_OUTPUT_SETTINGS_RES_ID ||
+                                          resource_id == DC_AUDIO_PIPELINE::SPEAKER_SETTINGS_RES_ID ||
+                                          resource_id == DC_AUDIO_PIPELINE::MIC_INPUT_SETTINGS_RES_ID));
+      if (!(payload_available || legacy_dfu_payload || legacy_audio_payload)) {
+        vTaskDelay(1);
+        continue;
+      }
+
+      if (read_len < (payload_len + 1)) {
+        vTaskDelay(1);
+        continue;
+      }
+
+      if (payload_len > 0 && payload != nullptr) {
+        memcpy(payload, &send_recv_buf[1], payload_len);
+      }
+      return true;
+    } while (attempts-- > 0);
+
+    return false;
   }
 
   return true;
@@ -181,6 +226,56 @@ void Satellite1::xmos_hardware_reset() {
   delay(100);
   this->xmos_rst_pin_->digital_write(0);
   delay(100);
+}
+
+bool Satellite1::set_mic_gain(int mic_gain) {
+  uint8_t payload[20] = {0};
+  write_u32_le(payload, DC_AUDIO_PIPELINE::MIC_INPUT_FIELD_MIC_GAIN);
+  write_i32_le(payload + 4, static_cast<int32_t>(mic_gain));
+  return this->transfer(DC_AUDIO_PIPELINE::MIC_INPUT_SETTINGS_RES_ID, DC_AUDIO_PIPELINE::CMD_SET_SETTINGS_PARTIAL,
+                        payload, sizeof(payload));
+}
+
+bool Satellite1::get_mic_gain(int *mic_gain_out) {
+  if (mic_gain_out == nullptr)
+    return false;
+  uint8_t payload[16] = {0};
+  if (!this->transfer(DC_AUDIO_PIPELINE::MIC_INPUT_SETTINGS_RES_ID, DC_AUDIO_PIPELINE::CMD_GET_SETTINGS, payload,
+                      sizeof(payload))) {
+    return false;
+  }
+  *mic_gain_out = read_i32_le(payload);
+  return true;
+}
+
+bool Satellite1::set_mic_output_i2s_channel_map(uint8_t left, uint8_t right) {
+  uint8_t payload[16] = {0};
+  write_u32_le(payload, DC_AUDIO_PIPELINE::MIC_OUTPUT_FIELD_I2S_CHANNEL_MAP);
+  payload[5] = left;
+  payload[6] = right;
+  return this->transfer(DC_AUDIO_PIPELINE::MIC_OUTPUT_SETTINGS_RES_ID, DC_AUDIO_PIPELINE::CMD_SET_SETTINGS_PARTIAL,
+                        payload, sizeof(payload));
+}
+
+bool Satellite1::get_mic_output_i2s_channel_map(uint8_t *left, uint8_t *right) {
+  if (left == nullptr || right == nullptr)
+    return false;
+  uint8_t payload[9] = {0};
+  if (!this->transfer(DC_AUDIO_PIPELINE::MIC_OUTPUT_SETTINGS_RES_ID, DC_AUDIO_PIPELINE::CMD_GET_SETTINGS, payload,
+                      sizeof(payload))) {
+    return false;
+  }
+  *left = payload[1];
+  *right = payload[2];
+  return true;
+}
+
+bool Satellite1::set_mic_output_pack_extra_upsample_channels(bool enabled) {
+  uint8_t payload[16] = {0};
+  write_u32_le(payload, DC_AUDIO_PIPELINE::MIC_OUTPUT_FIELD_PACK_EXTRA_UPSAMPLE_CHANNELS);
+  payload[4] = enabled ? 1 : 0;
+  return this->transfer(DC_AUDIO_PIPELINE::MIC_OUTPUT_SETTINGS_RES_ID, DC_AUDIO_PIPELINE::CMD_SET_SETTINGS_PARTIAL,
+                        payload, sizeof(payload));
 }
 
 }  // namespace satellite1
