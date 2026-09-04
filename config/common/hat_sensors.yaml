@@ -21,6 +21,7 @@ sensor:
     update_interval: 60s
 
   - platform: ltr_als_ps
+    id: ambient_light_component
     address: 0x29
     type: ALS
     update_interval: 60s

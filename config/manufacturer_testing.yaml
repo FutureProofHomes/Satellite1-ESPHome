@@ -230,6 +230,7 @@ improv_serial:
           condition:
             lambda: return x.get_action() == std::string("LOG_CURR_LIGHT_SENSOR");
           then:
+            - component.update: ambient_light_component
             - logger.log:
                 format: "The light sensor reports: %.1f"
                 args: ['id(ambient_light).state']
