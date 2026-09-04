@@ -143,6 +143,20 @@ improv_serial:
 
       - if:
           condition:
+            lambda: return x.get_action() == std::string("READ_XMOS_FLASH_UID");
+          then:
+            - logger.log: "Reading XMOS flash UID via SPI"
+            - lambda: |-
+                if (!id(satellite1_id).read_xmos_flash_uid()) {
+                  ESP_LOGW("xmos_uid", "READ_XMOS_FLASH_UID failed");
+                  return;
+                }
+                const uint8_t *uid = id(satellite1_id).xmos_flash_uid;
+                ESP_LOGI("xmos_uid", "XMOS flash UID: %02X %02X %02X %02X %02X %02X %02X %02X",
+                         uid[0], uid[1], uid[2], uid[3], uid[4], uid[5], uid[6], uid[7]);
+
+      - if:
+          condition:
             lambda: return x.get_action() == std::string("ENABLE_LED_RING");
           then:
             - light.turn_on:

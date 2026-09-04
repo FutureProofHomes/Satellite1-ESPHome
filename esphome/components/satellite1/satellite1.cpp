@@ -36,7 +36,9 @@ void Satellite1::setup() {
   }
 
   memset(this->xmos_fw_version, 0, 5);
+  memset(this->xmos_flash_uid, 0, sizeof(this->xmos_flash_uid));
   this->dfu_get_fw_version_();
+  this->dfu_get_flash_uid_();
 }
 
 void Satellite1::dump_config() {
@@ -162,11 +164,13 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
       const bool payload_available = (send_recv_buf[0] == DC_RET_STATUS::PAYLOAD_AVAILABLE);
       const bool legacy_dfu_payload = (resource_id == DC_RESOURCE::DFU_CONTROLLER && command == DC_DFU_CMD::GET_VERSION &&
                                        send_recv_buf[0] == 0);
+      const bool legacy_dfu_flash_uid_payload =
+          (resource_id == DC_RESOURCE::DFU_CONTROLLER && command == DC_DFU_CMD::GET_FLASH_UID && send_recv_buf[0] == 0);
       const bool legacy_audio_payload = (send_recv_buf[0] == 0 &&
                                          (resource_id == DC_AUDIO_PIPELINE::MIC_OUTPUT_SETTINGS_RES_ID ||
                                           resource_id == DC_AUDIO_PIPELINE::SPEAKER_SETTINGS_RES_ID ||
                                           resource_id == DC_AUDIO_PIPELINE::MIC_INPUT_SETTINGS_RES_ID));
-      if (!(payload_available || legacy_dfu_payload || legacy_audio_payload)) {
+      if (!(payload_available || legacy_dfu_payload || legacy_dfu_flash_uid_payload || legacy_audio_payload)) {
         vTaskDelay(1);
         continue;
       }
@@ -210,6 +214,24 @@ bool Satellite1::dfu_get_fw_version_() {
   memcpy(this->xmos_fw_version, version_resp, 5);
   ESP_LOGI(TAG, "XMOS Firmware Version: %s ", this->status_string().c_str());
 
+  return true;
+}
+
+bool Satellite1::dfu_get_flash_uid_() {
+  uint8_t uid_resp[8] = {0};
+  if (!this->transfer(DC_RESOURCE::DFU_CONTROLLER, DC_DFU_CMD::GET_FLASH_UID, uid_resp, sizeof(uid_resp))) {
+    ESP_LOGW(TAG, "Requesting XMOS flash UID failed");
+    return false;
+  }
+
+  memcpy(this->xmos_flash_uid, uid_resp, sizeof(this->xmos_flash_uid));
+#ifdef DEBUG_SPI_DEVICE_CONTROL
+  ESP_LOGI(TAG, "XMOS Flash UID: %s", format_bytes(this->xmos_flash_uid, sizeof(this->xmos_flash_uid),
+                                                     sizeof(this->xmos_flash_uid))
+                                        .c_str());
+#else
+  ESP_LOGI(TAG, "XMOS Flash UID read successfully");
+#endif
   return true;
 }
 
