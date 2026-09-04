@@ -225,13 +225,9 @@ bool Satellite1::dfu_get_flash_uid_() {
   }
 
   memcpy(this->xmos_flash_uid, uid_resp, sizeof(this->xmos_flash_uid));
-#ifdef DEBUG_SPI_DEVICE_CONTROL
-  ESP_LOGI(TAG, "XMOS Flash UID: %s", format_bytes(this->xmos_flash_uid, sizeof(this->xmos_flash_uid),
-                                                     sizeof(this->xmos_flash_uid))
-                                        .c_str());
-#else
-  ESP_LOGI(TAG, "XMOS Flash UID read successfully");
-#endif
+  ESP_LOGI(TAG, "XMOS Flash UID: %02x %02x %02x %02x %02x %02x %02x %02x", this->xmos_flash_uid[0],
+           this->xmos_flash_uid[1], this->xmos_flash_uid[2], this->xmos_flash_uid[3], this->xmos_flash_uid[4],
+           this->xmos_flash_uid[5], this->xmos_flash_uid[6], this->xmos_flash_uid[7]);
   return true;
 }
 
