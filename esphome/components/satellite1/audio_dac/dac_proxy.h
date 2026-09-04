@@ -38,7 +38,9 @@ class DACProxy : public audio_dac::AudioDac, public Component, public Satellite1
 
   void set_lineout_dac(audio_dac::AudioDac *pcm5122) { this->pcm5122_ = pcm5122; }
   void set_speaker_dac(audio_dac::AudioDac *tas2780) { this->tas2780_ = tas2780; }
-  void add_on_state_callback(std::function<void()> &&callback);
+  template<typename F> void add_on_state_callback(F &&callback) {
+    this->state_callback_.add(std::forward<F>(callback));
+  }
 
   void activate();
   void activate_line_out();

@@ -341,6 +341,7 @@ FLASH_ACTION_SCHEMA = cv.All(
     "memory_flasher.write_image",
     FlashAction,
     FLASH_ACTION_SCHEMA,
+    synchronous=True,
 )
 async def flash_image_action_to_code(config, action_id, template_arg, args):
     flasher = await cg.get_variable(config[CONF_FLASHER_ID])
@@ -369,7 +370,9 @@ FlASH_EMBEDDED_ACTION_SCHEMA = automation.maybe_simple_id(
 @automation.register_action(
     "memory_flasher.write_embedded_image", 
     FlashEmbeddedAction, 
-    FlASH_EMBEDDED_ACTION_SCHEMA)
+    FlASH_EMBEDDED_ACTION_SCHEMA,
+    synchronous=True,
+)
 async def flash_embedded_image_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_FLASHER_ID])
@@ -384,7 +387,9 @@ ERASE_MEMORY_ACTION_SCHEMA = automation.maybe_simple_id(
 @automation.register_action(
     "memory_flasher.erase", 
     EraseAction, 
-    ERASE_MEMORY_ACTION_SCHEMA)
+    ERASE_MEMORY_ACTION_SCHEMA,
+    synchronous=True,
+)
 async def erase_memory_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_FLASHER_ID])

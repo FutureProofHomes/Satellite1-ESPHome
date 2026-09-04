@@ -261,6 +261,7 @@ uint8_t get_channel_select_reg_val(ChannelSelect channel) {
 
 void TAS2780::setup() {
   this->init();
+  this->disable_loop();
   // set to software shutdown
   this->reg(TAS2780_MODE_CTRL) =
       (TAS2780_MODE_CTRL_BOP_SRC__PVDD_UVLO & ~TAS2780_MODE_CTRL_MODE_MASK) | TAS2780_MODE_CTRL_MODE__SFTW_SHTDWN;
@@ -343,6 +344,7 @@ void TAS2780::activate(uint8_t power_mode) {
   // activate
   this->reg(TAS2780_MODE_CTRL) =
       (TAS2780_MODE_CTRL_BOP_SRC__PVDD_UVLO & ~TAS2780_MODE_CTRL_MODE_MASK) | TAS2780_MODE_CTRL_MODE__ACTIVE;
+  this->enable_loop();
 }
 
 void TAS2780::deactivate() {
@@ -350,6 +352,7 @@ void TAS2780::deactivate() {
   // set to software shutdown
   this->reg(TAS2780_MODE_CTRL) =
       (TAS2780_MODE_CTRL_BOP_SRC__PVDD_UVLO & ~TAS2780_MODE_CTRL_MODE_MASK) | TAS2780_MODE_CTRL_MODE__SFTW_SHTDWN;
+  this->disable_loop();
 }
 
 void TAS2780::reset() {

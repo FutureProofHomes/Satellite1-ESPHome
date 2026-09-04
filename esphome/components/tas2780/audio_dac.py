@@ -46,19 +46,19 @@ CONFIG_SCHEMA = (
 TAS2780_ACTION_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.use_id(tas2780),
-        cv.Optional(CONF_MODE, default=2) : cv.int_range(0,3)
+        cv.Optional(CONF_MODE, default=2) : cv.templatable(cv.int_range(min=0, max=3)),
     }
 )
 
-@automation.register_action("tas2780.deactivate", DeactivateAction, TAS2780_ACTION_SCHEMA)
-@automation.register_action("tas2780.reset", RestAction, TAS2780_ACTION_SCHEMA)
+@automation.register_action("tas2780.deactivate", DeactivateAction, TAS2780_ACTION_SCHEMA, synchronous=True)
+@automation.register_action("tas2780.reset", RestAction, TAS2780_ACTION_SCHEMA, synchronous=True)
 async def tas2780_action(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
     return var
 
-@automation.register_action("tas2780.activate", ActivateAction, TAS2780_ACTION_SCHEMA)
-async def tas2780_action(config, action_id, template_arg, args):
+@automation.register_action("tas2780.activate", ActivateAction, TAS2780_ACTION_SCHEMA, synchronous=True)
+async def tas2780_activate_action(config, action_id, template_arg, args):
     tas2780 = await cg.get_variable(config[CONF_ID])
     var = cg.new_Pvariable(action_id, template_arg, tas2780)
     mode_ = config.get(CONF_MODE)
@@ -79,15 +79,15 @@ TAS2780_UPDATE_CONFIG_SCHEMA = cv.Schema(
 )
 
 
-@automation.register_action("tas2780.update_config", UpdateConfigAction, TAS2780_UPDATE_CONFIG_SCHEMA)
+@automation.register_action("tas2780.update_config", UpdateConfigAction, TAS2780_UPDATE_CONFIG_SCHEMA, synchronous=True)
 async def tas2780_action(config, action_id, template_arg, args):
     tas2780 = await cg.get_variable(config[CONF_ID])
     var = cg.new_Pvariable(action_id, template_arg, tas2780)
     vol_min_ = config.get(CONF_VOL_RNG_MIN)
-    template_ = await cg.templatable(vol_min_, args, float)
+    template_ = await cg.templatable(vol_min_, args, cg.float_)
     cg.add(var.set_vol_range_min(template_))
     vol_max_ = config.get(CONF_VOL_RNG_MAX)
-    template_ = await cg.templatable(vol_max_, args, float)
+    template_ = await cg.templatable(vol_max_, args, cg.float_)
     cg.add(var.set_vol_range_max(template_))
     if CONF_AMP_LEVEL_IDX in config:
         amp_level_idx = config.get(CONF_AMP_LEVEL_IDX)

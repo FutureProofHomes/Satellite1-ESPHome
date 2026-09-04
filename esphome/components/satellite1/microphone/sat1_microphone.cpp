@@ -147,7 +147,6 @@ void Sat1Microphone::loop() {
 void Sat1Microphone::configure_stream_settings_() {
   uint8_t channel_count = this->num_of_channels();
   uint8_t bits_per_sample = 32;
-#ifndef USE_I2S_LEGACY
   if (this->slot_bit_width_ != I2S_SLOT_BIT_WIDTH_AUTO) {
     bits_per_sample = this->slot_bit_width_;
   }
@@ -155,7 +154,6 @@ void Sat1Microphone::configure_stream_settings_() {
   if (this->slot_mode_ == I2S_SLOT_MODE_STEREO) {
     channel_count = 2;
   }
-#endif
   // report 16kHz sample rate, as the 48kHz i2s samples will be subsampled to 16kHz
   this->audio_stream_info_ = audio::AudioStreamInfo(bits_per_sample, channel_count, 16000);
 }
@@ -173,12 +171,8 @@ bool Sat1Microphone::stop_driver_() { return this->stop_i2s_channel_(); }
 
 size_t Sat1Microphone::read_(uint8_t *buf, size_t len, TickType_t ticks_to_wait) {
   size_t bytes_read = 0;
-#ifdef USE_I2S_LEGACY
-  esp_err_t err = i2s_read(this->parent_->get_port(), buf, len, &bytes_read, ticks_to_wait);
-#else
   // i2s_channel_read expects the timeout value in ms, not ticks
   esp_err_t err = i2s_channel_read(this->parent_->get_rx_handle(), buf, len, &bytes_read, pdTICKS_TO_MS(ticks_to_wait));
-#endif
   if ((err != ESP_OK) && ((err != ESP_ERR_TIMEOUT) || (ticks_to_wait != 0))) {
     // Ignore ESP_ERR_TIMEOUT if ticks_to_wait = 0, as it will read the data on the next call
     if (!this->status_has_warning()) {

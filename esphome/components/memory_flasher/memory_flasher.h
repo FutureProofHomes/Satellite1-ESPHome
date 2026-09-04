@@ -148,12 +148,10 @@ class MemoryFlasher : public Component {
   void set_md5_url(const std::string &md5_url);
   void set_md5(const std::string &md5) { this->md5_expected_ = md5; }
   void set_url(const std::string &url);
-
-  void add_on_state_callback(std::function<void()> &&callback) { this->state_callback_.add(std::move(callback)); }
-  void publish() {
-    // this->defer([this]() { this->state_callback_.call(); });
-    this->state_callback_.call();
+  template<typename F> void add_on_state_callback(F &&callback) {
+    this->state_callback_.add(std::forward<F>(callback));
   }
+  void publish() { this->state_callback_.call(); }
 
  protected:
   virtual void publish_progress_() {}

@@ -4,17 +4,9 @@
 # # https://deploy-preview-3327--esphome.netlify.app/components/sensor/ld2450.html?highlight=ld2450
 # ===========================================================================================
 
-uart:
-  id: uart_ld2450
-  tx_pin: GPIO43
-  rx_pin: GPIO44
-  baud_rate: 256000
-  parity: NONE
-  stop_bits: 1
-
 ld2450:
   id: ld2450_radar
-  uart_id: uart_ld2450
+  uart_id: uart_mmwave
 
 binary_sensor:
   - platform: ld2450
