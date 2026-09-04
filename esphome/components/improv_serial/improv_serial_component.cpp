@@ -45,6 +45,10 @@ bool ImprovSerialComponent::handle_network_action_(const ExtAction &action) {
     this->send_action_status(name, 0);
     return true;
   }
+  if (name == "GET_WIFI_STATUS") {
+    this->send_action_status(name, wifi::global_wifi_component->is_connected() ? 0 : 1);
+    return true;
+  }
 #endif
 #ifdef USE_ETHERNET
   if (name == "ENABLE_ETHERNET") {
