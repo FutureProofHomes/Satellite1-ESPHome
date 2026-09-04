@@ -25,11 +25,18 @@ external_components:
       - tas2780
       - improv_serial
       - online_testing
+      - iperf
 
 logger:
   level: ${log_level}
   deassert_rts_dtr: true
   hardware_uart: USB_SERIAL_JTAG
+
+esp32:
+  framework:
+    sdkconfig_options:
+      # The ESP-IDF iperf task otherwise starves ESPHome's loop task during TCP sends.
+      CONFIG_IPERF_TRAFFIC_TASK_PRIORITY: "1"
 
 # TestOrbit connects without the production API encryption and must not have its
 # connection state overwrite explicit test-ring commands.
@@ -37,6 +44,17 @@ api:
   encryption: !remove
   on_client_connected: !remove
   on_client_disconnected: !remove
+  actions:
+    - action: start_iperf_client
+      variables:
+        server: string
+        duration: int
+      then:
+        - iperf.start_client:
+            server: !lambda return server;
+            duration: !lambda return duration;
+
+iperf:
 
 wifi:
   on_connect: !remove
