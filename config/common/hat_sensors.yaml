@@ -25,9 +25,10 @@ sensor:
     type: ALS
     update_interval: 60s
 
+    # short variant of sensor definition:
     ambient_light:
-      name: "Ambient Light"
       id: ambient_light
+      name: "Ambient Light"
 
 number:
   # Dynamically adjust the temperature and humidity offset.  Credit goes to Lewis over @ EverythingSmartHome.  I admire your work and hope to meet someday.  Beers on me.

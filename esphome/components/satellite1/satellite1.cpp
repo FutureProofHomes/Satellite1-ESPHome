@@ -4,7 +4,6 @@
 
 #include <cstdint>
 
-
 namespace esphome {
 namespace satellite1 {
 
@@ -26,29 +25,6 @@ static inline int32_t read_i32_le(const uint8_t *src) {
                               (static_cast<uint32_t>(src[2]) << 16) | (static_cast<uint32_t>(src[3]) << 24));
 }
 
-#ifdef DEBUG_SPI_DEVICE_CONTROL
-static std::string format_bytes(const uint8_t *data, size_t len, size_t limit = 12) {
-  if (data == nullptr || len == 0) {
-    return "";
-  }
-  const size_t shown = len < limit ? len : limit;
-  std::string out;
-  out.reserve(shown * 3 + 4);
-  for (size_t i = 0; i < shown; ++i) {
-    char buf[4];
-    snprintf(buf, sizeof(buf), "%02x", data[i]);
-    out.append(buf);
-    if (i + 1 < shown) {
-      out.push_back(' ');
-    }
-  }
-  if (len > shown) {
-    out.append(" ...");
-  }
-  return out;
-}
-#endif
-
 void Satellite1::setup() {
   this->spi_setup();
   this->enable();
@@ -60,7 +36,9 @@ void Satellite1::setup() {
   }
 
   memset(this->xmos_fw_version, 0, 5);
+  memset(this->xmos_flash_uid, 0, sizeof(this->xmos_flash_uid));
   this->dfu_get_fw_version_();
+  this->dfu_get_flash_uid_();
 }
 
 void Satellite1::dump_config() {
@@ -148,16 +126,9 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
     if (payload_len > 0 && payload != nullptr) {
       memcpy(&send_recv_buf[3], payload, payload_len);
     }
-#ifdef DEBUG_SPI_DEVICE_CONTROL
-    ESP_LOGD(TAG, "SPI TX hdr res=%u cmd=0x%02x len=%u data=%s", resource_id, command, read_request_len,
-             format_bytes(send_recv_buf, payload_len + 3).c_str());
-#endif
     this->enable();
     this->transfer_array(&send_recv_buf[0], payload_len + 3 + status_report_dummies);
     this->disable();
-#ifdef DEBUG_SPI_DEVICE_CONTROL
-    ESP_LOGD(TAG, "SPI RX phase1 data=%s", format_bytes(send_recv_buf, payload_len + 3 + status_report_dummies).c_str());
-#endif
     vTaskDelay(1);
   } while (send_recv_buf[0] == CONTROL_COMMAND_IGNORED_IN_DEVICE && attempts-- > 0);
 
@@ -184,9 +155,6 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
       this->enable();
       this->transfer_array(&send_recv_buf[0], read_len);
       this->disable();
-#ifdef DEBUG_SPI_DEVICE_CONTROL
-      ESP_LOGD(TAG, "SPI RX phase2 data=%s", format_bytes(send_recv_buf, read_len).c_str());
-#endif
 
       if (send_recv_buf[0] == CONTROL_COMMAND_IGNORED_IN_DEVICE) {
         vTaskDelay(1);
@@ -196,11 +164,13 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
       const bool payload_available = (send_recv_buf[0] == DC_RET_STATUS::PAYLOAD_AVAILABLE);
       const bool legacy_dfu_payload = (resource_id == DC_RESOURCE::DFU_CONTROLLER && command == DC_DFU_CMD::GET_VERSION &&
                                        send_recv_buf[0] == 0);
+      const bool legacy_dfu_flash_uid_payload =
+          (resource_id == DC_RESOURCE::DFU_CONTROLLER && command == DC_DFU_CMD::GET_FLASH_UID && send_recv_buf[0] == 0);
       const bool legacy_audio_payload = (send_recv_buf[0] == 0 &&
                                          (resource_id == DC_AUDIO_PIPELINE::MIC_OUTPUT_SETTINGS_RES_ID ||
                                           resource_id == DC_AUDIO_PIPELINE::SPEAKER_SETTINGS_RES_ID ||
                                           resource_id == DC_AUDIO_PIPELINE::MIC_INPUT_SETTINGS_RES_ID));
-      if (!(payload_available || legacy_dfu_payload || legacy_audio_payload)) {
+      if (!(payload_available || legacy_dfu_payload || legacy_dfu_flash_uid_payload || legacy_audio_payload)) {
         vTaskDelay(1);
         continue;
       }
@@ -244,6 +214,24 @@ bool Satellite1::dfu_get_fw_version_() {
   memcpy(this->xmos_fw_version, version_resp, 5);
   ESP_LOGI(TAG, "XMOS Firmware Version: %s ", this->status_string().c_str());
 
+  return true;
+}
+
+bool Satellite1::dfu_get_flash_uid_() {
+  uint8_t uid_resp[8] = {0};
+  if (!this->transfer(DC_RESOURCE::DFU_CONTROLLER, DC_DFU_CMD::GET_FLASH_UID, uid_resp, sizeof(uid_resp))) {
+    ESP_LOGW(TAG, "Requesting XMOS flash UID failed");
+    return false;
+  }
+
+  memcpy(this->xmos_flash_uid, uid_resp, sizeof(this->xmos_flash_uid));
+#ifdef DEBUG_SPI_DEVICE_CONTROL
+  ESP_LOGI(TAG, "XMOS Flash UID: %s", format_bytes(this->xmos_flash_uid, sizeof(this->xmos_flash_uid),
+                                                     sizeof(this->xmos_flash_uid))
+                                        .c_str());
+#else
+  ESP_LOGI(TAG, "XMOS Flash UID read successfully");
+#endif
   return true;
 }
 

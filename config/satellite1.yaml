@@ -99,6 +99,7 @@ external_components:
       path: ../esphome/components
     components:
       - fusb302b
+      - ethernet
       - i2s_audio
       - memory_flasher
       - satellite1

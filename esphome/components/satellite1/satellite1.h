@@ -50,6 +50,7 @@ enum register_id {
 namespace DC_DFU_CMD {
 enum dc_dfu_cmd_id {
   GET_VERSION = (88 | CONTROL_CMD_READ_BIT),
+  GET_FLASH_UID = (90 | CONTROL_CMD_READ_BIT),
 };
 }
 
@@ -80,6 +81,7 @@ class Satellite1 : public Component,
  public:
   Satellite1State state{SAT_DETACHED_STATE};
   uint8_t xmos_fw_version[5];
+  uint8_t xmos_flash_uid[8];
   std::string status_string();
   uint8_t connection_attempts{0};
 
@@ -169,6 +171,7 @@ class Satellite1 : public Component,
 
   void xmos_hardware_reset();
   void read_xmos_firmware() { this->dfu_get_fw_version_(); }
+  bool read_xmos_flash_uid() { return this->dfu_get_flash_uid_(); }
 
   bool set_mic_gain(int mic_gain);
   bool get_mic_gain(int *mic_gain_out);
@@ -178,6 +181,7 @@ class Satellite1 : public Component,
 
  protected:
   bool dfu_get_fw_version_();
+  bool dfu_get_flash_uid_();
   bool check_for_xmos_();
   CallbackManager<void()> state_callback_{};
 

@@ -1,20 +1,18 @@
 globals:
+  # Used by the manufacturer test overlay to reserve the ring for button instructions.
+  - id: test_instructions
+    type: int
+    restore_value: no
+    initial_value: '0'
   # Global index for our LEDs. So that switching between different animation does not lead to unwanted effects.
   - id: global_led_animation_index
     type: int
     restore_value: no
     initial_value: '0'
-  # Global variable tracking if the jack has been plugged touched.
-  - id: jack_plugged_recently
-    type: bool
+  - id: led_anim_speed
+    type: float
     restore_value: no
-    initial_value: 'false'
-  # Global variable tracking if the jack has been unplugged touched.
-  - id: jack_unplugged_recently
-    type: bool
-    restore_value: no
-    initial_value: 'false'
-
+    initial_value: '0.5'
 light:
   # Hardware LED ring. Not used because remapping needed
   - platform: esp32_rmt_led_strip
@@ -56,55 +54,48 @@ light:
         to: 23
     effects:
       - addressable_lambda:
-          name: "Waiting for Command"
-          update_interval: 100ms
-          lambda: |-
-            auto light_color = id(led_ring).current_values;
-            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
-                  light_color.get_blue() * 255);
-            for (int i = 0; i < 24; i++) {
-              if (i == id(global_led_animation_index) % 24) {
-                it[i] = color;
-              } else if (i == (id(global_led_animation_index) + 23) % 24) {
-                it[i] = color * 192;
-              } else if (i == (id(global_led_animation_index) + 22) % 24) {
-                it[i] = color * 128;
-              } else if (i == (id(global_led_animation_index) + 12) % 24) {
-                it[i] = color;
-              } else if (i == (id(global_led_animation_index) + 11) % 24) {
-                it[i] = color * 192;
-              } else if (i == (id(global_led_animation_index) + 10) % 24) {
-                it[i] = color * 128;
-              } else {
-                it[i] = Color::BLACK;
-              }
-            }
-            id(global_led_animation_index) = (id(global_led_animation_index) + 1) % 24;
-      - addressable_lambda:
-          name: "Listening For Command"
+          name: "Rotating Blob"
           update_interval: 50ms
           lambda: |-
-            auto light_color = id(led_ring).current_values;
-            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
-                  light_color.get_blue() * 255);
-            for (int i = 0; i < 24; i++) {
-              if (i == id(global_led_animation_index) % 24) {
-                it[i] = color;
-              } else if (i == (id(global_led_animation_index) + 23) % 24) {
-                it[i] = color * 192;
-              } else if (i == (id(global_led_animation_index) + 22) % 24) {
-                it[i] = color * 128;
-              } else if (i == (id(global_led_animation_index) + 12) % 24) {
-                it[i] = color;
-              } else if (i == (id(global_led_animation_index) + 11) % 24) {
-                it[i] = color * 192;
-              } else if (i == (id(global_led_animation_index) + 10) % 24) {
-                it[i] = color * 128;
-              } else {
-                it[i] = Color::BLACK;
+            static float pos = 0.0f;
+
+            auto draw_blob = [&](float pos) {
+              auto light_color = id(led_ring).current_values;
+              Color base(
+                  light_color.get_red() * 255,
+                  light_color.get_green() * 255,
+                  light_color.get_blue() * 255
+              );
+
+              auto add_blob = [&](float center) {
+                int p = int(floorf(center)) % 24;
+                if (p < 0) p += 24;
+                it[p] = base;
+                it[(p + 23) % 24] = base * 192; // ~75%
+                it[(p + 22) % 24] = base * 128; // ~50%
+              };
+
+              it.all() = Color::BLACK;
+              add_blob(pos);
+              add_blob(pos + 12.0f);
+              uint8_t mic_pos[4] = {0,6,12,18};
+              for (int i = 0; i < 4; i++) {
+                 auto curr = it[mic_pos[i]];
+                 auto max_val = max(curr.get_red(), curr.get_blue());
+                 max_val = max(max_val, curr.get_green());
+                 if ( max_val > 128 ){
+                    float scale = 128.f * 255.f / float(max_val) + .5;
+                    uint8_t scale8 = (scale > 255.f) ? 255 : uint8_t(scale);
+                    it[mic_pos[i]] = curr.get() * scale8;
+                 }
               }
-            }
-            id(global_led_animation_index) = (id(global_led_animation_index) + 1) % 24;
+            };
+
+            draw_blob(pos);
+            pos += id(led_anim_speed);
+            while (pos >= 24.0f) pos -= 24.0f;
+            while (pos < 0.0f) pos += 24.0f;
+
       - addressable_lambda:
           name: "Thinking"
           update_interval: 10ms
@@ -115,19 +106,19 @@ light:
             if (initial_run) {
               brightness_step = 0;
               brightness_decreasing = true;
+              it.all() = Color::BLACK;
             }
             auto light_color = id(led_ring).current_values;
-            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
-                  light_color.get_blue() * 255);
-            for (int i = 0; i < 24; i++) {
-              if (i == id(global_led_animation_index) % 24) {
-                it[i] = color * uint8_t(255/brightness_step_number*(brightness_step_number-brightness_step));
-              } else if (i == (id(global_led_animation_index) + 12) % 24) {
-                it[i] = color * uint8_t(255/brightness_step_number*(brightness_step_number-brightness_step));
-              } else {
-                it[i] = Color::BLACK;
-              }
-            }
+            Color color(
+                light_color.get_red() * 255,
+                light_color.get_green() * 255,
+                light_color.get_blue() * 255
+            );
+            uint8_t brightness = 255 / brightness_step_number*(brightness_step_number-brightness_step);
+            int pos = 2;
+            it[pos] =    color * brightness;
+            it[pos+12] = color * brightness;
+
             if (brightness_decreasing) {
               brightness_step++;
             } else {
@@ -136,83 +127,52 @@ light:
             if (brightness_step == 0 || brightness_step == brightness_step_number) {
               brightness_decreasing = !brightness_decreasing;
             }
-      - addressable_lambda:
-          name: "Replying"
-          update_interval: 50ms
-          lambda: |-
-            id(global_led_animation_index) = (24 + id(global_led_animation_index) - 1) % 24;
-            auto light_color = id(led_ring).current_values;
-            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
-                  light_color.get_blue() * 255);
-            for (int i = 0; i < 24; i++) {
-              if (i == (id(global_led_animation_index)) % 24) {
-                it[i] = color;
-              } else if (i == ( id(global_led_animation_index) + 1) % 24) {
-                it[i] = color * 192;
-              } else if (i == ( id(global_led_animation_index) + 2) % 24) {
-                it[i] = color * 128;
-              } else if (i == ( id(global_led_animation_index) + 12) % 24) {
-                it[i] = color;
-              } else if (i == ( id(global_led_animation_index) + 13) % 24) {
-                it[i] = color * 192;
-              } else if (i == ( id(global_led_animation_index) + 14) % 24) {
-                it[i] = color * 128;
-              } else {
-                it[i] = Color::BLACK;
-              }
-            }
+
       - addressable_lambda:
           name: "Muted or Silent"
-          update_interval: 16ms
-          lambda: |-
-            static int8_t index = 0;
-            Color muted_color(255, 0, 0);
+          update_interval: 50ms
+          lambda: |2-
+
+            Color mic_muted_color(255, 0, 0);
+            Color speaker_muted_color(200, 0, 0);
             auto light_color = id(led_ring).current_values;
-            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
-                  light_color.get_blue() * 255);
+            Color color(
+                light_color.get_red() * 255,
+                light_color.get_green() * 255,
+                light_color.get_blue() * 255
+            );
+            bool light_on = light_color.get_state();
             for (int i = 0; i < 24; i++) {
-              if ( light_color.get_state() ) {
-                it[i] = color;
-              } else {
-                it[i] = Color::BLACK;
+              it[i] = light_on ? color : Color::BLACK;
+            }
+            auto mark_mic_positions = [&](const int centers[], int count) {
+              for (int n = 0; n < count; n++) {
+                int c = centers[n];
+                it[(c + 23) % 24] = Color::BLACK;
+                it[c] = mic_muted_color;
+                it[(c + 1) % 24] = Color::BLACK;
               }
+            };
+            auto mark_quadrants = [&](const int starts[], int count) {
+              for (int n = 0; n < count; n++) {
+                int s = starts[n];
+                it[s] = Color::BLACK;
+                it[(s + 1) % 24] = speaker_muted_color;
+                it[(s + 2) % 24] = speaker_muted_color;
+                it[(s + 3) % 24] = speaker_muted_color;
+                it[(s + 4) % 24] = Color::BLACK;
+              }
+            };
+            if (id(master_mute_switch).state) {
+              const int mic_centers[] = {0, 6, 12, 18};
+              mark_mic_positions(mic_centers, 4);
             }
-            if ( id(master_mute_switch).state ) {
-              it[23] = Color::BLACK;
-              it[0] = muted_color;
-              it[1] = Color::BLACK;
-              it[5] = Color::BLACK;
-              it[6] = muted_color;
-              it[7] = Color::BLACK;
-              it[11] = Color::BLACK;
-              it[12] = muted_color;
-              it[13] = Color::BLACK;
-              it[17] = Color::BLACK;
-              it[18] = muted_color;
-              it[19] = Color::BLACK;
+
+            if (id(external_media_player).volume == 0.0f || id(external_media_player).is_muted()) {
+              const int quadrant_starts[] = {1, 7, 13, 19};
+              mark_quadrants(quadrant_starts, 4);
             }
-            if ( id(external_media_player).volume == 0.0f || id(external_media_player).is_muted() ) {
-              it[1] = Color::BLACK;
-              it[2] = muted_color;
-              it[3] = muted_color;
-              it[4] = muted_color;
-              it[5] = Color::BLACK;
-              it[7] = Color::BLACK;
-              it[8] = muted_color;
-              it[9] = muted_color;
-              it[10] = muted_color;
-              it[11] = Color::BLACK;
-              it[13] = Color::BLACK;
-              it[14] = muted_color;
-              it[15] = muted_color;
-              it[16] = muted_color;
-              it[17] = Color::BLACK;
-              it[19] = Color::BLACK;
-              it[20] = muted_color;
-              it[21] = muted_color;
-              it[22] = muted_color;
-              it[23] = Color::BLACK;
-            }
+
       - addressable_lambda:
           name: "Volume Display"
           update_interval: 50ms
@@ -345,6 +305,63 @@ light:
           min_brightness: 50%
           max_brightness: 100%
 
+      - addressable_lambda:
+          name: "Timer Ring"
+          update_interval: 10ms
+          lambda: |-
+            static uint8_t brightness_step = 0;
+            static bool brightness_decreasing = true;
+            static uint8_t brightness_step_number = 10;
+            if (initial_run) {
+              brightness_step = 0;
+              brightness_decreasing = true;
+            }
+            auto light_color = id(led_ring).current_values;
+            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
+                  light_color.get_blue() * 255);
+            Color muted_color(255, 0, 0);
+            for (int i = 0; i < 24; i++) {
+              it[i] = color * uint8_t(255/brightness_step_number*(brightness_step_number-brightness_step));
+            }
+            if ( id(master_mute_switch).state ) {
+              it[3] = muted_color;
+              it[9] = muted_color;
+            }
+            if (brightness_decreasing) {
+              brightness_step++;
+            } else {
+              brightness_step--;
+            }
+            if (brightness_step == 0 || brightness_step == brightness_step_number) {
+              brightness_decreasing = !brightness_decreasing;
+            }
+      - addressable_lambda:
+          name: "Timer Tick"
+          update_interval: 100ms
+          lambda: |-
+            auto light_color = id(led_ring).current_values;
+            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
+                  light_color.get_blue() * 255);
+            Color muted_color(255, 0, 0);
+            auto timer_ratio = 24.0f * id(first_active_timer).seconds_left / max(id(first_active_timer).total_seconds , static_cast<uint32_t>(1));
+            uint8_t last_led_on = static_cast<uint8_t>(ceil(timer_ratio)) - 1;
+            for (int i = 0; i < 24; i++) {
+              float brightness_dip = ( i == id(global_led_animation_index) % 24 && i != last_led_on ) ? 0.9f : 1.0f ;
+              if (i <= timer_ratio) {
+                it[i] = color * min (255.0f * brightness_dip * (timer_ratio - i) , 255.0f * brightness_dip) ;
+              } else {
+                it[i] = Color::BLACK;
+              }
+            }
+            if (id(master_mute_switch).state) {
+              it[2] = Color::BLACK;
+              it[3] = muted_color;
+              it[4] = Color::BLACK;
+              it[8] = Color::BLACK;
+              it[9] = muted_color;
+              it[10] = Color::BLACK;
+            }
+            id(global_led_animation_index) = (24 + id(global_led_animation_index) - 1) % 24;
       - addressable_rainbow:
           name: "Rainbow"
           width: 24
@@ -403,67 +420,67 @@ light:
           name: "Jack Plugged"
           update_interval: 40ms
           lambda: |-
-              static uint8_t index = 0;
-              if (initial_run) {
-                index = 0;
-              }
-              auto light_color = id(led_ring).current_values;
-              Color color(light_color.get_red() * 255, light_color.get_green() * 255,
-                    light_color.get_blue() * 255);
-              if (index <= 12) {
-                for (int i = 0; i < 24; i++) {
-                  if (i == index) {
-                    it[i] = color;
-                  } else if (i == (24 - index) % 24) {
-                    it[i] = color;
-                  } else {
-                    it[i] = Color::BLACK;
-                  }
+            static uint8_t index = 0;
+            if (initial_run) {
+              index = 0;
+            }
+            auto light_color = id(led_ring).current_values;
+            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
+                  light_color.get_blue() * 255);
+            if (index <= 12) {
+              for (int i = 0; i < 24; i++) {
+                if (i == index) {
+                  it[i] = color;
+                } else if (i == (24 - index) % 24) {
+                  it[i] = color;
+                } else {
+                  it[i] = Color::BLACK;
                 }
               }
-              index = (index + 1);
+            }
+            index = (index + 1);
       - addressable_lambda:
           name: "Jack Unplugged"
           update_interval: 40ms
           lambda: |-
-              static uint8_t index = 0;
-              if (initial_run) {
-                index = 0;
-              }
-              auto light_color = id(led_ring).current_values;
-              Color color(light_color.get_red() * 255, light_color.get_green() * 255,
-                    light_color.get_blue() * 255);
-              if (index <= 12) {
-                for (int i = 0; i < 24; i++) {
-                  if (i == 12 - index) {
-                    it[i] = color;
-                  } else if (i == (12 + index) % 24) {
-                    it[i] = color;
-                  } else {
-                    it[i] = Color::BLACK;
-                  }
+            static uint8_t index = 0;
+            if (initial_run) {
+              index = 0;
+            }
+            auto light_color = id(led_ring).current_values;
+            Color color(light_color.get_red() * 255, light_color.get_green() * 255,
+                  light_color.get_blue() * 255);
+            if (index <= 12) {
+              for (int i = 0; i < 24; i++) {
+                if (i == 12 - index) {
+                  it[i] = color;
+                } else if (i == (12 + index) % 24) {
+                  it[i] = color;
+                } else {
+                  it[i] = Color::BLACK;
                 }
               }
-              index = (index + 1);
+            }
+            index = (index + 1);
       - addressable_lambda:
           name: "Test Instructions"
           update_interval: 100ms
           lambda: |-
             Color indication_color(255, 255, 255);
             it.all() = Color::BLACK;
-            if ( id(test_instructions) == 1) {
+            if (id(test_instructions) == 1) {
               it[23] = indication_color;
               it[0] = indication_color;
               it[1] = indication_color;
-            } else if ( id(test_instructions) == 2) {
+            } else if (id(test_instructions) == 2) {
               it[5] = indication_color;
               it[6] = indication_color;
               it[7] = indication_color;
-            } else if ( id(test_instructions) == 3) {
+            } else if (id(test_instructions) == 3) {
               it[11] = indication_color;
               it[12] = indication_color;
               it[13] = indication_color;
-            } else if ( id(test_instructions) == 4) {
+            } else if (id(test_instructions) == 4) {
               it[17] = indication_color;
               it[18] = indication_color;
               it[19] = indication_color;
@@ -476,6 +493,10 @@ script:
   - id: control_leds
     then:
       - lambda: |
+          id(check_if_timers_active).execute();
+          if (id(is_timer_active)){
+            id(fetch_first_active_timer).execute();
+          }
           if (id(xmos_flashing_state) > 0) {
             id(control_leds_xmos_flasher_state_update).execute();
           } else if (id(improv_ble_in_progress)) {
@@ -496,10 +517,28 @@ script:
             id(control_leds_jack_unplugged_recently).execute();
           } else if (id(warning)) {
             id(control_leds_warning).execute();
+          } else if (id(timer_ringing).state) {
+            id(control_leds_timer_ringing).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_waiting_for_command_phase_id}) {
+            id(control_leds_voice_assistant_waiting_for_command_phase).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_listening_for_command_phase_id}) {
+            id(control_leds_voice_assistant_listening_for_command_phase).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_thinking_phase_id}) {
+            id(control_leds_voice_assistant_thinking_phase).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_replying_phase_id}) {
+            id(control_leds_voice_assistant_replying_phase).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_error_phase_id}) {
+            id(control_leds_voice_assistant_error_phase).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_not_ready_phase_id}) {
+            id(control_leds_voice_assistant_not_ready_phase).execute();
+          } else if (id(is_timer_active)) {
+            id(control_leds_timer_ticking).execute();
           } else if (id(master_mute_switch).state) {
             id(control_leds_muted_or_silent).execute();
           } else if (id(external_media_player).volume == 0.0f || id(external_media_player).is_muted()) {
             id(control_leds_muted_or_silent).execute();
+          } else if (id(voice_assistant_phase) == ${voice_assist_idle_phase_id}) {
+            id(control_leds_voice_assistant_idle_phase).execute();
           }
 
   # Script executed during Improv BLE
@@ -565,19 +604,23 @@ script:
   # Slow clockwise spin of the LED ring.
   - id: control_leds_voice_assistant_waiting_for_command_phase
     then:
+      - lambda: |-
+          id(led_anim_speed) = .5f;
       - light.turn_on:
           brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.2f );
           id: voice_assistant_leds
-          effect: "Waiting for Command"
+          effect: "Rotating Blob"
 
   # Script executed when the voice assistant is listening to a command
   # Fast clockwise spin of the LED ring.
   - id: control_leds_voice_assistant_listening_for_command_phase
     then:
+      - lambda: |-
+          id(led_anim_speed) = 1.f;
       - light.turn_on:
           brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.2f );
           id: voice_assistant_leds
-          effect: "Listening For Command"
+          effect: "Rotating Blob"
 
   # Script executed when the voice assistant is thinking to a command
   # The spin stops and the 2 LEDs that are currently on and blinking indicating the commend is being processed.
@@ -592,10 +635,12 @@ script:
   # Fast anticlockwise spin of the LED ring.
   - id: control_leds_voice_assistant_replying_phase
     then:
+      - lambda: |-
+          id(led_anim_speed) = -1.f;
       - light.turn_on:
           brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.2f );
           id: voice_assistant_leds
-          effect: "Replying"
+          effect: "Rotating Blob"
 
   # Script executed when the voice assistant is in error
   # Fast Red Pulse
@@ -725,6 +770,6 @@ script:
   - id: control_leds_test_instructions
     then:
       - light.turn_on:
-          brightness: !lambda return min ( max( id(led_ring).current_values.get_brightness() , 0.2f ) + 0.1f , 1.0f );
+          brightness: !lambda return min(max(id(led_ring).current_values.get_brightness(), 0.2f) + 0.1f, 1.0f);
           id: voice_assistant_leds
           effect: "Test Instructions"

@@ -14,9 +14,6 @@ substitutions:
 
   esp32_fw_version: dev
   xmos_fw_version: "v1.0.3"
-  xmos_fw_bin: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
-  xmos_fw_md5: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
-
 
 globals:
   # Global initialisation variable. Initialized to true and set to false once everything is connected. Only used to have a smooth "plugging" experience
@@ -83,13 +80,15 @@ dashboard_import:
 
 packages:
   core_board: !include common/core_board.yaml
+  ethernet: !include common/ethernet.yaml
   wifi: !include common/wifi_improv.yaml
   sensors: !include common/hat_sensors.yaml
   buttons: !include common/buttons.yaml
   ha: !include common/home_assistant.yaml
   spk: !include common/speaker.yaml
   mp: !include common/media_player.yaml
-  #va: !include common/voice_assistant.yaml
+  va: !include common/voice_assistant.yaml
+  timer: !include common/timer.yaml
   led_ring: !include common/led_ring.yaml
   mmwave: !include common/mmwave.yaml
   sendspin: !include common/sendspin.yaml
@@ -147,9 +146,8 @@ memory_flasher:
     id: xflash
     embed_flash_image:
       image_version: ${xmos_fw_version}
-      image_file: ${xmos_fw_bin}
-      md5_file: ${xmos_fw_md5}
-
+      image_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
+      md5_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
 
     on_flashing_start:
       then:

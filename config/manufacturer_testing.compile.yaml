@@ -1,0 +1,23 @@
+# Compile-only coverage for the online_testing external component.
+packages:
+  satellite1: !include satellite1.yaml
+
+external_components:
+  - source:
+      type: local
+      path: ../esphome/components
+    components:
+      - online_testing
+
+online_testing:
+  id: online_testing_fixture
+  microphone: sat1_mics
+  # The fixture exercises code generation only; production supplies a sweep WAV.
+  media_file: factory_reset_initiated_sound
+  channel: 0
+  udp_stream_enabled: false
+  udp_stream_port: 5005
+  udp_stream_packet_samples: 960
+  on_detected:
+    then:
+      - logger.log: "Manufacturer test sweep detected"
