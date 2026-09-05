@@ -7,7 +7,7 @@ substitutions:
 
 packages:
   # This is an inline package to prefix the on_client_connected with the wait_until action
-  # It must appear before the actual package so it becomes the orignal config and the
+  # It must appear before the actual package so it becomes the original config and the
   # on_client_connected list from the package config is appended onto this one.
   va_connected_wait_for_ble_and_flasher:
     voice_assistant:
@@ -66,8 +66,6 @@ esp32_improv:
     - lambda: id(improv_ble_in_progress) = false;
     - script.execute: control_leds
 
-http_request:
-
 ota:
   - platform: http_request
     id: ota_http_request
@@ -100,17 +98,12 @@ external_components:
       type: local
       path: ../esphome/components
     components:
-      - audio
       - fusb302b
+      - ethernet
       - i2s_audio
       - memory_flasher
-      - micro_wake_word
-      - mixer
-      - pcm5122
-      - resampler
       - satellite1
-      - snapcast
-      - speaker
+      - satellite1_radar
       - tas2780
 
 logger:

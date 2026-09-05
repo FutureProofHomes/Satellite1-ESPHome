@@ -21,13 +21,15 @@ sensor:
     update_interval: 60s
 
   - platform: ltr_als_ps
+    id: ambient_light_component
     address: 0x29
     type: ALS
     update_interval: 60s
 
+    # short variant of sensor definition:
     ambient_light:
-      name: "Ambient Light"
       id: ambient_light
+      name: "Ambient Light"
 
 number:
   # Dynamically adjust the temperature and humidity offset.  Credit goes to Lewis over @ EverythingSmartHome.  I admire your work and hope to meet someday.  Beers on me.

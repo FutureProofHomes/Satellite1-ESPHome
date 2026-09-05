@@ -1,0 +1,166 @@
+globals:
+  # Global variable tracking if the jack has been plugged touched.
+  - id: jack_plugged_recently
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # Global variable tracking if the jack has been unplugged touched.
+  - id: jack_unplugged_recently
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # Tracks whether TAS2780 is currently active
+  - id: tas2780_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+audio_dac:
+  - platform: pcm5122
+    id: line_out_dac
+    address: 0x4D
+  - platform: tas2780
+    id: speaker_dac
+    address: 0x3F
+  - platform: satellite1
+    id: dac_proxy
+    speaker_dac: speaker_dac
+    line_out_dac: line_out_dac
+
+speaker:
+  - platform: i2s_audio
+    id: i2s_audio_speaker
+    sample_rate: 48000
+    i2s_dout_pin: GPIO9
+    bits_per_sample: 32bit
+    i2s_audio_id: i2s_shared
+    dac_type: external
+    channel: stereo
+    timeout: never
+    audio_dac: dac_proxy
+    # buffer_duration: 100ms
+
+  # Virtual speakers to combine the announcement and media streams together into one output
+  - platform: mixer
+    id: mixing_speaker
+    output_speaker: i2s_audio_speaker
+    num_channels: 2
+    source_speakers:
+      - id: announcement_mixing_input
+        timeout: never
+      - id: media_mixing_input
+        timeout: never
+        buffer_duration: 100ms
+
+  # Vritual speakers to resample each pipelines' audio, if necessary, as the mixer speaker requires the same sample rate
+  - platform: resampler
+    id: announcement_resampling_speaker
+    output_speaker: announcement_mixing_input
+    sample_rate: 48000
+    bits_per_sample: 16
+  - platform: resampler
+    id: media_resampling_speaker
+    output_speaker: media_mixing_input
+    sample_rate: 48000
+    bits_per_sample: 16
+
+select:
+  - platform: template
+    name: Speaker channel output
+    id: tas_mode_select
+    icon: "mdi:speaker-multiple"
+    options:
+      - "Mono (Left + Right)"
+      - "Left Channel Only"
+      - "Right Channel Only"
+    initial_option: "Mono (Left + Right)"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    on_value:
+      - tas2780.update_config:
+          channel: !lambda |-
+            auto index = id(tas_mode_select).active_index();
+            if (index.has_value()){
+              return index.value();
+            }
+            ESP_LOGI("main", "No channel selected");
+            return 0;
+
+script:
+  # Script to activate TAS2780
+  - id: tas2780_ensure_active
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: return !id(tas2780_active);
+          then:
+            - logger.log:
+                format: "Activating TAS2780 with power mode %d"
+                args: ['id(pd_power_contract) >=9 ? 2 : 0']
+            - tas2780.activate:
+                mode: !lambda 'return id(pd_power_contract) >=9 ? 2 : 0;'
+            - lambda: id(tas2780_active) = true;
+
+  - id: activate_internal_speaker
+    mode: single
+    then:
+      - logger.log: "Activating internal speaker"
+      - script.execute: tas2780_ensure_active
+      - dac_proxy.activate_speaker:
+
+  - id: activate_line_out
+    mode: single
+    then:
+      - logger.log: "Activating line-out audio"
+      - dac_proxy.activate_line_out:
+
+api:
+  actions:
+    - action: activate_speaker_dac
+      then:
+        - script.execute: activate_internal_speaker
+
+    - action: activate_lineout_dac
+      then:
+        - script.execute: activate_line_out
+
+binary_sensor:
+  - platform: gpio
+    id: line_out_sensor
+    pin:
+      pcm5122:
+      number: 3
+      inverted: false
+    name: "Line-Out Connected"
+    icon: "mdi:audio-input-stereo-minijack"
+    filters:
+      - delayed_on: 200ms
+      - delayed_off: 200ms
+
+    on_press:
+      - script.execute: activate_line_out
+      - lambda: id(jack_plugged_recently) = true;
+      - script.execute: control_leds
+      - delay: 200ms
+      - script.execute:
+          id: play_sound
+          priority: false
+          sound_file: "jack_connected_sound"
+      - delay: 800ms
+      - lambda: id(jack_plugged_recently) = false;
+      - script.execute: control_leds
+
+    on_release:
+      - script.execute: activate_internal_speaker
+      - lambda: id(jack_unplugged_recently) = true;
+      - script.execute: control_leds
+      - delay: 200ms
+      - script.execute:
+          id: play_sound
+          priority: false
+          sound_file: "jack_disconnected_sound"
+      - delay: 800ms
+      - lambda: id(jack_unplugged_recently) = false;
+      - script.execute: control_leds

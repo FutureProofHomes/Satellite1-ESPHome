@@ -15,6 +15,5 @@ CONFIG_SCHEMA = sat.SAT1_CONFIG_SCHEMA
 
 
 async def to_code(config):
-    #cg.add_define("DEBUG_SPI_DEVICE_CONTROL")
     sat1_var = await sat.register_satellite1(config)
     return sat1_var

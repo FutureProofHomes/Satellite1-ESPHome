@@ -2,15 +2,9 @@ name: Build-and-Release-Satellite-Firmware
 
 on:
   push:
-    branches:
-      - main
-      - staging
-  
+    tags:
+      - v*
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag for the release (optional). If not provided, it will be auto-generated.'
-        required: false
 
 env:
   DEFAULT_PYTHON: "3.9"
@@ -23,52 +17,45 @@ jobs:
     outputs:
       commit_id: ${{ steps.dump.outputs.commit }}
       previous_tag: ${{ steps.dump.outputs.previous_tag }}
-      next_tag: ${{ steps.set_release_tag.outputs.release_tag }}
+      next_tag: ${{ steps.tag.outputs.release_tag }}
+      esphome_version: ${{ steps.esphome.outputs.esphome_version }}
     steps:
       - name: Check out code from GitHub
         uses: actions/checkout@v4.1.6
         with:
           fetch-depth: 0
           ref: ${{ github.ref }}
-      
-      - name: Set Manual Tag (if provided)
-        id: set_tag
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
-        run: echo "manual_tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
 
-      - name: Bump version
-        # if manual tag is provided, use it
-        if: ${{ !steps.set_tag.outputs.manual_tag }}
-        uses: anothrNick/github-tag-action@1.70.0
-        id: bump
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # To create a major bump add #major to commit message
-          DEFAULT_BUMP: 'patch'
-          WITH_V: true
-          PRERELEASE: ${{ github.ref_name != 'main' }}
-          PRERELEASE_SUFFIX: ${{ github.ref_name == 'staging' && 'beta' || 'alpha' }}
-          DRY_RUN: true # Prevent action from pushing the tag.
-          INITIAL_VERSION: 0.0.0
-
-      - name: Set tag for release
-        if: ${{ steps.set_tag.outputs.manual_tag || steps.bump.outputs.tag }}
-        id: set_release_tag
+      - name: Resolve release tag
+        id: tag
         run: |
-            if [ -z "${{ steps.set_tag.outputs.manual_tag }}" ]; then
-              echo "release_tag=${{ steps.bump.outputs.tag }}" >> $GITHUB_OUTPUT
-            else
-              echo "release_tag=${{ steps.set_tag.outputs.manual_tag }}" >> $GITHUB_OUTPUT
-            fi
+          tag="${{ github.ref_name }}"
+          if [ -z "$tag" ]; then
+            echo "Release tag is empty"
+            exit 1
+          fi
+          if ! printf '%s' "$tag" | grep -Eq '^v'; then
+            echo "Release workflows must run on a tag ref that starts with v"
+            exit 1
+          fi
+          echo "release_tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Read ESPHome version from requirements.txt
+        id: esphome
+        run: |
+          version=$(grep -E '^esphome==' requirements.txt | cut -d'=' -f3)
+          if [ -z "$version" ]; then
+            echo "Failed to resolve ESPHome version from requirements.txt"
+            exit 1
+          fi
+          echo "esphome_version=$version" >> "$GITHUB_OUTPUT"
 
       - id: dump
         name: Set outputs
         run: |
-          echo "gh_env=${{ github.ref_name == 'main' && 'production' || github.ref_name == 'staging' && 'beta' || 'alpha' }}" >> $GITHUB_OUTPUT
           echo "commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
-          echo "long_version=${{ steps.set_release_tag.outputs.release_tag }}_$(date +%Y-%m-%d)_$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
-          echo "label_version=$(echo "${{ steps.set_release_tag.outputs.release_tag }}" | sed 's/\./dot/g' | sed 's/-/dash/g')" >> $GITHUB_OUTPUT
-          echo "previous_tag=$(git describe --abbrev=0 --tags)" >> $GITHUB_OUTPUT
+          previous_tag=$(git tag --sort=-version:refname | grep '^v' | grep -Fxv "${{ steps.tag.outputs.release_tag }}" | sed -n '1p')
+          echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
 
   build-firmware:
     name: Build Firmware
@@ -80,11 +67,11 @@ jobs:
         config/satellite1.yaml
         config/satellite1.ld2410.yaml
         config/satellite1.ld2450.yaml
-      esphome-version: 2026.2.4
+      esphome-version: ${{ needs.prepare.outputs.esphome_version }}
       release-version: ${{ needs.prepare.outputs.next_tag }}
 
-  push-tag:
-    name: Push tag to repository and build changelog.
+  build-changelog:
+    name: Build changelog
     needs:
       - prepare
       - build-firmware
@@ -97,54 +84,27 @@ jobs:
         with:
               fetch-depth: 0
               ref: ${{ github.ref }}
-      
-      - name: Create Manual Tag (if provided and does not exist)
-        id: crate_manual_tag
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
+
+      - name: Ensure tag exists remotely
         run: |
-          tag="${{ github.event.inputs.tag }}"
-
-          # Fetch tags from remote
           git fetch --tags
-
-          if git rev-parse "refs/tags/$tag" >/dev/null 2>&1; then
-            echo "Tag '$tag' already exists."
-          else
-            echo "Creating tag '$tag'"
-            git config user.name "github-actions"
-            git config user.email "github-actions@github.com"
-            git tag "$tag"
-            git push origin "$tag"
+          if ! git rev-parse "refs/tags/${{ needs.prepare.outputs.next_tag }}" >/dev/null 2>&1; then
+            echo "Tag ${{ needs.prepare.outputs.next_tag }} does not exist."
+            exit 1
           fi
-
-          echo "manual_tag=$tag" >> "$GITHUB_OUTPUT"
-
-      - name: Bump version and push tag
-        if: ${{ !github.event.inputs.tag }}
-        uses: anothrNick/github-tag-action@1.70.0
-        id: bump
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # To create a major bump add #major to commit message
-          DEFAULT_BUMP: 'patch'
-          WITH_V: true
-          PRERELEASE: ${{ github.ref_name != 'main' }}
-          PRERELEASE_SUFFIX: ${{ github.ref_name == 'staging' && 'beta' || 'alpha' }}
-          DRY_RUN: false # Set the tag to the commit.
-          INITIAL_VERSION: 0.0.0
 
       - name: Release Changelog Builder
         id: changelog
         uses: mikepenz/release-changelog-builder-action@v5
         with:
           fromTag: ${{ needs.prepare.outputs.previous_tag }}
+          toTag: ${{ needs.prepare.outputs.next_tag }}
+          configuration: .github/changelog-configuration.json
 
   create_release:
     name: Create Release
-    # only build release for staging and main branches
-    # if: github.ref_name == 'main' || github.ref_name == 'staging'
     needs:
-      - push-tag
+      - build-changelog
       - prepare
     runs-on: ubuntu-latest
     steps:
@@ -166,18 +126,13 @@ jobs:
           files: |
             build/*.bin
             build/*.elf
-          generate_release_notes: true
-          append_body: true
-          body: ${{ needs.push-tag.outputs.changelog }}
-          tag_name: ${{ needs.prepare.outputs.next_tag }}
+          draft: true
+          prerelease: ${{ contains(needs.prepare.outputs.next_tag, '-beta') || contains(needs.prepare.outputs.next_tag, '-alpha') }}
+          generate_release_notes: false
+          body: |
+            ## Build Info
+            - ESPHome Version: ${{ needs.prepare.outputs.esphome_version }}
+            - Commit: `${{ needs.prepare.outputs.commit_id }}`
 
-      - name: Update Documentation
-        if: ${{ github.ref_name == 'main' || github.ref_name == 'staging' }}
-        run: |
-          curl -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
-            https://api.github.com/repos/FutureProofHomes/Documentation/actions/workflows/update-binaries-esp32.yaml/dispatches \
-            -d '{"ref":"main", "inputs": {"esphome_release_tag": "${{ needs.prepare.outputs.next_tag }}"}}'
-        env:
-          SECOND_REPO_PAT: ${{ secrets.PAT_TOKEN }}
+            ${{ needs.build-changelog.outputs.changelog }}
+          tag_name: ${{ needs.prepare.outputs.next_tag }}

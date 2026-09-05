@@ -229,9 +229,5 @@ void PDMsg::debug_log() const {
   ESP_LOGD(TAG, "Current Cnter: %d", this->msg_cnter_);
 }
 
-void PowerDelivery::add_on_state_callback(std::function<void()> &&callback) {
-  this->state_callback_.add(std::move(callback));
-}
-
 }  // namespace power_delivery
 }  // namespace esphome

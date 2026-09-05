@@ -50,8 +50,6 @@ CONF_RIGHT = "right"
 CONF_STEREO = "stereo"
 CONF_BOTH = "both"
 
-CONF_USE_LEGACY = "use_legacy"
-
 i2s_audio_ns = cg.esphome_ns.namespace("i2s_audio")
 I2SPortComponent = i2s_audio_ns.class_("I2SPortComponent", cg.Component)
 I2SAudioBase = i2s_audio_ns.class_(
@@ -164,8 +162,6 @@ def validate_mclk_divisible_by_3(config):
         )
     return config
 
-_use_legacy_driver = None
-
 
 def i2s_audio_component_schema(
     class_: MockObjClass,
@@ -200,66 +196,30 @@ def i2s_audio_component_schema(
     )
 
 
-def use_legacy():
-    framework_version = CORE.data[KEY_CORE][KEY_FRAMEWORK_VERSION]
-    if CORE.is_esp32 and framework_version >= cv.Version(5, 0, 0):
-        if not _use_legacy_driver:
-            return False
-    return True
-
 
 async def register_i2s_audio_component(var, config):
-    await cg.register_parented(var, config[CONF_I2S_AUDIO_ID])
-    if use_legacy():
-        #cg.add(var.set_i2s_mode(I2S_MODE_OPTIONS[config[CONF_I2S_MODE]]))
-        cg.add(var.set_channel(I2S_CHANNELS[config[CONF_CHANNEL]]))
-        cg.add(
-            var.set_bits_per_sample(I2S_BITS_PER_SAMPLE[config[CONF_BITS_PER_SAMPLE]])
-        )
-        cg.add(
-            var.set_bits_per_channel(
-                I2S_BITS_PER_CHANNEL[config[CONF_BITS_PER_CHANNEL]]
-            )
-        )
-        cg.add(
-                var.set_i2s_comm_fmt(I2C_COMM_FMT_OPTIONS[config[CONF_I2S_COMM_FMT]])
-            )
-    else:
-        #cg.add(var.set_i2s_role(I2S_ROLE_OPTIONS[config[CONF_I2S_MODE]]))
-        slot_mode = config[CONF_CHANNEL]
-        if slot_mode != CONF_STEREO:
-            slot_mode = CONF_MONO
-        slot_mask = config[CONF_CHANNEL]
-        if slot_mask not in [CONF_LEFT, CONF_RIGHT]:
-            slot_mask = CONF_BOTH
-        cg.add(var.set_slot_mode(I2S_SLOT_MODE[slot_mode]))
-        cg.add(var.set_std_slot_mask(I2S_STD_SLOT_MASK[slot_mask]))
-        cg.add(var.set_slot_bit_width(I2S_SLOT_BIT_WIDTH[config[CONF_BITS_PER_SAMPLE]]))
-        fmt = "std"  # equals stand_i2s, stand_pcm_long, i2s_msb, pcm_long
-        if config[CONF_I2S_COMM_FMT] in ["stand_msb", "i2s_lsb"]:
-            fmt = "msb"
-        elif config[CONF_I2S_COMM_FMT] in ["stand_pcm_short", "pcm_short", "pcm"]:
-            fmt = "pcm"
-        cg.add(var.set_i2s_comm_fmt(fmt))
+    await cg.register_parented(var, config[CONF_I2S_AUDIO_ID])    
+    #cg.add(var.set_i2s_role(I2S_ROLE_OPTIONS[config[CONF_I2S_MODE]]))
+    slot_mode = config[CONF_CHANNEL]
+    if slot_mode != CONF_STEREO:
+        slot_mode = CONF_MONO
+    slot_mask = config[CONF_CHANNEL]
+    if slot_mask not in [CONF_LEFT, CONF_RIGHT]:
+        slot_mask = CONF_BOTH
+    cg.add(var.set_slot_mode(I2S_SLOT_MODE[slot_mode]))
+    cg.add(var.set_std_slot_mask(I2S_STD_SLOT_MASK[slot_mask]))
+    cg.add(var.set_slot_bit_width(I2S_SLOT_BIT_WIDTH[config[CONF_BITS_PER_SAMPLE]]))
+    fmt = "std"  # equals stand_i2s, stand_pcm_long, i2s_msb, pcm_long
+    if config[CONF_I2S_COMM_FMT] in ["stand_msb", "i2s_lsb"]:
+        fmt = "msb"
+    elif config[CONF_I2S_COMM_FMT] in ["stand_pcm_short", "pcm_short", "pcm"]:
+        fmt = "pcm"
+    cg.add(var.set_i2s_comm_fmt(fmt))
     cg.add(var.set_sample_rate(config[CONF_SAMPLE_RATE]))
     cg.add(var.set_use_apll(config[CONF_USE_APLL]))
     cg.add(var.set_mclk_multiple(I2S_MCLK_MULTIPLE[config[CONF_MCLK_MULTIPLE]]))
     cg.add(var.register_at_parent())
 
-
-def validate_use_legacy(value):
-    global _use_legacy_driver  # noqa: PLW0603
-    if CONF_USE_LEGACY in value:
-        if (_use_legacy_driver is not None) and (
-            _use_legacy_driver != value[CONF_USE_LEGACY]
-        ):
-            raise cv.Invalid(
-                f"All i2s_audio components must set {CONF_USE_LEGACY} to the same value."
-            )
-        if (not value[CONF_USE_LEGACY]) and (CORE.using_arduino):
-            raise cv.Invalid("Arduino supports only the legacy i2s driver.")
-        _use_legacy_driver = value[CONF_USE_LEGACY]
-    return value
 
 
 CONFIG_SCHEMA = cv.All(
@@ -273,10 +233,8 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_I2S_MODE, default=CONF_PRIMARY): cv.one_of(
                 *I2S_MODE_OPTIONS, lower=True
             ),
-            cv.Optional(CONF_USE_LEGACY): cv.boolean,
         }
     ),
-    validate_use_legacy,
 )
 
 def _final_validate(_):
@@ -296,11 +254,7 @@ FINAL_VALIDATE_SCHEMA = _final_validate
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
-    if use_legacy():
-        cg.add_define("USE_I2S_LEGACY")
-        cg.add(var.set_i2s_mode(I2S_MODE_OPTIONS[config[CONF_I2S_MODE]]))
-    else:
-        cg.add(var.set_i2s_role(I2S_ROLE_OPTIONS[config[CONF_I2S_MODE]]))
+    cg.add(var.set_i2s_role(I2S_ROLE_OPTIONS[config[CONF_I2S_MODE]]))
     cg.add(var.set_lrclk_pin(config[CONF_I2S_LRCLK_PIN]))
     if CONF_I2S_BCLK_PIN in config:
         cg.add(var.set_bclk_pin(config[CONF_I2S_BCLK_PIN]))

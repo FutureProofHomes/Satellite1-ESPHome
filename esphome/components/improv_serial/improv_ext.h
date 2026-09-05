@@ -9,14 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace improv_ext {
-
-static const char *const SERVICE_UUID = "00467768-6228-2272-4663-277478268000";
-static const char *const STATUS_UUID = "00467768-6228-2272-4663-277478268001";
-static const char *const ERROR_UUID = "00467768-6228-2272-4663-277478268002";
-static const char *const RPC_COMMAND_UUID = "00467768-6228-2272-4663-277478268003";
-static const char *const RPC_RESULT_UUID = "00467768-6228-2272-4663-277478268004";
-static const char *const CAPABILITIES_UUID = "00467768-6228-2272-4663-277478268005";
+namespace manufacturer_improv_ext {
 
 enum Error : uint8_t {
   ERROR_NONE = 0x00,
@@ -42,20 +35,17 @@ enum Command : uint8_t {
   GET_CURRENT_STATE = 0x02,
   GET_DEVICE_INFO = 0x03,
   GET_WIFI_NETWORKS = 0x04,
-
   TRIGGER_ACTION = 0x20,
-
   BAD_CHECKSUM = 0xFF,
 };
 
-static const uint8_t CAPABILITY_IDENTIFY = 0x01;
 static const uint8_t IMPROV_SERIAL_VERSION = 1;
 
 enum ImprovSerialType : uint8_t {
   TYPE_CURRENT_STATE = 0x01,
   TYPE_ERROR_STATE = 0x02,
   TYPE_RPC = 0x03,
-  TYPE_RPC_RESPONSE = 0x04
+  TYPE_RPC_RESPONSE = 0x04,
 };
 
 struct ImprovCommand {
@@ -64,16 +54,10 @@ struct ImprovCommand {
   std::string password;
 };
 
-ImprovCommand parse_improv_data(const std::vector<uint8_t> &data, bool check_checksum = true);
 ImprovCommand parse_improv_data(const uint8_t *data, size_t length, bool check_checksum = true);
-
 bool parse_improv_serial_byte(size_t position, uint8_t byte, const uint8_t *buffer,
                               std::function<bool(ImprovCommand)> &&callback, std::function<void(Error)> &&on_error);
-
 std::vector<uint8_t> build_rpc_response(Command command, const std::vector<std::string> &datum,
                                         bool add_checksum = true);
-#ifdef ARDUINO
-std::vector<uint8_t> build_rpc_response(Command command, const std::vector<String> &datum, bool add_checksum = true);
-#endif  // ARDUINO
 
-}  // namespace improv
+}  // namespace manufacturer_improv_ext

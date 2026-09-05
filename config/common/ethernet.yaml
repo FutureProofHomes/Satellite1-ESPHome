@@ -1,0 +1,14 @@
+network:
+  priority:
+    - ethernet
+    - wifi
+
+ethernet:
+  id: ethernet_id
+  type: W5500
+  spi_id: spi_0
+  interrupt_pin: GPIO38
+  cs_pin:
+    number: GPIO3
+    ignore_strapping_warning: true
+  enable_on_boot: false

@@ -91,9 +91,9 @@ async def to_code(config):
 
 DAC_ACTION_SCHEMA = automation.maybe_simple_id({cv.GenerateID(): cv.use_id(DACProxy)})
 
-@automation.register_action("dac_proxy.activate", ActivateAction, DAC_ACTION_SCHEMA)
-@automation.register_action("dac_proxy.activate_line_out", ActivateLineOutAction, DAC_ACTION_SCHEMA)
-@automation.register_action("dac_proxy.activate_speaker", ActivateSpeakerAction, DAC_ACTION_SCHEMA)
+@automation.register_action("dac_proxy.activate", ActivateAction, DAC_ACTION_SCHEMA, synchronous=True)
+@automation.register_action("dac_proxy.activate_line_out", ActivateLineOutAction, DAC_ACTION_SCHEMA, synchronous=True)
+@automation.register_action("dac_proxy.activate_speaker", ActivateSpeakerAction, DAC_ACTION_SCHEMA, synchronous=True)
 async def tas2780_action(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])

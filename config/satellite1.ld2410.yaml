@@ -1,6 +1,11 @@
 packages:
   base_image: !include satellite1.yaml
-  mmwave_ld2450: !include common/mmwave_ld2410.yaml
+  mmwave_ld2410: !include common/mmwave_ld2410.yaml
+
+satellite1_radar: !remove
+
+text_sensor:
+  - id: !remove radar_detected_text
 
 esphome:
   name: ${node_name}

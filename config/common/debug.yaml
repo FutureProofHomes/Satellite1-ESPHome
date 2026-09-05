@@ -1,11 +1,3 @@
-external_components:
-  - source:
-      type: git
-      url: https://github.com/FutureProofHomes/Satellite1-ESPHome
-      ref: develop
-    refresh: 1s
-    components: [version]
-
 debug:
   update_interval: 5s
 
@@ -25,7 +17,6 @@ text_sensor:
     reset_reason:
       name: "Reset Reason"
       entity_category: "diagnostic"
-
   - platform: version
     name: "Firmware Version"
     hide_timestamp: true
@@ -44,7 +35,6 @@ sensor:
     psram:
       name: "Free PSRAM"
       entity_category: "diagnostic"
-
   - platform: internal_temperature
     name: "Internal ESP Temperature"
     entity_category: "diagnostic"
@@ -55,7 +45,6 @@ button:
   - platform: safe_mode
     name: "Restart Sat1 (Safe Mode)"
     entity_category: diagnostic
-
   - platform: template
     id: xmos_hardware_reset
     name: "XMOS Hardware Reset"
@@ -63,7 +52,6 @@ button:
     on_press:
       then:
         - satellite1.xmos_hardware_reset
-
   # Flashes Sat1 HAT with specific XMOS firmware
   - platform: template
     id: flash_satellite
@@ -75,16 +63,6 @@ button:
             image_version: ${xmos_fw_version}
             image_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
             md5_url: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
-
-  # Flashes Sat1 HAT with XMOS firmware embedded in the ESP32
-  - platform: template
-    id: flash_embedded
-    name: "XMOS Flash Embedded FW"
-    entity_category: diagnostic
-    on_press:
-      then:
-        - memory_flasher.write_embedded_image:
-
   # Wipes the Satellite1 HAT XMOS Chip
   - platform: template
     id: erase_xmos_flash

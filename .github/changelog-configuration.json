@@ -1,0 +1,43 @@
+{
+  "template": "## What's New\n\n#{{CHANGELOG}}",
+  "pr_template": "- #{{TITLE}} (#{{NUMBER}})",
+  "empty_template": "- No customer-facing changes.",
+  "categories": [
+    {
+      "title": "## Features",
+      "labels": ["feature", "enhancement"]
+    },
+    {
+      "title": "## Improvements",
+      "labels": ["improvement", "performance", "hardware"]
+    },
+    {
+      "title": "## Fixes",
+      "labels": ["fix", "bug"]
+    },
+    {
+      "title": "## Breaking Changes / Migration Notes",
+      "labels": ["breaking", "migration"]
+    },
+    {
+      "title": "## Dashboard Builder",
+      "labels": ["dashboard-builder"]
+    },
+    {
+      "title": "## Internal",
+      "labels": ["internal"]
+    }
+  ],
+  "exclude_labels": [
+    "skip-changelog",
+    "chore",
+    "ci",
+    "refactor",
+    "dependencies",
+    "sync"
+  ],
+  "sort": {
+    "order": "ASC",
+    "on_property": "mergedAt"
+  }
+}

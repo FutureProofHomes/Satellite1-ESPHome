@@ -1,105 +1,120 @@
 substitutions:
-  company_name: FutureProofHomes
-  project_name: Satellite1
-
-  # set this version by GHA at build time
-  esp32_fw_version: dev
+  node_name: satellite1
+  friendly_name: Satellite1 Manufacturer Testing
+  log_level: debug
+  # build_esphome_firmware.sh replaces these with the locally built XMOS test
+  # image and checksum. The defaults retain standalone config validation.
+  xmos_fw_bin: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
+  xmos_fw_md5: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
+  test_sweep_file: https://raw.githubusercontent.com/FutureProofHomes/Satellite1-ESPHome/82820f24d611d7fbd571e617817d28852e9d5d11/esphome/components/online_testing/sweep_512.wav
 
 packages:
-  - !include satellite1.base.yaml
-  - !include common/microphones.yaml
-
-esphome:
-  project:
-    name: ${company_name}.${project_name}
-    version: ${esp32_fw_version}
-
+  base: !include satellite1.base.yaml
 
 external_components:
   - source:
       type: local
       path: ../esphome/components
     components:
-      - audio
       - fusb302b
+      - ethernet
       - i2s_audio
-      - improv_serial
       - memory_flasher
-      - mixer
-      - online_testing
-      - pcm5122
-      - resampler
       - satellite1
-      #- snapcast
-      - speaker
+      - satellite1_radar
       - tas2780
+      - improv_serial
+      - online_testing
+      - iperf
 
 logger:
+  level: ${log_level}
   deassert_rts_dtr: true
   hardware_uart: USB_SERIAL_JTAG
-  level: debug
-  logs:
-    ltr_als_ps: WARN
 
-globals:
-  - id: test_instructions
-    type: int
-    restore_value: no
-    initial_value: '0'
+esp32:
+  framework:
+    sdkconfig_options:
+      # The ESP-IDF iperf task otherwise starves ESPHome's loop task during TCP sends.
+      CONFIG_IPERF_TRAFFIC_TASK_PRIORITY: "1"
 
+# TestOrbit connects without the production API encryption and must not have its
+# connection state overwrite explicit test-ring commands.
+api:
+  encryption: !remove
+  on_client_connected: !remove
+  on_client_disconnected: !remove
+  actions:
+    - action: start_iperf_client
+      variables:
+        server: string
+        duration: int
+      then:
+        - iperf.start_client:
+            server: !lambda return server;
+            duration: !lambda return duration;
+
+iperf:
 
 wifi:
   on_connect: !remove
   on_disconnect: !remove
 
-api:
-  encryption: !remove
-  on_client_connected: !remove
-  on_client_disconnected: !remove
+# The harness owns the microphone while sweep detection is enabled. Remove local
+# button automations that can start production audio or reset flows during a test.
+binary_sensor:
+  - id: !extend btn_up
+    on_press:
+      - logger.log: "Button Up - pressed"
+  - id: !extend btn_down
+    on_press:
+      - logger.log: "Button Down - pressed"
+  - id: !extend btn_left
+    on_state:
+      - logger.log: "Button Left - pressed"
+  - id: !extend btn_action
+    on_press:
+      - logger.log: "Button Right - pressed"
+    on_release: !remove
+    on_multi_click: !remove
 
-media_player:
-  - id: !extend external_media_player
-    files:
-      - id: audio_test_sweep
-        file: ../esphome/components/online_testing/sweep_512.wav
-
+audio_file:
+  - id: audio_test_sweep
+    file: ${test_sweep_file}
 
 memory_flasher:
   - id: !extend xflash
+    embed_flash_image:
+      image_version: ${xmos_fw_version}
+      image_file: ${xmos_fw_bin}
+      md5_file: ${xmos_fw_md5}
     on_flashing_success:
       then:
         - improv_serial.send_action_status:
             action: "FLASH_XMOS_EMBEDDED"
             status: 0
-
     on_flashing_failed:
       then:
         - improv_serial.send_action_status:
             action: "FLASH_XMOS_EMBEDDED"
             status: 1
-
     on_erasing_done:
       then:
         - improv_serial.send_action_status:
             action: "ERASE_XMOS_FLASH"
             status: 0
 
-
-
 online_testing:
   id: mic_tester
   microphone: sat1_mics
   media_file: audio_test_sweep
-  udp_stream_enabled: false
-  udp_stream_port: 5005
-  udp_stream_packet_samples: 960
+  channel: 0
   on_detected:
     then:
       - logger.log: "Sweep detected"
       - improv_serial.send_action_status:
           action: "SWEEP_DETECTED"
           status: 0
-
 
 improv_serial:
   on_action:
@@ -114,14 +129,11 @@ improv_serial:
             lambda: return x.get_action() == std::string("ERASE_XMOS_FLASH");
           then:
             - memory_flasher.erase:
-
       - if:
           condition:
             lambda: return x.get_action() == std::string("FLASH_XMOS_EMBEDDED");
           then:
             - memory_flasher.write_embedded_image:
-
-
       - if:
           condition:
             lambda: return x.get_action() == std::string("READ_XMOS_FIRMWARE");
@@ -131,9 +143,22 @@ improv_serial:
 
       - if:
           condition:
+            lambda: return x.get_action() == std::string("READ_XMOS_FLASH_UID");
+          then:
+            - logger.log: "Reading XMOS flash UID via SPI"
+            - lambda: |-
+                if (!id(satellite1_id).read_xmos_flash_uid()) {
+                  ESP_LOGW("xmos_uid", "READ_XMOS_FLASH_UID failed");
+                  return;
+                }
+                const uint8_t *uid = id(satellite1_id).xmos_flash_uid;
+                ESP_LOGI("xmos_uid", "XMOS flash UID: %02X %02X %02X %02X %02X %02X %02X %02X",
+                         uid[0], uid[1], uid[2], uid[3], uid[4], uid[5], uid[6], uid[7]);
+
+      - if:
+          condition:
             lambda: return x.get_action() == std::string("ENABLE_LED_RING");
           then:
-            - logger.log: "Enable full led ring with color: white"
             - light.turn_on:
                 id: voice_assistant_leds
                 brightness: 33%
@@ -141,40 +166,58 @@ improv_serial:
                 green: 100%
                 blue: 100%
                 effect: None
-
       - if:
           condition:
             lambda: return x.get_action() == std::string("SET_TEST_FAILED_STATE");
           then:
-            - logger.log: "Test failed, set leds to red"
             - light.turn_on:
                 id: voice_assistant_leds
                 brightness: 33%
                 red: 100%
                 green: 0%
-                blue:  0%
+                blue: 0%
                 effect: None
-
       - if:
           condition:
             lambda: return x.get_action() == std::string("SET_WAITING_FOR_LINE_OUT");
           then:
-            - logger.log: "We are waiting for the line out to be connected"
             - light.turn_on:
                 id: voice_assistant_leds
                 brightness: 33%
                 red: 100%
                 green: 100%
-                blue:  100%
+                blue: 100%
                 effect: "Jack Unplugged"
-
       - if:
           condition:
             lambda: return x.get_action() == std::string("DISABLE_LED_RING");
           then:
             - lambda: id(test_instructions) = 0;
-            - light.turn_off:
-                id: voice_assistant_leds
+            - light.turn_off: voice_assistant_leds
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("LED_INSTRUCTION_UP_BUTTON");
+          then:
+            - lambda: id(test_instructions) = 1;
+            - script.execute: control_leds_test_instructions
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("LED_INSTRUCTION_DOWN_BUTTON");
+          then:
+            - lambda: id(test_instructions) = 3;
+            - script.execute: control_leds_test_instructions
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("LED_INSTRUCTION_LEFT_BUTTON");
+          then:
+            - lambda: id(test_instructions) = 4;
+            - script.execute: control_leds_test_instructions
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("LED_INSTRUCTION_RIGHT_BUTTON");
+          then:
+            - lambda: id(test_instructions) = 2;
+            - script.execute: control_leds_test_instructions
 
       - if:
           condition:
@@ -182,33 +225,29 @@ improv_serial:
           then:
             - logger.log:
                 format: "The AHT20 reports temperature %.1f and humidity %.1f"
-                args: [ 'id(temperature_sensor).state', 'id(humidity_sensor).state' ]
-
+                args: ['id(temperature_sensor).state', 'id(humidity_sensor).state']
       - if:
           condition:
             lambda: return x.get_action() == std::string("LOG_CURR_LIGHT_SENSOR");
           then:
+            - component.update: ambient_light_component
             - logger.log:
                 format: "The light sensor reports: %.1f"
-                args: [ 'id(ambient_light).state' ]
-
+                args: ['id(ambient_light).state']
       - if:
           condition:
             lambda: return x.get_action() == std::string("LOG_LINE_OUT_STATE");
           then:
             - logger.log:
                 format: "The line out reports: %s"
-                args: [ 'id(line_out_sensor).state ? "connected" : "disconnected"' ]
-
-
+                args: ['id(line_out_sensor).state ? "connected" : "disconnected"']
       - if:
           condition:
             lambda: return x.get_action() == std::string("LOG_MUTE_STATE");
           then:
             - logger.log:
                 format: "The hardware mute reports: %s"
-                args: [ 'id(btn_left).state ? "muted" : "unmuted"' ]
-
+                args: ['id(btn_left).state ? "muted" : "unmuted"']
       - if:
           condition:
             lambda: return x.get_action() == std::string("LOG_NETWORK_STATE");
@@ -422,48 +461,29 @@ improv_serial:
             - script.execute:
                 id: play_sound
                 priority: false
-                sound_file: !lambda return id(audio_test_sweep);
-
-
+                sound_file: audio_test_sweep
       - if:
           condition:
             lambda: return x.get_action() == std::string("SET_TO_LINE_OUT");
           then:
-            - logger.log: "Activate line-out DAC"
-            - delay: 500ms
-            - lambda: |-
-                id(dac_proxy).activate_line_out();
-
+            - script.execute: activate_line_out
       - if:
           condition:
             lambda: return x.get_action() == std::string("SET_TO_BUILT_IN_SPEAKER");
           then:
-            - logger.log: "Activate built-in speaker DAC"
-            - delay: 500ms
-            - lambda: |-
-                id(dac_proxy).activate_speaker();
-
+            - script.execute: activate_internal_speaker
       - if:
           condition:
-            lambda: |-
-              return x.get_action().substr(0, 11) == std::string("SET_VOLUME_");
+            lambda: return x.get_action().substr(0, 11) == std::string("SET_VOLUME_");
           then:
             - lambda: |-
-                std::string action = x.get_action();
-                int volume_pct = std::stoi(action.substr(11));
-                float volume = volume_pct / 100.0f;
-                id(external_media_player)->make_call()
-                  .set_volume(volume)
-                  .perform();
-            - logger.log:
-                format: "Volume set to %d%%"
-                args: ['std::stoi(x.get_action().substr(11))']
+                const int volume_pct = std::stoi(x.get_action().substr(11));
+                id(external_media_player)->make_call().set_volume(volume_pct / 100.0f).perform();
 
       - if:
           condition:
             lambda: return x.get_action() == std::string("ENABLE_SWEEP_DETECTED_LEFT");
           then:
-            - logger.log: "Starting audio sweep detection on Left Mic (ch0)"
             - delay: 500ms
             - lambda: |-
                 id(mic_tester).set_microphone(id(sat1_mics));
@@ -475,20 +495,15 @@ improv_serial:
                   id(mic_tester).reset_detection();
                   id(mic_tester).request_start(true);
                 }
-
       - if:
           condition:
             lambda: return x.get_action() == std::string("DISABLE_SWEEP_DETECTED_LEFT");
           then:
-            - logger.log: "Pausing audio sweep detection on Left Mic"
-            - lambda: |-
-                id(mic_tester).pause_detection();
-
+            - lambda: id(mic_tester).pause_detection();
       - if:
           condition:
             lambda: return x.get_action() == std::string("ENABLE_SWEEP_DETECTED_RIGHT");
           then:
-            - logger.log: "Starting audio sweep detection on Right Mic (ch1)"
             - delay: 500ms
             - lambda: |-
                 id(mic_tester).set_channel(1);
@@ -500,50 +515,8 @@ improv_serial:
                   id(mic_tester).reset_detection();
                   id(mic_tester).request_start(true);
                 }
-
       - if:
           condition:
             lambda: return x.get_action() == std::string("DISABLE_SWEEP_DETECTED_RIGHT");
           then:
-            - logger.log: "Stopping audio sweep detection on Right Mic"
-            - lambda: |-
-                id(mic_tester).pause_detection();
-
-
-      - if:
-          condition:
-            lambda: return x.get_action() == std::string("LED_INSTRUCTION_UP_BUTTON");
-          then:
-            - logger.log: "led instructions up button detected"
-            - lambda: id(test_instructions) = 1;
-            - light.turn_on:
-                id: voice_assistant_leds
-                brightness: 33%
-                red: 100%
-                green: 100%
-                blue: 100%
-                effect: "Test Instructions"
-
-      - if:
-          condition:
-            lambda: return x.get_action() == std::string("LED_INSTRUCTION_DOWN_BUTTON");
-          then:
-            - logger.log: "led instructions down button detected"
-            - lambda: id(test_instructions) = 3;
-            - script.execute: control_leds
-
-      - if:
-          condition:
-            lambda: return x.get_action() == std::string("LED_INSTRUCTION_LEFT_BUTTON");
-          then:
-            - logger.log: "led instructions left button detected"
-            - lambda: id(test_instructions) = 4;
-            - script.execute: control_leds
-
-      - if:
-          condition:
-            lambda: return x.get_action() == std::string("LED_INSTRUCTION_RIGHT_BUTTON");
-          then:
-            - logger.log: "led instructions right button detected"
-            - lambda: id(test_instructions) = 2;
-            - script.execute: control_leds
+            - lambda: id(mic_tester).pause_detection();

@@ -1,90 +1,60 @@
 #include "improv_ext.h"
+
 #include <cstring>
 
-namespace improv_ext {
-
-ImprovCommand parse_improv_data(const std::vector<uint8_t> &data, bool check_checksum) {
-  return parse_improv_data(data.data(), data.size(), check_checksum);
-}
+namespace manufacturer_improv_ext {
 
 ImprovCommand parse_improv_data(const uint8_t *data, size_t length, bool check_checksum) {
   ImprovCommand improv_command;
-  Command command = (Command) data[0];
-  uint8_t data_length = data[1];
+  const size_t checksum_length = check_checksum ? 1 : 0;
+  if (data == nullptr || length < 2 + checksum_length) {
+    improv_command.command = UNKNOWN;
+    return improv_command;
+  }
 
-  if (data_length != length - 2 - check_checksum) {
+  const Command command = static_cast<Command>(data[0]);
+  const uint8_t data_length = data[1];
+  const size_t payload_end = length - checksum_length;
+  if (data_length != payload_end - 2) {
     improv_command.command = UNKNOWN;
     return improv_command;
   }
 
   if (check_checksum) {
-    uint8_t checksum = data[length - 1];
-
-    uint32_t calculated_checksum = 0;
-    for (uint8_t i = 0; i < length - 1; i++) {
-      calculated_checksum += data[i];
-    }
-
-    if ((uint8_t) calculated_checksum != checksum) {
+    uint8_t checksum = 0;
+    for (size_t i = 0; i < length - 1; i++)
+      checksum += data[i];
+    if (checksum != data[length - 1]) {
       improv_command.command = BAD_CHECKSUM;
       return improv_command;
     }
   }
 
-  if (command == WIFI_SETTINGS) {
-    uint8_t ssid_length = data[2];
-    uint8_t ssid_start = 3;
-    size_t ssid_end = ssid_start + ssid_length;
-    if (ssid_end > length) {
+  if (command == WIFI_SETTINGS || command == TRIGGER_ACTION) {
+    if (payload_end < 3) {
       improv_command.command = UNKNOWN;
       return improv_command;
     }
-
-    uint8_t pass_length = data[ssid_end];
-    size_t pass_start = ssid_end + 1;
-    size_t pass_end = pass_start + pass_length;
-    if (pass_end > length) {
+    const size_t first_start = 3;
+    const size_t first_end = first_start + data[2];
+    if (first_end > payload_end || (command == WIFI_SETTINGS && first_end >= payload_end)) {
       improv_command.command = UNKNOWN;
       return improv_command;
     }
-
-    std::string ssid(data + ssid_start, data + ssid_end);
-    std::string password(data + pass_start, data + pass_end);
-    return {.command = command, .ssid = ssid, .password = password};
-  }
-
-  if (command == TRIGGER_ACTION){
-    uint8_t action_length = data[2];
-    size_t action_start = 3;
-    size_t action_end = action_start + action_length;
-    if (action_end > length) {
-      improv_command.command = UNKNOWN;
-      return improv_command;
-    }
-
-    if ( length > action_end + 1) {
-      uint8_t url_length = data[action_end];
-      size_t url_start = action_end + 1;
-      size_t url_end = url_start + url_length;
-      if (url_end > length) {
-        improv_command.command = UNKNOWN;
-        return improv_command;
-      }
-      
-      std::string action(data + action_start, data + action_end);
-      std::string url(data + url_start, data + url_end);
-      
+    if (command == TRIGGER_ACTION && first_end == payload_end) {
       improv_command.command = command;
-      improv_command.ssid = action;
-      improv_command.password = url;
-      
+      improv_command.ssid.assign(reinterpret_cast<const char *>(data + first_start), first_end - first_start);
       return improv_command;
     }
-    
-    
-    std::string action(data + action_start, data + action_end);
+    const size_t second_start = first_end + 1;
+    const size_t second_end = second_start + data[first_end];
+    if (second_end != payload_end) {
+      improv_command.command = UNKNOWN;
+      return improv_command;
+    }
     improv_command.command = command;
-    improv_command.ssid = action;
+    improv_command.ssid.assign(reinterpret_cast<const char *>(data + first_start), first_end - first_start);
+    improv_command.password.assign(reinterpret_cast<const char *>(data + second_start), second_end - second_start);
     return improv_command;
   }
 
@@ -94,128 +64,50 @@ ImprovCommand parse_improv_data(const uint8_t *data, size_t length, bool check_c
 
 bool parse_improv_serial_byte(size_t position, uint8_t byte, const uint8_t *buffer,
                               std::function<bool(ImprovCommand)> &&callback, std::function<void(Error)> &&on_error) {
-  if (position == 0)
-    return byte == 'I';
-  if (position == 1)
-    return byte == 'M';
-  if (position == 2)
-    return byte == 'P';
-  if (position == 3)
-    return byte == 'R';
-  if (position == 4)
-    return byte == 'O';
-  if (position == 5)
-    return byte == 'V';
-
+  static const char header[] = "IMPROV";
+  if (position < 6)
+    return byte == header[position];
   if (position == 6)
     return byte == IMPROV_SERIAL_VERSION;
-
-  if (position <= 8)
+  if (position <= 8 + buffer[8])
     return true;
-
-  uint8_t type = buffer[7];
-  uint8_t data_len = buffer[8];
-
-  if (position <= 8 + data_len)
-    return true;
-
-  if (position == 8 + data_len + 1) {
-    uint8_t checksum = 0x00;
+  if (position == 9 + buffer[8]) {
+    uint8_t checksum = 0;
     for (size_t i = 0; i < position; i++)
       checksum += buffer[i];
-
     if (checksum != byte) {
       on_error(ERROR_INVALID_RPC);
       return false;
     }
-
-    if (type == TYPE_RPC) {
-      auto command = parse_improv_data(&buffer[9], data_len, false);
-      return callback(command);
-    }
+    if (buffer[7] == TYPE_RPC)
+      return callback(parse_improv_data(&buffer[9], buffer[8], false));
   }
-
   return false;
 }
 
 std::vector<uint8_t> build_rpc_response(Command command, const std::vector<std::string> &datum, bool add_checksum) {
-  // Calculate the byte count to reserve memory to avoid reallocations
-  // Frame length fixed: 3 = Command: 1 + frame length: 1 + checksum: 1
-  size_t frame_length = 3;
-  // Frame length variable: string lengths: n + length of data in datum
-  frame_length += datum.size();
-  for (int i = 0; i < datum.size(); i++) {
-    frame_length += datum[i].length();
+  size_t data_length = 0;
+  for (const auto &item : datum) {
+    if (item.length() > UINT8_MAX - 4 || data_length > UINT8_MAX - 4 - item.length())
+      return {};
+    data_length += 1 + item.length();
   }
-  // Reserve frame_length bytes in vector
-  std::vector<uint8_t> out(frame_length, 0);
-
+  std::vector<uint8_t> out(3 + data_length, 0);
   out[0] = command;
-
-  // Copy data from datum input to out vector with lengths
-  const size_t data_offset = 2;
-  size_t pos = data_offset;
-  for (const auto &str : datum) {
-    out[pos] = static_cast<uint8_t>(str.length());
-    pos++;
-    std::memcpy(out.data() + pos, str.c_str(), str.length());
-    pos += str.length();
+  out[1] = static_cast<uint8_t>(data_length);
+  size_t pos = 2;
+  for (const auto &item : datum) {
+    out[pos++] = static_cast<uint8_t>(item.length());
+    std::memcpy(out.data() + pos, item.data(), item.length());
+    pos += item.length();
   }
-
-  out[1] = static_cast<uint8_t>(pos - data_offset);
-
   if (add_checksum) {
-    uint32_t calculated_checksum = 0;
-
-    for (uint8_t byte : out) {
-      calculated_checksum += byte;
-    }
-    // Clear all bits, but the least significant byte
-    calculated_checksum &= 0xFF;
-    out[frame_length - 1] = static_cast<uint8_t>(calculated_checksum);
+    uint8_t checksum = 0;
+    for (uint8_t byte : out)
+      checksum += byte;
+    out.back() = checksum;
   }
   return out;
 }
 
-#ifdef ARDUINO
-std::vector<uint8_t> build_rpc_response(Command command, const std::vector<String> &datum, bool add_checksum) {
-  // Calculate the byte count to reserve memory to avoid reallocations
-  // Frame length fixed: 3 = Command: 1 + frame length: 1 + checksum: 1
-  size_t frame_length = 3;
-  // Frame length variable: string lengths: n + length of data in datum
-  frame_length += datum.size();
-  for (int i = 0; i < datum.size(); i++) {
-    frame_length += datum[i].length();
-  }
-  // Reserve frame_length bytes in vector
-  std::vector<uint8_t> out(frame_length, 0);
-
-  out[0] = command;
-
-  // Copy data from datum input to out vector with lengths
-  const size_t data_offset = 2;
-  size_t pos = data_offset;
-  for (const auto &str : datum) {
-    out[pos] = static_cast<uint8_t>(str.length());
-    pos++;
-    std::memcpy(out.data() + pos, str.c_str(), str.length());
-    pos += str.length();
-  }
-
-  out[1] = static_cast<uint8_t>(pos - data_offset);
-
-  if (add_checksum) {
-    uint32_t calculated_checksum = 0;
-
-    for (uint8_t byte : out) {
-      calculated_checksum += byte;
-    }
-    // Clear all bits, but the least significant byte
-    calculated_checksum &= 0xFF;
-    out[frame_length - 1] = static_cast<uint8_t>(calculated_checksum);
-  }
-  return out;
-}
-#endif  // ARDUINO
-
-}  // namespace improv
+}  // namespace manufacturer_improv_ext

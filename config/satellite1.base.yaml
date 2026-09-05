@@ -14,9 +14,6 @@ substitutions:
 
   esp32_fw_version: dev
   xmos_fw_version: "v1.0.3"
-  xmos_fw_bin: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
-  xmos_fw_md5: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
-
 
 globals:
   # Global initialisation variable. Initialized to true and set to false once everything is connected. Only used to have a smooth "plugging" experience
@@ -34,12 +31,17 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
+  # Global variable tracking the XMOS flasher status.
+  - id: pd_power_contract
+    type: int
+    restore_value: no
+    initial_value: '0'
 
 esphome:
   name: ${node_name}
   name_add_mac_suffix: true
   friendly_name: ${friendly_name}
-  min_version: 2026.2.0
+  min_version: 2026.7.0
 
   project:
     name: ${company_name}.${project_name}
@@ -78,19 +80,37 @@ dashboard_import:
 
 packages:
   core_board: !include common/core_board.yaml
+  ethernet: !include common/ethernet.yaml
   wifi: !include common/wifi_improv.yaml
   sensors: !include common/hat_sensors.yaml
   buttons: !include common/buttons.yaml
   ha: !include common/home_assistant.yaml
+  spk: !include common/speaker.yaml
   mp: !include common/media_player.yaml
-  #va: !include common/voice_assistant.yaml
+  va: !include common/voice_assistant.yaml
+  timer: !include common/timer.yaml
   led_ring: !include common/led_ring.yaml
+  mmwave: !include common/mmwave.yaml
+  sendspin: !include common/sendspin.yaml
 
   ## OPTIONAL COMPONENTS
-  # mmwave_ld2410: !include common/mmwave_ld2410.yaml
-  # mmwave_ld2450: !include common/mmwave_ld2450.yaml
   # debug: !include common/debug.yaml
   # developer: !include common/developer.yaml
+
+fusb302b:
+  id: pd_fusb302b
+  irq_pin: GPIO1
+  request_voltage: 20
+  on_power_ready:
+    then:
+      - logger.log:
+          format: "PD contract got accepted: %s"
+          args: ['id(pd_fusb302b).contract.c_str()']
+      - text_sensor.template.publish:
+          id: pd_state_text
+          state: !lambda 'return id(pd_fusb302b).contract;'
+      - lambda: id(pd_power_contract) = id(pd_fusb302b).contract_voltage;
+      - script.execute: tas2780_ensure_active
 
 http_request:
 
@@ -126,9 +146,8 @@ memory_flasher:
     id: xflash
     embed_flash_image:
       image_version: ${xmos_fw_version}
-      image_file: ${xmos_fw_bin}
-      md5_file: ${xmos_fw_md5}
-
+      image_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
+      md5_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
 
     on_flashing_start:
       then:

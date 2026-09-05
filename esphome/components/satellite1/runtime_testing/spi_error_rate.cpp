@@ -1,5 +1,7 @@
 #include "testing.h"
 
+#include <cinttypes>
+
 #include "esphome/core/log.h"
 
 namespace esphome {
@@ -76,8 +78,8 @@ void SPIErrorRate::report() {
   uint32_t elapsed_time = (millis() - this->start_time_);
 
   ESP_LOGD(
-      TAG, "Frames: %d, bytes/sec: %4.2f, error_rate: %4.2f incorrect: %d (failed: %d)", this->frames_received_,
-      this->frames_received_ * this->bytes_per_frame_ * 1000. / elapsed_time,
+      TAG, "Frames: %" PRIu32 ", bytes/sec: %4.2f, error_rate: %4.2f incorrect: %" PRIu32 " (failed: %" PRIu32 ")",
+      this->frames_received_, this->frames_received_ * this->bytes_per_frame_ * 1000. / elapsed_time,
       this->frames_received_ ? 1. * this->incorrect_bytes_ / (this->bytes_per_frame_ * this->frames_received_) : 0.,
       this->incorrect_bytes_, this->ignored_cmds_);
 }

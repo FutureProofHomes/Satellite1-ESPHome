@@ -167,9 +167,9 @@ Before updating your ESPHome Device Builder, verify that the latest Satellite1 f
 
 |Code Base|FW Release|ESPHome|
 |-----|-----|-----|
-| `develop`|-|![Dynamic YAML Badge](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fgithub.com%2FFutureProofHomes%2FSatellite1-ESPHome%2Fraw%2Fdevelop%2F.github%2Fworkflows%2Fbuild_latest.yaml&query=%24..esphome-version&label=ESPHome)| 
-|`staging` (**default**)|![GitHub Release](https://img.shields.io/github/v/release/FutureProofHomes/Satellite1-ESPHome?filter=*-beta*)|![Dynamic YAML Badge](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fgithub.com%2FFutureProofHomes%2FSatellite1-ESPHome%2Fraw%2Fstaging%2F.github%2Fworkflows%2Fbuild_latest.yaml&query=%24..esphome-version&label=ESPHome)|
-| `main`|![GitHub Release](https://img.shields.io/github/v/release/FutureProofHomes/Satellite1-ESPHome?filter=!*-beta*)|![Dynamic YAML Badge](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fgithub.com%2FFutureProofHomes%2FSatellite1-ESPHome%2Fraw%2Fmain%2F.github%2Fworkflows%2Fbuild_latest.yaml&query=%24..esphome-version&label=ESPHome)| 
+| `develop`|-|![Dynamic Regex Badge](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2FFutureProofHomes%2FSatellite1-ESPHome%2Fdevelop%2Frequirements.txt&search=%5Eesphome%3D%3D(%5B0-9A-Za-z.%5C-%5D%2B)&replace=%241&label=ESPHome&flags=m)| 
+|`staging` (**default**)|![GitHub Release](https://img.shields.io/github/v/release/FutureProofHomes/Satellite1-ESPHome?filter=*-beta*)|![Dynamic Regex Badge](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2FFutureProofHomes%2FSatellite1-ESPHome%2Fstaging%2Frequirements.txt&search=%5Eesphome%3D%3D(%5B0-9A-Za-z.%5C-%5D%2B)&replace=%241&label=ESPHome&flags=m)|
+| `main`|![GitHub Release](https://img.shields.io/github/v/release/FutureProofHomes/Satellite1-ESPHome?filter=!*-beta*)|![Dynamic Regex Badge](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2FFutureProofHomes%2FSatellite1-ESPHome%2Fmain%2Frequirements.txt&search=%5Eesphome%3D%3D(%5B0-9A-Za-z.%5C-%5D%2B)&replace=%241&label=ESPHome&flags=m)| 
 
 
 ### Terminal Builds
