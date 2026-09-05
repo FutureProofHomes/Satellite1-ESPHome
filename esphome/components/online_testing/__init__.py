@@ -95,16 +95,23 @@ MIC_TESTER_ACTION_SCHEMA = cv.Schema({cv.GenerateID(): cv.use_id(MicTester)})
 
 
 @automation.register_action(
-    "mic_tester.start_continuous", StartContinuousAction, MIC_TESTER_ACTION_SCHEMA
+    "mic_tester.start_continuous",
+    StartContinuousAction,
+    MIC_TESTER_ACTION_SCHEMA,
+    synchronous=False,
 )
-@automation.register_action("mic_tester.start", StartAction, MIC_TESTER_ACTION_SCHEMA)
+@automation.register_action(
+    "mic_tester.start", StartAction, MIC_TESTER_ACTION_SCHEMA, synchronous=False
+)
 async def mic_tester_start_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
     return var
 
 
-@automation.register_action("mic_tester.stop", StopAction, MIC_TESTER_ACTION_SCHEMA)
+@automation.register_action(
+    "mic_tester.stop", StopAction, MIC_TESTER_ACTION_SCHEMA, synchronous=False
+)
 async def mic_tester_stop_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
