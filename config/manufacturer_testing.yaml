@@ -10,6 +10,7 @@ substitutions:
 
 packages:
   base: !include satellite1.base.yaml
+  manufacturer_api_actions: !include manufacturer_testing_api_actions.yaml
 
 external_components:
   - source:
@@ -268,6 +269,19 @@ improv_serial:
                   - logger.log: "WiFi is connected"
                 else:
                   - logger.log: "WiFi is NOT connected"
+
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("LOG_PD_CONTRACT");
+          then:
+            - lambda: |-
+                auto *pd = id(pd_fusb302b);
+                if (pd->state == power_delivery::PD_STATE_DISCONNECTED) {
+                  ESP_LOGI("pd_contract", "USB-C Power Supply: Detached");
+                  return;
+                }
+                ESP_LOGI("pd_contract", "USB-C Power Supply: %s (%dV, %.3fA max)",
+                         pd->contract.c_str(), pd->contract_voltage, pd->contract_max_current);
 
       - if:
           condition:

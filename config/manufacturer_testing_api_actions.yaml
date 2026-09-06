@@ -1,0 +1,291 @@
+api:
+  actions:
+    - action: reset_xmos
+      then:
+        - satellite1.xmos_hardware_reset:
+
+    - action: erase_xmos_flash
+      then:
+        - memory_flasher.erase:
+
+    - action: flash_xmos_embedded
+      then:
+        - memory_flasher.write_embedded_image:
+
+    - action: read_xmos_firmware
+      then:
+        - logger.log: "Reading XMOS firmware version via SPI"
+        - lambda: id(satellite1_id).read_xmos_firmware();
+
+    - action: read_tas2780_voltages
+      then:
+        - logger.log: "Activating TAS2780 before supply-voltage read"
+        - lambda: id(speaker_dac).activate();
+        - delay: 100ms
+        - lambda: id(speaker_dac).log_supply_voltages();
+
+    - action: read_xmos_flash_uid
+      then:
+        - logger.log: "Reading XMOS flash UID via SPI"
+        - lambda: |-
+            if (!id(satellite1_id).read_xmos_flash_uid()) {
+              ESP_LOGW("xmos_uid", "READ_XMOS_FLASH_UID failed");
+              return;
+            }
+            const uint8_t *uid = id(satellite1_id).xmos_flash_uid;
+            ESP_LOGI("xmos_uid", "XMOS flash UID: %02X %02X %02X %02X %02X %02X %02X %02X",
+                     uid[0], uid[1], uid[2], uid[3], uid[4], uid[5], uid[6], uid[7]);
+
+    - action: enable_led_ring
+      then:
+        - light.turn_on:
+            id: voice_assistant_leds
+            brightness: 33%
+            red: 100%
+            green: 100%
+            blue: 100%
+            effect: None
+
+    - action: set_test_failed_state
+      then:
+        - light.turn_on:
+            id: voice_assistant_leds
+            brightness: 33%
+            red: 100%
+            green: 0%
+            blue: 0%
+            effect: None
+
+    - action: set_waiting_for_line_out
+      then:
+        - light.turn_on:
+            id: voice_assistant_leds
+            brightness: 33%
+            red: 100%
+            green: 100%
+            blue: 100%
+            effect: "Jack Unplugged"
+
+    - action: disable_led_ring
+      then:
+        - lambda: id(test_instructions) = 0;
+        - light.turn_off: voice_assistant_leds
+
+    - action: led_instruction_up_button
+      then:
+        - lambda: id(test_instructions) = 1;
+        - script.execute: control_leds_test_instructions
+
+    - action: led_instruction_down_button
+      then:
+        - lambda: id(test_instructions) = 3;
+        - script.execute: control_leds_test_instructions
+
+    - action: led_instruction_left_button
+      then:
+        - lambda: id(test_instructions) = 4;
+        - script.execute: control_leds_test_instructions
+
+    - action: led_instruction_right_button
+      then:
+        - lambda: id(test_instructions) = 2;
+        - script.execute: control_leds_test_instructions
+
+    - action: log_curr_temp_humidity
+      then:
+        - logger.log:
+            format: "The AHT20 reports temperature %.1f and humidity %.1f"
+            args: ['id(temperature_sensor).state', 'id(humidity_sensor).state']
+
+    - action: log_curr_light_sensor
+      then:
+        - component.update: ambient_light_component
+        - logger.log:
+            format: "The light sensor reports: %.1f"
+            args: ['id(ambient_light).state']
+
+    - action: log_line_out_state
+      then:
+        - logger.log:
+            format: "The line out reports: %s"
+            args: ['id(line_out_sensor).state ? "connected" : "disconnected"']
+
+    - action: log_mute_state
+      then:
+        - logger.log:
+            format: "The hardware mute reports: %s"
+            args: ['id(btn_left).state ? "muted" : "unmuted"']
+
+    - action: log_network_state
+      then:
+        - if:
+            condition:
+              wifi.connected:
+            then:
+              - logger.log: "WiFi is connected"
+            else:
+              - logger.log: "WiFi is NOT connected"
+
+    - action: log_pd_contract
+      then:
+        - lambda: |-
+            auto *pd = id(pd_fusb302b);
+            if (pd->state == power_delivery::PD_STATE_DISCONNECTED) {
+              ESP_LOGI("pd_contract", "USB-C Power Supply: Detached");
+              return;
+            }
+            ESP_LOGI("pd_contract", "USB-C Power Supply: %s (%dV, %.3fA max)",
+                     pd->contract.c_str(), pd->contract_voltage, pd->contract_max_current);
+
+    - action: measure_mic_energy
+      then:
+        - lambda: |-
+            float energy = id(mic_tester).get_mic_energy();
+            ESP_LOGI("mic_energy", "Mic energy (ch=%d): %.6f", id(mic_tester).get_channel(), energy);
+
+    - action: set_udp_audio_target
+      variables:
+        host: string
+        port: int
+      then:
+        - lambda: |-
+            if (port <= 0 || port > 65535) {
+              ESP_LOGW("udp_audio", "Invalid UDP port: %d", static_cast<int>(port));
+              return;
+            }
+            id(mic_tester).set_udp_stream_target(host, static_cast<uint16_t>(port));
+            id(mic_tester).set_udp_stream_enabled(true);
+            ESP_LOGI("udp_audio", "UDP audio target set to %s:%d", host.c_str(), static_cast<int>(port));
+
+    - action: stop_udp_streaming
+      then:
+        - lambda: |-
+            id(mic_tester).set_udp_stream_enabled(false);
+            ESP_LOGI("udp_audio", "UDP audio streaming disabled");
+
+    - action: set_mic_gain
+      variables:
+        gain: int
+      then:
+        - lambda: |-
+            if (!id(satellite1_id).set_mic_gain(gain)) {
+              ESP_LOGW("mic_gain", "SET_MIC_GAIN failed");
+              return;
+            }
+            ESP_LOGI("mic_gain", "Mic gain set to %d", static_cast<int>(gain));
+
+    - action: get_mic_gain
+      then:
+        - lambda: |-
+            int gain = 0;
+            if (!id(satellite1_id).get_mic_gain(&gain)) {
+              ESP_LOGW("mic_gain", "GET_MIC_GAIN failed");
+              return;
+            }
+            ESP_LOGI("mic_gain", "Mic gain is %d", gain);
+
+    - action: set_i2s_channel_map
+      variables:
+        left: int
+        right: int
+      then:
+        - lambda: |-
+            if (left < 0 || left > 7 || right < 0 || right > 7) {
+              ESP_LOGW("mic_i2s_map", "SET_I2S_CHANNEL_MAP out of range: %d/%d",
+                       static_cast<int>(left), static_cast<int>(right));
+              return;
+            }
+            if (!id(satellite1_id).set_mic_output_i2s_channel_map(
+                    static_cast<uint8_t>(left), static_cast<uint8_t>(right))) {
+              ESP_LOGW("mic_i2s_map", "SET_I2S_CHANNEL_MAP failed");
+              return;
+            }
+            ESP_LOGI("mic_i2s_map", "I2S channel map set to left=%d right=%d",
+                     static_cast<int>(left), static_cast<int>(right));
+
+    - action: get_i2s_channel_map
+      then:
+        - lambda: |-
+            uint8_t left = 0;
+            uint8_t right = 0;
+            if (!id(satellite1_id).get_mic_output_i2s_channel_map(&left, &right)) {
+              ESP_LOGW("mic_i2s_map", "GET_I2S_CHANNEL_MAP failed");
+              return;
+            }
+            ESP_LOGI("mic_i2s_map", "I2S channel map is left=%u right=%u", left, right);
+
+    - action: set_pack_extra_upsample_channels
+      variables:
+        enabled: bool
+      then:
+        - lambda: |-
+            if (!id(satellite1_id).set_mic_output_pack_extra_upsample_channels(enabled)) {
+              ESP_LOGW("mic_i2s_map", "SET_PACK_EXTRA_UPSAMPLE_CHANNELS failed");
+              return;
+            }
+            ESP_LOGI("mic_i2s_map", "Pack extra upsample channels set to %s", enabled ? "true" : "false");
+
+    - action: play_sweep_sound
+      then:
+        - script.execute:
+            id: play_sound
+            priority: false
+            sound_file: audio_test_sweep
+
+    - action: set_to_line_out
+      then:
+        - script.execute: activate_line_out
+
+    - action: set_to_built_in_speaker
+      then:
+        - script.execute: activate_internal_speaker
+
+    - action: set_volume
+      variables:
+        volume_pct: int
+      then:
+        - lambda: id(external_media_player)->make_call().set_volume(volume_pct / 100.0f).perform();
+
+    - action: enable_sweep_detected_left
+      then:
+        - delay: 500ms
+        - lambda: |-
+            id(mic_tester).set_microphone(id(sat1_mics));
+            id(mic_tester).set_channel(0);
+            if (!id(mic_tester).is_running()) {
+              id(mic_tester).request_start(true);
+            } else {
+              id(mic_tester).pause_detection();
+              id(mic_tester).reset_detection();
+              id(mic_tester).request_start(true);
+            }
+
+    - action: disable_sweep_detected_left
+      then:
+        - lambda: id(mic_tester).pause_detection();
+
+    - action: enable_sweep_detected_right
+      then:
+        - delay: 500ms
+        - lambda: |-
+            id(mic_tester).set_channel(1);
+            id(mic_tester).set_microphone(id(sat1_mics));
+            if (!id(mic_tester).is_running()) {
+              id(mic_tester).request_start(true);
+            } else {
+              id(mic_tester).pause_detection();
+              id(mic_tester).reset_detection();
+              id(mic_tester).request_start(true);
+            }
+
+    - action: disable_sweep_detected_right
+      then:
+        - lambda: id(mic_tester).pause_detection();
+
+    - action: micro_wake_word_enable
+      then:
+        - micro_wake_word.start:
+
+    - action: micro_wake_word_disable
+      then:
+        - micro_wake_word.stop:
