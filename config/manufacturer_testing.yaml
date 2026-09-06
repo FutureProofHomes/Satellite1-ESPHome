@@ -143,6 +143,15 @@ improv_serial:
 
       - if:
           condition:
+            lambda: return x.get_action() == std::string("READ_TAS2780_VOLTAGES");
+          then:
+            - logger.log: "Activating TAS2780 before supply-voltage read"
+            - lambda: id(speaker_dac).activate();
+            - delay: 100ms
+            - lambda: id(speaker_dac).log_supply_voltages();
+
+      - if:
+          condition:
             lambda: return x.get_action() == std::string("READ_XMOS_FLASH_UID");
           then:
             - logger.log: "Reading XMOS flash UID via SPI"

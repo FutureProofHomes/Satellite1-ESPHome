@@ -456,6 +456,45 @@ void TAS2780::log_error_states() {
   }
 }
 
+bool TAS2780::read_adc12_(uint8_t msb_reg, uint8_t lsb_reg, uint8_t *msb, uint8_t *lsb, uint16_t *raw) {
+  if (!this->write_byte(TAS2780_PAGE_SELECT, 0x00)) {
+    ESP_LOGE(TAG, "TAS2780 I2C page-0 selection failed before ADC read");
+    return false;
+  }
+  if (!this->read_byte(msb_reg, msb) || !this->read_byte(lsb_reg, lsb)) {
+    ESP_LOGE(TAG, "TAS2780 I2C ADC read failed for registers 0x%02X/0x%02X", msb_reg, lsb_reg);
+    return false;
+  }
+  *raw = (static_cast<uint16_t>(*msb) << 4) | (*lsb >> 4);
+  return true;
+}
+
+void TAS2780::log_supply_voltages() {
+  uint8_t mode_ctrl;
+  if (!this->write_byte(TAS2780_PAGE_SELECT, 0x00) || !this->read_byte(TAS2780_MODE_CTRL, &mode_ctrl)) {
+    ESP_LOGE(TAG, "TAS2780 I2C MODE_CTRL read failed");
+    return;
+  }
+
+  uint8_t vbat_msb;
+  uint8_t vbat_lsb;
+  uint8_t pvdd_msb;
+  uint8_t pvdd_lsb;
+  uint16_t vbat_raw;
+  uint16_t pvdd_raw;
+  if (!this->read_adc12_(TAS2780_VBAT_MSB, TAS2780_VBAT_LSB, &vbat_msb, &vbat_lsb, &vbat_raw) ||
+      !this->read_adc12_(TAS2780_PVDD_MSB, TAS2780_PVDD_LSB, &pvdd_msb, &pvdd_lsb, &pvdd_raw)) {
+    return;
+  }
+
+  ESP_LOGI(TAG, "TAS2780 MODE_CTRL before ADC read: 0x%02X", mode_ctrl);
+  ESP_LOGI(TAG, "TAS2780 I2C ADC reads: OK");
+  ESP_LOGI(TAG, "TAS2780 raw ADC: VBAT=%02X %02X, PVDD=%02X %02X", vbat_msb, vbat_lsb, pvdd_msb, pvdd_lsb);
+  ESP_LOGI(TAG, "TAS2780 ADC12: VBAT=0x%03X, PVDD=0x%03X", vbat_raw, pvdd_raw);
+  ESP_LOGI(TAG, "TAS2780 VBAT1S Voltage: %.3f V", static_cast<float>(vbat_raw) / 128.0f);
+  ESP_LOGI(TAG, "TAS2780 PVDD Voltage: %.3f V", static_cast<float>(pvdd_raw) / 64.0f);
+}
+
 void TAS2780::loop() {
   static uint32_t last_call = millis();
   if (millis() - last_call > 1000) {

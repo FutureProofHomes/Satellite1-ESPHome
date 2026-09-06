@@ -23,6 +23,7 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   void deactivate();
   void update_register();
   void log_error_states();
+  void log_supply_voltages();
 
   bool set_mute_off() override;
   bool set_mute_on() override;
@@ -38,6 +39,7 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
 
  protected:
   void set_power_mode_(const uint8_t power_mode);
+  bool read_adc12_(uint8_t msb_reg, uint8_t lsb_reg, uint8_t *msb, uint8_t *lsb, uint16_t *raw);
   bool write_mute_();
   bool write_volume_();
 
