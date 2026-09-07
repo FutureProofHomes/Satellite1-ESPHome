@@ -21,6 +21,7 @@ static const uint8_t GPIO_SERVICER_RESID_PORT_OUT_A = 221;
 static const uint8_t DFU_CONTROLLER_SERVICER_RESID = 240;
 
 static const uint8_t MAX_CONNECTION_ATTEMPTS = 3;
+static const uint32_t STATUS_REFRESH_INTERVAL_MS = 20;
 
 namespace DC_RESOURCE {
 enum dc_resource_enum {
@@ -60,8 +61,8 @@ enum Satellite1State : uint8_t {
 };
 
 class Satellite1 : public Component,
-                   public spi::SPIDevice<spi::BIT_ORDER_MSB_FIRST, spi::CLOCK_POLARITY_LOW, spi::CLOCK_PHASE_LEADING,
-                                         spi::DATA_RATE_1KHZ> {
+                   public spi::SPIDevice<spi::BIT_ORDER_MSB_FIRST, spi::CLOCK_POLARITY_HIGH, spi::CLOCK_PHASE_TRAILING,
+                                         spi::DATA_RATE_8MHZ> {
  public:
   Satellite1State state{SAT_DETACHED_STATE};
   uint8_t xmos_fw_version[5];
@@ -98,6 +99,9 @@ class Satellite1 : public Component,
    * @param payload      Pointer to the buffer containing the data to be sent. For read commands,
    *                     this buffer is updated with the response from the device.
    * @param payload_len  Length of the payload buffer in bytes.
+   * @param status_report_received Optional output set when this transfer copied a controller
+   *                                status-register report.
+   * @param retry        Whether ignored commands should be retried.
    *
    * @return             A boolean value indicating the success or failure of the operation:
    *                     - `true`: The operation was successful. The payload buffer and/or status
@@ -110,7 +114,8 @@ class Satellite1 : public Component,
    *   a status report (resource ID matches `DC_RESOURCE::CNTRL_ID`), the internal status register
    *   is updated.
    */
-  bool transfer(uint8_t resource_id, uint8_t command, uint8_t *payload, uint8_t payload_len);
+  bool transfer(uint8_t resource_id, uint8_t command, uint8_t *payload, uint8_t payload_len,
+                bool *status_report_received = nullptr, bool retry = true);
 
   /**
    * @brief Requests an update to the XMOS device controller's status registers.
@@ -124,7 +129,11 @@ class Satellite1 : public Component,
    *                     - `false`: The update request failed, potentially due to communication
    *                       issues or ignored commands.
    */
-  bool request_status_register_update();
+  bool request_status_register_update(bool retry = true);
+
+  /// Returns false until a controller status-register report has been cached.
+  /// @param value Non-null output pointer for the cached register value.
+  bool get_cached_dc_status(DC_STATUS_REGISTER::register_id reg, uint8_t *value);
 
   /**
    * @brief Retrieves the cached value of a specific status register.
@@ -160,8 +169,11 @@ class Satellite1 : public Component,
   CallbackManager<void()> state_callback_{};
 
   uint32_t last_attempt_timestamp_{0};
+  uint32_t status_refresh_timestamp_{0};
 
   uint8_t dc_status_register_[DC_STATUS_REGISTER::REGISTER_LEN];
+  bool status_register_valid_{false};
+  bool status_refresh_attempted_{false};
   bool spi_flash_direct_access_enabled_{false};
 
   GPIOPin *xmos_rst_pin_{nullptr};

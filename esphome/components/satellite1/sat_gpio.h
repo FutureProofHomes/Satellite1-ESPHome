@@ -27,6 +27,18 @@ class Satellite1GPIOPin : public GPIOPin, public Satellite1SPIService {
   void set_pin(XMOSPort port, uint8_t pin) {
     this->port_ = port;
     this->pin_ = pin;
+    this->pin_mask_ = 1 << pin;
+    switch (port) {
+      case XMOSPort::INPUT_A:
+        this->port_register_ = DC_STATUS_REGISTER::GPIO_PORT_IN_A;
+        break;
+      case XMOSPort::INPUT_B:
+        this->port_register_ = DC_STATUS_REGISTER::GPIO_PORT_IN_B;
+        break;
+      case XMOSPort::OUTPUT_A:
+        this->port_register_ = DC_STATUS_REGISTER::GPIO_PORT_OUT_A;
+        break;
+    }
   }
   void set_inverted(bool inverted) { this->inverted_ = inverted; }
   void set_flags(gpio::Flags flags) { this->flags_ = flags; }
@@ -35,6 +47,8 @@ class Satellite1GPIOPin : public GPIOPin, public Satellite1SPIService {
  protected:
   XMOSPort port_;
   uint8_t pin_;
+  DC_STATUS_REGISTER::register_id port_register_;
+  uint8_t pin_mask_;
   bool inverted_;
   gpio::Flags flags_;
 };

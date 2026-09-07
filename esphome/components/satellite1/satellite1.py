@@ -50,7 +50,7 @@ SAT1_CONFIG_SCHEMA = (
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(XMOSNoResponseStateTrigger),
         }),
 
-    }).extend(spi_device_schema(True, "1Hz"))
+    }).extend(spi_device_schema(True, "8MHz", "MODE3"))
 )
 
 
@@ -92,4 +92,3 @@ async def erase_memory_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_SATELLITE1])
     return var
-
