@@ -4,6 +4,7 @@ substitutions:
 
   # set this version by GHA at build time
   esp32_fw_version: dev
+  xmos_auto_flash_on_boot: "true"
 
 packages:
   # This is an inline package to prefix the on_client_connected with the wait_until action
@@ -24,28 +25,6 @@ packages:
       on_connect:
         - delay: 5s  # Gives time for improv results to be transmitted
         - ble.disable:
-
-    satellite1:
-      on_xmos_no_response:
-        then:
-          - if:
-              condition:
-                - lambda: return id(init_in_progress);
-                - lambda: return id(xflash).has_image_embedded();
-              then:
-                - memory_flasher.write_embedded_image:
-
-      on_xmos_connected:
-        then:
-          - delay: 1s
-          - script.execute: control_leds
-          - if:
-              condition:
-                - lambda: return id(init_in_progress);
-                - lambda: return id(xflash).has_image_embedded();
-                - lambda: return !id(xflash).match_embedded( id(satellite1_id).xmos_fw_version );
-              then:
-                - memory_flasher.write_embedded_image:
 
   home-assistant-voice: !include satellite1.base.yaml
 

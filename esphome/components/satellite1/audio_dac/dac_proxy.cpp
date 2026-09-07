@@ -28,7 +28,6 @@ void DACProxy::setup() {
     }
     ESP_LOGD(TAG, "   active dac: %d", this->restore_state_.dac_output);
     this->active_dac = (DacOutput) this->restore_state_.dac_output;
-    this->activate();
   } else {
     ESP_LOGW(TAG, "Preferences not found, using default settings");
     this->active_dac = LINE_OUT;
@@ -43,6 +42,13 @@ void DACProxy::setup() {
     if (this->tas2780_) {
       this->tas2780_->set_volume(this->restore_state_.speaker_volume);
     }
+  }
+  // XMOS owns the I2S clocks. Keep both paths muted until audio routing is released.
+  if (this->pcm5122_) {
+    this->pcm5122_->set_mute_on();
+  }
+  if (this->tas2780_) {
+    this->tas2780_->set_mute_on();
   }
   this->setup_was_called_ = true;
   this->defer([this]() { this->state_callback_.call(); });

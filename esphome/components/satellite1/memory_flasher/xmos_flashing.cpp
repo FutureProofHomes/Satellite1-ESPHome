@@ -116,6 +116,7 @@ void XMOSFlasher::erase_memory() {
 
   this->requested_action = ACTION_FULL_ERASE;
   this->state = FLASHER_INITIALIZING;
+  this->publish();
 }
 
 void XMOSFlasher::flash_remote_image() {
@@ -131,6 +132,8 @@ void XMOSFlasher::flash_remote_image() {
     return;
   }
 
+  this->flash_attempted_this_boot_ = true;
+
   if (this->md5_expected_.empty() && !this->http_get_md5_()) {
     ESP_LOGE(TAG, "Couldn't receive expected md5 sum.");
     this->error_code = MD5_INVALID;
@@ -140,6 +143,7 @@ void XMOSFlasher::flash_remote_image() {
 
   this->requested_action = ACTION_FLASH_REMOTE_IMAGE;
   this->state = FLASHER_INITIALIZING;
+  this->publish();
 }
 
 void XMOSFlasher::flash_embedded_image() {
@@ -155,9 +159,12 @@ void XMOSFlasher::flash_embedded_image() {
     return;
   }
 
+  this->flash_attempted_this_boot_ = true;
+
   this->md5_expected_ = this->embedded_image_.md5;
   this->requested_action = ACTION_FLASH_EMBEDDED_IMAGE;
   this->state = FLASHER_INITIALIZING;
+  this->publish();
 }
 
 bool XMOSFlasher::read_JEDECID_() {

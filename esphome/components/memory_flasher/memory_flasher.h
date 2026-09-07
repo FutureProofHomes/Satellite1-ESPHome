@@ -130,6 +130,8 @@ class MemoryFlasher : public Component {
 
   virtual bool flash_accessible() { return false; }
   bool has_image_embedded() { return this->embedded_image_.length > 0; }
+  bool flash_attempted_this_boot() const { return this->flash_attempted_this_boot_; }
+  bool in_progress() const { return this->state != FLASHER_IDLE; }
 
   bool match_embedded(uint8_t to_compare[5]) { return memcmp(this->embedded_image_.version.bytes, to_compare, 5) == 0; }
 
@@ -173,6 +175,7 @@ class MemoryFlasher : public Component {
   std::string password_{};
   std::string username_{};
   std::string url_{};
+  bool flash_attempted_this_boot_{false};
 };
 
 }  // namespace memory_flasher
