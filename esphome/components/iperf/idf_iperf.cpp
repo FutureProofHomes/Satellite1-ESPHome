@@ -47,5 +47,27 @@ void Iperf::start_client() {
   }
 }
 
+void Iperf::start_server() {
+  iperf_cfg_t config = {};
+  config.flag = IPERF_FLAG_SERVER | IPERF_FLAG_TCP;
+  config.type = IPERF_IP_TYPE_IPV4;
+  config.sport = port_;
+  config.interval = interval_s_;
+  config.format = MBITS_PER_SEC;
+
+  ESP_LOGI(TAG, "Starting iperf server on port %u", port_);
+  const auto error = iperf_start(&config);
+  if (error != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to start iperf server: %d", static_cast<int>(error));
+  }
+}
+
+void Iperf::stop() {
+  const auto error = iperf_stop();
+  if (error != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to stop iperf: %d", static_cast<int>(error));
+  }
+}
+
 }  // namespace iperf
 }  // namespace esphome

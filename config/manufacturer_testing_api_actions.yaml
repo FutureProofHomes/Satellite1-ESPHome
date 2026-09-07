@@ -17,6 +17,23 @@ api:
         - logger.log: "Reading XMOS firmware version via SPI"
         - lambda: id(satellite1_id).read_xmos_firmware();
 
+    - action: start_iperf_client
+      variables:
+        server: string
+        duration: int
+      then:
+        - iperf.start_client:
+            server: !lambda return server;
+            duration: !lambda return duration;
+
+    - action: start_iperf_server
+      then:
+        - iperf.start_server: {}
+
+    - action: stop_iperf
+      then:
+        - iperf.stop: {}
+
     - action: read_tas2780_voltages
       then:
         - logger.log: "Activating TAS2780 before supply-voltage read"

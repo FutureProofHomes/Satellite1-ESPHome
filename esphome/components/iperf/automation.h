@@ -22,5 +22,15 @@ template<typename... Ts> class IPerfStartClientAction : public Action<Ts...>, pu
   }
 };
 
+template<typename... Ts> class IPerfStartServerAction : public Action<Ts...>, public Parented<Iperf> {
+ public:
+  void play(const Ts &...) override { this->parent_->start_server(); }
+};
+
+template<typename... Ts> class IPerfStopAction : public Action<Ts...>, public Parented<Iperf> {
+ public:
+  void play(const Ts &...) override { this->parent_->stop(); }
+};
+
 }  // namespace iperf
 }  // namespace esphome
