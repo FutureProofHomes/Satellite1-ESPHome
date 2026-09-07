@@ -52,7 +52,8 @@ void Iperf::start_server() {
   config.flag = IPERF_FLAG_SERVER | IPERF_FLAG_TCP;
   config.type = IPERF_IP_TYPE_IPV4;
   config.sport = port_;
-  config.interval = interval_s_;
+  config.time = duration_s_;
+  config.interval = interval_s_ ? interval_s_ : IPERF_DEFAULT_INTERVAL;
   config.format = MBITS_PER_SEC;
 
   ESP_LOGI(TAG, "Starting iperf server on port %u", port_);
