@@ -14,6 +14,12 @@ Iperf = iperf_ns.class_("Iperf", cg.Component)
 StartClientAction = iperf_ns.class_(
     "IPerfStartClientAction", automation.Action, cg.Parented.template(Iperf)
 )
+StartServerAction = iperf_ns.class_(
+    "IPerfStartServerAction", automation.Action, cg.Parented.template(Iperf)
+)
+StopAction = iperf_ns.class_(
+    "IPerfStopAction", automation.Action, cg.Parented.template(Iperf)
+)
 
 CONF_SERVER = "server"
 CONF_HIGH_PERFORMANCE_NET = "high_performance_net"
@@ -50,6 +56,12 @@ IPERF_CLIENT_ACTION_SCHEMA = automation.maybe_simple_id(
     }
 )
 
+IPERF_SERVER_ACTION_SCHEMA = automation.maybe_simple_id(
+    {
+        cv.GenerateID(): cv.use_id(Iperf),
+    }
+)
+
 
 @automation.register_action(
     "iperf.start_client", StartClientAction, IPERF_CLIENT_ACTION_SCHEMA, synchronous=True
@@ -61,4 +73,20 @@ async def iperf_register_client_actions(config, action_id, template_arg, args):
     cg.add(var.set_server(server))
     duration = await cg.templatable(config[CONF_DURATION], args, cg.uint32)
     cg.add(var.set_duration(duration))
+    return var
+
+
+@automation.register_action(
+    "iperf.start_server", StartServerAction, IPERF_SERVER_ACTION_SCHEMA, synchronous=True
+)
+async def iperf_register_server_actions(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
+
+
+@automation.register_action("iperf.stop", StopAction, IPERF_SERVER_ACTION_SCHEMA, synchronous=True)
+async def iperf_register_stop_actions(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
     return var

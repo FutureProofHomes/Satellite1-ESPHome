@@ -11,6 +11,8 @@ class Iperf : public Component {
  public:
   float get_setup_priority() const override { return setup_priority::AFTER_CONNECTION + 10; }
   void start_client();
+  void start_server();
+  void stop();
 
   void set_remote_ip(const std::string &ip) { remote_ip_ = ip; }
   void set_duration(uint32_t duration) { duration_s_ = duration; }

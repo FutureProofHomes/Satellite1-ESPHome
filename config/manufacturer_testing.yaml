@@ -45,16 +45,6 @@ api:
   encryption: !remove
   on_client_connected: !remove
   on_client_disconnected: !remove
-  actions:
-    - action: start_iperf_client
-      variables:
-        server: string
-        duration: int
-      then:
-        - iperf.start_client:
-            server: !lambda return server;
-            duration: !lambda return duration;
-
 iperf:
 
 wifi:
