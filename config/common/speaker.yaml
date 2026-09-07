@@ -88,7 +88,7 @@ select:
             return 0;
 
 script:
-  # Script to activate TAS2780
+  # The TAS must be active before it can measure PVDD and select its final power mode.
   - id: tas2780_ensure_active
     mode: single
     then:
@@ -96,25 +96,55 @@ script:
           condition:
             lambda: return !id(tas2780_active);
           then:
-            - logger.log:
-                format: "Activating TAS2780 with power mode %d"
-                args: ['id(pd_power_contract) >=9 ? 2 : 0']
             - tas2780.activate:
-                mode: !lambda 'return id(pd_power_contract) >=9 ? 2 : 0;'
-            - lambda: id(tas2780_active) = true;
+            - lambda: id(tas2780_active) = id(speaker_dac).is_active();
+
+  # Both DACs require the XMOS-provided I2S clocks before their outputs are selected.
+  - id: activate_audio_output
+    mode: restart
+    then:
+      - wait_until:
+          lambda: return id(xmos_audio_ready);
+      # A restored line-out selection is invalid when no jack is connected.
+      - if:
+          condition:
+            lambda: |-
+              return !id(audio_output_speaker_requested) && !id(line_out_sensor).state &&
+                     id(dac_proxy).active_dac == 1;
+          then:
+            - lambda: id(audio_output_speaker_requested) = true;
+      - if:
+          condition:
+            lambda: return id(audio_output_speaker_requested);
+          then:
+            - script.execute: tas2780_ensure_active
+            - script.wait: tas2780_ensure_active
+            - if:
+                condition:
+                  lambda: return id(tas2780_active);
+                then:
+                  - dac_proxy.activate_speaker:
+          else:
+            - dac_proxy.activate_line_out:
+
+  - id: activate_restored_audio_output
+    mode: restart
+    then:
+      - script.execute: activate_audio_output
 
   - id: activate_internal_speaker
     mode: single
     then:
       - logger.log: "Activating internal speaker"
-      - script.execute: tas2780_ensure_active
-      - dac_proxy.activate_speaker:
+      - lambda: id(audio_output_speaker_requested) = true;
+      - script.execute: activate_audio_output
 
   - id: activate_line_out
     mode: single
     then:
       - logger.log: "Activating line-out audio"
-      - dac_proxy.activate_line_out:
+      - lambda: id(audio_output_speaker_requested) = false;
+      - script.execute: activate_audio_output
 
 api:
   actions:

@@ -14,6 +14,8 @@ substitutions:
 
   esp32_fw_version: dev
   xmos_fw_version: "v1.0.3"
+  # Production configurations enable this; dashboard builds only wait for a responding XMOS.
+  xmos_auto_flash_on_boot: "false"
 
 globals:
   # Global initialisation variable. Initialized to true and set to false once everything is connected. Only used to have a smooth "plugging" experience
@@ -31,11 +33,15 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
-  # Global variable tracking the XMOS flasher status.
-  - id: pd_power_contract
-    type: int
+  # Audio outputs remain muted until the XMOS is responding after any required flash attempt.
+  - id: xmos_audio_ready
+    type: bool
     restore_value: no
-    initial_value: '0'
+    initial_value: 'false'
+  - id: audio_output_speaker_requested
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
 esphome:
   name: ${node_name}
@@ -55,11 +61,8 @@ esphome:
         - script.execute: control_leds
         - delay: 1s
 
-        # if line_out was used previously but is not available try speaker
-        - lambda: |
-            if( !id(line_out_sensor).state && id(dac_proxy).active_dac == 1){
-              id(dac_proxy).activate_speaker();
-            }
+        - lambda: id(audio_output_speaker_requested) = id(dac_proxy).active_dac == 0;
+        - script.execute: activate_restored_audio_output
 
         # If after 10 minutes, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
         - delay: 10min
@@ -108,8 +111,7 @@ fusb302b:
       - text_sensor.template.publish:
           id: pd_state_text
           state: !lambda 'return id(pd_fusb302b).contract;'
-      - lambda: id(pd_power_contract) = id(pd_fusb302b).contract_voltage;
-      - script.execute: tas2780_ensure_active
+      - script.execute: activate_restored_audio_output
 
 http_request:
 
@@ -130,15 +132,44 @@ satellite1:
 
   on_xmos_no_response:
     then:
+      - lambda: id(xmos_audio_ready) = false;
       - text_sensor.template.publish:
           id: xmos_firmware_version_text
           state: !lambda 'return id(satellite1_id).status_string();'
+      - if:
+          condition:
+            - lambda: return ${xmos_auto_flash_on_boot};
+            - lambda: return id(init_in_progress);
+            - lambda: return id(xflash).has_image_embedded();
+            - lambda: return !id(xflash).flash_attempted_this_boot();
+          then:
+            - memory_flasher.write_embedded_image:
 
   on_xmos_connected:
     then:
+      - lambda: id(xmos_audio_ready) = false;
       - text_sensor.template.publish:
           id: xmos_firmware_version_text
           state: !lambda 'return id(satellite1_id).status_string();'
+      - delay: 1s
+      - script.execute: control_leds
+      - if:
+          condition:
+            - lambda: return ${xmos_auto_flash_on_boot};
+            - lambda: return id(init_in_progress);
+            - lambda: return id(xflash).has_image_embedded();
+            - lambda: return !id(xflash).match_embedded(id(satellite1_id).xmos_fw_version);
+            - lambda: return !id(xflash).flash_attempted_this_boot();
+          then:
+            - memory_flasher.write_embedded_image:
+          else:
+            - if:
+                condition:
+                  lambda: |-
+                    return id(satellite1_id).is_xmos_connected() && !id(xflash).in_progress();
+                then:
+                  - lambda: id(xmos_audio_ready) = true;
+                  - script.execute: activate_restored_audio_output
 
 memory_flasher:
   - platform: satellite1
@@ -150,6 +181,9 @@ memory_flasher:
 
     on_flashing_start:
       then:
+        - lambda: id(xmos_audio_ready) = false;
+        - tas2780.deactivate:
+        - lambda: id(tas2780_active) = false;
         - lambda: id(xmos_flashing_state) = 1;
         - script.execute: control_leds
 
@@ -164,16 +198,6 @@ memory_flasher:
         - lambda: id(xmos_flashing_state) = 2;
         - script.execute: control_leds
         - lambda: id(xmos_flashing_state) = 0;
-        - if:
-            condition:
-              lambda: |-
-                return id(pd_fusb302b).contract_voltage >= 9;
-            then:
-              - tas2780.activate:
-                  mode: 2
-            else:
-              - tas2780.activate:
-                  mode: 0
 
     on_flashing_failed:
       then:
