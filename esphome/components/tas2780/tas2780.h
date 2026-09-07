@@ -38,9 +38,15 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   void set_selected_channel(ChannelSelect channel) { this->selected_channel_ = channel; }
 
  protected:
+  struct SupplyVoltages {
+    uint8_t mode_ctrl;
+    float vbat1s;
+    float pvdd;
+  };
+
   void set_power_mode_(const uint8_t power_mode);
   bool read_adc12_(uint8_t msb_reg, uint8_t lsb_reg, uint16_t *raw);
-  bool read_pvdd_voltage_(float *voltage);
+  bool read_supply_voltages_(SupplyVoltages *voltages);
   bool write_mute_();
   bool write_volume_();
 
