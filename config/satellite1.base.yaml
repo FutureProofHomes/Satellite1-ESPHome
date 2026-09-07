@@ -62,7 +62,7 @@ esphome:
         - delay: 1s
 
         - lambda: id(audio_output_speaker_requested) = id(dac_proxy).active_dac == 0;
-        - script.execute: activate_restored_audio_output
+        - script.execute: refresh_audio_output
 
         # If after 10 minutes, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
         - delay: 10min
@@ -111,7 +111,11 @@ fusb302b:
       - text_sensor.template.publish:
           id: pd_state_text
           state: !lambda 'return id(pd_fusb302b).contract;'
-      - script.execute: activate_restored_audio_output
+      - script.execute: refresh_audio_output
+
+  on_disconnect:
+    then:
+      - script.execute: refresh_audio_output
 
 http_request:
 
@@ -169,7 +173,7 @@ satellite1:
                     return id(satellite1_id).is_xmos_connected() && !id(xflash).in_progress();
                 then:
                   - lambda: id(xmos_audio_ready) = true;
-                  - script.execute: activate_restored_audio_output
+                  - script.execute: refresh_audio_output
 
 memory_flasher:
   - platform: satellite1

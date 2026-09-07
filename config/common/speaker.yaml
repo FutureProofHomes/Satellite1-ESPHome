@@ -88,16 +88,12 @@ select:
             return 0;
 
 script:
-  # The TAS must be active before it can measure PVDD and select its final power mode.
+  # TAS activation remeasures the supplies and selects the applicable power mode.
   - id: tas2780_ensure_active
     mode: single
     then:
-      - if:
-          condition:
-            lambda: return !id(tas2780_active);
-          then:
-            - tas2780.activate:
-            - lambda: id(tas2780_active) = id(speaker_dac).is_active();
+      - tas2780.activate:
+      - lambda: id(tas2780_active) = id(speaker_dac).is_active();
 
   # Both DACs require the XMOS-provided I2S clocks before their outputs are selected.
   - id: activate_audio_output
@@ -127,7 +123,7 @@ script:
           else:
             - dac_proxy.activate_line_out:
 
-  - id: activate_restored_audio_output
+  - id: refresh_audio_output
     mode: restart
     then:
       - script.execute: activate_audio_output
