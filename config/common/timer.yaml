@@ -28,19 +28,13 @@ switch:
             media_player.stop:
               announcement: true
               id: external_media_player
-      # Set back ducking ratio to zero
-      - mixer_speaker.apply_ducking:
-          id: media_mixing_input
-          decibel_reduction: 0
-          duration: 1.0s
+      # Drop back to the idle gain (audio_gain_reconcile reads timer_ringing itself)
+      - script.execute: audio_gain_reconcile
       # Refresh the LED ring
       - script.execute: control_leds
     on_turn_on:
       # Duck audio
-      - mixer_speaker.apply_ducking:
-          id: media_mixing_input
-          decibel_reduction: 20
-          duration: 0.0s
+      - script.execute: audio_gain_reconcile
       # Enable stop wake word
       - micro_wake_word.enable_model: stop
       # Ring timer

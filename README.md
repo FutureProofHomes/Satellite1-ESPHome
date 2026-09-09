@@ -88,6 +88,7 @@ The Satellite1 ESPHome firmware should be flashed on your [FutureProofHomes Core
 - Hardware & Software Mute Buttons
 - 360 degree LEDs & Notification Animations
 - Support for TTS Announcements via Home Assistant
+- Routing voice responses to other speakers, and ducking the ones in the same room while you talk
 - USB-C Power Delivery for easy power input
 
 
@@ -127,6 +128,16 @@ To get a local copy up and running follow these simple example steps. -->
 <!-- Use this space to show useful examples of how a project can be used. Additional screenshots, code examples and demos work well in this space. You may also link to more resources. -->
 
 _For more examples, please refer to the [Documentation](https://docs.futureproofhomes.net)_
+
+### Routing voice responses and ducking the room
+
+A Satellite1 can send its voice responses to other speakers instead of, or as well as, playing them
+itself, and turn down the other media players in its Home Assistant area while you are talking to
+it. Both run entirely from the device — no blueprint, no automation — and both need one Home
+Assistant setting switched on first.
+
+See [docs/TTS-Routing.md](docs/TTS-Routing.md) for setup, the full entity list, the design
+decisions behind the implementation and troubleshooting.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

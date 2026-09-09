@@ -1,76 +1,807 @@
+# Routes voice assistant TTS responses to remote media players.
+# See docs/TTS-Routing.md for setup, the design decisions and the alternatives that were rejected.
+
+substitutions:
+  # The target list as Home Assistant reads it. Shared by every call. Expects `targets`.
+  tts_targets_jinja: "targets.split(',') | map('trim') | map('lower') | reject('eq', '') | list"
+
+  # The hint is a real state, not a placeholder: the API has no placeholder field, and Home
+  # Assistant hardcodes "(empty value)". So every read of the target list treats it as unset.
+  tts_targets_hint: "Enter media_player IDs, comma separated"
+  tts_targets_unset: >-
+    (id(tts_target_media_player).state.empty() ||
+     id(tts_target_media_player).state == "${tts_targets_hint}")
+
+  # Targets eligible for a remote wake chime, as `chime_players`. Expects `targets` and `mac`.
+  # Each must be a Satellite1 (by manufacturer - every ESPHome device shares the esphome
+  # integration), have its own Wake sound switch on, and not be this device. A switch that cannot
+  # be found counts as off.
+  wake_chime_targets_jinja: >-
+    {% set cns = namespace(t=[]) %}
+    {% for t in targets.split(',') | map('trim') | map('lower') | reject('eq', '') %}
+      {% set d = device_id(t) %}
+      {% set ws = (device_entities(d) | select('search', 'wake_sound') | list)
+                  if d and device_attr(d, 'manufacturer') == 'FutureProofHomes' else [] %}
+      {% if ws | count > 0 and states(ws | first) == 'on'
+            and (mac | lower) not in device_attr(d, 'connections') | map(attribute=1) | list %}
+        {% set cns.t = cns.t + [t] %}
+      {% endif %}
+    {% endfor %}
+    {% set chime_players = cns.t %}
+
+  # An audio_file id from media_player.yaml behind the scheme the target's own media source matches
+  # on, so no audio crosses the network. Named here because the call and its log line must agree.
+  wake_chime_uri: "audio-file://wake_word_triggered_sound"
+
+  # This device's own ESPHome config entry, or the empty string. Expects `mac`.
+  # An entry id rather than a device target: the device form is deprecated and stops working in 2027.4.
+  tts_self_entry_jinja: >-
+    {% set ns = namespace(entry='') %}
+    {% for e in integration_entities('esphome') %}
+      {% if not ns.entry %}
+        {% set d = device_id(e) %}
+        {% if d and (mac | lower) in device_attr(d, 'connections') | map(attribute=1) | list %}
+          {% set ns.entry = config_entry_id(e) or '' %}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+
+  # Nothing ever creates a notification under this id, so dismissing it leaves no state behind.
+  ha_probe_notification_id: "satellite1_ha_action_probe"
+
 globals:
   - id: tts_routing_to_remote
     type: bool
     restore_value: no
     initial_value: 'false'
+  # Set as the announcement is sent, cleared by its outcome handler. Tells a call Home Assistant
+  # answered from one it swallowed.
+  - id: tts_announce_pending
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # Two triggers can send this turn's response and exactly one should. Cleared at on_start, so each
+  # turn of a continued conversation gets a fresh one.
+  - id: tts_remote_sent
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # Arms tts_announce_watchdog. Replies are a Home Assistant 2025.12 feature and ESPHome never times
+  # a pending one out, so without this the watchdog would flash after every response on an older one.
+  - id: ha_action_replies_seen
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # What ha_action_probe concluded about the "Allow the device to perform Home Assistant actions"
+  # checkbox, which is off for every newly added device and reported by nothing in the API.
+  #
+  #   0  unknown, nothing asked yet      2  blocked, the checkbox is off
+  #   1  allowed, an answer came back    3  unverifiable, this Home Assistant answers nothing
+  - id: ha_actions_allowed
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: ha_action_probe_pending
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # Parsed off the version Home Assistant announces itself with, so a silence cannot accuse an
+  # older installation of a checkbox it may well have ticked.
+  - id: ha_supports_action_replies
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # The codec this device advertises, and the one the live connection read off ListEntities. Both
+  # start false because the compile-time default in media_player.yaml is FLAC. They can only
+  # disagree between a runtime change and the reconnect that publishes it.
+  - id: tts_announce_format_mp3
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: tts_announce_format_advertised_mp3
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # The target list pre-normalized, so the log can print a pasteable call. Only read into a log line.
+  - id: tts_targets_literal
+    type: std::string
+    restore_value: no
+  # False is both "checked, all native" and "not checked yet", so the status entity only accuses the
+  # target list once a call has said so.
+  - id: tts_targets_have_ma
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
 text:
+  # Comma-separated list of media_player entity_ids to route TTS responses to.
+  # Leave at the hint, or empty, for normal local playback.
   - platform: template
     id: tts_target_media_player
-    name: "TTS Target Media Player"
+    name: "Remote TTS Targets"
     icon: "mdi:cast-audio"
     entity_category: config
     optimistic: true
     restore_value: true
-    initial_value: ""
+    initial_value: "${tts_targets_hint}"
     mode: text
     min_length: 0
-    max_length: 128
+    max_length: 255
+    # Re-check everything as the list is edited. Each script's own api.connected guard makes this a
+    # no-op before Home Assistant connects, which covers restore and the hint re-seed below.
+    on_value:
+      - script.execute: ha_action_probe
+      - script.execute: tts_targets_ma_check
+      - script.execute: tts_routing_status_publish
+      - script.execute: tts_announce_format_apply
+
+# Re-seed the hint, and settle the codec before anything connects.
+#
+# TemplateText::setup() skips publish_state() for a restored empty string, so a cleared field would
+# read "unknown" in Home Assistant. publish_state() does not write the preference, so the field
+# stays cleared in flash and only the display is re-seeded.
+esphome:
+  on_boot:
+    # -100 runs after all component setup, so TemplateText::setup() has already restored.
+    - priority: -100
+      then:
+        - lambda: |-
+            if (id(tts_target_media_player).state.empty()) {
+              id(tts_target_media_player).publish_state("${tts_targets_hint}");
+            }
+        - script.execute: tts_routing_status_publish
+        # The first ListEntities of the boot then carries the right format and no reload is needed.
+        - script.execute: tts_announce_format_apply
+
+# Every client that completes the handshake fires this, `esphome logs` included, so the version
+# string is what tells them apart - otherwise a run of `esphome logs` would hand the probe a silence
+# to misread. Ticking the actions checkbox reloads the config entry, which reconnects the device,
+# which is what makes the check below self-healing.
+api:
+  on_client_connected:
+    - if:
+        condition:
+          lambda: 'return client_info.rfind("Home Assistant", 0) == 0;'
+        then:
+          # Fires on the Connect handshake, ahead of ListEntities, so this is what the connection is
+          # about to be told. Recording it lets a later change know it has something to publish.
+          - lambda: 'id(tts_announce_format_advertised_mp3) = id(tts_announce_format_mp3);'
+          - lambda: |-
+              // The version follows the last space. Before 2025.12 Home Assistant answers no action
+              // call at all, which must not read as a blocked device.
+              id(ha_supports_action_replies) = false;
+              size_t space = client_info.rfind(' ');
+              if (space != std::string::npos) {
+                int year = 0, month = 0;
+                if (sscanf(client_info.c_str() + space + 1, "%d.%d", &year, &month) == 2) {
+                  id(ha_supports_action_replies) = year > 2025 || (year == 2025 && month >= 12);
+                  ESP_LOGD("tts_routing", "%s connected; action replies %s", client_info.c_str(),
+                           id(ha_supports_action_replies) ? "supported" : "unsupported");
+                }
+              }
+          # Home Assistant registers its action-call handler partway through its own connect
+          # sequence, and a call that arrives first is dropped silently - the exact shape of a
+          # blocked device.
+          - delay: 5s
+          - script.execute: ha_action_probe
+          # Re-taken every connection: an all-native target list reads differently once Music
+          # Assistant has adopted those players.
+          - script.execute: tts_targets_ma_check
+
+switch:
+  # The master switch. Off, the response plays here and no call fires. On, it goes to Remote TTS
+  # Targets as one media_player.play_media with announce: true. Both halves of the configuration
+  # have to be set: this switch on, and targets filled in.
+  - platform: template
+    id: tts_routing_enabled
+    name: "Remote TTS Routing"
+    icon: "mdi:speaker-multiple"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    # Switching on is when the checkbox and the target list start to matter.
+    on_turn_on:
+      - script.execute: ha_action_probe
+      - script.execute: tts_targets_ma_check
+      - script.execute: tts_routing_status_publish
+      - script.execute: tts_announce_format_apply
+    on_turn_off:
+      - script.execute: tts_routing_status_publish
+      - script.execute: tts_announce_format_apply
+
+  # Whether the Remote TTS Targets sound their own wake chime when this device hears the wake word.
+  # Eligibility is decided per call by wake_chime_targets_jinja, so targets need no reflash.
+  # Independent of this device's own Wake sound, which governs its own speaker alone.
+  - platform: template
+    id: remote_wake_chime
+    name: "Remote Wake Chime"
+    icon: "mdi:bullhorn-outline"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+
+  # Whether this device goes quiet while its response plays elsewhere. Off out of the box, so a
+  # routed response comes out of this speaker too.
+  #
+  # Carried out by audio_gain_reconcile, which ducks the local announcement channel rather than
+  # stopping the pipeline - so the wake chime still plays either way, and on_end and both watchdogs
+  # still have a local drain to wait for. Reconciling on both triggers is what lets a switch
+  # flipped mid-response land on that response.
+  - platform: template
+    id: tts_mute_local_voice
+    name: "Remote TTS Mutes Local Voice"
+    icon: "mdi:account-voice-off"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - script.execute: audio_gain_reconcile
+    on_turn_off:
+      - script.execute: audio_gain_reconcile
+
+number:
+  # This device's own level for speech: its own responses, and every announcement it receives.
+  # 0 means "no override" and speech follows the media volume.
+  #
+  # Local only - nothing here travels with a routed call. On a device that is somebody else's
+  # routing target it also decides whether that router may set this device's volume;
+  # tts_volume_targets_jinja in area_ducking.yaml is the filter that asks.
+  - platform: template
+    id: tts_volume
+    name: "Voice Override"
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 5
+    mode: slider
+    update_interval: never
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+    icon: "mdi:account-voice"
+    on_value:
+      - script.execute: audio_gain_reconcile
+
+  # The level asked of the speakers a response is routed to. Nothing local reads it. 0 means "leave
+  # every target's volume alone". Above 0 it also arms tts_targets_volume_apply in area_ducking.yaml,
+  # since only Sonos reads the per-call level the announcement carries.
+  - platform: template
+    id: remote_tts_volume
+    name: "Remote TTS Volume"
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 5
+    mode: slider
+    update_interval: never
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+    icon: "mdi:speaker-multiple"
+    entity_category: config
+
+text_sensor:
+  # Everything that has to be true before a response reaches a remote speaker, in one line, so a
+  # customer wondering why one did not has a single place to look. docs/TTS-Routing.md lists the
+  # states and what each one means.
+  - platform: template
+    id: tts_routing_status
+    name: "Remote TTS Status"
+    icon: "mdi:cast-audio"
+    entity_category: "diagnostic"
+    update_interval: never
+    lambda: |-
+      if (!id(tts_routing_enabled).state) {
+        return std::string("Off (local playback)");
+      }
+      if (id(ha_actions_allowed) == 2) {
+        return std::string("Blocked: allow HA actions in device settings");
+      }
+      if (${tts_targets_unset}) {
+        return std::string("No targets set");
+      }
+      // Ahead of the version caveat, because this was established by a call HA actually ran.
+      if (id(tts_targets_have_ma)) {
+        return std::string("Music Assistant ids in targets");
+      }
+      if (id(ha_actions_allowed) == 3) {
+        return std::string("Cannot verify: Home Assistant older than 2025.12");
+      }
+      // Counted the way Home Assistant reads the list, so a trailing comma does not inflate it.
+      const std::string &targets = id(tts_target_media_player).state;
+      int count = 0;
+      size_t start = 0;
+      while (start <= targets.size()) {
+        size_t comma = targets.find(',', start);
+        size_t end = comma == std::string::npos ? targets.size() : comma;
+        std::string entry = targets.substr(start, end - start);
+        if (entry.find_first_not_of(" \t") != std::string::npos) {
+          count++;
+        }
+        if (comma == std::string::npos) {
+          break;
+        }
+        start = comma + 1;
+      }
+      return std::string("Ready: ") + std::to_string(count) +
+             (count == 1 ? " target" : " targets");
+
+script:
+  # Outcome handlers for every action this package fires. Scripts rather than inline blocks, because
+  # on_error's arguments are the error string plus the enclosing automation's own, and a reporting
+  # call written inline would nest an `error` argument inside a scope that already has one.
+  #
+  # What reaches here is narrow: Home Assistant answers a failure only for ServiceNotFound,
+  # ServiceValidationError and vol.Invalid. Anything else goes unanswered, hence the watchdog below.
+  - id: tts_call_ok
+    parameters:
+      call: string
+    then:
+      - lambda: |-
+          id(ha_action_replies_seen) = true;
+          id(tts_announce_pending) = false;
+          ESP_LOGD("tts_routing", "%s accepted", call.c_str());
+
+  # Neither handler may test tts_routing_to_remote: on_end clears it when the local pipeline drains,
+  # which is often before this reply arrives.
+  - id: tts_call_error
+    parameters:
+      call: string
+      reason: string
+    then:
+      - lambda: |-
+          id(ha_action_replies_seen) = true;
+          id(tts_announce_pending) = false;
+          ESP_LOGE("tts_routing", "%s failed: %s", call.c_str(), reason.c_str());
+      - script.execute: tts_call_flash
+
+  # Five fast red pulses, the same warning the mute switch uses. control_leds tests `warning` ahead
+  # of every voice assistant phase, and control_leds_warning clears the flag after 2s.
+  - id: tts_call_flash
+    then:
+      - lambda: 'id(warning) = true;'
+      - script.execute: control_leds
+
+  # Tests the actions checkbox by asking one harmless question and reading the answer off whether one
+  # comes back at all - with the box unticked Home Assistant returns without responding, and that
+  # silence is the entire signal available. Firing the call is also what raises the repair issue in
+  # Home Assistant that carries the fix. Gated on routing, so a device that never routes never trips it.
+  - id: ha_action_probe
+    mode: restart
+    then:
+      - if:
+          condition:
+            and:
+              - api.connected:
+              - switch.is_on: tts_routing_enabled
+          then:
+            - lambda: 'id(ha_action_probe_pending) = true;'
+            - homeassistant.service:
+                service: persistent_notification.dismiss
+                data:
+                  notification_id: "${ha_probe_notification_id}"
+                # Either outcome proves the channel is open: an error means the call ran.
+                on_success:
+                  - script.execute: ha_action_probe_answered
+                on_error:
+                  - script.execute: ha_action_probe_answered
+            # A reply to a no-op lands in milliseconds; this is slack for a busy installation.
+            - delay: 5s
+            - if:
+                condition:
+                  # A silence is only evidence if the connection outlasted the window; the reconnect
+                  # asks again anyway.
+                  lambda: 'return id(ha_action_probe_pending) && id(api_id).is_connected();'
+                then:
+                  - lambda: |-
+                      id(ha_action_probe_pending) = false;
+                      id(ha_actions_allowed) = id(ha_supports_action_replies) ? 2 : 3;
+                  - script.execute: tts_routing_status_publish
+                  - if:
+                      condition:
+                        lambda: 'return id(ha_actions_allowed) == 2;'
+                      then:
+                        # Split across messages: the logger's tx_buffer_size defaults to 512 bytes.
+                        - lambda: |-
+                            ESP_LOGE("tts_routing",
+                                     "Home Assistant rejected an action call, so no TTS response "
+                                     "can be routed anywhere and every one will play locally.");
+                            ESP_LOGE("tts_routing",
+                                     "  Fix: Settings > Devices & services > ESPHome > this "
+                                     "device > CONFIGURE, tick 'Allow the device to perform Home "
+                                     "Assistant actions'. Routing works immediately afterwards.");
+                        - script.execute: tts_call_flash
+                      else:
+                        # A warning and no red ring: nothing is provably wrong with this installation.
+                        - lambda: |-
+                            ESP_LOGW("tts_routing",
+                                     "Cannot confirm this device may perform Home Assistant "
+                                     "actions; Home Assistant 2025.12 is the first version that "
+                                     "answers action calls. If responses play locally, check the "
+                                     "option in this device's ESPHome settings.");
+
+  # Any answer at all means the checkbox is ticked. Setting ha_action_replies_seen here arms the
+  # watchdog from the moment Home Assistant connects, rather than after the first real interaction.
+  - id: ha_action_probe_answered
+    then:
+      - lambda: |-
+          id(ha_action_probe_pending) = false;
+          id(ha_action_replies_seen) = true;
+          if (id(ha_actions_allowed) != 1) {
+            ESP_LOGI("tts_routing", "Home Assistant actions are allowed");
+          }
+          id(ha_actions_allowed) = 1;
+      - script.execute: tts_routing_status_publish
+
+  # Warns when Remote TTS Targets holds Music Assistant entity ids, which serialize playback across
+  # the targets and make Sonos start late and clip.
+  #
+  # get_queue only reads, so aiming it at the target list changes nothing, and the answer is in
+  # whether one comes back: a target MA owns produces a response, a list it owns none of raises
+  # HomeAssistantError, and no MA at all raises ServiceNotFound. Both failures are the correct
+  # configuration, which is why success is the branch that complains.
+  - id: tts_targets_ma_check
+    mode: restart
+    then:
+      - if:
+          condition:
+            and:
+              - api.connected:
+              - switch.is_on: tts_routing_enabled
+              # Without replies neither branch fires, so this would be a question asked into a void.
+              - lambda: 'return !${tts_targets_unset} && id(ha_supports_action_replies);'
+          then:
+            - homeassistant.action:
+                action: music_assistant.get_queue
+                capture_response: true
+                data_template:
+                  entity_id: "{{ ${tts_targets_jinja} }}"
+                variables:
+                  targets: !lambda 'return id(tts_target_media_player).state;'
+                # Only the ids the queues came back under matter, so they are rendered on Home
+                # Assistant's side to keep kilobytes off the wire. ESPHome wraps it as {"response":}.
+                response_template: "{{ response.keys() | list | join(', ') }}"
+                on_success:
+                  - lambda: |-
+                      id(tts_targets_have_ma) = true;
+                      // Split across messages: logger tx_buffer_size defaults to 512 bytes.
+                      ESP_LOGE("tts_routing",
+                               "Remote TTS Targets contains Music Assistant entity ids: %s",
+                               response["response"].as<const char *>());
+                      ESP_LOGE("tts_routing",
+                               "  Responses sent to these play one speaker at a time and clip on "
+                               "Sonos. Fix: replace each with the native entity id for the same "
+                               "speaker - the one the speaker's own integration created.");
+                  - script.execute: tts_routing_status_publish
+                # No Music Assistant entity in the list, or no Music Assistant at all.
+                on_error:
+                  - lambda: 'id(tts_targets_have_ma) = false;'
+                  - script.execute: tts_routing_status_publish
+          else:
+            # Nothing was asked, so nothing is known: a verdict about a target list that has since
+            # been edited must not outlive it.
+            - lambda: 'id(tts_targets_have_ma) = false;'
+
+  # Re-reads Remote TTS Status, whose update_interval is never.
+  - id: tts_routing_status_publish
+    then:
+      - component.update: tts_routing_status
+
+  # Applies the same normalization tts_targets_jinja applies on the other side, so the logged call is
+  # pasteable rather than a template. Every action is a lambda, so an execute returns with the global
+  # already filled.
+  - id: tts_targets_parse
+    then:
+      - lambda: |-
+          std::string all;
+          const std::string &raw = id(tts_target_media_player).state;
+          size_t start = 0;
+          size_t count = 0;
+          while (true) {
+            size_t comma = raw.find(',', start);
+            std::string entry =
+                raw.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+            size_t begin = entry.find_first_not_of(" \t");
+            if (begin != std::string::npos) {
+              entry = entry.substr(begin, entry.find_last_not_of(" \t") - begin + 1);
+              for (char &c : entry) {
+                c = (char) ::tolower((unsigned char) c);
+              }
+              if (count > 0) {
+                all += ", ";
+              }
+              all += "'" + entry + "'";
+              count++;
+            }
+            if (comma == std::string::npos) {
+              break;
+            }
+            start = comma + 1;
+          }
+          id(tts_targets_literal) = "[" + all + "]";
+
+  # MP3 while routing is on, FLAC when it is off. Home Assistant reads this format off ListEntities
+  # and hands it to the TTS engine, so it decides the extension on the one URL every target is
+  # given - and a Sonos AudioClip accepts MP3 and WAV only, silently playing nothing for FLAC.
+  - id: tts_announce_format_apply
+    mode: restart
+    then:
+      - lambda: |-
+          const bool want_mp3 = id(tts_routing_enabled).state && !${tts_targets_unset};
+          if (want_mp3 != id(tts_announce_format_mp3)) {
+            media_player::MediaPlayerSupportedFormat fmt;
+            fmt.purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_ANNOUNCEMENT;
+            fmt.sample_rate = 48000;
+            fmt.num_channels = 1;
+            fmt.format = want_mp3 ? "mp3" : "flac";
+            // Zero for MP3 rather than 2, and not an oversight: speaker_source's own codegen leaves
+            // the field out for that codec because Home Assistant's ffmpeg transcode fails when
+            // bytes-per-sample is specified alongside it.
+            fmt.sample_bytes = want_mp3 ? 0 : 2;
+            id(external_media_player).set_format(speaker_source::ANNOUNCEMENT_PIPELINE, fmt);
+            id(tts_announce_format_mp3) = want_mp3;
+            ESP_LOGI("tts_routing", "Announcement codec set to %s", fmt.format.c_str());
+          }
+      - if:
+          # Tested against what the live connection was told, not the previous value, so a reload
+          # that reached nobody is retried by the next change. Neither half runs on the boot path.
+          condition:
+            and:
+              - api.connected:
+              - lambda: 'return id(tts_announce_format_mp3) != id(tts_announce_format_advertised_mp3);'
+          then:
+            # ListEntities is sent once per connection, so reloading the entry is how the device asks
+            # for the reconnect that republishes it. An unresolvable entry id fails with a ValueError,
+            # which Home Assistant does not answer for, so the codec then waits for the next reboot.
+            - lambda: |-
+                ESP_LOGI("tts_routing",
+                         "Reloading this device in Home Assistant so it re-reads the codec");
+            - homeassistant.service:
+                service: homeassistant.reload_config_entry
+                data_template:
+                  entry_id: >-
+                    ${tts_self_entry_jinja}
+                    {{ ns.entry }}
+                variables:
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+
+  # Sends the response to the Remote TTS Targets, for whichever of the two triggers arrives first.
+  # on_intent_progress normally wins, ~36ms after intent start against ~1.1s for on_tts_end, so
+  # every target starts from the same moment this speaker does. on_tts_end is the fallback for a TTS
+  # engine that does not stream.
+  - id: tts_route_response
+    mode: single
+    parameters:
+      url: string
+    then:
+      - if:
+          condition:
+            # This interaction's routing decision, plus the flag that makes two triggers one call.
+            lambda: 'return id(tts_routing_to_remote) && !id(tts_remote_sent);'
+          then:
+            - lambda: 'id(tts_remote_sent) = true;'
+            # Slack for tts_targets_volume_apply, which fires a trigger earlier. Dispatch order is
+            # not the worry, application is: a networked speaker takes a round trip to accept a
+            # volume, and a response that starts at the old level and jumps is what this prevents.
+            - if:
+                condition:
+                  lambda: 'return id(remote_tts_volume).state > 0;'
+                then:
+                  - delay: 250ms
+            # The call written out as the action it will become, so it can be pasted into Developer
+            # Tools > Actions unchanged. One line per key: the logger's tx_buffer_size is 512 bytes.
+            - script.execute: tts_targets_parse
+            - lambda: |-
+                ESP_LOGD("tts_routing", "routing response: volume %d%%, codec %s",
+                         (int) id(remote_tts_volume).state,
+                         id(tts_announce_format_mp3) ? "mp3" : "flac");
+            # One call, to every target. No guard on the list: an empty entity_id is a no-op rather
+            # than an error, and on_start has already logged that nothing is set.
+            #
+            # announce_volume is sent to nobody - native Squeezebox reads it as a 0.0-1.0 float and
+            # rejects the call outright above 1. Only Sonos honours a per-call level, via extra.volume.
+            - lambda: |-
+                const int vol = (int) id(remote_tts_volume).state;
+                ESP_LOGD("tts_routing", "action: media_player.play_media");
+                ESP_LOGD("tts_routing", "data:");
+                ESP_LOGD("tts_routing", "  entity_id: %s", id(tts_targets_literal).c_str());
+                ESP_LOGD("tts_routing", "  media_content_id: %s", url.c_str());
+                ESP_LOGD("tts_routing", "  media_content_type: music");
+                ESP_LOGD("tts_routing", "  announce: true");
+                if (vol > 0) {
+                  ESP_LOGD("tts_routing", "  extra: {'use_pre_announce': false, 'volume': %d}",
+                           vol);
+                } else {
+                  ESP_LOGD("tts_routing", "  extra: {'use_pre_announce': false}");
+                }
+            - lambda: 'id(tts_announce_pending) = true;'
+            - homeassistant.service:
+                service: media_player.play_media
+                data:
+                  media_content_type: music
+                  announce: "true"
+                data_template:
+                  entity_id: "{{ ${tts_targets_jinja} }}"
+                  media_content_id: "{{ tts_url }}"
+                  extra: >-
+                    {{ {'use_pre_announce': false, 'volume': vol | int}
+                       if vol | int > 0 else {'use_pre_announce': false} }}
+                variables:
+                  targets: !lambda 'return id(tts_target_media_player).state;'
+                  tts_url: !lambda 'return url;'
+                  vol: !lambda 'return (int) id(remote_tts_volume).state;'
+                on_success:
+                  - script.execute:
+                      id: tts_call_ok
+                      call: "media_player.play_media"
+                on_error:
+                  - script.execute:
+                      id: tts_call_error
+                      call: "media_player.play_media"
+                      reason: !lambda 'return error;'
+            # Started once the call is out, so it has something to wait on.
+            - script.execute: tts_announce_watchdog
+
+  # Covers the failures Home Assistant never reports: an unanswered call leaves ESPHome holding the
+  # pending callback forever, so the response would vanish with nothing in this log to show it.
+  # The wait is self-calibrating - the local pipeline received the same URL and drains when the
+  # response ends - and the delay after it covers a Music Assistant target, whose reply only returns
+  # once the controller has slept out the announcement's length. Nothing is played late.
+  - id: tts_announce_watchdog
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: 'return id(ha_action_replies_seen);'
+          then:
+            - wait_until:
+                condition:
+                  not:
+                    media_player.is_announcing: external_media_player
+                timeout: 30s
+            - delay: 15s
+            - if:
+                condition:
+                  lambda: 'return id(tts_announce_pending);'
+                then:
+                  - lambda: |-
+                      ESP_LOGE("tts_routing",
+                               "Home Assistant never answered media_player.play_media; "
+                               "the response may not have played");
+                  - script.execute: tts_call_flash
+                  # An unanswered call is also what a revoked checkbox looks like, so ask again.
+                  - script.execute: ha_action_probe
+
+  # Asks every eligible Remote TTS Target to sound its own wake chime. Fired from
+  # on_wake_word_detected ahead of the local chime, and nothing waits on it: the chime is not part
+  # of the interaction, and the assistant must start regardless.
+  #
+  # bypass_proxy is not decoration. Home Assistant substitutes an ffmpeg proxy URL for any media id
+  # whose scheme and netloc parse, which audio-file:// satisfies, and ffmpeg cannot open that URI -
+  # so without the flag the call succeeds, the log stays clean and no chime is ever heard.
+  - id: remote_wake_chime_send
+    mode: single
+    then:
+      - if:
+          condition:
+            and:
+              - api.connected:
+              - switch.is_on: remote_wake_chime
+              # Both halves of the routing configuration, the same condition area_ducking.yaml
+              # shares as duck_routing_on_expr. Spelled out because that package merges later.
+              - lambda: 'return id(tts_routing_enabled).state && !${tts_targets_unset};'
+          then:
+            # No guard on the target list: an empty entity_id is a no-op, so every target being a
+            # Sonos, or every target's chime being off, costs one ignored call.
+            - homeassistant.action:
+                action: media_player.play_media
+                data:
+                  media_content_type: music
+                  announce: "true"
+                  media_content_id: "${wake_chime_uri}"
+                data_template:
+                  entity_id: >-
+                    ${wake_chime_targets_jinja}
+                    {{ chime_players }}
+                  extra: "{{ {'bypass_proxy': true} }}"
+                variables:
+                  targets: !lambda 'return id(tts_target_media_player).state;'
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                on_error:
+                  - script.execute:
+                      id: remote_wake_chime_error
+                      reason: !lambda 'return error;'
+
+  # A chime that did not arrive, reported to the log and nowhere else. Deliberately not
+  # tts_call_error: that clears tts_announce_pending, which belongs to the announcement, and flashes
+  # red - which in this firmware means the answer went nowhere, not that a chime was missed.
+  - id: remote_wake_chime_error
+    parameters:
+      reason: string
+    then:
+      - lambda: |-
+          id(ha_action_replies_seen) = true;
+          ESP_LOGE("tts_routing", "wake chime call failed: %s", reason.c_str());
 
 voice_assistant:
   on_start:
+    # Whichever trigger sends this turn's response, it has not been sent yet.
+    - lambda: 'id(tts_remote_sent) = false;'
+    # Routing needs both halves of the configuration. Either one alone means local playback.
     - if:
         condition:
-          lambda: 'return !id(tts_target_media_player).state.empty();'
+          lambda: 'return id(tts_routing_enabled).state && !${tts_targets_unset};'
         then:
+          # Whether this device also plays the response is Remote TTS Mutes Local Voice's decision,
+          # and audio_gain_reconcile's to carry out.
           - lambda: |-
               id(tts_routing_to_remote) = true;
-              ESP_LOGI("tts_routing", "Remote TTS routing enabled, target: %s", id(tts_target_media_player).state.c_str());
-          - mixer_speaker.apply_ducking:
-              id: announcement_mixing_input
-              decibel_reduction: 51
-              duration: 0.0s
+              ESP_LOGI("tts_routing", "Remote TTS routing enabled, target: %s",
+                       id(tts_target_media_player).state.c_str());
         else:
-          - lambda: 'id(tts_routing_to_remote) = false;'
+          - lambda: |-
+              id(tts_routing_to_remote) = false;
+              if (id(tts_routing_enabled).state) {
+                ESP_LOGW("tts_routing",
+                         "Remote TTS Routing is on but Remote TTS Targets "
+                         "is not set; playing on the local speaker");
+              }
 
+  # The response, handed on as soon as Home Assistant has a URL for it. `x` is empty on every
+  # intent-progress event but the first.
+  #
+  # A trigger of this package's own rather than an addition to voice_assistant.yaml: ESPHome
+  # concatenates lists when merging packages and satellite1.base.yaml lists `va` first, so that
+  # file's handler has already set tts_playing and reconciled the gain by the time this runs.
+  on_intent_progress:
+    - if:
+        condition:
+          lambda: 'return !x.empty() && id(tts_routing_to_remote);'
+        then:
+          - script.execute:
+              id: tts_route_response
+              url: !lambda 'return x;'
+
+  # The fallback for an engine that does not stream. tts_route_response's own guard makes this a
+  # no-op after a streaming response, so the line below is only printed when generation really was
+  # waited out.
   on_tts_end:
     - if:
         condition:
-          lambda: 'return id(tts_routing_to_remote);'
+          lambda: 'return id(tts_routing_to_remote) && !id(tts_remote_sent);'
         then:
-          - lambda: 'ESP_LOGI("tts_routing", "Routing TTS to remote player, URL: %s", x.c_str());'
-          - homeassistant.service:
-              service: media_player.play_media
-              data:
-                media_content_type: music
-                announce: "true"
-              data_template:
-                entity_id: "{{ target_entity }}"
-                media_content_id: "{{ tts_url }}"
-              variables:
-                target_entity: !lambda 'return id(tts_target_media_player).state;'
-                tts_url: !lambda 'return x;'
+          - lambda: |-
+              ESP_LOGD("tts_routing",
+                       "no streaming TTS URL for this response; routing it at tts-end");
+          - script.execute:
+              id: tts_route_response
+              url: !lambda 'return x;'
 
   on_end:
     - if:
         condition:
           lambda: 'return id(tts_routing_to_remote);'
         then:
-          - lambda: 'ESP_LOGI("tts_routing", "Restoring announcement ducking");'
-          - mixer_speaker.apply_ducking:
-              id: announcement_mixing_input
-              decibel_reduction: 0
-              duration: 0.0s
+          # The local pipeline still received the TTS URL, so wait for it to drain before clearing
+          # the flag or the tail of the response leaks out at chime level.
+          - wait_until:
+              condition:
+                not:
+                  media_player.is_announcing: external_media_player
+              timeout: 30s
           - lambda: 'id(tts_routing_to_remote) = false;'
+          - script.execute: audio_gain_reconcile
 
   on_error:
     - if:
         condition:
           lambda: 'return id(tts_routing_to_remote);'
         then:
-          - lambda: 'ESP_LOGI("tts_routing", "Error during remote routing, restoring announcement ducking");'
-          - mixer_speaker.apply_ducking:
-              id: announcement_mixing_input
-              decibel_reduction: 0
-              duration: 0.0s
+          - wait_until:
+              condition:
+                not:
+                  media_player.is_announcing: external_media_player
+              timeout: 30s
+          - lambda: 'ESP_LOGI("tts_routing", "Error during remote routing, restoring local playback");'
           - lambda: 'id(tts_routing_to_remote) = false;'
+          - script.execute: audio_gain_reconcile

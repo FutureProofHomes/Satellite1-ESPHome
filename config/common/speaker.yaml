@@ -103,18 +103,25 @@ script:
                 mode: !lambda 'return id(pd_power_contract) >=9 ? 2 : 0;'
             - lambda: id(tas2780_active) = true;
 
+  # Switching outputs swaps which DAC is live, and the two have very different volume
+  # curves (31.5 dB vs 47.25 dB across the usable range), so the ducking that goes with a
+  # given level is not the same on both and the gain state has to be re-derived on every
+  # switch. DACProxy re-applies the volume itself as part of activating a DAC, which is what
+  # keeps the level right in the gap before this script's reconcile lands.
   - id: activate_internal_speaker
     mode: single
     then:
       - logger.log: "Activating internal speaker"
       - script.execute: tas2780_ensure_active
       - dac_proxy.activate_speaker:
+      - script.execute: audio_gain_reconcile
 
   - id: activate_line_out
     mode: single
     then:
       - logger.log: "Activating line-out audio"
       - dac_proxy.activate_line_out:
+      - script.execute: audio_gain_reconcile
 
 api:
   actions:

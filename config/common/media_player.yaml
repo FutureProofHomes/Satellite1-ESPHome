@@ -80,28 +80,16 @@ media_player:
       - script.execute: control_leds
     on_volume:
       - script.execute: control_leds
-    # Apply audio ducking when an announcement starts
+      # The media player writes the new volume straight to the DAC on its way down the
+      # speaker chain, so re-derive the whole gain state against it.
+      - script.execute: audio_gain_reconcile
+    # Duck the media channel while an announcement plays
     on_announcement:
-      - mixer_speaker.apply_ducking:
-          id: media_mixing_input
-          decibel_reduction: 20
-          duration: 0.0s
+      - script.execute: audio_gain_reconcile
 
     # Restore audio ducking when not actively playing announcements or running voice assistant
     on_state:
-      - if:
-          condition:
-            and:
-              - switch.is_off: timer_ringing
-              - not:
-                  voice_assistant.is_running:
-              - not:
-                  media_player.is_announcing: external_media_player
-          then:
-            - mixer_speaker.apply_ducking:
-                id: media_mixing_input
-                decibel_reduction: 0
-                duration: 1.0s
+      - script.execute: audio_gain_reconcile
 
 script:
   # Script executed when we want to play sounds on the device.

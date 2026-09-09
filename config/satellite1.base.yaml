@@ -61,6 +61,12 @@ esphome:
               id(dac_proxy).activate_speaker();
             }
 
+        # The restored DAC level is safe on its own, since DACProxy persists the media volume rather
+        # than any level the reconciler raised it to. What is missing is the raise that goes with a
+        # Voice Override, because the floor is never persisted - so derive the gain state now that
+        # the DAC is set up and the slider has restored.
+        - script.execute: audio_gain_reconcile
+
         # If after 10 minutes, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
         - delay: 10min
         - if:
@@ -86,7 +92,27 @@ packages:
   spk: !include common/speaker.yaml
   mp: !include common/media_player.yaml
   va: !include common/voice_assistant.yaml
+  # An inline package purely for where it sits: handing the Remote TTS Targets their volumes back has
+  # to reach Home Assistant before the calls that play the response on them, and ESPHome runs a
+  # trigger's automations in merge order - so this must be listed ahead of tts_routing, which owns
+  # the other blocks on both triggers below.
+  #
+  # Both triggers, because either can be the one that sends the response. The release is self-gated
+  # and clears its own flag, so being called twice hands the volumes back once; the empty-string test
+  # keeps the intent-progress events that carry no URL from restarting it. Whether this is the right
+  # moment is the script's own decision - see area_ducking.yaml.
+  duck_tts_targets_release_first:
+    voice_assistant:
+      on_intent_progress:
+        - if:
+            condition:
+              lambda: 'return !x.empty();'
+            then:
+              - script.execute: area_duck_release_tts_targets
+      on_tts_end:
+        - script.execute: area_duck_release_tts_targets
   tts_routing: !include common/tts_routing.yaml
+  area_ducking: !include common/area_ducking.yaml
   timer: !include common/timer.yaml
   led_ring: !include common/led_ring.yaml
   mmwave: !include common/mmwave.yaml
