@@ -85,9 +85,34 @@ class LD2410Handler {
   size_t cmd_queue_count_{0};
   bool waiting_for_ack_{false};
   uint32_t ack_wait_start_{0};
-  bool bt_readback_pending_{false};
-  uint32_t bt_readback_due_ms_{0};
-  static const uint32_t BT_READBACK_DELAY_MS = 1500;
+  /// A parameter readback deferred until the module has finished restarting. Both the Bluetooth
+  /// command and a factory reset restart the module, and neither can be read back until it is up.
+  bool param_readback_pending_{false};
+  uint32_t param_readback_due_ms_{0};
+  static const uint32_t PARAM_READBACK_DELAY_MS = 1500;
+
+  /// Total length of a well-formed 0x0161 (read-parameters) ACK frame. The declared data length is
+  /// 28 - command word 2, ACK status 2, then a 24-byte payload of 0xAA marker, max distance gate,
+  /// max moving gate, max still gate, 9 moving sensitivities, 9 still sensitivities and a 2-byte
+  /// unmanned duration - around which sit a 4-byte header and a 4-byte footer.
+  /// A shorter frame cannot hold the duration field and must not be parsed.
+  static constexpr size_t PARAM_ACK_FRAME_LEN = 4 + 2 + 28 + 4;
+
+  /// True once ESPHome holds a configuration it must not surrender to the radar module: either a
+  /// stored one was restored at boot, or someone wrote one through set_backend_config().
+  ///
+  /// The module is a slave that gets written to, not a source of truth. It is read back only to
+  /// learn what an unconfigured device already had, which happens exactly once - on the first boot
+  /// after flashing, before anything is in NVS. Letting a later readback win meant every apply
+  /// ended by overwriting the settings that apply had just been asked to write.
+  bool config_authoritative_{false};
+
+  /// The module's own Bluetooth state as last observed from a 0x01A5 MAC query, kept apart from
+  /// config_.bluetooth_enabled, which is the state the user asked for. apply_backend_config()
+  /// needs the difference between the two: sending the Bluetooth command also restarts the module,
+  /// so it must only be sent when the module genuinely disagrees.
+  bool bt_module_enabled_{false};
+  bool bt_module_state_known_{false};
   static const uint32_t ACK_TIMEOUT_MS = 1000;
   static const int TARGET_STATE_STREAK_THRESHOLD = 3;
   std::string pub_target_state_;

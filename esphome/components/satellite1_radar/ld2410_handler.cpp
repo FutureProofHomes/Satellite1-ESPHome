@@ -24,6 +24,9 @@ void LD2410Handler::setup() {
   if (config_pref_.load(&loaded)) {
     this->set_backend_config(loaded);
   }
+  // Runs on every boot, but only the first one - the one with nothing in NVS yet - is allowed to
+  // take its answer as configuration. After that it is a consistency check; see
+  // config_authoritative_.
   query_params();
 }
 
@@ -194,17 +197,29 @@ void LD2410Handler::loop() {
 
   process_queue_();
 
-  if (bt_readback_pending_ && static_cast<int32_t>(millis() - bt_readback_due_ms_) >= 0) {
-    bt_readback_pending_ = false;
+  if (param_readback_pending_ && static_cast<int32_t>(millis() - param_readback_due_ms_) >= 0) {
+    param_readback_pending_ = false;
     this->query_params();
-    ESP_LOGI(TAG_LD2410, "Queued parameter readback after Bluetooth restart");
+    ESP_LOGI(TAG_LD2410, "Queued parameter readback after module restart");
   }
 }
 
 void LD2410Handler::factory_reset() {
   queue_enter_config_();
   queue_config_command_(0x00A2, nullptr, 0);
+  // The datasheet is explicit that restored defaults do not take effect until the module restarts,
+  // so the reset is followed by one rather than left half-applied until something else reboots it.
+  queue_config_command_(0x00A3, nullptr, 0);
   queue_exit_config_();
+
+  // The one case where the module legitimately outranks the stored configuration: the point of a
+  // factory reset is to end up on the module's defaults, so stand down and let the readback below
+  // adopt whatever it reports once it is back up.
+  config_authoritative_ = false;
+  bt_module_state_known_ = false;
+  param_readback_pending_ = true;
+  param_readback_due_ms_ = millis() + PARAM_READBACK_DELAY_MS;
+
   ESP_LOGI(TAG_LD2410, "Factory reset queued");
 }
 
@@ -310,6 +325,9 @@ bool LD2410Handler::set_backend_config(const LD2410BackendConfig &cfg) {
   if (!validate_backend_config_(candidate))
     return false;
   config_ = candidate;
+  // From here on the module's own parameters are no longer allowed to overwrite this. Covers both
+  // callers: a write from the tuner, and setup() replaying a configuration out of NVS.
+  config_authoritative_ = true;
   save_backend_config_();
   return true;
 }
@@ -317,7 +335,16 @@ bool LD2410Handler::set_backend_config(const LD2410BackendConfig &cfg) {
 void LD2410Handler::apply_backend_config() {
   this->write_gate_config();
   this->set_distance_resolution(config_.distance_resolution == 1);
-  this->set_bluetooth_enabled(config_.bluetooth_enabled);
+
+  // Deliberately conditional. set_bluetooth_enabled() queues a module restart alongside the
+  // command, because the radio only changes state across one - so calling it unconditionally meant
+  // every threshold tweak from the tuner rebooted the radar, dropped presence detection for about
+  // a second, and scheduled a parameter readback that used to overwrite the very settings this
+  // apply had just written. Only send it when the module actually disagrees; if its state has
+  // never been observed, send it once to establish a known state.
+  if (!bt_module_state_known_ || bt_module_enabled_ != config_.bluetooth_enabled) {
+    this->set_bluetooth_enabled(config_.bluetooth_enabled);
+  }
 }
 
 void LD2410Handler::enable_engineering_mode() {
@@ -506,31 +533,60 @@ void LD2410Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
     ESP_LOGI(TAG_LD2410, "Firmware version: %s", ver);
   }
 
-  if (cmd_word == 0x0161 && status == 0 && len >= 32) {
-    uint8_t max_move = buf[10];
-    uint8_t max_still = buf[11];
+  if (cmd_word == 0x0161 && status == 0 && len >= PARAM_ACK_FRAME_LEN) {
+    // Payload offsets, counted from the start of the frame. buf[10] is the 0xAA marker that opens
+    // the parameter block and buf[11] is the module's maximum supported distance gate; neither is
+    // a configured value. Reading the configured gates from 10 and 11 instead of 12 and 13 shifted
+    // every field that follows by two bytes, so max_move took the value of the 0xAA marker (170,
+    // clamped to 8), both threshold arrays slid two gates to the right, and the duration was
+    // assembled out of the last two still sensitivities - two gates at 20 reading back as a
+    // timeout of 5140 seconds. The misread was then persisted, which is what silently reverted
+    // every tuner write about two seconds after it was applied.
+    static constexpr size_t OFF_MAX_MOVE_GATE = 12;
+    static constexpr size_t OFF_MAX_STILL_GATE = 13;
+    static constexpr size_t OFF_MOVE_THRESHOLDS = 14;
+    static constexpr size_t OFF_STILL_THRESHOLDS = OFF_MOVE_THRESHOLDS + NUM_GATES;
+    static constexpr size_t OFF_DURATION = OFF_STILL_THRESHOLDS + NUM_GATES;
 
-    config_.max_move_gate = (max_move > 8) ? 8 : max_move;
-    config_.max_still_gate = (max_still > 8) ? 8 : max_still;
+    const uint8_t max_move = buf[OFF_MAX_MOVE_GATE];
+    const uint8_t max_still = buf[OFF_MAX_STILL_GATE];
 
-    for (size_t g = 0; g < NUM_GATES && (12 + g) < (len - 4); g++) {
-      uint8_t gate_val = (buf[12 + g] > 100) ? 100 : buf[12 + g];
-      config_.gate_move_threshold[g] = gate_val;
+    if (!config_authoritative_) {
+      config_.max_move_gate = (max_move > 8) ? 8 : max_move;
+      config_.max_still_gate = (max_still > 8) ? 8 : max_still;
+
+      for (size_t g = 0; g < NUM_GATES; g++) {
+        const uint8_t move_val = buf[OFF_MOVE_THRESHOLDS + g];
+        const uint8_t still_val = buf[OFF_STILL_THRESHOLDS + g];
+        config_.gate_move_threshold[g] = (move_val > 100) ? 100 : move_val;
+        config_.gate_still_threshold[g] = (still_val > 100) ? 100 : still_val;
+      }
+
+      config_.timeout_seconds = to_uint16_(buf[OFF_DURATION], buf[OFF_DURATION + 1]);
+
+      save_backend_config_();
+      ESP_LOGI(TAG_LD2410, "Adopted module parameters: max_move=%u max_still=%u timeout=%us",
+               static_cast<unsigned int>(config_.max_move_gate), static_cast<unsigned int>(config_.max_still_gate),
+               static_cast<unsigned int>(config_.timeout_seconds));
+    } else {
+      // Purely informational from here on: the stored configuration stands. A mismatch means the
+      // module has not caught up with the last apply, which is worth seeing in a log but must not
+      // be written back over what the user asked for.
+      const uint16_t module_timeout = to_uint16_(buf[OFF_DURATION], buf[OFF_DURATION + 1]);
+      if (max_move != config_.max_move_gate || max_still != config_.max_still_gate ||
+          module_timeout != config_.timeout_seconds) {
+        ESP_LOGW(TAG_LD2410,
+                 "Module parameters differ from stored config (module: max_move=%u max_still=%u timeout=%us; "
+                 "stored: max_move=%u max_still=%u timeout=%us)",
+                 static_cast<unsigned int>(max_move), static_cast<unsigned int>(max_still),
+                 static_cast<unsigned int>(module_timeout), static_cast<unsigned int>(config_.max_move_gate),
+                 static_cast<unsigned int>(config_.max_still_gate), static_cast<unsigned int>(config_.timeout_seconds));
+      } else {
+        ESP_LOGI(TAG_LD2410, "Module parameters match stored config (max_move=%u max_still=%u timeout=%us)",
+                 static_cast<unsigned int>(max_move), static_cast<unsigned int>(max_still),
+                 static_cast<unsigned int>(module_timeout));
+      }
     }
-    for (size_t g = 0; g < NUM_GATES && (21 + g) < (len - 4); g++) {
-      uint8_t gate_val = (buf[21 + g] > 100) ? 100 : buf[21 + g];
-      config_.gate_still_threshold[g] = gate_val;
-    }
-
-    if (len > 31) {
-      uint16_t timeout = to_uint16_(buf[30], buf[31]);
-      config_.timeout_seconds = timeout;
-    }
-
-    save_backend_config_();
-
-    ESP_LOGI(TAG_LD2410, "Parameters: max_move=%u max_still=%u", static_cast<unsigned int>(max_move),
-             static_cast<unsigned int>(max_still));
   }
 
   if (cmd_word == 0x0162) {
@@ -550,21 +606,32 @@ void LD2410Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
   if (cmd_word == 0x01AB && status == 0 && len >= 12) {
     uint16_t res = to_uint16_(buf[10], buf[11]);
     bool fine = (res == 0x0001);
-    config_.distance_resolution = fine ? 1 : 0;
-    save_backend_config_();
+    if (!config_authoritative_) {
+      config_.distance_resolution = fine ? 1 : 0;
+      save_backend_config_();
+    }
     ESP_LOGI(TAG_LD2410, "Distance resolution: %s", fine ? "0.2m" : "0.75m");
   }
 
   if (cmd_word == 0x01A5 && status == 0 && len >= 16) {
     const bool has_bt_mac = memcmp(&buf[10], LD2410_NO_BT_MAC, sizeof(LD2410_NO_BT_MAC)) != 0;
-    config_.bluetooth_enabled = has_bt_mac;
-    save_backend_config_();
+
+    // Always recorded: this is the only way to learn what the module's radio is actually doing,
+    // and apply_backend_config() needs it to decide whether the Bluetooth command - which drags a
+    // module restart along with it - has to be sent at all.
+    bt_module_enabled_ = has_bt_mac;
+    bt_module_state_known_ = true;
+
+    if (!config_authoritative_) {
+      config_.bluetooth_enabled = has_bt_mac;
+      save_backend_config_();
+    }
     ESP_LOGI(TAG_LD2410, "Bluetooth state from MAC query: %s", has_bt_mac ? "enabled" : "disabled");
   }
 
   if (cmd_word == 0x01A4 && status == 0) {
-    bt_readback_pending_ = true;
-    bt_readback_due_ms_ = millis() + BT_READBACK_DELAY_MS;
+    param_readback_pending_ = true;
+    param_readback_due_ms_ = millis() + PARAM_READBACK_DELAY_MS;
     ESP_LOGI(TAG_LD2410, "Bluetooth command acknowledged, scheduling readback");
   }
 

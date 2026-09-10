@@ -29,8 +29,17 @@ canvas{display:block;width:100%;height:100%}
 .hint{font-size:11px;color:var(--dim);line-height:1.4}
 .instructions{font-size:11px;color:var(--dim);line-height:1.5;border:1px solid var(--border);border-radius:4px;padding:8px 10px;background:var(--bg)}
 .tooltip{position:relative;display:inline-block;cursor:help;margin-left:4px;width:14px;height:14px;border-radius:50%;background:var(--border);color:var(--dim);font-size:10px;text-align:center;line-height:14px}
-.tooltip .tt{visibility:hidden;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:11px;line-height:1.4;position:absolute;z-index:10;bottom:120%;left:50%;transform:translateX(-50%);width:220px;text-transform:none;letter-spacing:0;font-weight:400}
+/* pointer-events:none matters: .tt is a child of .tooltip, so hovering the popup keeps it open,
+   and a 220px box with no pointer transparency sits over the controls it overlaps and swallows
+   their clicks. Opens downward to match the LD2450 page. */
+.tooltip .tt{visibility:hidden;pointer-events:none;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:11px;line-height:1.4;position:absolute;z-index:10;top:120%;bottom:auto;left:50%;transform:translateX(-50%);width:220px;text-transform:none;letter-spacing:0;font-weight:400}
 .tooltip:hover .tt{visibility:visible}
+/* Save feedback. The panel scrolls and the Set buttons are spread down it, so this is pinned to
+   the viewport rather than placed next to whichever control was used. */
+.savemsg{position:fixed;right:16px;bottom:16px;z-index:50;max-width:320px;padding:10px 12px;border-radius:6px;border:1px solid var(--border);background:var(--panel);color:var(--text);font-size:12px;line-height:1.4;box-shadow:0 4px 14px rgba(0,0,0,.35);opacity:0;transform:translateY(6px);transition:opacity .15s,transform .15s;pointer-events:none}
+.savemsg.show{opacity:1;transform:translateY(0)}
+.savemsg.ok{border-color:var(--green)}
+.savemsg.err{border-color:var(--red)}
 .toggle{position:relative;display:inline-block;width:40px;height:22px}
 .toggle input{opacity:0;width:0;height:0}
 .slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:var(--border);border-radius:22px;transition:.2s}
@@ -53,6 +62,7 @@ canvas{display:block;width:100%;height:100%}
 <h1>Satellite1 Radar Tuner — LD2410</h1>
 <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle light/dark mode"><svg id="themeIcon" viewBox="0 0 24 24"><path d="M21.75 12.02c-.06 5.27-4.38 9.53-9.65 9.48-4.3-.04-8.03-2.92-9.18-6.96-.12-.42.15-.82.58-.9 1.04-.17 2.05-.54 2.97-1.09 2.72-1.63 4.35-4.38 4.53-7.3.02-.33.05-.67.05-1.01 0-.52-.06-1.02-.16-1.52-.09-.43.19-.85.63-.89 5.43-.42 10.28 3.8 10.23 9.19z"/></svg></button>
 </header>
+<div class="savemsg" id="saveMsg"></div>
 <div class="wrap">
 <div class="canvas-wrap"><canvas id="cv"></canvas></div>
 <div class="panel">
@@ -396,11 +406,47 @@ async function apiPatch(path,payload){
   // POST, not PATCH: the device serves this page from ESPHome's shared web server, which registers
   // only GET, POST and OPTIONS handlers, so a PATCH never reaches the radar tuner at all.
   const r=await fetch(BASE+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  if(!r.ok)throw new Error(r.statusText);
+  if(!r.ok)throw new Error(await errDetail(r));
   return r.json();
 }
-async function flushPrefs(){await fetch(BASE+'/api/v1/save',{method:'POST',...FETCH_OPTS})}
-async function applyConfig(){await fetch(BASE+'/api/v1/ld2410/apply',{method:'POST',...FETCH_OPTS})}
+// Rejections come back as {"error":"invalid timeout"} naming the exact field the device refused.
+// That is far more use than a bare status line, so it is dug out and shown.
+async function errDetail(r){
+  try{
+    const t=await r.text();
+    try{const j=JSON.parse(t);if(j&&j.error)return 'HTTP '+r.status+' - '+j.error}catch(_){}
+    if(t)return 'HTTP '+r.status+' - '+t;
+  }catch(_){}
+  return 'HTTP '+r.status+' '+r.statusText;
+}
+// The bodyless POSTs. Their status used to be discarded entirely, so a rejected apply or a failed
+// NVS flush looked exactly like a successful one.
+async function postEmpty(path){
+  const r=await fetch(BASE+path,{method:'POST',...FETCH_OPTS});
+  if(!r.ok)throw new Error(await errDetail(r));
+}
+async function flushPrefs(){await postEmpty('/api/v1/save')}
+async function applyConfig(){await postEmpty('/api/v1/ld2410/apply')}
+
+function flash(ok,text){
+  const el=document.getElementById('saveMsg');
+  el.textContent=text;
+  el.classList.remove('ok','err');
+  el.classList.add(ok?'ok':'err');
+  el.classList.add('show');
+  clearTimeout(flash._t);
+  flash._t=setTimeout(function(){el.classList.remove('show')},ok?2000:6000);
+}
+// Every control's write goes through here so that failure can never again be indistinguishable
+// from success. Errors linger longer than confirmations and carry the device's own reason.
+async function saveAction(label,fn){
+  try{
+    await fn();
+    flash(true,label+' saved');
+  }catch(e){
+    flash(false,label+' failed - '+((e&&e.message)?e.message:'unknown error'));
+  }
+}
 
 async function loadConfig(){
   const cfg=await apiGet('/api/v1/ld2410/config');
@@ -435,50 +481,65 @@ async function pollGates(){
   }
 }
 
-async function saveTimeout(){
+function saveTimeout(){
   const v=parseInt(document.getElementById('timeoutInput').value)||0;
-  await apiPatch('/api/v1/ld2410/config',{timeout:v});await applyConfig();await flushPrefs();
+  return saveAction('Timeout',async function(){
+    await apiPatch('/api/v1/ld2410/config',{timeout:v});await applyConfig();await flushPrefs();
+  });
 }
-async function saveMaxMoveGate(){
+function saveMaxMoveGate(){
   const v=parseInt(document.getElementById('maxMoveGate').value)||0;
-  await apiPatch('/api/v1/ld2410/config',{max_move_gate:v});await applyConfig();await flushPrefs();
+  return saveAction('Max moving gate',async function(){
+    await apiPatch('/api/v1/ld2410/config',{max_move_gate:v});await applyConfig();await flushPrefs();
+  });
 }
-async function saveMaxStillGate(){
+function saveMaxStillGate(){
   const v=parseInt(document.getElementById('maxStillGate').value)||0;
-  await apiPatch('/api/v1/ld2410/config',{max_still_gate:v});await applyConfig();await flushPrefs();
+  return saveAction('Max still gate',async function(){
+    await apiPatch('/api/v1/ld2410/config',{max_still_gate:v});await applyConfig();await flushPrefs();
+  });
 }
-async function saveBluetooth(){
+function saveBluetooth(){
   const on=document.getElementById('btToggle').checked;
   document.getElementById('btLabel').textContent=on?'ON':'OFF';
-  await apiPatch('/api/v1/ld2410/config',{bluetooth:on});
+  return saveAction('Bluetooth '+(on?'on':'off'),async function(){
+    await apiPatch('/api/v1/ld2410/config',{bluetooth:on});await applyConfig();await flushPrefs();
+  });
 }
-async function saveDistRes(){
+function saveDistRes(){
   const v=document.getElementById('distRes').value;
-  await apiPatch('/api/v1/ld2410/config',{distance_resolution:v});
-  await applyConfig();await flushPrefs();
+  return saveAction('Distance resolution',async function(){
+    await apiPatch('/api/v1/ld2410/config',{distance_resolution:v});
+    await applyConfig();await flushPrefs();
+  });
 }
-async function applyThreshold(){
-  if(selGate<0)return;
+function applyThreshold(){
+  if(selGate<0){flash(false,'Select a gate first');return Promise.resolve()}
+  const g=selGate;
   const mt=parseInt(document.getElementById('moveThreshInput').value)||0;
   const st=parseInt(document.getElementById('stillThreshInput').value)||0;
-  moveThresh[selGate]=mt;stillThresh[selGate]=st;
+  moveThresh[g]=mt;stillThresh[g]=st;
   const move=moveThresh.map(v=>Math.round(v));
   const still=stillThresh.map(v=>Math.round(v));
-  await apiPatch('/api/v1/ld2410/config',{gate_move_thresholds:move,gate_still_thresholds:still});
-  await applyConfig();await flushPrefs();
-  draw();
-}
-async function saveAll(){
-  await apiPatch('/api/v1/ld2410/config',{
-    timeout:parseInt(document.getElementById('timeoutInput').value)||0,
-    max_move_gate:parseInt(document.getElementById('maxMoveGate').value)||0,
-    max_still_gate:parseInt(document.getElementById('maxStillGate').value)||0,
-    distance_resolution:document.getElementById('distRes').value,
-    bluetooth:document.getElementById('btToggle').checked,
-    gate_move_thresholds:moveThresh.map(v=>Math.round(v)),
-    gate_still_thresholds:stillThresh.map(v=>Math.round(v))
+  return saveAction('Gate '+g,async function(){
+    await apiPatch('/api/v1/ld2410/config',{gate_move_thresholds:move,gate_still_thresholds:still});
+    await applyConfig();await flushPrefs();
+    draw();
   });
-  await applyConfig();await flushPrefs();
+}
+function saveAll(){
+  return saveAction('All settings',async function(){
+    await apiPatch('/api/v1/ld2410/config',{
+      timeout:parseInt(document.getElementById('timeoutInput').value)||0,
+      max_move_gate:parseInt(document.getElementById('maxMoveGate').value)||0,
+      max_still_gate:parseInt(document.getElementById('maxStillGate').value)||0,
+      distance_resolution:document.getElementById('distRes').value,
+      bluetooth:document.getElementById('btToggle').checked,
+      gate_move_thresholds:moveThresh.map(v=>Math.round(v)),
+      gate_still_thresholds:stillThresh.map(v=>Math.round(v))
+    });
+    await applyConfig();await flushPrefs();
+  });
 }
 
 async function init(){
