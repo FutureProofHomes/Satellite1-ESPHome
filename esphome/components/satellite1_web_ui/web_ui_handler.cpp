@@ -179,7 +179,11 @@ void WebUIHandler::handle_ha_refresh_(AsyncWebServerRequest *request) {
   // Only a request. The sync itself is a Home Assistant action call, which has to be started from the
   // main loop, so loop() picks this up and fires the trigger that runs the script.
   this->ha_refresh_requested_.store(true);
-  request->send(202, "application/json", "{\"queued\":1}");
+
+  // 200 and not the 202 this deserves: init_response_ knows 200, 204, 400, 401, 404, 409 and 422, and
+  // maps everything else to 500 - so a 202 was answered as a 500 while still sending this body, which
+  // is a failure the browser would have believed. The body carries the meaning instead.
+  request->send(200, "application/json", "{\"queued\":1}");
 }
 
 void WebUIHandler::handle_index_(AsyncWebServerRequest *request) {

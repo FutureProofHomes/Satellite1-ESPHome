@@ -66,11 +66,12 @@ struct EntityRef {
  * web_server_idf registers exactly three wildcard URI handlers - GET, POST and OPTIONS - so PATCH
  * and DELETE never reach any handler at all. Writes are POST.
  *
- * ESPHome's response API cannot express 304. AsyncWebServerRequest::init_response_ maps status
- * codes through a switch whose default is 500, and 304 is not one of its cases, so
- * beginResponse(304, ...) would send a 500 carrying our cache headers. handle_index_ therefore
- * reaches past it to httpd_resp_set_status directly, which the operator httpd_req_t*() on the
- * request makes legal.
+ * ESPHome's response API can only express seven status codes. AsyncWebServerRequest::init_response_
+ * maps them through a switch that knows 200, 204, 400, 401, 404, 409 and 422 and defaults everything
+ * else to 500 - so beginResponse(304, ...) would send a 500 carrying our cache headers, and a 202
+ * would report a failure while still sending its body. handle_index_ therefore reaches past it to
+ * httpd_resp_set_status directly, which the operator httpd_req_t*() on the request makes legal;
+ * handle_ha_refresh_ takes the other option and answers 200.
  */
 class WebUIHandler : public AsyncWebHandler {
  public:
