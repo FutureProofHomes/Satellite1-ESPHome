@@ -18,6 +18,7 @@ from esphome.components import (
     update,
 )
 from esphome.components.light.types import LightState
+from esphome.components.voice_assistant import VoiceAssistant
 from esphome.const import CONF_ID, Framework
 from esphome.core import HexInt
 import esphome.final_validate as fv
@@ -40,6 +41,8 @@ MULTI_CONF = False
 
 CONF_INDEX_ID = "index_id"
 CONF_ENTITIES = "entities"
+CONF_VOICE_ASSISTANT_ID = "voice_assistant_id"
+CONF_VOICE_PHASE = "voice_phase"
 
 satellite1_web_ui_ns = cg.esphome_ns.namespace("satellite1_web_ui")
 Satellite1WebUI = satellite1_web_ui_ns.class_("Satellite1WebUI", cg.Component)
@@ -89,6 +92,12 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(): cv.declare_id(Satellite1WebUI),
             cv.GenerateID(CONF_INDEX_ID): cv.declare_id(cg.uint8),
             cv.Optional(CONF_ENTITIES, default={}): _ENTITIES_SCHEMA,
+            # Timers and the assistant's phase have no entity to read them from: get_timers() is a
+            # plain vector on the component, and the phase is a `globals:` int that config/ already
+            # maintains through the existing on_listening / on_stt_vad_* triggers. Both optional so
+            # that a build without voice_assistant still compiles.
+            cv.Optional(CONF_VOICE_ASSISTANT_ID): cv.use_id(VoiceAssistant),
+            cv.Optional(CONF_VOICE_PHASE): cv.returning_lambda,
         }
     ).extend(cv.COMPONENT_SCHEMA),
     cv.only_with_framework(Framework.ESP_IDF),
@@ -137,6 +146,13 @@ async def to_code(config):
         for key in sorted(config[CONF_ENTITIES][group]):
             entity = await cg.get_variable(config[CONF_ENTITIES][group][key])
             cg.add(var.add_entity(key, domain, entity))
+
+    if CONF_VOICE_ASSISTANT_ID in config:
+        cg.add(var.set_voice_assistant(await cg.get_variable(config[CONF_VOICE_ASSISTANT_ID])))
+
+    if CONF_VOICE_PHASE in config:
+        phase = await cg.process_lambda(config[CONF_VOICE_PHASE], [], return_type=cg.int_)
+        cg.add(var.set_voice_phase_fn(phase))
 
     if not _DIST.is_file():
         raise cv.Invalid(

@@ -662,6 +662,33 @@ hr {
   color: #fff;
 }
 
+/* ---------------------------------------------------------------- */
+/* Timers and transcript                                            */
+/* ---------------------------------------------------------------- */
+
+.lg {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.utt {
+  margin: 0 0 5px;
+  font-size: 12px;
+  color: var(--fg-2);
+}
+.utt.heard {
+  color: var(--fg);
+}
+.utt-who {
+  display: inline-block;
+  min-width: 38px;
+  margin-right: 6px;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-4);
+}
+
 .log {
   height: 220px;
   overflow: auto;

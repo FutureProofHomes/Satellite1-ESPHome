@@ -38,6 +38,14 @@ class Satellite1WebUI : public Component {
     this->handler_.add_entity(key, domain, entity);
   }
 
+#ifdef USE_VOICE_ASSISTANT
+  void set_voice_assistant(voice_assistant::VoiceAssistant *va) { this->handler_.set_voice_assistant(va); }
+  void set_voice_phase_fn(std::function<int()> fn) { this->handler_.set_voice_phase_fn(std::move(fn)); }
+
+  /// Called from the on_stt_end and on_tts_start lambdas in common/voice_assistant.yaml.
+  void push_utterance(const std::string &text, bool heard) { this->handler_.push_utterance(text, heard); }
+#endif
+
  protected:
   WebUIHandler handler_;
 

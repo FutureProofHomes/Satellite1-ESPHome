@@ -82,6 +82,58 @@ export function useDeviceState(intervalMs) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Voice: timers and the assistant's phase                             */
+/* ------------------------------------------------------------------ */
+
+/** Matches the `voice_assist_*_phase_id` substitutions in common/voice_assistant.yaml. */
+export const PHASE = {
+  1: "Idle",
+  2: "Waiting for a command",
+  3: "Listening",
+  4: "Thinking",
+  5: "Replying",
+  10: "Not ready",
+  11: "Error",
+};
+
+/**
+ * GET /api/sat1/voice, polled only while Controls is on screen.
+ *
+ * A second while a timer is counting or the assistant is mid-exchange, five seconds otherwise. The
+ * fast rate is there so a timer's remaining seconds move; polling that hard when nothing is
+ * happening would be a request every second, forever, on a device that also has to do audio.
+ */
+export function useVoice(enabled) {
+  const [voice, setVoice] = useState(null);
+  const busy = voice ? voice.running || voice.timers.some((t) => t.active) : false;
+
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    let timer = null;
+
+    const tick = async () => {
+      try {
+        const r = await fetch("/api/sat1/voice");
+        if (r.ok && live) setVoice(await r.json());
+      } catch {
+        // A dropped poll is not worth surfacing: the next one is a second away, and the stream
+        // banner already covers the case where the device has actually gone.
+      }
+      if (live) timer = setTimeout(tick, busy ? 1000 : 5000);
+    };
+
+    tick();
+    return () => {
+      live = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [enabled, busy]);
+
+  return voice;
+}
+
+/* ------------------------------------------------------------------ */
 /* Live state and the log, over one /events stream                     */
 /* ------------------------------------------------------------------ */
 

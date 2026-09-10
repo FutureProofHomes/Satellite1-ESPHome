@@ -83,6 +83,10 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
     return Route::INDEX;
   if (url == "/api/sat1/state")
     return Route::STATE;
+#ifdef USE_VOICE_ASSISTANT
+  if (url == "/api/sat1/voice")
+    return Route::VOICE;
+#endif
 
   return Route::NONE;
 }
@@ -96,6 +100,9 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
       break;
     case Route::STATE:
       this->handle_state_(request);
+      break;
+    case Route::VOICE:
+      this->handle_voice_(request);
       break;
     case Route::NONE:
       break;
@@ -128,6 +135,100 @@ void WebUIHandler::handle_index_(AsyncWebServerRequest *request) {
     response->addHeader("ETag", this->etag_);
   request->send(response);
 }
+
+#ifdef USE_VOICE_ASSISTANT
+
+void WebUIHandler::push_utterance(const std::string &text, bool heard) {
+  if (text.empty())
+    return;
+  LockGuard guard{this->transcript_lock_};
+  if (this->transcript_.size() >= WU_TRANSCRIPT_RING)
+    this->transcript_.erase(this->transcript_.begin());
+  this->transcript_.push_back({text, static_cast<uint32_t>(millis_64() / 1000), heard});
+}
+
+/// Escapes the two characters that can break a JSON string, plus control characters.
+///
+/// Every other string this file emits is a device name or a version, but these come from speech
+/// recognition by way of Home Assistant, so they are the one place a quotation mark or a stray
+/// newline is plausible - and unescaped, one would truncate the whole response into invalid JSON.
+static void write_json_string(AsyncResponseStream *stream, const std::string &text) {
+  stream->print("\"");
+  for (const char c : text) {
+    switch (c) {
+      case '"':
+        stream->print("\\\"");
+        break;
+      case '\\':
+        stream->print("\\\\");
+        break;
+      case '\n':
+        stream->print("\\n");
+        break;
+      case '\r':
+        stream->print("\\r");
+        break;
+      case '\t':
+        stream->print("\\t");
+        break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          stream->printf("\\u%04x", static_cast<unsigned int>(c));
+        } else {
+          stream->write(static_cast<uint8_t>(c));
+        }
+        break;
+    }
+  }
+  stream->print("\"");
+}
+
+/// Timers and the assistant's phase, neither of which web_server can express.
+///
+/// Timers are held entirely on the device - VoiceAssistant::get_timers() returns its own vector, and
+/// they keep counting and still ring with Home Assistant gone - but they are not entities, so there
+/// is no REST path or /events id for them. The phase is the `voice_assistant_phase` global that
+/// config/ already maintains.
+void WebUIHandler::handle_voice_(AsyncWebServerRequest *request) {
+  auto *stream = request->beginResponseStream("application/json");
+
+  const int phase = this->voice_phase_fn_ ? this->voice_phase_fn_() : 0;
+  stream->printf(R"({"phase":%d,"running":%s,)", phase,
+                 this->va_ != nullptr && this->va_->is_running() ? "true" : "false");
+
+  stream->print(R"("timers":[)");
+  if (this->va_ != nullptr) {
+    bool first = true;
+    for (const auto &timer : this->va_->get_timers()) {
+      stream->printf(R"(%s{"id":)", first ? "" : ",");
+      write_json_string(stream, timer.id);
+      stream->print(R"(,"name":)");
+      write_json_string(stream, timer.name);
+      stream->printf(R"(,"total":%u,"left":%u,"active":%s})", static_cast<unsigned int>(timer.total_seconds),
+                     static_cast<unsigned int>(timer.seconds_left), timer.is_active ? "true" : "false");
+      first = false;
+    }
+  }
+  stream->print("],");
+
+  stream->print(R"("transcript":[)");
+  {
+    LockGuard guard{this->transcript_lock_};
+    bool first = true;
+    for (const auto &line : this->transcript_) {
+      stream->printf(R"(%s{"heard":%s,"at":%u,"text":)", first ? "" : ",", line.heard ? "true" : "false",
+                     static_cast<unsigned int>(line.at_uptime));
+      write_json_string(stream, line.text);
+      stream->print("}");
+      first = false;
+    }
+  }
+  stream->print("]}");
+
+  request->send(stream);
+}
+
+#endif  // USE_VOICE_ASSISTANT
 
 void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
   auto *stream = request->beginResponseStream("application/json");

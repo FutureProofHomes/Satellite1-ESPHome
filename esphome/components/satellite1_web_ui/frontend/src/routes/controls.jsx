@@ -7,7 +7,7 @@
 import { useState } from "preact/hooks";
 
 import { HINTS } from "../copy.js";
-import { entity, pathFor, post } from "../lib/device.js";
+import { entity, pathFor, PHASE, post, useVoice } from "../lib/device.js";
 import { Card, Missing, Row, Select, Slider, Toggle } from "../ui.jsx";
 
 /* ------------------------------------------------------------------ */
@@ -253,14 +253,19 @@ function Leds({ ctx }) {
 /* Voice and audio                                                     */
 /* ------------------------------------------------------------------ */
 
-function Voice({ ctx }) {
+function Voice({ ctx, voice }) {
   const mute = entity(ctx, "mute_mics");
   const chime = entity(ctx, "wake_sound");
   const sens = entity(ctx, "wake_sensitivity");
   const vol = entity(ctx, "voice_override");
 
+  // The phase is the same global the LED ring animates from, so what the card says and what the ring
+  // is doing cannot disagree. "Not ready" is the honest reading with Home Assistant gone: the
+  // microphones work, but there is nothing on the other end to answer.
+  const phase = voice ? PHASE[voice.phase] : null;
+
   return (
-    <Card title="Voice">
+    <Card title="Voice" right={phase && <span class={`dim xs${voice.running ? " accent" : ""}`}>{phase}</span>}>
       {mute && (
         <Row label="Mute microphones" hint={HINTS.mute}>
           <Toggle
@@ -302,6 +307,66 @@ function Voice({ ctx }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Timers and what was said                                            */
+/* ------------------------------------------------------------------ */
+
+const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+/**
+ * Timers live on the device, not in Home Assistant: they keep counting and still ring with the
+ * connection gone, which is the whole reason they are worth showing on a page that works offline.
+ *
+ * The card is absent when there are none rather than showing an empty state, because there is no way
+ * to set one from here - they are created by voice - so an empty card would be an invitation to
+ * press something that does not exist.
+ */
+function Timers({ voice }) {
+  const timers = voice?.timers || [];
+  if (!timers.length) return null;
+
+  return (
+    <Card title={timers.length > 1 ? "Timers" : "Timer"} hint={HINTS.timers}>
+      {timers.map((t) => (
+        <div key={t.id} class="ctl">
+          <div class="ctl-label">
+            <span>{t.name || "Timer"}</span>
+            {!t.active && <span class="ctl-sub">paused</span>}
+          </div>
+          <div class="ctl-body">
+            <span class={`mono lg${t.active ? "" : " dim"}`}>{mmss(t.left)}</span>
+          </div>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+/**
+ * The last few exchanges, so a misheard command is visible without opening the log.
+ *
+ * Only rendered once there is something to show. On a device that has not been spoken to since boot
+ * an empty panel would read as a fault rather than as an absence.
+ */
+function Transcript({ voice }) {
+  const lines = voice?.transcript || [];
+  if (!lines.length) return null;
+
+  return (
+    <Card title="Recently">
+      {lines
+        .slice()
+        .reverse()
+        .map((l, i) => (
+          <p key={i} class={`utt${l.heard ? " heard" : ""}`}>
+            <span class="utt-who">{l.heard ? "heard" : "said"}</span>
+            {l.text}
+          </p>
+        ))}
+    </Card>
+  );
+}
+
 function Speaker({ ctx }) {
   const chan = entity(ctx, "speaker_channel");
   const lineOut = entity(ctx, "line_out");
@@ -330,12 +395,16 @@ function Speaker({ ctx }) {
 /* ------------------------------------------------------------------ */
 
 export function Controls({ ctx }) {
+  const voice = useVoice(true);
+
   return (
     <>
       <Card>
         <SensorPills ctx={ctx} />
       </Card>
-      <Voice ctx={ctx} />
+      <Voice ctx={ctx} voice={voice} />
+      <Timers voice={voice} />
+      <Transcript voice={voice} />
       <Speaker ctx={ctx} />
       <Leds ctx={ctx} />
     </>

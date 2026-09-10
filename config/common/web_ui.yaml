@@ -112,6 +112,13 @@ web_server:
 satellite1_web_ui:
   id: web_ui_app
 
+  # Timers and the assistant's phase, for GET /api/sat1/voice. Neither is an entity: get_timers() is
+  # a plain vector on the voice_assistant component, and the phase is the `voice_assistant_phase`
+  # global that voice_assistant.yaml already maintains from its own triggers - read here rather than
+  # mirrored into a text_sensor, so there is only ever one copy to go stale.
+  voice_assistant_id: va
+  voice_phase: !lambda "return id(voice_assistant_phase);"
+
   # Which entity backs which control in the app.
   #
   # web_server identifies entities by their display name in both directions - /events publishes

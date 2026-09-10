@@ -166,6 +166,10 @@ voice_assistant:
   on_stt_vad_end:
     - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
     - script.execute: control_leds
+  # What the device heard, for the Voice card in the web UI. Held in a ring of eight on the device
+  # and never written to flash, so this is a "what did it mishear" readout rather than a history.
+  on_stt_end:
+    - lambda: id(web_ui_app)->push_utterance(x, true);
   on_intent_progress:
     - if:
         condition:
@@ -190,6 +194,8 @@ voice_assistant:
           # Start a script that would potentially enable the stop word if the response is longer than a second
           - script.execute: activate_stop_word_once
     - lambda: id(tts_playing) = true;
+    # The reply, paired with the on_stt_end line above so the card can show both halves.
+    - lambda: id(web_ui_app)->push_utterance(x, false);
     - script.execute: audio_gain_reconcile
   # When the voice assistant ends ...
   on_end:
