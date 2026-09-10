@@ -17,6 +17,10 @@
 #include <esp_psram.h>
 #include <esp_system.h>
 
+#ifdef USE_API
+#include "esphome/components/api/api_server.h"
+#endif
+
 namespace esphome {
 namespace satellite1_web_ui {
 
@@ -169,6 +173,16 @@ void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
   // %u with an explicit cast rather than PRIu32: these are raw string literals, so a PRIu32 in the
   // middle of one is not a macro at all - it is the eleven characters `" PRIu32 "`.
   stream->printf(R"("reset":"%s","uptime":%u,)", reset_reason_str_(), static_cast<unsigned int>(millis_64() / 1000));
+
+  // Whether Home Assistant is actually attached, so the UI can say so rather than leaving someone to
+  // work out why their media controls are missing. api_connection_count_ != 0, which is the same
+  // condition the LED ring already uses to decide whether the assistant can run at all.
+#ifdef USE_API
+  stream->printf(R"("ha":%s,)",
+                 api::global_api_server != nullptr && api::global_api_server->is_connected() ? "true" : "false");
+#else
+  stream->print(R"("ha":false,)");
+#endif
 
   stream->printf(R"("heap":{"free":%zu,"total":%zu,"block":%zu},)", internal.total_free_bytes,
                  internal.total_free_bytes + internal.total_allocated_bytes, internal.largest_free_block);

@@ -17,12 +17,18 @@ sensor:
         - lambda: "return x + id(humidity_offset_ui).state;"
 
   - platform: ltr_als_ps
+    id: ltr_als_sensor
     address: 0x29
     type: ALS
     update_interval: 60s
 
-    # short variant of sensor definition:
-    ambient_light: "Ambient Light"
+    # Expanded from the short `ambient_light: "Ambient Light"` form so the sensor can carry an id and
+    # a filter, matching how temperature and humidity are calibrated. The short form gives neither.
+    ambient_light:
+      name: "Ambient Light"
+      id: ambient_light_sensor
+      filters:
+        - lambda: "return x + id(lux_offset_ui).state;"
 
 number:
   # Dynamically adjust the temperature and humidity offset.  Credit goes to Lewis over @ EverythingSmartHome.  I admire your work and hope to meet someday.  Beers on me.
@@ -42,6 +48,25 @@ number:
     entity_category: config
     on_value:
       - lambda: 'id(aht20_temp_hum_sensor).update();'
+
+  # Same shape as the two above. The range is wide because the LTR-329 reads through whatever the
+  # device is sitting behind, and a tinted enclosure or a recessed shelf can halve the figure.
+  - platform: template
+    name: "Offset Ambient Light"
+    id: lux_offset_ui
+    unit_of_measurement: "lx"
+    min_value: -500
+    max_value: 500
+    step: 1
+    mode: box
+    update_interval: never
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+    icon: "mdi:brightness-6"
+    entity_category: config
+    on_value:
+      - lambda: 'id(ltr_als_sensor).update();'
 
   - platform: template
     name: "Offset Humidity"

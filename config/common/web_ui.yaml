@@ -131,10 +131,12 @@ satellite1_web_ui:
     sensors:
       temp: temperature_sensor
       humidity: humidity_sensor
+      lux: ambient_light_sensor
 
     numbers:
       temp_offset: temp_offset_ui
       humidity_offset: humidity_offset_ui
+      lux_offset: lux_offset_ui
       voice_override: tts_volume
 
     lights:
@@ -159,6 +161,10 @@ satellite1_web_ui:
       # internal: true already, and reachable over REST regardless - internal only gates /events,
       # never the entity handlers. Auth is what protects it, which is why web_server has auth on.
       factory_reset: factory_reset_button
+      safe_mode: safe_mode_button
+      xmos_reset: xmos_hardware_reset
+      xmos_flash: flash_satellite
+      xmos_erase: erase_xmos_flash
 
     binary_sensors:
       btn_up: btn_up
@@ -176,6 +182,56 @@ satellite1_web_ui:
 
     events:
       action_button: action_button_press_event
+
+# The maintenance buttons the Diagnostics page is built around.
+#
+# These used to live in common/debug.yaml, which is commented out in both satellite1.base.yaml and
+# satellite1.dashboard.yaml - so on a stock device they did not exist, and the web UI's Audio chip
+# and Safe mode controls would have had nothing behind them. They cannot be declared in both files:
+# ids are global after package merging, so a customer who uncommented debug.yaml would get a
+# duplicate-id error, and giving them different ids there would produce two entities with the same
+# display name, which web_server resolves by name and could not tell apart.
+#
+# So they are declared once, here, always present and internal: true - the web UI reaches them over
+# REST, which internal does not gate. debug.yaml now promotes them into Home Assistant with
+# `!extend internal: false`, which is what that file is for and preserves exactly what a customer
+# who enables it sees today.
+button:
+  - platform: safe_mode
+    id: safe_mode_button
+    name: "Restart Sat1 (Safe Mode)"
+    entity_category: diagnostic
+    internal: true
+
+  - platform: template
+    id: xmos_hardware_reset
+    name: "XMOS Hardware Reset"
+    entity_category: diagnostic
+    internal: true
+    on_press:
+      then:
+        - satellite1.xmos_hardware_reset
+
+  - platform: template
+    id: flash_satellite
+    name: "XMOS Flash ${xmos_fw_version}"
+    entity_category: diagnostic
+    internal: true
+    on_press:
+      then:
+        - memory_flasher.write_image:
+            image_version: ${xmos_fw_version}
+            image_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
+            md5_url: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
+
+  - platform: template
+    id: erase_xmos_flash
+    name: "XMOS Erase Chip"
+    entity_category: diagnostic
+    internal: true
+    on_press:
+      then:
+        - memory_flasher.erase:
 
 text_sensor:
   # Deliberately visible in Home Assistant rather than internal: it is the only way a customer
