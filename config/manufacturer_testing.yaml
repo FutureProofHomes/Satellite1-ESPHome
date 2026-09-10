@@ -225,6 +225,65 @@ improv_serial:
                 effect: None
       - if:
           condition:
+            lambda: return x.get_action() == std::string("SET_PROGRESS_LED");
+          then:
+            - lambda: |-
+                if (!x.get_url().has_value()) {
+                  ESP_LOGW("host_progress", "SET_PROGRESS_LED missing parameters");
+                  return;
+                }
+                const std::string query = *x.get_url();
+                const auto read_parameter = [&query](const char *key, long *value) {
+                  const std::string prefix = std::string(key) + "=";
+                  size_t start = 0;
+                  while (start <= query.size()) {
+                    const size_t end = query.find('&', start);
+                    const std::string parameter = query.substr(start, end - start);
+                    if (parameter.rfind(prefix, 0) == 0) {
+                      char *parse_end = nullptr;
+                      const long parsed = std::strtol(parameter.c_str() + prefix.size(), &parse_end, 10);
+                      if (parse_end != parameter.c_str() + prefix.size() && *parse_end == '\0') {
+                        *value = parsed;
+                        return true;
+                      }
+                      return false;
+                    }
+                    if (end == std::string::npos) {
+                      break;
+                    }
+                    start = end + 1;
+                  }
+                  return false;
+                };
+                long progress = 0;
+                long red = 0;
+                long green = 0;
+                long blue = 0;
+                long brightness = 0;
+                if (!read_parameter("progress", &progress) || !read_parameter("red", &red) ||
+                    !read_parameter("green", &green) || !read_parameter("blue", &blue) ||
+                    !read_parameter("brightness", &brightness) || progress < 0 || progress > 100 ||
+                    red < 0 || red > 255 || green < 0 || green > 255 || blue < 0 || blue > 255 ||
+                    brightness < 0 || brightness > 100) {
+                  ESP_LOGW("host_progress", "SET_PROGRESS_LED invalid parameters: %s", query.c_str());
+                  return;
+                }
+                auto call = id(voice_assistant_leds).make_call();
+                call.set_state(true);
+                call.set_brightness(brightness / 100.0f);
+                call.set_effect("None");
+                call.perform();
+
+                const int lit_leds = (progress * 24 + 99) / 100;
+                const Color color(red, green, blue);
+                auto *leds = static_cast<esphome::light::AddressableLight *>(
+                    id(voice_assistant_leds).get_output());
+                for (int i = 0; i < 24; i++) {
+                  (*leds)[i] = i < lit_leds ? color : Color::BLACK;
+                }
+                leds->schedule_show();
+      - if:
+          condition:
             lambda: return x.get_action() == std::string("SET_TEST_FAILED_STATE");
           then:
             - light.turn_on:
@@ -249,7 +308,8 @@ improv_serial:
           condition:
             lambda: return x.get_action() == std::string("DISABLE_LED_RING");
           then:
-            - lambda: id(test_instructions) = 0;
+            - lambda: |-
+                id(test_instructions) = 0;
             - light.turn_off: voice_assistant_leds
       - if:
           condition:
