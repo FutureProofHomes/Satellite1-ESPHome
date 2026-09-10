@@ -106,6 +106,12 @@ web_server:
     # second. Digest does not, costs an MD5 per request, and becomes ESPHome's default in 2027.1.0.
     type: digest
 
+# The on-device web app. Registers at setup_priority::WIFI (250) so it lands ahead of web_server
+# (WIFI - 1.0f = 249) in web_server_base's handler vector and answers "/" instead of ESPHome's own
+# dashboard. It is also served at /ui/, which is the canary if that ordering ever regresses.
+satellite1_web_ui:
+  id: web_ui_app
+
 text_sensor:
   # Deliberately visible in Home Assistant rather than internal: it is the only way a customer
   # finds the generated password. Anyone who can read it can already control this device through

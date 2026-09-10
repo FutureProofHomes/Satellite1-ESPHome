@@ -1,0 +1,101 @@
+/*
+ * Dark-first, one accent colour, system font stack. A webfont is bytes we cannot spend and a
+ * network fetch the no-internet-at-runtime rule forbids.
+ */
+:root {
+  --bg: #12141a;
+  --bg-elev: #1a1d26;
+  --bg-sunk: #0d0f14;
+  --fill: #22262f;
+  --line: #2b303b;
+  --line-soft: #23272f;
+  --fg: #e8ebf0;
+  --fg-2: #b3bac6;
+  --fg-3: #7d8595;
+  --fg-4: #5b6270;
+  --accent: #3d8bfd;
+  --on-accent: #fff;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --err: #e5534b;
+  --r: 8px;
+  --pad: 11px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Safe-area inset so the sticky bar clears a notch on a phone held in landscape. */
+body {
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.card {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  margin-bottom: 9px;
+}
+
+.card > h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px var(--pad);
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.card > div {
+  padding: 8px var(--pad) var(--pad);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.dim {
+  color: var(--fg-3);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 10px;
+}

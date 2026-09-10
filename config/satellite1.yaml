@@ -105,6 +105,7 @@ external_components:
       - memory_flasher
       - satellite1
       - satellite1_radar
+      - satellite1_web_ui
       - ethernet
       - tas2780
 

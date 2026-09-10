@@ -12,6 +12,7 @@ __pycache__
 
 build/
 /components
+node_modules/
 managed_components/
 sdkconfig.esp32-idf
 sdkconfig.esp32-s3-idf

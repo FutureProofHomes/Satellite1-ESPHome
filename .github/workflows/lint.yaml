@@ -35,3 +35,35 @@ jobs:
 
       - name: Run yamllint
         run: yamllint config/
+
+  web-ui-bundle:
+    name: web UI bundle
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: esphome/components/satellite1_web_ui/frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: esphome/components/satellite1_web_ui/frontend/package-lock.json
+
+      # npm ci, not npm install: the drift check below asserts the committed bundle is
+      # byte-identical to a fresh build, and esbuild's minifier output moves between releases.
+      # package.json pins exact versions for the same reason.
+      - name: Install pinned toolchain
+        run: npm ci
+
+      - name: Build the bundle
+        run: npm run build | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The bundle ships inside the external component, so a stale dist/ would be flashed to
+      # customers without anyone noticing the source had moved on.
+      - name: Fail if the committed bundle drifted from source
+        working-directory: .
+        run: git diff --exit-code -- esphome/components/satellite1_web_ui/dist
