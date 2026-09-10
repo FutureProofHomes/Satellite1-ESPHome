@@ -2,6 +2,7 @@ substitutions:
   node_name: satellite1
   friendly_name: Satellite1 Manufacturer Testing
   log_level: debug
+  internal_led_automation: "false"
   # build_esphome_firmware.sh replaces these with the locally built XMOS test
   # image and checksum. The defaults retain standalone config validation.
   xmos_fw_bin: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
