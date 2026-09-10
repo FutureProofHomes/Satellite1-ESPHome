@@ -112,6 +112,71 @@ web_server:
 satellite1_web_ui:
   id: web_ui_app
 
+  # Which entity backs which control in the app.
+  #
+  # web_server identifies entities by their display name in both directions - /events publishes
+  # "<domain>/<name>" and the REST path is /<domain>/<name>/<action> - so without this table the
+  # frontend would have to contain about twenty-five display names, and renaming any entity in YAML
+  # would break a control with nothing to catch it. The device resolves each key from get_name() at
+  # runtime instead, and a deleted entity becomes a compile error here rather than a dead button on
+  # a customer's phone.
+  #
+  # One of these cannot be hardcoded at all: the update entity is declared `name: None`, which
+  # ESPHome renders as the device name, so its path carries the MAC suffix and differs on every
+  # device ever built.
+  #
+  # Keys are the app's vocabulary and are safe to rename alongside the frontend. The ids on the
+  # right are the contract with the rest of config/.
+  entities:
+    sensors:
+      temp: temperature_sensor
+      humidity: humidity_sensor
+
+    numbers:
+      temp_offset: temp_offset_ui
+      humidity_offset: humidity_offset_ui
+      voice_override: tts_volume
+
+    lights:
+      ring: led_ring
+
+    # Note what is *not* here: `firmware` and `beta_firmware`. The OTA update entity and its beta
+    # channel switch are declared in config/satellite1.yaml, which the ESPHome Device Builder path
+    # never includes - dashboard.yaml pulls satellite1.base.yaml and dashboard_build.yaml only. This
+    # file is a package two levels inside base.yaml, so referencing them here would resolve locally
+    # and fail every dashboard build on an unknown id. They are added from satellite1.yaml instead,
+    # where they exist, and the app treats them as optional.
+    switches:
+      mute_mics: master_mute_switch
+      wake_sound: wake_sound
+
+    selects:
+      speaker_channel: tas_mode_select
+      wake_sensitivity: mww_sensitivity_select
+
+    buttons:
+      restart: restart_button
+      # internal: true already, and reachable over REST regardless - internal only gates /events,
+      # never the entity handlers. Auth is what protects it, which is why web_server has auth on.
+      factory_reset: factory_reset_button
+
+    binary_sensors:
+      btn_up: btn_up
+      btn_down: btn_down
+      btn_mute: btn_left
+      btn_action: btn_action
+      line_out: line_out_sensor
+
+    text_sensors:
+      network: network_status_sensor
+      usb_power: pd_state_text
+      xmos_firmware: xmos_firmware_version_text
+      radar_detected: radar_detected_text
+      remote_tts_status: tts_routing_status
+
+    events:
+      action_button: action_button_press_event
+
 text_sensor:
   # Deliberately visible in Home Assistant rather than internal: it is the only way a customer
   # finds the generated password. Anyone who can read it can already control this device through

@@ -14,6 +14,7 @@
 #endif
 
 #include <esp_heap_caps.h>
+#include <esp_psram.h>
 #include <esp_system.h>
 
 namespace esphome {
@@ -48,6 +49,20 @@ static const char *reset_reason_str_() {
       return "Brownout";
     case ESP_RST_SDIO:
       return "SDIO";
+    // The five below are why this switch is exhaustive rather than convenient. A device that has
+    // just been flashed over USB reports ESP_RST_USB, so leaving these to the default made the
+    // single most common reset during development read as "Unknown" - which is exactly the value
+    // a support conversation cannot use.
+    case ESP_RST_USB:
+      return "USB peripheral";
+    case ESP_RST_JTAG:
+      return "JTAG";
+    case ESP_RST_EFUSE:
+      return "eFuse error";
+    case ESP_RST_PWR_GLITCH:
+      return "Power glitch";
+    case ESP_RST_CPU_LOCKUP:
+      return "CPU lockup (double exception)";
     default:
       return "Unknown";
   }
@@ -157,14 +172,32 @@ void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
 
   stream->printf(R"("heap":{"free":%zu,"total":%zu,"block":%zu},)", internal.total_free_bytes,
                  internal.total_free_bytes + internal.total_allocated_bytes, internal.largest_free_block);
-  stream->printf(R"("psram":{"free":%zu,"total":%zu},)", psram.total_free_bytes,
-                 psram.total_free_bytes + psram.total_allocated_bytes);
+  // Three numbers rather than two, because free-of-total is ambiguous for PSRAM and the difference
+  // is large enough to look like a fault. heap_caps only knows the region it was handed - measured
+  // 5.4MB on an 8MB part, the rest going to the SPIRAM cache and to allocations made outside the
+  // heap - so "4.4 MB free of 5.4 MB" is the true allocator picture while "installed" is the number
+  // on the datasheet that a customer would otherwise think we had lost 2.6MB of.
+  stream->printf(R"("psram":{"free":%zu,"total":%zu,"installed":%zu},)", psram.total_free_bytes,
+                 psram.total_free_bytes + psram.total_allocated_bytes, esp_psram_get_size());
 
   // Reset on read: the value is "worst loop since you last asked", which is what a diagnostics
   // page refreshing every couple of seconds wants. A never-reset maximum only ever tells you
   // about boot.
   const uint32_t loop_ms = this->max_loop_ms_ == nullptr ? 0 : this->max_loop_ms_->exchange(0);
-  stream->printf(R"("loop_ms":%u})", static_cast<unsigned int>(loop_ms));
+  stream->printf(R"("loop_ms":%u,)", static_cast<unsigned int>(loop_ms));
+
+  // The key -> "<domain>/<name>" table. Names are read here rather than cached at setup because a
+  // few entities are named from runtime state, and because nothing about this is hot: Diagnostics
+  // polls a couple of times a second and the app reads the table once per load.
+  stream->print(R"("e":{)");
+  bool first = true;
+  for (const auto &ref : this->entities_) {
+    if (ref.entity == nullptr)
+      continue;
+    stream->printf(R"(%s"%s":"%s/%s")", first ? "" : ",", ref.key, ref.domain, ref.entity->get_name().c_str());
+    first = false;
+  }
+  stream->print("}}");
 
   request->send(stream);
 }

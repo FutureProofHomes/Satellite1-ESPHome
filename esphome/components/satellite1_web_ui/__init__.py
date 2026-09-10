@@ -5,6 +5,19 @@ from pathlib import Path
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
+from esphome.components import (
+    binary_sensor,
+    button,
+    event,
+    number,
+    select,
+    sensor,
+    switch,
+    text,
+    text_sensor,
+    update,
+)
+from esphome.components.light.types import LightState
 from esphome.const import CONF_ID, Framework
 from esphome.core import HexInt
 import esphome.final_validate as fv
@@ -26,15 +39,56 @@ MULTI_CONF = False
 # web_server_base already reserves.
 
 CONF_INDEX_ID = "index_id"
+CONF_ENTITIES = "entities"
 
 satellite1_web_ui_ns = cg.esphome_ns.namespace("satellite1_web_ui")
 Satellite1WebUI = satellite1_web_ui_ns.class_("Satellite1WebUI", cg.Component)
+
+# The frontend addresses entities by a stable logical key; the device resolves each key to the
+# "<domain>/<name>" that web_server actually answers to, at runtime, from get_name().
+#
+# This indirection is not decoration. web_server identifies entities by *display name*, in both
+# directions: set_json_id builds the /events id as "{domain}/{name}" (web_server.cpp:550, "Uses
+# names (not object_id) to avoid UTF-8 collision issues") and UrlMatch::match_entity compares
+# `this->id == entity->get_name()` (web_server.cpp:167). So the alternative is ~25 display names
+# hardcoded in JavaScript, where a YAML rename becomes a silently broken control with nothing to
+# catch it - and Phase 4 exists to change entity dispositions.
+#
+# One entity proves the point on its own. `update:` in satellite1.yaml is declared `name: None`,
+# which ESPHome renders as the device name, so on the test device the Install button lives at
+# "update/Satellite1 c5ac00" - a name that differs on every device ever built. There is no string
+# the frontend could have contained.
+#
+# Radar entities are deliberately absent. satellite1_radar registers "Radar Target", "Radar
+# Detected" and friends at runtime from constants in its own C++, so those names are owned by code
+# rather than by anyone's YAML, and there is no id to point at here anyway.
+_ENTITY_DOMAINS = {
+    "sensors": ("sensor", sensor.Sensor),
+    "binary_sensors": ("binary_sensor", binary_sensor.BinarySensor),
+    "text_sensors": ("text_sensor", text_sensor.TextSensor),
+    "switches": ("switch", switch.Switch),
+    "numbers": ("number", number.Number),
+    "selects": ("select", select.Select),
+    "buttons": ("button", button.Button),
+    "texts": ("text", text.Text),
+    "events": ("event", event.Event),
+    "updates": ("update", update.UpdateEntity),
+    "lights": ("light", LightState),
+}
+
+_ENTITIES_SCHEMA = cv.Schema(
+    {
+        cv.Optional(group): cv.Schema({cv.string_strict: cv.use_id(entity_class)})
+        for group, (_, entity_class) in _ENTITY_DOMAINS.items()
+    }
+)
 
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(Satellite1WebUI),
             cv.GenerateID(CONF_INDEX_ID): cv.declare_id(cg.uint8),
+            cv.Optional(CONF_ENTITIES, default={}): _ENTITIES_SCHEMA,
         }
     ).extend(cv.COMPONENT_SCHEMA),
     cv.only_with_framework(Framework.ESP_IDF),
@@ -75,6 +129,14 @@ FINAL_VALIDATE_SCHEMA = _final_validate
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
+
+    # Sorted so the generated code, and the JSON the device serves, are stable across builds
+    # regardless of how the YAML happens to be ordered.
+    for group in sorted(config[CONF_ENTITIES]):
+        domain, _ = _ENTITY_DOMAINS[group]
+        for key in sorted(config[CONF_ENTITIES][group]):
+            entity = await cg.get_variable(config[CONF_ENTITIES][group][key])
+            cg.add(var.add_entity(key, domain, entity))
 
     if not _DIST.is_file():
         raise cv.Invalid(

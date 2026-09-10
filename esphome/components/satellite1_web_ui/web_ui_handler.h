@@ -3,6 +3,9 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
+
+#include "esphome/core/entity_base.h"
 
 #include "esphome/components/web_server_base/web_server_base.h"
 
@@ -15,6 +18,15 @@ namespace satellite1_web_ui {
 static const char *const WU_URL_ROOT = "/";
 static const char *const WU_URL_ALIAS = "/ui";
 static const char *const WU_URL_ALIAS_SLASH = "/ui/";
+
+/// One row of the key -> "<domain>/<name>" table the frontend reads from GET /api/sat1/state.
+/// `key` and `domain` are string literals from generated code; `entity` is resolved to its name
+/// lazily, because get_name() is only meaningful once the entity has been constructed.
+struct EntityRef {
+  const char *key;
+  const char *domain;
+  EntityBase *entity;
+};
 
 /**
  * The web app's HTTP surface: the bundle itself, plus the endpoints web_server cannot cover.
@@ -51,6 +63,12 @@ class WebUIHandler : public AsyncWebHandler {
   /// which is why it is an exchange rather than a load. Diagnostics is the only reader.
   void set_loop_time_source(std::atomic<uint32_t> *max_loop_ms) { this->max_loop_ms_ = max_loop_ms; }
 
+  /// Called only from generated setup code in main.cpp, which runs to completion before the
+  /// listener accepts anything, so the table is immutable by the time the httpd task can read it.
+  void add_entity(const char *key, const char *domain, EntityBase *entity) {
+    this->entities_.push_back({key, domain, entity});
+  }
+
   // NOLINTNEXTLINE(readability-identifier-naming)
   bool canHandle(AsyncWebServerRequest *request) const override;
   // NOLINTNEXTLINE(readability-identifier-naming)
@@ -75,6 +93,7 @@ class WebUIHandler : public AsyncWebHandler {
   size_t index_gz_len_{0};
   const char *etag_{nullptr};
   std::atomic<uint32_t> *max_loop_ms_{nullptr};
+  std::vector<EntityRef> entities_;
 };
 
 }  // namespace satellite1_web_ui

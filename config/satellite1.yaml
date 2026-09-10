@@ -78,6 +78,17 @@ update:
     id: update_http_request
     source: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/manifest.json
 
+# The two entities the web app can only be told about from here. HTTP-request OTA and its beta
+# channel switch are local-build-only - the ESPHome Device Builder path includes satellite1.base.yaml
+# and dashboard_build.yaml, neither of which declares them - so common/web_ui.yaml cannot name them
+# without failing every dashboard build. Package merging unions these keys into the block there.
+satellite1_web_ui:
+  entities:
+    switches:
+      beta_firmware: beta_firmware
+    updates:
+      firmware: update_http_request
+
 switch:
   - platform: template
     id: beta_firmware

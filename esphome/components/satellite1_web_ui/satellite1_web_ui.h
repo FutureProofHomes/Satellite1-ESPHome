@@ -34,6 +34,9 @@ class Satellite1WebUI : public Component {
 
   void set_index(const uint8_t *gz, size_t gz_len) { this->handler_.set_index(gz, gz_len); }
   void set_etag(const char *etag) { this->handler_.set_etag(etag); }
+  void add_entity(const char *key, const char *domain, EntityBase *entity) {
+    this->handler_.add_entity(key, domain, entity);
+  }
 
  protected:
   WebUIHandler handler_;

@@ -15,6 +15,10 @@ api:
 button:
   # Restarts Sat1 Device
   - platform: restart
+    # Only so the web UI's entity map can point at it. web_server addresses entities by display
+    # name, and the map is what keeps that name out of the frontend - see web_ui.yaml. Adding an id
+    # changes nothing about the entity itself.
+    id: restart_button
     name: "Restart Sat1"
     entity_category: diagnostic
 
