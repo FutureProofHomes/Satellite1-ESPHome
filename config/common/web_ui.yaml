@@ -1,0 +1,118 @@
+####################################################################################################
+# The device's own web server.
+#
+# Until now nothing in config/ declared web_server:. The radar tuner ran its own esp_http_server on
+# port 80 behind the "Radar Tuner WebUI" switch, and satellite1_radar faked USE_WEBSERVER so Home
+# Assistant would offer a "Visit device" link to it. This file replaces all of that with the real
+# component, which the tuner is now a handler on and which the on-device web app will build on.
+#
+# Turning it on hands the network every entity this device has, so read the auth notes below before
+# changing anything here.
+####################################################################################################
+
+substitutions:
+  web_ui_username: satellite1
+
+  # Leave empty and the device invents a password on first boot and remembers it - see the on_boot
+  # block below. Set it to share one password across a fleet, which is the only reason to: ten
+  # Satellite1s otherwise mean ten different passwords to look up.
+  #
+  # The value is pasted into a C++ string literal, so a quote or a backslash in it breaks the build.
+  web_ui_password: ""
+
+globals:
+  # Owns the password's storage for the life of the process. WebServerBase::Credentials holds a
+  # bare const char*, and its own comment says "All fields point to string literals in generated
+  # code; nothing is copied" - so whatever we hand set_auth_password() has to outlive every request,
+  # which rules out a local. Never assigned after the on_boot block, so c_str() stays valid.
+  - id: web_ui_password_value
+    type: std::string
+    restore_value: true
+    max_restore_data_length: 32
+
+esphome:
+  on_boot:
+    # 600 is after globals restore (DATA, 800) and before WebServer::setup() starts listening
+    # (WIFI - 1.0f, 249), so no request can ever be served against the placeholder password.
+    - priority: 600.0
+      then:
+        - lambda: |-
+            // A per-device password that is not a secret is worse than none, because it looks like
+            // security. The MAC is the obvious source and is exactly that: anyone who can reach the
+            // device can already read its MAC off the network. So this is random on first boot and
+            // persisted, which costs the customer one lookup in Home Assistant and is genuinely
+            // unguessable.
+            //
+            // Alphabet drops l, 1, 0 and o. This is a value people read off a screen and type into
+            // a browser prompt.
+            //
+            // Both names are prefixed because this lambda is pasted into main.cpp after the whole
+            // ESP-IDF define soup: an earlier draft called the first one CONFIGURED and hit a
+            // predefined macro of that name.
+            static const std::string WEB_UI_YAML_PASSWORD{"${web_ui_password}"};
+            if (!WEB_UI_YAML_PASSWORD.empty()) {
+              id(web_ui_password_value) = WEB_UI_YAML_PASSWORD;
+            } else if (id(web_ui_password_value).empty()) {
+              static const char WEB_UI_PASSWORD_ALPHABET[] = "abcdefghijkmnpqrstuvwxyz23456789";
+              std::string generated;
+              generated.reserve(12);
+              for (int i = 0; i < 12; i++) {
+                generated.push_back(
+                    WEB_UI_PASSWORD_ALPHABET[esphome::random_uint32() % (sizeof(WEB_UI_PASSWORD_ALPHABET) - 1)]);
+              }
+              id(web_ui_password_value) = generated;
+            }
+
+            // A plain setter on WebServerBase, and AuthMiddlewareHandler reads the credentials
+            // through a pointer on every request, so installing it here rather than at codegen is
+            // enough. The username cannot move: Credentials::is_set() tests it at the moment a
+            // handler is added, and that decides whether the handler is wrapped in auth at all.
+            web_server_base::global_web_server_base->set_auth_password(
+                id(web_ui_password_value).c_str());
+            id(web_ui_password_text).publish_state(id(web_ui_password_value));
+
+web_server:
+  id: web_ui_server
+  port: 80
+
+  # Version 2 rather than 3 (900KB of embedded frontend) or 1 (deprecated, removed in 2027.1.0).
+  #
+  # local: true is not a preference. Every version defaults css_url and js_url to oi.esphome.io, and
+  # a device that has to reach the internet to render its own settings page is not a device people
+  # can trust in a closet. Everything ships in the firmware.
+  version: 2
+  local: true
+
+  # The web app is meant to show controls the Home Assistant UI deliberately does not, so entities
+  # marked internal: true still have to reach it. Nothing depends on this yet; it is set here
+  # because it belongs with the rest of the server's shape.
+  include_internal: true
+
+  log: true
+
+  # The device already has ESPHome OTA and safe_mode. A second, browser-facing firmware upload form
+  # is attack surface with nothing behind it.
+  ota: false
+
+  auth:
+    username: ${web_ui_username}
+
+    # Replaced in the on_boot block above, before the listener starts. It has to be non-empty here
+    # because the schema requires it, and it has to be something that could never be a real
+    # generated password - the generator's alphabet has no hyphens.
+    password: "placeholder-replaced-at-boot"
+
+    # Basic sends the password in an easily reversible form on every one of the tuner's two polls a
+    # second. Digest does not, costs an MD5 per request, and becomes ESPHome's default in 2027.1.0.
+    type: digest
+
+text_sensor:
+  # Deliberately visible in Home Assistant rather than internal: it is the only way a customer
+  # finds the generated password. Anyone who can read it can already control this device through
+  # Home Assistant, so it gives away nothing they did not have.
+  - platform: template
+    id: web_ui_password_text
+    name: "Web UI Password"
+    icon: "mdi:key-variant"
+    entity_category: diagnostic
+    update_interval: never

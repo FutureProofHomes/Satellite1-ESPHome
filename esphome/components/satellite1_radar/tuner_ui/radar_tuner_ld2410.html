@@ -393,7 +393,9 @@ function syncThreshInputs(){
 
 async function apiGet(path){const r=await fetch(BASE+path,FETCH_OPTS);if(!r.ok)throw new Error(r.statusText);return r.json()}
 async function apiPatch(path,payload){
-  const r=await fetch(BASE+path,{method:'PATCH',headers:{'Content-Type':'application/json','Connection':'close'},body:JSON.stringify(payload)});
+  // POST, not PATCH: the device serves this page from ESPHome's shared web server, which registers
+  // only GET, POST and OPTIONS handlers, so a PATCH never reaches the radar tuner at all.
+  const r=await fetch(BASE+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   if(!r.ok)throw new Error(r.statusText);
   return r.json();
 }

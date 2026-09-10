@@ -6,6 +6,18 @@ substitutions:
   # OPTIONALLY, set the log level to debug, info, warn, error
   log_level: debug
 
+  ## OPTIONALLY, set your own login for the device's web interface at http://<device-ip>/.
+  ## Leave these commented out and each Satellite1 invents its own password on first boot and
+  ## publishes it as the "Web UI Password" diagnostic sensor in Home Assistant. Set them here and
+  ## every device built from this config shares one login, which is what you want once you have
+  ## more than one - browsers scope these credentials per device, so ten Satellite1s otherwise
+  ## mean ten different passwords to look up.
+  ##
+  ## Changing these later is safe. The username is fixed at build time; the password is applied
+  ## at every boot, so a new one takes effect as soon as the device restarts.
+  # web_ui_username: satellite1
+  # web_ui_password: !secret web_ui_password
+
 esphome:
   name: ${name}
   name_add_mac_suffix: true

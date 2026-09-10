@@ -115,6 +115,9 @@ packages:
   area_ducking: !include common/area_ducking.yaml
   timer: !include common/timer.yaml
   led_ring: !include common/led_ring.yaml
+  # Ahead of mmwave, which is where satellite1_radar is configured: the radar tuner is a handler on
+  # this server now and fails config validation without it.
+  web_ui: !include common/web_ui.yaml
   mmwave: !include common/mmwave.yaml
   sendspin: !include common/sendspin.yaml
 

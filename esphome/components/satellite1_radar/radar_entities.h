@@ -3,10 +3,8 @@
 #include "esphome/core/component.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/sensor/sensor.h"
-#include "esphome/components/switch/switch.h"
 #include "esphome/components/button/button.h"
 #include "esphome/components/text_sensor/text_sensor.h"
-#include <functional>
 
 namespace esphome {
 namespace satellite1_radar {
@@ -77,30 +75,6 @@ class Satellite1RadarDynamicTextSensor : public text_sensor::TextSensor {
                          bool disabled_by_default = false, uint8_t icon_idx = 0) {
     this->configure_entity_(name, 0, pack_entity_fields(0, 0, icon_idx, false, disabled_by_default, entity_category));
   }
-};
-
-class Satellite1RadarSwitch : public switch_::Switch, public Component {
- public:
-  void setup() override {}
-  void dump_config() override {}
-
- protected:
-  void write_state(bool state) override { this->publish_state(state); }
-};
-
-class Satellite1RadarTunerSwitch : public switch_::Switch, public Component {
- public:
-  void setup() override {}
-  void dump_config() override {}
-  void configure_dynamic(const char *name, EntityCategory entity_category = ENTITY_CATEGORY_NONE,
-                         bool disabled_by_default = false, uint8_t icon_idx = 0) {
-    this->configure_entity_(name, 0, pack_entity_fields(0, 0, icon_idx, false, disabled_by_default, entity_category));
-  }
-  void set_write_callback(std::function<void(bool)> callback) { write_callback_ = std::move(callback); }
-
- protected:
-  void write_state(bool state) override;
-  std::function<void(bool)> write_callback_{};
 };
 
 class Satellite1RadarButton : public button::Button, public Component {

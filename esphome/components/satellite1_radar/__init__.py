@@ -3,8 +3,8 @@ from pathlib import Path
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import mdns, socket, uart
-from esphome.const import CONF_ESPHOME, CONF_ID, Framework
+from esphome.components import uart
+from esphome.const import CONF_ID, Framework
 from esphome.core.entity_helpers import (
     register_device_class,
     register_icon,
@@ -14,26 +14,27 @@ from esphome.core import CORE, HexInt
 import esphome.final_validate as fv
 
 CODEOWNERS = ["@FutureProofHomes"]
-DEPENDENCIES = ["network","uart"]
+DEPENDENCIES = ["network", "uart"]
+
+# Auto-loaded rather than declared a dependency so that the missing-web_server case is reported by
+# _final_validate below, which can say what to add, instead of by the generic dependency error.
+# web_server auto-loads this too; both resolve to the same single instance.
+AUTO_LOAD = ["web_server_base"]
 MULTI_CONF = False
 
-
-def _consume_sockets(config):
-    """Register socket needs for this component."""
-    # Example: 1 web-server
-    socket.consume_sockets(1, "satellite1_radar")(config)
-    return config
-
+# No consume_sockets() call. The tuner used to run its own esp_http_server and so had to reserve a
+# socket; it is now a handler on the shared web_server, which reserves its own.
 
 # Headroom for entities that may be registered dynamically at runtime.
 #
 # These values reserve StaticVector capacity in App for post-detection
 # registration of radar entities.
+#
+# No "switch" entry: the only one was "Radar Tuner WebUI", and the tuner is always mounted now.
 RUNTIME_ENTITY_HEADROOM = {
     "binary_sensor": 1,
     "sensor": 6,
     "text_sensor": 5,
-    "switch": 1,
     "button": 3,
 }
 
@@ -57,17 +58,24 @@ CONFIG_SCHEMA = cv.All(
     .extend(cv.COMPONENT_SCHEMA)
     .extend(uart.UART_DEVICE_SCHEMA),
     cv.only_with_framework(Framework.ESP_IDF),
-    _consume_sockets,
 )
 
+
 def _final_validate(config):
-    full_config = fv.full_config.get()[CONF_ESPHOME]
-    if "web_server" not in full_config:
-        mdns.COMPONENTS_WITH_MDNS_SERVICES = (
-            *mdns.COMPONENTS_WITH_MDNS_SERVICES,
-            "satellite1_radar",
+    # The radar tuner is a handler on the shared server now, so web_server is a hard requirement
+    # rather than something to work around. Without it global_web_server_base is never
+    # constructed and setup() would dereference null - a boot loop, not a missing page. Caught
+    # here so it is a config error with a fix in it instead.
+    #
+    # web_server_base is in DEPENDENCIES and so is auto-loaded, but it only provides the plumbing;
+    # nothing creates the listener or the "Visit device" link unless web_server itself is present.
+    if "web_server" not in fv.full_config.get():
+        raise cv.Invalid(
+            "satellite1_radar serves the radar tuner from ESPHome's shared web server, so a "
+            "top-level 'web_server:' block is required. Add one on port 80."
         )
     return config
+
 
 FINAL_VALIDATE_SCHEMA = _final_validate
 
@@ -112,10 +120,9 @@ async def to_code(config):
     await cg.register_component(var, config)
     await uart.register_uart_device(var, config)
 
-    # Expose lightweight tuner HTTP endpoint to Home Assistant device info
-    # so HA can show the Web UI link without enabling full web_server component.
-    cg.add_define("USE_WEBSERVER")
-    cg.add_define("USE_WEBSERVER_PORT", 80)
+    # USE_WEBSERVER and USE_WEBSERVER_PORT used to be defined here, to make Home Assistant show a
+    # "Visit device" link for a tuner that was not on ESPHome's web server at all. web_server now
+    # defines both for real, and faking them alongside it would be a redefinition.
 
     cg.add(
         var.set_device_class_indices(
