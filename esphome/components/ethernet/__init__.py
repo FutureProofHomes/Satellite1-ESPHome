@@ -57,6 +57,8 @@ from esphome.core import (
 import esphome.final_validate as fv
 from esphome.types import ConfigType
 
+from .w5500_psram_patch import W5500PsramPatchError, ensure_w5500_psram_patch
+
 AUTO_LOAD = ["network"]
 LOGGER = logging.getLogger(__name__)
 
@@ -114,6 +116,8 @@ CONF_PHY_REGISTERS = "phy_registers"
 CONF_INTERFACE = "interface"
 
 CONF_CLOCK_SPEED = "clock_speed"
+CONF_REQUIRE_W5500_PSRAM_PATCH = "require_w5500_psram_patch"
+W5500_PSRAM_PATCH_IDF_VERSION = cv.Version(5, 5, 5)
 
 EthernetType = ethernet_ns.enum("EthernetType")
 ETHERNET_TYPES = {
@@ -287,6 +291,22 @@ def _validate(config):
         config[CONF_USE_ADDRESS] = use_address
 
     if CORE.is_esp32:
+        if config[CONF_REQUIRE_W5500_PSRAM_PATCH]:
+            if config[CONF_TYPE] != "W5500":
+                raise cv.Invalid(
+                    "'require_w5500_psram_patch' is only supported with type: W5500."
+                )
+            if not CORE.using_toolchain_esp_idf:
+                raise cv.Invalid(
+                    "'require_w5500_psram_patch' requires the native ESP-IDF framework."
+                )
+            from esphome.components.esp32 import idf_version
+
+            if idf_version() != W5500_PSRAM_PATCH_IDF_VERSION:
+                raise cv.Invalid(
+                    "'require_w5500_psram_patch' requires ESP-IDF "
+                    f"{W5500_PSRAM_PATCH_IDF_VERSION}, got {idf_version()}."
+                )
         if config[CONF_TYPE] in SPI_ETHERNET_TYPES:
             # ENC28J60 driver does not support polling mode - interrupt is required
             if config[CONF_TYPE] == "ENC28J60":
@@ -388,6 +408,7 @@ BASE_SCHEMA = cv.Schema(
         cv.Optional(CONF_USE_ADDRESS): cv.string_strict,
         cv.Optional(CONF_MAC_ADDRESS): cv.mac_address,
         cv.Optional(CONF_ENABLE_ON_BOOT, default=True): cv.boolean,
+        cv.Optional(CONF_REQUIRE_W5500_PSRAM_PATCH, default=False): cv.boolean,
         cv.Optional(CONF_ON_CONNECT): automation.validate_automation(single=True),
         cv.Optional(CONF_ON_DISCONNECT): automation.validate_automation(single=True),
     }
@@ -522,11 +543,13 @@ CONFIG_SCHEMA = cv.All(
     _validate,
 )
 
+
 def _get_spi_config(spi_id):
     for spi_conf in fv.full_config.get().get(CONF_SPI, []):
         if spi_conf[CONF_ID] == spi_id:
             return spi_conf
     raise cv.Invalid(f"Unable to resolve SPI bus '{spi_id.id}' for ethernet")
+
 
 def _final_validate_spi(config):
     if not CORE.is_esp32:
@@ -580,8 +603,22 @@ def phy_register(address: int, value: int, page: int):
     )
 
 
+def _ensure_w5500_psram_patch() -> None:
+    try:
+        applied = ensure_w5500_psram_patch()
+    except W5500PsramPatchError as err:
+        raise cv.Invalid(str(err)) from err
+    if applied:
+        LOGGER.info("Applied W5500 PSRAM receive-buffer patch to ESP-IDF.")
+    else:
+        LOGGER.info("Verified W5500 PSRAM receive-buffer patch in ESP-IDF.")
+
+
 @coroutine_with_priority(CoroPriority.COMMUNICATION)
 async def to_code(config):
+    if config[CONF_REQUIRE_W5500_PSRAM_PATCH]:
+        _ensure_w5500_psram_patch()
+
     var = cg.new_Pvariable(config[CONF_ID])
 
     # Apply network priority before register_component (which emits the user's
