@@ -82,6 +82,103 @@ export function useDeviceState(intervalMs) {
 }
 
 /* ------------------------------------------------------------------ */
+/* The Home Assistant data layer                                       */
+/* ------------------------------------------------------------------ */
+
+/** Nothing has ever arrived, so the age is not a duration. Matches handle_ha_ on the device. */
+export const HA_NEVER = -1;
+
+/** Older than this and opening a card that needs it asks again. */
+const HA_STALE_S = 60;
+
+/**
+ * GET /api/sat1/ha: the area, player and device tree Home Assistant rendered.
+ *
+ * The browser cannot ask Home Assistant itself - it has no token, and requiring one to open a
+ * settings page is not a setup step this product can have - so the device asks over the native API
+ * and caches the answer. What comes back is `{rung, age, d}`: which rung of the responding-action
+ * ladder worked, how many seconds ago, and the payload.
+ *
+ * `rung` is what the degraded copy is written from. 1 or 2 means the channel works; 0 means nothing
+ * has been asked yet, which on a fresh boot is simply "not for another five seconds"; -1 means both
+ * rungs were refused, which is either an installation below 2025.12 or the actions checkbox off.
+ *
+ * A stale payload is still served with its real age rather than withheld, because a list of speakers
+ * from a minute ago is more use than an empty one - so `stale` is advice to the UI, not an error.
+ */
+export function useHaData() {
+  const [ha, setHa] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const read = async () => {
+    try {
+      const r = await fetch("/api/sat1/ha");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setHa(await r.json());
+      return true;
+    } catch {
+      // The stream-lost banner in the shell already covers a device that has gone away, and the
+      // cached payload we may already be holding is still worth showing.
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    let live = true;
+    let timer = null;
+
+    const tick = async () => {
+      const r = await fetch("/api/sat1/ha").catch(() => null);
+      if (!live) return;
+      if (r && r.ok) {
+        const json = await r.json();
+        if (!live) return;
+        setHa(json);
+        // Nothing has arrived yet and the device is still inside the 5s it waits after Home
+        // Assistant connects. Ask again shortly rather than showing "unavailable" for a sync that
+        // has not been attempted.
+        if (json.age === HA_NEVER && json.rung === 0) timer = setTimeout(tick, 3000);
+      }
+    };
+
+    tick();
+    return () => {
+      live = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+
+  /**
+   * Asks the device to sync again. The endpoint only records the request - the action call has to
+   * start from the main loop - so this waits for the round trip rather than expecting the POST's
+   * response to carry anything.
+   */
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      // Not queued through post(): that chain serialises entity writes, and a slider mid-drag should
+      // not be held up behind a Home Assistant round trip.
+      await fetch("/api/sat1/ha/refresh", { method: "POST" });
+      // The device waits on Home Assistant, which took about a second on a real installation. Two
+      // reads a second apart, so a slow answer still lands without polling for minutes.
+      await new Promise((r) => setTimeout(r, 1200));
+      if (!(await read())) return;
+      await new Promise((r) => setTimeout(r, 1500));
+      await read();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  return {
+    ha,
+    haRefresh: refresh,
+    haRefreshing: refreshing,
+    haStale: ha ? ha.age === HA_NEVER || ha.age > HA_STALE_S : false,
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Voice: timers and the assistant's phase                             */
 /* ------------------------------------------------------------------ */
 

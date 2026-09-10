@@ -10,6 +10,35 @@
  */
 
 export const HINTS = {
+  tts_routing:
+    "Sends this device's spoken answers to other speakers instead of, or as well as, its own. The microphones and wake word stay here - only the reply moves.",
+
+  tts_local_speaker:
+    "Whether this device also speaks the answer aloud. It is not a member of the list below, because it is this device rather than something Home Assistant knows about.",
+
+  tts_targets:
+    "Every area Home Assistant knows, expandable to the media players in it. Tick a whole area or pick speakers across several. This device's own speaker is not listed - the checkbox above covers it.",
+
+  tts_manual_ids:
+    "For players Home Assistant has not put in an area: TV casts, AirPlay targets, speaker groups. Comma separated entity ids. On a typical house most media players are in this category, so this is a normal thing to use rather than a workaround.",
+
+  remote_tts_volume:
+    "How loud the answer is on the remote speakers. It does not touch this device's own level - that is Voice Override, on the Audio card.",
+
+  remote_wake_chime:
+    "Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to.",
+
+  duck_area:
+    "Turns down whatever is already playing in this device's area while the assistant is listening and answering, then puts it back.",
+
+  duck_volume:
+    "The level everything in the area drops to. Players already quieter than this are left alone, so a whole-house group does not get turned up.",
+
+  duck_players:
+    "Which players to quieten. An area ticked as a whole includes speakers added to it later; individual picks do not. Rows marked with a slash cannot be ducked, and say why.",
+
+  duck_tts_targets:
+    "Whether the speakers you are routing answers to also get ducked first. Usually off: turning a speaker down and then speaking through it is self-defeating.",
   temp: "Reads high by design - the sensor sits inside a warm enclosure, next to the board. Calibrate against a thermometer in the same room and the offset is stored on the device.",
 
   humidity:
@@ -85,4 +114,27 @@ export const TEXT = {
   cancel: "Cancel",
 
   copied: "Copied",
+
+  /* The Home Assistant data layer. Each of these is a different reason the area and player lists are
+     not here, and each has a different fix - which is the whole point of not collapsing them into one
+     "unavailable" message. */
+  ha_pending: "Asking Home Assistant which speakers you have.",
+
+  ha_never:
+    "Not connected to Home Assistant, so the device does not know which areas or speakers exist. The controls below still hold their current settings and will apply as soon as the connection returns.",
+
+  ha_refused:
+    "Home Assistant did not answer. Either it is older than 2025.12, or this device is not allowed to perform actions: Settings \u203A Devices & services \u203A ESPHome \u203A this device \u203A CONFIGURE, then tick \u201CAllow the device to perform Home Assistant actions\u201D.",
+
+  ha_no_area:
+    "This device is not in a Home Assistant area, so there is no room for it to duck or route within. Assign it to an area in Home Assistant and refresh.",
+
+  ha_no_players:
+    "Home Assistant has no media players in any area. Speakers only appear here once they are assigned to an area; anything else can be entered by entity id.",
+
+  ha_truncated:
+    "Too many speakers to send in one go, so the list is cut short. Anything missing can still be entered by entity id.",
+
+  ha_refresh: "Refresh",
+  ha_refreshing: "Asking\u2026",
 };

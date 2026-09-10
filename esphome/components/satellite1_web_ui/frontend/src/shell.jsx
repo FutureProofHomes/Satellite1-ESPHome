@@ -8,17 +8,18 @@
 import { useEffect, useState } from "preact/hooks";
 
 import { TEXT } from "./copy.js";
-import { useDeviceState, useEvents } from "./lib/device.js";
+import { useDeviceState, useEvents, useHaData } from "./lib/device.js";
+import { Config } from "./routes/config.jsx";
 import { Controls } from "./routes/controls.jsx";
 import { Diagnostics } from "./routes/diagnostics.jsx";
 
 /**
- * Only the two routes this build has. The canvas specifies four - Config and Presence arrive with
- * the Home Assistant data layer and the tuner integration - and a nav entry that opens an empty page
- * is worse than one that is not there yet.
+ * Three of the canvas's four. Presence arrives with the tuner integration; a nav entry that opens an
+ * empty page is worse than one that is not there yet.
  */
 const ROUTES = [
   { id: "controls", label: "Controls", view: Controls },
+  { id: "config", label: "Config", view: Config },
   { id: "diagnostics", label: "Diagnostics", view: Diagnostics },
 ];
 
@@ -108,10 +109,13 @@ export function App() {
   // the truth again on its own after the connection comes back.
   const { device, deviceError } = useDeviceState(route === "diagnostics" ? 2000 : 10000);
   const events = useEvents();
+  // Read once for the tab rather than per route, so switching to Config and back does not re-ask the
+  // device - and therefore does not re-ask Home Assistant - for a list that changes hourly at most.
+  const ha = useHaData();
 
-  const active = ROUTES.find((r) => r.id === route);
+  const active = ROUTES.find((r) => r.id === route) || ROUTES[0];
   const View = active.view;
-  const ctx = { device, deviceError, ...events };
+  const ctx = { device, deviceError, ...events, ...ha };
 
   return (
     <div class="app">

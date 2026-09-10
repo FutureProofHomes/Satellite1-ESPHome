@@ -704,3 +704,120 @@ hr {
 .ln {
   white-space: pre-wrap;
 }
+
+/* The area/player tree, shared by Remote routing and Area ducking.
+   Scrolls at a fixed height rather than growing: 22 areas is a plausible house, and a card that
+   pushes everything below it off screen is worse than one that scrolls. */
+.tree {
+  max-height: 210px;
+  overflow: auto;
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.tree-a + .tree-a {
+  border-top: 1px solid var(--line);
+}
+.tree-h,
+.tree-p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+}
+.tree-p {
+  padding-left: 26px;
+  color: var(--fg-2);
+}
+.tree-ps {
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+.tree-x {
+  background: none;
+  border: 0;
+  padding: 0 2px;
+  color: var(--fg-3);
+  font-size: 11px;
+  cursor: pointer;
+}
+.tree-n {
+  font-size: 11px;
+  color: var(--fg-4);
+  white-space: nowrap;
+}
+/* The reason sits under the name rather than beside it: "duplicate of Kitchen Sonos" next to a
+   speaker called "Kitchen Sonos" reads as one long name on a phone. */
+.tree-why {
+  display: block;
+  font-size: 10.5px;
+  color: var(--fg-4);
+}
+.tree-off {
+  color: var(--fg-4);
+}
+
+/* A control, not an input: a real checkbox needs a ref for the mixed state, and three glyphs cost
+   less than restyling one. */
+.cb {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.cb.dim,
+.cb:disabled {
+  color: var(--fg-4);
+  cursor: default;
+}
+
+.ids {
+  margin-top: 9px;
+}
+.in {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+  background: var(--fill);
+  color: var(--fg);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  padding: 6px 7px;
+  font: 12px inherit;
+}
+.in:disabled {
+  color: var(--fg-4);
+}
+
+/* The per-target volume explanation. A definition list, because each row is a target and the
+   mechanism that applies to it, and the mechanisms differ per target for reasons the customer
+   cannot otherwise see. */
+.mech {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  margin-top: 7px;
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.mech b {
+  font-weight: 600;
+  color: var(--fg-2);
+}
+
+/* The data layer's own state, above each list it feeds. */
+.habox {
+  display: block;
+  margin: 5px 0 7px;
+}
+.harow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 5px;
+}
