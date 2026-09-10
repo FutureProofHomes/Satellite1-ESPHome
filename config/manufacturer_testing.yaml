@@ -40,6 +40,9 @@ esp32:
       # The ESP-IDF iperf task otherwise starves ESPHome's loop task during TCP sends.
       CONFIG_IPERF_TRAFFIC_TASK_PRIORITY: "1"
 
+ethernet:
+  require_w5500_psram_patch: true
+
 # TestOrbit connects without the production API encryption and must not have its
 # connection state overwrite explicit test-ring commands.
 api:

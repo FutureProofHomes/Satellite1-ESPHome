@@ -1,0 +1,12 @@
+diff --git a/components/esp_eth/src/spi/w5500/esp_eth_mac_w5500.c b/components/esp_eth/src/spi/w5500/esp_eth_mac_w5500.c
+--- a/components/esp_eth/src/spi/w5500/esp_eth_mac_w5500.c
++++ b/components/esp_eth/src/spi/w5500/esp_eth_mac_w5500.c
+@@ -683,7 +683,7 @@ static esp_err_t emac_w5500_receive(esp_eth_mac_t *mac, uint8_t **buf, uint32_t
+         copy_len = rx_len > *length ? *length : rx_len;
+         // runt frames are not forwarded by W5500 (tested on target), but check the length anyway since it could be corrupted at SPI bus
+         ESP_GOTO_ON_FALSE(copy_len >= ETH_MIN_PACKET_SIZE - ETH_CRC_LEN, ESP_ERR_INVALID_SIZE, err, TAG, "invalid frame length %" PRIu32, copy_len);
+-        *buf = malloc(copy_len);
++        *buf = heap_caps_malloc(copy_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+         if (*buf != NULL) {
+             emac_w5500_auto_buf_info_t *buff_info = (emac_w5500_auto_buf_info_t *)*buf;
+             buff_info->offset = offset;
