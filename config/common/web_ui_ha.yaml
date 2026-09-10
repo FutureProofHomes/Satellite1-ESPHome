@@ -1,0 +1,285 @@
+####################################################################################################
+# The on-device web app's Home Assistant data layer.
+#
+# The browser holds no Home Assistant token, and asking a customer for one so they can open their own
+# device's settings page is not a setup step this product can have. So the device asks, over the
+# native API connection it already has, caches the answer, and serves it to the browser from
+# GET /api/sat1/ha.
+#
+# One call carries everything Home Assistant knows and this device does not: which areas exist, which
+# media players are in them, and which other FutureProofHomes devices are on the network. It is
+# rendered on Home Assistant's side, exactly as tts_targets_ma_check already does, so only the result
+# crosses the wire rather than the whole entity registry.
+#
+# See docs/TTS-Routing.md for the routing this shares its area walk with.
+####################################################################################################
+
+substitutions:
+  # The whole payload, rendered by Home Assistant.
+  #
+  # Expects `mac`, which cannot be sent as a variable. Home Assistant renders a response_template
+  # with only {"response": ...} in scope, while data_template gets the call's variables through
+  # render_complex - so web_ui_ha_template below prepends its own `{% set mac = ... %}` and the
+  # shared walk reads it exactly as ducking's callers do.
+  #
+  # It is also rendered with strict=True, which makes any undefined reference a hard error with no
+  # partial result. That is stricter than Developer Tools: a template that renders there can still
+  # fail here.
+  #
+  # Music Assistant entities are rejected for the reason tts_targets_ma_check explains - a speaker
+  # with two entity ids would otherwise appear twice - and this device's own media player is rejected
+  # through `mine` from the shared walk. Measured against a 22-area, 104-media-player installation:
+  # 82 bytes per player, 90 per device, 4.3KB in total.
+  #
+  # Shape:
+  #   {"area": "Media Room",
+  #    "areas": [{"n": "Kitchen", "p": [["media_player.kitchen", "Kitchen Sonos"]]}],
+  #    "dev": [["Satellite1", "Satellite1 c5ac00", "Media Room", "3c:0f:02:c5:ac:00", "dev (ESP...)"]]}
+  #
+  # `dev` carries every FutureProofHomes device with its model, not only Satellite1s. The model is
+  # what separates products - a Nexus registers through a config entry with no MAC connection, no
+  # software version and one entity - so filtering on the absence of a MAC would key on an accident
+  # of how an integration registers itself. The frontend renders the models it understands, which
+  # makes recognising another product later a change there rather than here, and means an unknown
+  # one appears in the payload the day Home Assistant learns about it.
+  #
+  # Areas with no eligible player are dropped rather than sent empty: the frontend has nothing to
+  # offer for them, and on the installation above that is 11 areas of the 22.
+  #
+  # The size cap is enforced here, on Home Assistant's side, and it is not a nicety. An incoming API
+  # message larger than MAX_MESSAGE_SIZE - 32768 on ESP32, api_frame_helper.h:31 - does not arrive
+  # truncated: api_frame_helper_plaintext.cpp:145 sets State::FAILED and returns BAD_DATA_PACKET,
+  # which drops the connection. Since this syncs on reconnect, an installation too large to fit would
+  # disconnect, reconnect, ask again and disconnect again. So areas are added while they fit and `t`
+  # says some were left out; the frontend then falls back to the manual entity id field, which it
+  # needs regardless - only 38 of 104 media players on the test installation were in any area at all.
+  #
+  # 24000 rather than 32768 leaves room for the device list, the wrapper and protobuf framing. At the
+  # measured 82 bytes per player that is roughly 290 players before anything is dropped.
+  #
+  # Every value is a string or an int, never a boolean or none, and that is deliberate: Home Assistant
+  # puts the rendered result through literal_eval, which parses a JSON object into a dict but raises
+  # on `true` or `null` and hands back the raw string instead. Keeping booleans out makes which of
+  # those two happens a property of this template rather than of a customer's speaker names. The
+  # device accepts either form anyway.
+  web_ui_ha_jinja: >-
+    ${self_area_jinja}
+    {% set ma = integration_entities('music_assistant') %}
+    {% set out = namespace(areas=[], rows=[], dev=[]) %}
+    {% for a in areas() %}
+      {% set out.rows = [] %}
+      {% for e in area_entities(a) | select('match', 'media_player\.')
+                  | reject('in', ma) | reject('in', mine) %}
+        {% set out.rows = out.rows + [[e, state_attr(e, 'friendly_name') or e]] %}
+      {% endfor %}
+      {% if out.rows | count > 0 %}
+        {% set out.areas = out.areas + [{'n': area_name(a), 'p': out.rows}] %}
+      {% endif %}
+    {% endfor %}
+    {% for a in areas() %}
+      {% for d in area_devices(a) %}
+        {% if device_attr(d, 'manufacturer') == 'FutureProofHomes' %}
+          {% set macs = device_attr(d, 'connections')
+                        | selectattr(0, 'eq', 'mac') | map(attribute=1) | list %}
+          {% set out.dev = out.dev + [[device_attr(d, 'model'), device_attr(d, 'name'), area_name(a),
+                                       macs | first if macs else '',
+                                       device_attr(d, 'sw_version') or '']] %}
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+    {% set lim = 24000 - (out.dev | to_json | length) %}
+    {% set keep = namespace(a=[], n=0) %}
+    {% for ar in out.areas %}
+      {% set sz = (ar | to_json | length) + 1 %}
+      {% if keep.n + sz < lim %}
+        {% set keep.a = keep.a + [ar] %}
+        {% set keep.n = keep.n + sz %}
+      {% endif %}
+    {% endfor %}
+    {{ {'area': area_name(ns.area) if ns.area else '',
+        'areas': keep.a, 'dev': out.dev,
+        't': 1 if keep.a | count < out.areas | count else 0} | to_json }}
+
+  # Nothing has ever recorded statistics under this id, so asking for them reads nothing and returns
+  # an empty result rather than an error. Named here because rung 1's comment explains it.
+  web_ui_ha_probe_statistic: "sensor.satellite1_web_ui_probe"
+
+  # Leaves the payload in `payload`, whichever of the two forms it arrived in. Each rung then stores it
+  # with its own number, which is the only part that differs between them.
+  #
+  # Home Assistant puts every rendered template through literal_eval, so a payload with no boolean and
+  # no none parses into a dict and comes back as a JSON object, while one with either raises, is
+  # caught, and comes back as the original string. The template above is written to stay on one side of
+  # that line, but both are handled: the alternative is a transport whose shape depends on whether
+  # someone's speaker is called something unusual.
+  #
+  # This lives in YAML rather than in the component because ArduinoJson is only compiled in when
+  # something in the config uses capture_response - which is exactly this file - and a lambda is part
+  # of main.cpp, where it always is.
+  web_ui_ha_payload_lambda: >-
+    std::string payload;
+    auto captured = response["response"];
+    if (captured.is<const char *>()) {
+      payload = captured.as<std::string>();
+    } else {
+      serializeJson(captured, payload);
+    }
+
+globals:
+  # The response template, with this device's MAC already in the text, built once.
+  #
+  # A global rather than a literal in each rung's lambda: the Jinja above is about 1.6KB, and pasting
+  # it into every rung would put that many copies in flash to no purpose. Built at boot because the
+  # MAC is the only runtime part and it never changes.
+  - id: web_ui_ha_template
+    type: std::string
+    restore_value: no
+
+  # Which rung of the ladder produced the payload, for the Diagnostics page and the frontend's
+  # explanation of its own degraded state.
+  #
+  #   0  nothing asked yet                2  conversation.process
+  #   1  recorder.get_statistics         -1  both refused
+  #
+  # The ladder always restarts at rung 1 rather than resuming from this value. A refused rung costs
+  # one round trip to something that does nothing, syncs are rare, and steering from here would mean
+  # a dispatch chain for no measurable gain - so this records what worked rather than deciding what
+  # to try.
+  - id: web_ui_ha_rung
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+esphome:
+  on_boot:
+    # 600 matches the block in common/web_ui.yaml: after globals restore, before anything serves a
+    # request. Nothing reads this until Home Assistant connects, so the priority only has to be
+    # early enough to be certain.
+    - priority: 600.0
+      then:
+        - lambda: |-
+            // A raw string literal, so the Jinja can carry quotes, backslashes and newlines without
+            // any of it being escaped for C++. The delimiter has to be something the template cannot
+            // contain, which )JINJA" is.
+            id(web_ui_ha_template) = std::string("{% set mac = '") +
+                                     esphome::get_mac_address_pretty() +
+                                     R"JINJA(' %}${web_ui_ha_jinja})JINJA";
+
+script:
+  # Home Assistant registers its action-call handler partway through its own connect sequence, and a
+  # call that arrives first is dropped silently - the same 5s of slack ha_action_probe takes, for the
+  # same reason. restart, so a reconnect during the wait does not leave two syncs queued.
+  - id: web_ui_ha_sync_on_connect
+    mode: restart
+    then:
+      - delay: 5s
+      - script.execute: web_ui_ha_sync
+
+  # Asks Home Assistant for the area, player and device tree.
+  #
+  # capture_response needs an action that supports responses, or return_response=True raises before
+  # anything is rendered. The action's own answer is then thrown away, because Home Assistant renders
+  # response_template itself with the full template environment in scope. So the action is a key
+  # rather than a query, and the only things that matter about it are that it cannot fail and that it
+  # changes nothing.
+  - id: web_ui_ha_sync
+    mode: restart
+    then:
+      - if:
+          condition:
+            and:
+              - api.connected:
+              # Before 2025.12 Home Assistant answers no action call at all, so every rung would be a
+              # silence and the ladder would conclude something false. common/tts_routing.yaml sets
+              # this from the version on the connect handshake.
+              - lambda: 'return id(ha_supports_action_replies);'
+          then:
+            - script.execute: web_ui_ha_rung_1
+
+  # Rung 1. get_statistics is domain-level, so it needs no entity to exist, and aimed at a statistic
+  # id nothing has ever written it returns {"statistics": {}} with changed_states empty - it succeeds
+  # immediately having read nothing and changed nothing. Verified against a live installation, as was
+  # the coercion below: ESPHome sends every value as a string, and Home Assistant's schema puts
+  # statistic_ids and types through ensure_list, so neither needs to be sent as a list.
+  #
+  # recorder is not itself in default_config, but history and logbook both depend on it, so removing
+  # it takes deliberate effort. That is why it is rung 1 and not the floor.
+  - id: web_ui_ha_rung_1
+    then:
+      - homeassistant.action:
+          action: recorder.get_statistics
+          capture_response: true
+          data:
+            start_time: "1970-01-01 00:00:00"
+            statistic_ids: "${web_ui_ha_probe_statistic}"
+            period: day
+            types: mean
+          response_template: !lambda 'return id(web_ui_ha_template);'
+          on_success:
+            - lambda: |-
+                ${web_ui_ha_payload_lambda}
+                id(web_ui_ha_rung) = 1;
+                id(web_ui_app)->set_ha_payload(payload, 1);
+          on_error:
+            - script.execute: web_ui_ha_rung_2
+
+  # Rung 2, and the floor. assist_pipeline declares a hard dependency on conversation, so a Home
+  # Assistant that can run a Satellite1 at all has conversation.process, and it is domain-level -
+  # registered with async_register, so it needs no entity either. There is no rung 3: an entity-backed
+  # action needs a matching entity to exist, which is a weaker guarantee than this one, so anything
+  # behind this would be unreachable.
+  #
+  # Aimed at the built-in agent with text that matches no intent, so nothing runs and no cloud or LLM
+  # agent is billed. Unlike rung 1 this is not free - it updates the agent entity's state and writes a
+  # context, and took about three seconds on a live installation - which is the whole reason it is
+  # second.
+  - id: web_ui_ha_rung_2
+    then:
+      - homeassistant.action:
+          action: conversation.process
+          capture_response: true
+          data:
+            agent_id: conversation.home_assistant
+            text: "satellite1 web ui data layer probe"
+          response_template: !lambda 'return id(web_ui_ha_template);'
+          on_success:
+            - lambda: |-
+                ${web_ui_ha_payload_lambda}
+                id(web_ui_ha_rung) = 2;
+                id(web_ui_app)->set_ha_payload(payload, 2);
+          on_error:
+            - lambda: |-
+                id(web_ui_ha_rung) = -1;
+                id(web_ui_app)->set_ha_failed();
+                // Split across messages: the logger's tx_buffer_size defaults to 512 bytes.
+                ESP_LOGW("web_ui", "Home Assistant answered no action call, so the web app cannot "
+                                   "show areas, media players or other Satellite1s.");
+                ESP_LOGW("web_ui", "  Everything the device knows unaided still works. Check that "
+                                   "'Allow the device to perform Home Assistant actions' is ticked "
+                                   "in this device's ESPHome settings.");
+
+# Merged into the block in common/web_ui.yaml, which declares the component itself. Split across the
+# two files on purpose: that one is the web server and this one is the Home Assistant half, and the
+# script this points at is here.
+#
+# The endpoint behind this only records that someone asked; the component's loop() fires the trigger,
+# so the action call starts from the main loop. Several tabs opening at once collapse into one sync.
+satellite1_web_ui:
+  on_ha_refresh:
+    - script.execute: web_ui_ha_sync
+
+# The client test is the one ha_action_probe explains: only Home Assistant can answer an action call.
+#
+# The wait is inside web_ui_ha_sync_on_connect rather than here, and that is not a style choice. Every
+# package's on_client_connected is concatenated into one automation that runs its actions in sequence,
+# so a `delay:` at this level holds up every package merged after it - tts_routing waits 5s, which
+# already puts area_ducking's recover at about 10s. Handing off to a script returns immediately, so
+# this one waits 5s from the connection rather than 5s from whenever the queue reaches it, and it stops
+# adding to the pile for whatever is merged next.
+api:
+  on_client_connected:
+    - if:
+        condition:
+          lambda: 'return client_info.rfind("Home Assistant", 0) == 0;'
+        then:
+          - script.execute: web_ui_ha_sync_on_connect

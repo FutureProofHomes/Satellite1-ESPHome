@@ -46,8 +46,18 @@ class Satellite1WebUI : public Component {
   void push_utterance(const std::string &text, bool heard) { this->handler_.push_utterance(text, heard); }
 #endif
 
+  /// Both called from the rung lambdas in common/web_ui_ha.yaml.
+  void set_ha_payload(const std::string &json, int rung) { this->handler_.set_ha_payload(json, rung); }
+  void set_ha_failed() { this->handler_.set_ha_failed(); }
+
+  /// Fired from loop() when a browser has posted to /api/sat1/ha/refresh. A trigger rather than a
+  /// direct call, because the work is a Home Assistant action and the script that owns it lives in
+  /// YAML - which also keeps the ladder's only caller in one file.
+  Trigger<> *get_ha_refresh_trigger() { return &this->ha_refresh_trigger_; }
+
  protected:
   WebUIHandler handler_;
+  Trigger<> ha_refresh_trigger_;
 
   /// Our loop() runs once per main-loop iteration, so the gap between two calls is the main loop
   /// period. That makes the loop-time readout free, where the debug: component would cost a sensor

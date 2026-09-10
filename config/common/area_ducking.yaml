@@ -5,18 +5,15 @@
 # See docs/TTS-Routing.md for setup, the design decisions and the alternatives that were rejected.
 
 substitutions:
-  # Resolves this device's area from its own MAC, then the players in it worth ducking, split into
-  # `players` and `tts_players`. Expects `mac`, `duck` and `targets`; all three are sent with every
-  # call, because the two lists are rendered independently and only agree because the inputs do.
-  # Identity has to travel in the payload, and the MAC is the handle that survives a rename.
+  # Resolves this device's own Home Assistant device and area from its MAC, as `ns.dev` and
+  # `ns.area`, and its own entities as `mine`. Expects `mac`. Identity has to travel in the payload,
+  # and the MAC is the handle that survives a rename.
   #
-  # Silent states are rejected rather than audible ones selected, because an amplifier never reports
-  # `playing` while it is the loudest thing in the room. Music Assistant entities are rejected
-  # outright so a speaker with two entity ids cannot be ducked twice. The "Satellite1 Do Not Duck"
-  # label is rejected from `room`, which gives it scope over both lists at once; labels do not roll
-  # up, hence the device and area expansions, and it is matched by id so a rename keeps working.
-  # Needs Home Assistant 2024.4 for the label_* functions.
-  duck_players_jinja: >-
+  # Shared with common/web_ui.yaml, which is always included, so the on-device web app and ducking
+  # cannot disagree about which area this device is in. That file cannot send `mac` as a variable,
+  # because a response_template is rendered with only the response in scope, so it prepends its own
+  # `{% set mac = ... %}` - which is why this expects a variable rather than reading one itself.
+  self_area_jinja: >-
     {% set ns = namespace(dev='', area='') %}
     {% for a in areas() %}
       {% if not ns.dev %}
@@ -29,6 +26,19 @@ substitutions:
       {% endif %}
     {% endfor %}
     {% set mine = device_entities(ns.dev) if ns.dev else [] %}
+
+  # The players in this device's area worth ducking, split into `players` and `tts_players`. Expects
+  # `mac`, `duck` and `targets`; all three are sent with every call, because the two lists are
+  # rendered independently and only agree because the inputs do.
+  #
+  # Silent states are rejected rather than audible ones selected, because an amplifier never reports
+  # `playing` while it is the loudest thing in the room. Music Assistant entities are rejected
+  # outright so a speaker with two entity ids cannot be ducked twice. The "Satellite1 Do Not Duck"
+  # label is rejected from `room`, which gives it scope over both lists at once; labels do not roll
+  # up, hence the device and area expansions, and it is matched by id so a rename keeps working.
+  # Needs Home Assistant 2024.4 for the label_* functions.
+  duck_players_jinja: >-
+    ${self_area_jinja}
     {% set skip = targets.split(',') | map('trim') | map('lower') | reject('eq', '') | list %}
     {% set nd = namespace(e=label_entities('satellite1_do_not_duck')) %}
     {% for d in label_devices('satellite1_do_not_duck') %}

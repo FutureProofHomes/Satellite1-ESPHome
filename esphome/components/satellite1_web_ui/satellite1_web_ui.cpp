@@ -27,6 +27,11 @@ void Satellite1WebUI::loop() {
   uint32_t seen = this->max_loop_ms_.load(std::memory_order_relaxed);
   while (elapsed > seen && !this->max_loop_ms_.compare_exchange_weak(seen, elapsed, std::memory_order_relaxed)) {
   }
+
+  // Collapses any number of refresh requests since the last iteration into one sync, which is what we
+  // want: several tabs opening at once should ask Home Assistant a single time.
+  if (this->handler_.take_ha_refresh_request())
+    this->ha_refresh_trigger_.trigger();
 }
 
 void Satellite1WebUI::dump_config() {

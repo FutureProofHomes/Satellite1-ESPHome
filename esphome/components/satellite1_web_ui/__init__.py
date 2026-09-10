@@ -3,6 +3,7 @@ import hashlib
 import logging
 from pathlib import Path
 
+import esphome.automation as automation
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import (
@@ -43,6 +44,7 @@ CONF_INDEX_ID = "index_id"
 CONF_ENTITIES = "entities"
 CONF_VOICE_ASSISTANT_ID = "voice_assistant_id"
 CONF_VOICE_PHASE = "voice_phase"
+CONF_ON_HA_REFRESH = "on_ha_refresh"
 
 satellite1_web_ui_ns = cg.esphome_ns.namespace("satellite1_web_ui")
 Satellite1WebUI = satellite1_web_ui_ns.class_("Satellite1WebUI", cg.Component)
@@ -98,6 +100,11 @@ CONFIG_SCHEMA = cv.All(
             # that a build without voice_assistant still compiles.
             cv.Optional(CONF_VOICE_ASSISTANT_ID): cv.use_id(VoiceAssistant),
             cv.Optional(CONF_VOICE_PHASE): cv.returning_lambda,
+            # Fired when a browser posts to /api/sat1/ha/refresh. The work is a Home Assistant action
+            # call, which belongs in YAML next to the rest of the ladder, so the component only says
+            # that someone asked. Optional: without common/web_ui_ha.yaml the endpoint accepts the
+            # request and nothing listens, which is the honest behaviour for a build with no data layer.
+            cv.Optional(CONF_ON_HA_REFRESH): automation.validate_automation(single=True),
         }
     ).extend(cv.COMPONENT_SCHEMA),
     cv.only_with_framework(Framework.ESP_IDF),
@@ -153,6 +160,11 @@ async def to_code(config):
     if CONF_VOICE_PHASE in config:
         phase = await cg.process_lambda(config[CONF_VOICE_PHASE], [], return_type=cg.int_)
         cg.add(var.set_voice_phase_fn(phase))
+
+    if CONF_ON_HA_REFRESH in config:
+        await automation.build_automation(
+            var.get_ha_refresh_trigger(), [], config[CONF_ON_HA_REFRESH]
+        )
 
     if not _DIST.is_file():
         raise cv.Invalid(

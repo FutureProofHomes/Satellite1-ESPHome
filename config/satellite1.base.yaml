@@ -118,6 +118,9 @@ packages:
   # Ahead of mmwave, which is where satellite1_radar is configured: the radar tuner is a handler on
   # this server now and fails config validation without it.
   web_ui: !include common/web_ui.yaml
+  # After web_ui, which declares the component this calls into, and after area_ducking, whose
+  # self_area_jinja it shares so the app and ducking cannot disagree about this device's area.
+  web_ui_ha: !include common/web_ui_ha.yaml
   mmwave: !include common/mmwave.yaml
   sendspin: !include common/sendspin.yaml
 

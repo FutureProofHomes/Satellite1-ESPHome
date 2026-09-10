@@ -112,6 +112,26 @@ class WebUIHandler : public AsyncWebHandler {
   void push_utterance(const std::string &text, bool heard);
 #endif
 
+  /// Stores what Home Assistant rendered, and which rung of the ladder got it.
+  ///
+  /// Takes a std::string rather than the JsonObjectConst the trigger hands over, deliberately. The
+  /// api component only pulls ArduinoJson in when something in the config uses capture_response, so a
+  /// type from it in this header would make this component fail to build in a config that does not -
+  /// and the caller in common/web_ui_ha.yaml is compiled into main.cpp, where it is always available.
+  /// That lambda is also where the string-or-object ambiguity is resolved, for the same reason.
+  ///
+  /// Called from the API callback on the main loop; read from the httpd task, so both take the lock.
+  void set_ha_payload(const std::string &json, int rung);
+
+  /// Records that every rung refused, without discarding a payload an earlier sync managed to get.
+  /// Stale data with an honest age is more use to the app than nothing.
+  void set_ha_failed() { this->ha_rung_ = -1; }
+
+  /// True once, if a browser has asked for a resync since the last call. An atomic exchange rather
+  /// than a scheduler call, because this is set from the httpd task and read from the main loop -
+  /// the same split satellite1_radar's engineering-mode gating uses.
+  bool take_ha_refresh_request() { return this->ha_refresh_requested_.exchange(false); }
+
   // NOLINTNEXTLINE(readability-identifier-naming)
   bool canHandle(AsyncWebServerRequest *request) const override;
   // NOLINTNEXTLINE(readability-identifier-naming)
@@ -126,6 +146,8 @@ class WebUIHandler : public AsyncWebHandler {
     INDEX,
     STATE,
     VOICE,
+    HA,
+    HA_REFRESH,
   };
 
   static Route match_route_(AsyncWebServerRequest *request);
@@ -133,12 +155,33 @@ class WebUIHandler : public AsyncWebHandler {
   void handle_index_(AsyncWebServerRequest *request);
   void handle_state_(AsyncWebServerRequest *request);
   void handle_voice_(AsyncWebServerRequest *request);
+  void handle_ha_(AsyncWebServerRequest *request);
+  void handle_ha_refresh_(AsyncWebServerRequest *request);
 
   const uint8_t *index_gz_{nullptr};
   size_t index_gz_len_{0};
   const char *etag_{nullptr};
   std::atomic<uint32_t> *max_loop_ms_{nullptr};
   std::vector<EntityRef> entities_;
+
+  /// The Home Assistant payload, in PSRAM. It is bounded on Home Assistant's side rather than here -
+  /// see the size cap in common/web_ui_ha.yaml - but the bound is 24KB, which has no business in a
+  /// 165KB internal heap shared with audio buffers.
+  ///
+  /// Held as bytes rather than parsed: the frontend is the only consumer and it wants JSON, so
+  /// parsing here would cost a DOM and then a re-serialization to hand back exactly what arrived.
+  /// The buffer only ever grows, since a re-sync of the same installation is nearly the same size and
+  /// churning PSRAM to save a few hundred bytes would fragment it for no gain.
+  RAMAllocator<char> ha_alloc_{RAMAllocator<char>::ALLOC_EXTERNAL};
+  char *ha_buf_{nullptr};
+  size_t ha_len_{0};
+  size_t ha_cap_{0};
+  /// Uptime in seconds when the payload arrived, so the app can show its age and decide to resync.
+  /// Zero means nothing has ever arrived, which is why the endpoint reports an age of -1 for it.
+  uint32_t ha_at_{0};
+  int ha_rung_{0};
+  Mutex ha_lock_;
+  std::atomic<bool> ha_refresh_requested_{false};
 
 #ifdef USE_VOICE_ASSISTANT
   voice_assistant::VoiceAssistant *va_{nullptr};

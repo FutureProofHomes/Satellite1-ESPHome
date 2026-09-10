@@ -73,16 +73,26 @@ static const char *reset_reason_str_() {
 }
 
 WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
-  if (request->method() != HTTP_GET)
-    return Route::NONE;
-
   char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
   const StringRef url = request->url_to(url_buf);
+
+  // POST, not PATCH: web_server_idf registers wildcard handlers for GET, POST and OPTIONS only, so
+  // any other verb never reaches a handler at all.
+  if (request->method() == HTTP_POST) {
+    if (url == "/api/sat1/ha/refresh")
+      return Route::HA_REFRESH;
+    return Route::NONE;
+  }
+
+  if (request->method() != HTTP_GET)
+    return Route::NONE;
 
   if (url == WU_URL_ROOT || url == WU_URL_ALIAS || url == WU_URL_ALIAS_SLASH)
     return Route::INDEX;
   if (url == "/api/sat1/state")
     return Route::STATE;
+  if (url == "/api/sat1/ha")
+    return Route::HA;
 #ifdef USE_VOICE_ASSISTANT
   if (url == "/api/sat1/voice")
     return Route::VOICE;
@@ -104,9 +114,72 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
     case Route::VOICE:
       this->handle_voice_(request);
       break;
+    case Route::HA:
+      this->handle_ha_(request);
+      break;
+    case Route::HA_REFRESH:
+      this->handle_ha_refresh_(request);
+      break;
     case Route::NONE:
       break;
   }
+}
+
+void WebUIHandler::set_ha_payload(const std::string &json, int rung) {
+  LockGuard guard{this->ha_lock_};
+
+  if (json.size() + 1 > this->ha_cap_) {
+    char *grown = this->ha_buf_ == nullptr ? this->ha_alloc_.allocate(json.size() + 1)
+                                           : this->ha_alloc_.reallocate(this->ha_buf_, json.size() + 1);
+    if (grown == nullptr) {
+      // The previous payload is still intact and still served, with its real age. Losing the update
+      // is better than dropping what we have for an installation that has not changed much.
+      ESP_LOGW(TAG_WU, "No room for a %u byte Home Assistant payload; keeping the previous one",
+               static_cast<unsigned>(json.size()));
+      return;
+    }
+    this->ha_buf_ = grown;
+    this->ha_cap_ = json.size() + 1;
+  }
+
+  memcpy(this->ha_buf_, json.c_str(), json.size() + 1);
+  this->ha_len_ = json.size();
+  this->ha_at_ = static_cast<uint32_t>(millis_64() / 1000);
+  this->ha_rung_ = rung;
+  ESP_LOGD(TAG_WU, "Home Assistant payload: %u bytes via rung %d", static_cast<unsigned>(json.size()), rung);
+}
+
+void WebUIHandler::handle_ha_(AsyncWebServerRequest *request) {
+  auto *stream = request->beginResponseStream("application/json");
+
+  LockGuard guard{this->ha_lock_};
+
+  // `d` is whatever Home Assistant rendered, passed through byte for byte rather than reparsed. The
+  // age is what lets the app decide to ask again; -1 says nothing has ever arrived, which is a
+  // different thing from a payload that is merely old.
+  //
+  // AsyncResponseStream::print has overloads for const char * and float but not for an integer, so
+  // every number here goes through printf - a float would render an age as "12.00". The payload goes
+  // out through the const char * overload because there is no block write; set_ha_payload copies the
+  // terminator with it for exactly this reason.
+  if (this->ha_at_ == 0) {
+    stream->printf(R"({"rung":%d,"age":-1,"d":null})", this->ha_rung_);
+  } else {
+    stream->printf(R"({"rung":%d,"age":%u,"d":)", this->ha_rung_,
+                   static_cast<unsigned int>(static_cast<uint32_t>(millis_64() / 1000) - this->ha_at_));
+    stream->print(this->ha_buf_);
+    stream->print("}");
+  }
+
+  stream->addHeader("Cache-Control", CACHE_REVALIDATE);
+  request->send(stream);
+}
+
+void WebUIHandler::handle_ha_refresh_(AsyncWebServerRequest *request) {
+  // Only a request. The sync itself is a Home Assistant action call, which has to be started from the
+  // main loop, so loop() picks this up and fires the trigger that runs the script.
+  this->ha_refresh_requested_.store(true);
+  request->send(202, "application/json", "{\"queued\":1}");
 }
 
 void WebUIHandler::handle_index_(AsyncWebServerRequest *request) {
