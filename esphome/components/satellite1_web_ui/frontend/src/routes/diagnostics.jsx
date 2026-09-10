@@ -67,6 +67,10 @@ function Firmware({ ctx }) {
   const upd = entity(ctx, "firmware");
   const beta = entity(ctx, "beta_firmware");
   const xmos = entity(ctx, "xmos_firmware");
+  const radarModule = entity(ctx, "radar_module");
+  // Component-owned name, like Radar Target on Controls - registered from a C++ literal, with no
+  // config id to route through the entity map.
+  const radarFw = ctx.states["text_sensor/Radar Firmware"];
   const available = upd && upd.state === "UPDATE AVAILABLE";
 
   return (
@@ -76,6 +80,8 @@ function Firmware({ ctx }) {
         <Fact label="ESPHome" value={d?.esphome || "\u2014"} />
         {xmos && <Fact label="Audio chip" value={xmos.value || "\u2014"} hint={HINTS.xmos} />}
         <Fact label="Built" value={d?.built || "\u2014"} />
+        {radarModule && <Fact label="Radar module" value={radarModule.value} />}
+        {radarFw && <Fact label="Radar firmware" value={radarFw.value} />}
       </div>
 
       {upd && (

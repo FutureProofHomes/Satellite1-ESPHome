@@ -96,7 +96,12 @@ function SensorPills({ ctx }) {
     return { ...s, value: Number(sensor.value), offset, offsetPath: pathFor(ctx, s.offsetKey, "set") };
   }).filter(Boolean);
 
-  const presence = entity(ctx, "radar_detected");
+  // Referenced by id rather than through the entity map, and deliberately so. satellite1_radar
+  // registers this at runtime from a C++ string literal that both the LD2450 and LD2410 handlers
+  // share, so the name is owned by code rather than by anyone's YAML - which is the thing the map
+  // exists to protect against - and there is no config id to point the map at anyway.
+  const presence = ctx.states["text_sensor/Radar Target"];
+  const module = entity(ctx, "radar_module");
   const openRow = rows.find((r) => r.id === open);
 
   return (
@@ -115,7 +120,7 @@ function SensorPills({ ctx }) {
         {presence && (
           // The Presence route is Phase 3. Until then the pill goes somewhere real: the radar tuner
           // already served by this device, which is what someone tapping "Presence" actually wants.
-          <a class="pill" href="/radar_tuner">
+          <a class="pill" href="/radar_tuner" title={module?.value ? `${module.value} tuner` : "Radar tuner"}>
             <span class={`pill-v${String(presence.value).length > 8 ? " sm" : ""}`}>{presence.value || "\u2014"}</span>
             <span class="pill-l">
               Presence<span class="accent"> &#8594;</span>
@@ -137,7 +142,12 @@ function SensorPills({ ctx }) {
         />
       )}
 
-      {!open && <p class="pills-foot">Tap a reading to calibrate it. Presence opens the radar tuner.</p>}
+      {!open && (
+        <p class="pills-foot">
+          Tap a reading to calibrate it.
+          {presence ? ` Presence opens the ${module?.value || "radar"} tuner.` : ""}
+        </p>
+      )}
     </div>
   );
 }

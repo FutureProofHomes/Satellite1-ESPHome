@@ -184,7 +184,10 @@ satellite1_web_ui:
       network: network_status_sensor
       usb_power: pd_state_text
       xmos_firmware: xmos_firmware_version_text
-      radar_detected: radar_detected_text
+      # Despite the name, this holds the detected module - "LD2450" or "LD2410" - not a presence
+      # state. Presence itself comes from "Radar Target", which satellite1_radar registers at runtime
+      # from a C++ literal shared by both handlers, so it has no id to map and does not need one.
+      radar_module: radar_detected_text
       remote_tts_status: tts_routing_status
 
     events:
