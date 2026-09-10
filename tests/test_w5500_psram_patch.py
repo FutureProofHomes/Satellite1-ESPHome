@@ -58,3 +58,13 @@ class W5500PsramPatchTest(unittest.TestCase):
 
         with self.assertRaises(w5500_psram_patch.W5500PsramPatchError):
             w5500_psram_patch.ensure_w5500_psram_patch(idf_path)
+
+    def test_rejects_source_with_both_allocation_modes(self) -> None:
+        idf_path, target = self._idf_tree()
+        target.write_text(
+            _unpatched_source() + w5500_psram_patch.PATCHED_ALLOCATION + "\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(w5500_psram_patch.W5500PsramPatchError):
+            w5500_psram_patch.ensure_w5500_psram_patch(idf_path)
