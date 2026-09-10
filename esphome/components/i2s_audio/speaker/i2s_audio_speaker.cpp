@@ -137,7 +137,14 @@ void I2SAudioSpeaker::loop() {
     }
 
     this->stop_i2s_channel_();
-    xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::ALL_BITS);
+    // A new source can request startup while the old speaker task stops.
+    // Preserve that request rather than clearing it with the stale task state.
+    const EventBits_t bits_before_clear =
+        xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::ALL_BITS);
+    if (bits_before_clear & SpeakerEventGroupBits::COMMAND_START) {
+      ESP_LOGD(TAG, "Start requested while stopping; keeping the request");
+      xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::COMMAND_START);
+    }
     this->status_clear_error();
 
     this->state_ = speaker::STATE_STOPPED;
