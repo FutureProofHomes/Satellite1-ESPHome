@@ -499,10 +499,10 @@ script:
           }
           if (id(xmos_flashing_state) > 0) {
             id(control_leds_xmos_flasher_state_update).execute();
+          } else if (id(improv_ble_in_progress)) {
+            id(control_leds_improv_ble_state).execute();
           } else if (${internal_led_automation}) {
-            if (id(improv_ble_in_progress)) {
-              id(control_leds_improv_ble_state).execute();
-            } else if (id(test_instructions) > 0) {
+            if (id(test_instructions) > 0) {
               id(control_leds_test_instructions).execute();
             } else if (id(init_in_progress)) {
               id(control_leds_init_state).execute();

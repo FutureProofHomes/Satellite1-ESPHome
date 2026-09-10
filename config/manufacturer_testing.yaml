@@ -52,6 +52,34 @@ wifi:
   on_connect: !remove
   on_disconnect: !remove
 
+# BLE is reserved for explicit manufacturer tests and remains off otherwise.
+esp32_ble:
+  enable_on_boot: false
+
+esp32_improv:
+  authorizer: btn_action
+
+globals:
+  - id: ble_improv_duration_seconds
+    type: uint32_t
+    restore_value: no
+    initial_value: '10'
+
+script:
+  - id: ble_improv_window
+    mode: restart
+    then:
+      - lambda: id(improv_ble_in_progress) = true;
+      - script.execute: control_leds
+      - ble.enable:
+      - delay: !lambda 'return id(ble_improv_duration_seconds) * 1000;'
+      - ble.disable:
+      - lambda: id(improv_ble_in_progress) = false;
+      - script.execute: control_leds
+      - improv_serial.send_action_status:
+          action: "START_BLE_IMPROV"
+          status: 0
+
 # The harness owns the microphone while sweep detection is enabled. Remove local
 # button automations that can start production audio or reset flows during a test.
 binary_sensor:
@@ -141,6 +169,34 @@ improv_serial:
             - lambda: id(speaker_dac).activate();
             - delay: 100ms
             - lambda: id(speaker_dac).log_supply_voltages();
+
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("START_BLE_IMPROV");
+          then:
+            - lambda: |-
+                constexpr long MIN_DURATION_SECONDS = 1;
+                constexpr long MAX_DURATION_SECONDS = 300;
+                if (!x.get_url().has_value()) {
+                  ESP_LOGW("ble_improv", "START_BLE_IMPROV missing duration");
+                  return;
+                }
+                const std::string query = *x.get_url();
+                const std::string prefix = "duration=";
+                if (query.rfind(prefix, 0) != 0) {
+                  ESP_LOGW("ble_improv", "START_BLE_IMPROV invalid query: %s", query.c_str());
+                  return;
+                }
+                char *end = nullptr;
+                const long duration = std::strtol(query.c_str() + prefix.size(), &end, 10);
+                if (end == query.c_str() + prefix.size() || *end != '\0' || duration < MIN_DURATION_SECONDS ||
+                    duration > MAX_DURATION_SECONDS) {
+                  ESP_LOGW("ble_improv", "START_BLE_IMPROV invalid duration: %s", query.c_str());
+                  return;
+                }
+                id(ble_improv_duration_seconds) = static_cast<uint32_t>(duration);
+                ESP_LOGI("ble_improv", "Enabling BLE Improv for %ld seconds", duration);
+            - script.execute: ble_improv_window
 
       - if:
           condition:
