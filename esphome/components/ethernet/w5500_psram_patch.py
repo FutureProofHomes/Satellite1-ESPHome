@@ -41,11 +41,15 @@ def ensure_w5500_psram_patch(idf_path: Path | None = None) -> bool:
     """Apply the patch and return whether it changed the framework source."""
     if idf_path is None:
         idf_path_value = os.environ.get("IDF_PATH")
-        if not idf_path_value:
-            raise W5500PsramPatchError(
-                "IDF_PATH is required to identify the native ESP-IDF framework."
-            )
-        idf_path = Path(idf_path_value)
+        if idf_path_value:
+            idf_path = Path(idf_path_value)
+        else:
+            from esphome.const import KEY_CORE, KEY_FRAMEWORK_VERSION
+            from esphome.core import CORE
+            from esphome.espidf.framework import _get_framework_path
+
+            version = str(CORE.data[KEY_CORE][KEY_FRAMEWORK_VERSION])
+            idf_path = _get_framework_path(version)
 
     source_path = idf_path / W5500_SOURCE
     if not source_path.is_file():
