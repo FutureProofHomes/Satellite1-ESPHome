@@ -146,7 +146,7 @@ function SensorPills({ ctx }) {
       {!open && (
         <p class="pills-foot">
           Tap a reading to calibrate it.
-          {presence ? ` Presence opens the ${module?.value || "radar"} tuner.` : ""}
+          {presence ? ` Presence opens the ${module?.value || "radar"} settings.` : ""}
         </p>
       )}
     </div>
