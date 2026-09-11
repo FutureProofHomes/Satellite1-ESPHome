@@ -148,11 +148,10 @@ satellite1_web_ui:
       remote_tts_volume: remote_tts_volume
       duck_volume: duck_area_volume
 
-    # The routing target list. A text entity, so web_server's path is /text/<name>/set?value=, and the
-    # tree writes the whole comma-separated list on every change - which is what the entity already
-    # expects, since its on_value re-runs every check in tts_routing.yaml.
-    texts:
-      tts_targets: tts_target_media_player
+    # No `texts:` block. The routing target list used to be here, as a text entity the tree wrote a
+    # comma-separated list into on every change - and that entity caps at 255 characters, which is
+    # roughly half of what one area's worth of players needs. The selection moved into this component
+    # and the app reads and writes it at /api/sat1/sel instead.
 
     lights:
       ring: led_ring
@@ -166,14 +165,18 @@ satellite1_web_ui:
     switches:
       mute_mics: master_mute_switch
       wake_sound: wake_sound
-      # The Remote routing and Area ducking cards on the Config route. Every one of these is a real
-      # entity in tts_routing.yaml or area_ducking.yaml, so the app is a second face on the same
-      # controls Home Assistant shows rather than a parallel set of settings.
+      # The Remote routing and Area ducking cards on the Config route.
+      #
+      # Only the two derived switches and the wake chime are left. The app does not drive the derived
+      # pair through these paths - it writes the selection and they follow - but they stay in the map so
+      # the app can *show* the whole-area state, and so the Home Assistant face and the app face are
+      # visibly the same control rather than two that happen to agree.
+      #
+      # tts_mute_local and duck_tts_targets were here. Both entities are deleted; the first is now the
+      # app's "Local Speaker" row and the second is unconditional.
       tts_routing: tts_routing_enabled
-      tts_mute_local: tts_mute_local_voice
       remote_wake_chime: remote_wake_chime
       duck_area: duck_area_players
-      duck_tts_targets: duck_tts_targets
 
     selects:
       speaker_channel: tas_mode_select

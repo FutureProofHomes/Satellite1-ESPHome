@@ -81,6 +81,8 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
   if (request->method() == HTTP_POST) {
     if (url == "/api/sat1/ha/refresh")
       return Route::HA_REFRESH;
+    if (url == "/api/sat1/sel")
+      return Route::SEL_SET;
     return Route::NONE;
   }
 
@@ -93,6 +95,8 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
     return Route::STATE;
   if (url == "/api/sat1/ha")
     return Route::HA;
+  if (url == "/api/sat1/sel")
+    return Route::SEL;
 #ifdef USE_VOICE_ASSISTANT
   if (url == "/api/sat1/voice")
     return Route::VOICE;
@@ -120,9 +124,137 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
     case Route::HA_REFRESH:
       this->handle_ha_refresh_(request);
       break;
+    case Route::SEL:
+      this->handle_sel_(request);
+      break;
+    case Route::SEL_SET:
+      this->handle_sel_set_(request);
+      break;
     case Route::NONE:
       break;
   }
+}
+
+void WebUIHandler::handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+  if (match_route_(request) != Route::SEL_SET)
+    return;
+
+  // Cleared on the first chunk rather than after the last, so a connection dropped mid-body cannot
+  // leave a fragment to be parsed as the front of the next request.
+  if (index == 0) {
+    this->body_.clear();
+    this->body_.reserve(total);
+  }
+  if (this->body_.size() + len > SEL_BODY_MAX) {
+    // Marked poisoned rather than truncated: half a selection is a selection the customer never made.
+    this->body_ = "!";
+    return;
+  }
+  if (this->body_ != "!")
+    this->body_.append(reinterpret_cast<const char *>(data), len);
+}
+
+void WebUIHandler::handle_sel_(AsyncWebServerRequest *request) {
+  auto *stream = request->beginResponseStream("application/json");
+  if (this->selection_ == nullptr) {
+    stream->print("{}");
+  } else {
+    std::string json;
+    this->selection_->to_json(json);
+    stream->print(json);
+  }
+  stream->addHeader("Cache-Control", CACHE_REVALIDATE);
+  request->send(stream);
+}
+
+/// Reads one JSON string array into a comma-separated list, without a JSON parser.
+///
+/// ArduinoJson is only linked in when something in the config uses capture_response, and this endpoint
+/// has to work regardless - so this walks the text instead. The shape is ours on both ends and narrow:
+/// arrays of quoted ids containing no escapes, because area ids and entity ids are slugs.
+static bool json_array_to_csv(const std::string &body, size_t from, size_t to, const char *key, std::string &out) {
+  out.clear();
+  const std::string needle = std::string("\"") + key + "\":[";
+  const size_t at = body.find(needle, from);
+  if (at == std::string::npos || at >= to)
+    return false;
+
+  size_t i = at + needle.size();
+  while (i < to && body[i] != ']') {
+    if (body[i] != '"') {
+      i++;
+      continue;
+    }
+    const size_t start = ++i;
+    while (i < to && body[i] != '"')
+      i++;
+    if (i >= to)
+      return false;
+    if (!out.empty())
+      out += ',';
+    out.append(body, start, i - start);
+    i++;
+  }
+  return i < to;
+}
+
+/// Locates `"key":{ ... }` and returns the span between the braces, so the array reader above cannot
+/// pick up the routing arrays when it was asked for the ducking ones.
+static bool json_object_span(const std::string &body, const char *key, size_t &from, size_t &to) {
+  const std::string needle = std::string("\"") + key + "\":{";
+  const size_t at = body.find(needle);
+  if (at == std::string::npos)
+    return false;
+  from = at + needle.size();
+  to = body.find('}', from);
+  return to != std::string::npos;
+}
+
+void WebUIHandler::handle_sel_set_(AsyncWebServerRequest *request) {
+  if (this->selection_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  if (this->body_ == "!" || this->body_.empty()) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  SelectionSet routing;
+  SelectionSet duck;
+  size_t from = 0;
+  size_t to = 0;
+
+  bool ok = json_object_span(this->body_, "routing", from, to);
+  ok = ok && json_array_to_csv(this->body_, from, to, "areas", routing.areas);
+  ok = ok && json_array_to_csv(this->body_, from, to, "extra", routing.extra);
+  ok = ok && json_array_to_csv(this->body_, from, to, "excluded", routing.excluded);
+  ok = ok && json_object_span(this->body_, "duck", from, to);
+  ok = ok && json_array_to_csv(this->body_, from, to, "areas", duck.areas);
+  ok = ok && json_array_to_csv(this->body_, from, to, "extra", duck.extra);
+  ok = ok && json_array_to_csv(this->body_, from, to, "excluded", duck.excluded);
+
+  if (!ok) {
+    ESP_LOGW(TAG_WU, "Selection POST did not parse; keeping the previous one");
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  // Absent means unchanged rather than false, so a caller that only wants to move a checkbox in the
+  // tree does not have to know about the local speaker to avoid silencing this device.
+  bool local = this->selection_->local_speaker();
+  if (this->body_.find("\"local\":1") != std::string::npos) {
+    local = true;
+  } else if (this->body_.find("\"local\":0") != std::string::npos) {
+    local = false;
+  }
+  this->selection_->replace(routing, duck, local);
+  this->body_.clear();
+
+  // 200 rather than the 204 this deserves: init_response_ knows 200, 204, 400, 401, 404, 409 and 422,
+  // and 204 is in that set - but a body is more useful to the caller than a bare status, and a 204
+  // carrying one is malformed.
+  request->send(200, "application/json", "{\"ok\":1}");
 }
 
 void WebUIHandler::set_ha_payload(const std::string &json, int rung) {

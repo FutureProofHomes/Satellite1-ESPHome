@@ -45,6 +45,7 @@ CONF_ENTITIES = "entities"
 CONF_VOICE_ASSISTANT_ID = "voice_assistant_id"
 CONF_VOICE_PHASE = "voice_phase"
 CONF_ON_HA_REFRESH = "on_ha_refresh"
+CONF_ON_SELECTION_CHANGE = "on_selection_change"
 
 satellite1_web_ui_ns = cg.esphome_ns.namespace("satellite1_web_ui")
 Satellite1WebUI = satellite1_web_ui_ns.class_("Satellite1WebUI", cg.Component)
@@ -105,6 +106,7 @@ CONFIG_SCHEMA = cv.All(
             # that someone asked. Optional: without common/web_ui_ha.yaml the endpoint accepts the
             # request and nothing listens, which is the honest behaviour for a build with no data layer.
             cv.Optional(CONF_ON_HA_REFRESH): automation.validate_automation(single=True),
+            cv.Optional(CONF_ON_SELECTION_CHANGE): automation.validate_automation(single=True),
         }
     ).extend(cv.COMPONENT_SCHEMA),
     cv.only_with_framework(Framework.ESP_IDF),
@@ -160,6 +162,11 @@ async def to_code(config):
     if CONF_VOICE_PHASE in config:
         phase = await cg.process_lambda(config[CONF_VOICE_PHASE], [], return_type=cg.int_)
         cg.add(var.set_voice_phase_fn(phase))
+
+    if CONF_ON_SELECTION_CHANGE in config:
+        await automation.build_automation(
+            var.get_selection_change_trigger(), [], config[CONF_ON_SELECTION_CHANGE]
+        )
 
     if CONF_ON_HA_REFRESH in config:
         await automation.build_automation(

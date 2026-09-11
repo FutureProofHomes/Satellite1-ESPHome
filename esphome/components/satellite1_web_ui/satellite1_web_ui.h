@@ -47,7 +47,11 @@ class Satellite1WebUI : public Component {
 #endif
 
   /// Both called from the rung lambdas in common/web_ui_ha.yaml.
-  void set_ha_payload(const std::string &json, int rung) { this->handler_.set_ha_payload(json, rung); }
+  ///
+  /// This one also lifts `aid` out of the payload into the selection store, which is the only moment
+  /// the device can learn its own Home Assistant area. Done here rather than in the YAML lambda so
+  /// the one place that receives the payload is the one place that unpacks it.
+  void set_ha_payload(const std::string &json, int rung);
   void set_ha_failed() { this->handler_.set_ha_failed(); }
 
   /// Fired from loop() when a browser has posted to /api/sat1/ha/refresh. A trigger rather than a
@@ -55,9 +59,23 @@ class Satellite1WebUI : public Component {
   /// YAML - which also keeps the ladder's only caller in one file.
   Trigger<> *get_ha_refresh_trigger() { return &this->ha_refresh_trigger_; }
 
+  /// Fired from loop() after the app has written a new selection. tts_routing.yaml hangs its re-check
+  /// scripts here, in place of the `on_value` the deleted Remote TTS Targets text entity carried.
+  ///
+  /// Deferred to loop() rather than fired from the change callback, because that callback runs on the
+  /// httpd task and the scripts it starts perform Home Assistant actions.
+  Trigger<> *get_selection_change_trigger() { return &this->selection_change_trigger_; }
+
+  /// What the app has chosen, and the only copy of it. Read from YAML lambdas in tts_routing.yaml and
+  /// area_ducking.yaml, and by the template switches that project it.
+  Selection &selection() { return this->selection_; }
+
  protected:
   WebUIHandler handler_;
+  Selection selection_;
   Trigger<> ha_refresh_trigger_;
+  Trigger<> selection_change_trigger_;
+  std::atomic<bool> selection_changed_{false};
 
   /// Our loop() runs once per main-loop iteration, so the gap between two calls is the main loop
   /// period. That makes the loop-time readout free, where the debug: component would cost a sensor

@@ -22,6 +22,8 @@
 
 #include "esphome/components/web_server_base/web_server_base.h"
 
+#include "selection.h"
+
 namespace esphome {
 namespace satellite1_web_ui {
 
@@ -133,10 +135,21 @@ class WebUIHandler : public AsyncWebHandler {
   /// the same split satellite1_radar's engineering-mode gating uses.
   bool take_ha_refresh_request() { return this->ha_refresh_requested_.exchange(false); }
 
+  /// Set from the component's setup(), before this handler is registered.
+  void set_selection(Selection *selection) { this->selection_ = selection; }
+
   // NOLINTNEXTLINE(readability-identifier-naming)
   bool canHandle(AsyncWebServerRequest *request) const override;
   // NOLINTNEXTLINE(readability-identifier-naming)
   void handleRequest(AsyncWebServerRequest *request) override;
+
+  /// Accumulates a POST body. web_server_idf routes any content type it does not recognise as a form
+  /// to whichever handler claims the path, in chunks, and calls handleRequest afterwards - see
+  /// AsyncWebServer::handle_raw_body_. That path is the reason the selection is posted as JSON rather
+  /// than as form fields: the form branch rejects anything over CONFIG_HTTPD_MAX_REQ_HDR_LEN, which
+  /// this build sets to 1024, and a selection can legitimately exceed that.
+  // NOLINTNEXTLINE(readability-identifier-naming)
+  void handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) override;
 
  protected:
   /// One route table for canHandle and handleRequest, so the two can never disagree about which
@@ -149,6 +162,8 @@ class WebUIHandler : public AsyncWebHandler {
     VOICE,
     HA,
     HA_REFRESH,
+    SEL,
+    SEL_SET,
   };
 
   static Route match_route_(AsyncWebServerRequest *request);
@@ -158,6 +173,8 @@ class WebUIHandler : public AsyncWebHandler {
   void handle_voice_(AsyncWebServerRequest *request);
   void handle_ha_(AsyncWebServerRequest *request);
   void handle_ha_refresh_(AsyncWebServerRequest *request);
+  void handle_sel_(AsyncWebServerRequest *request);
+  void handle_sel_set_(AsyncWebServerRequest *request);
 
   const uint8_t *index_gz_{nullptr};
   size_t index_gz_len_{0};
@@ -183,6 +200,18 @@ class WebUIHandler : public AsyncWebHandler {
   int ha_rung_{0};
   Mutex ha_lock_;
   std::atomic<bool> ha_refresh_requested_{false};
+
+  Selection *selection_{nullptr};
+
+  /// Ceiling on a posted selection, comfortably above what the store itself accepts, so an oversized
+  /// body is rejected on its own terms rather than by running the heap down first.
+  static const size_t SEL_BODY_MAX = 4096;
+
+  /// The POST body being assembled. handleBody can be called several times for one request, and
+  /// handleRequest runs afterwards on the same httpd task, so no lock is needed between them - but the
+  /// buffer is cleared at index 0 so a connection that died mid-body cannot leave a fragment behind to
+  /// be parsed as the front of the next one.
+  std::string body_;
 
 #ifdef USE_VOICE_ASSISTANT
   voice_assistant::VoiceAssistant *va_{nullptr};

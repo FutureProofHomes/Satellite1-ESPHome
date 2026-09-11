@@ -2,23 +2,64 @@
 # See docs/TTS-Routing.md for setup, the design decisions and the alternatives that were rejected.
 
 substitutions:
-  # The target list as Home Assistant reads it. Shared by every call. Expects `targets`.
-  tts_targets_jinja: "targets.split(',') | map('trim') | map('lower') | reject('eq', '') | list"
+  # Is a response going anywhere other than this speaker?
+  #
+  # This replaced the old pairing of "the master switch is on AND the target list is not empty", which
+  # appeared at eight sites. The composition had to invert as well as move: the switch now means only
+  # "my whole area", so a speaker picked in another room routes with it off. AND became OR, and both
+  # halves became one question asked of the selection.
+  #
+  # Written once here and referenced everywhere, because eight copies of a condition is eight chances
+  # for one of them to be updated and the others not.
+  tts_routing_active: "(!id(web_ui_app)->selection().routing().empty())"
 
-  # The hint is a real state, not a placeholder: the API has no placeholder field, and Home
-  # Assistant hardcodes "(empty value)". So every read of the target list treats it as unset.
-  tts_targets_hint: "Enter media_player IDs, comma separated"
-  tts_targets_unset: >-
-    (id(tts_target_media_player).state.empty() ||
-     id(tts_target_media_player).state == "${tts_targets_hint}")
+  # The resolved target list as Home Assistant reads it, from the three parts the selection holds.
+  # Expects `sel_areas`, `sel_extra`, `sel_cut` and `mac`.
+  #
+  # Prefixed names because one caller is media_player.play_media, whose own payload has a key called
+  # `extra` - two different things called the same thing in one call is how the wrong one gets read.
+  #
+  # Areas expand at call time rather than being enumerated when they are picked, which is what makes a
+  # speaker added to a room later get included without anyone revisiting the setting. Music Assistant
+  # entities are rejected during expansion for the reason tts_targets_ma_check explains: expanding an
+  # area returns them, and on the test installation area_entities('media_room') gives 18 players where
+  # the app offers 12 - the other 6 are duplicates that clip on Sonos. Rejecting them here is what
+  # stops whole-area mode from quietly reintroducing what the app filtered out.
+  #
+  # `excluded` entries carry an `area_id:` prefix for the device's benefit, not Home Assistant's, so
+  # the prefix is stripped and the ids rejected globally - an entity belongs to at most one area, so
+  # that gives the same answer as rejecting per area.
+  # Leaves the answer in `targets_list` rather than emitting it, so the wake chime walk below can
+  # iterate it instead of re-splitting a raw string - which it can no longer do, since an area entry
+  # is not an entity id and device_id() returns nothing for one.
+  tts_targets_resolve: >-
+    {% set ma = integration_entities('music_assistant') %}
+    {% set cut = sel_cut.split(',') | map('trim') | reject('eq', '')
+                 | map('regex_replace', '^[^:]*:', '') | list %}
+    {% set res = namespace(t=[]) %}
+    {% for a in sel_areas.split(',') | map('trim') | reject('eq', '') %}
+      {% set res.t = res.t + (area_entities(a) | select('match', 'media_player\.')
+                              | reject('in', ma) | list) %}
+    {% endfor %}
+    {% set res.t = res.t
+                   + (sel_extra.split(',') | map('trim') | map('lower') | reject('eq', '') | list) %}
+    {% set targets_list = res.t | unique | reject('in', cut) | reject('in', mine) | list %}
 
-  # Targets eligible for a remote wake chime, as `chime_players`. Expects `targets` and `mac`.
-  # Each must be a Satellite1 (by manufacturer - every ESPHome device shares the esphome
-  # integration), have its own Wake sound switch on, and not be this device. A switch that cannot
-  # be found counts as off.
+  # The same thing as a value, for the calls that just want an entity_id.
+  tts_targets_jinja: >-
+    ${tts_targets_resolve}
+    {{ targets_list }}
+
+  # Targets eligible for a remote wake chime, as `chime_players`. Expects `targets_list` and `mac`, so
+  # ${tts_targets_resolve} has to run ahead of it.
+  #
+  # Each must be a Satellite1 (by manufacturer - every ESPHome device shares the esphome integration),
+  # have its own Wake sound switch on, and not be this device. A switch that cannot be found counts as
+  # off. It reads the resolved list rather than the selection because every test here is per player:
+  # an area cannot have a wake_sound switch.
   wake_chime_targets_jinja: >-
     {% set cns = namespace(t=[]) %}
-    {% for t in targets.split(',') | map('trim') | map('lower') | reject('eq', '') %}
+    {% for t in targets_list %}
       {% set d = device_id(t) %}
       {% set ws = (device_entities(d) | select('search', 'wake_sound') | list)
                   if d and device_attr(d, 'manufacturer') == 'FutureProofHomes' else [] %}
@@ -113,42 +154,54 @@ globals:
     restore_value: no
     initial_value: 'false'
 
-text:
-  # Comma-separated list of media_player entity_ids to route TTS responses to.
-  # Leave at the hint, or empty, for normal local playback.
-  - platform: template
-    id: tts_target_media_player
-    name: "Remote TTS Targets"
-    icon: "mdi:cast-audio"
-    entity_category: config
-    optimistic: true
-    restore_value: true
-    initial_value: "${tts_targets_hint}"
-    mode: text
-    min_length: 0
-    max_length: 255
-    # Re-check everything as the list is edited. Each script's own api.connected guard makes this a
-    # no-op before Home Assistant connects, which covers restore and the hint re-seed below.
-    on_value:
-      - script.execute: ha_action_probe
-      - script.execute: tts_targets_ma_check
-      - script.execute: tts_routing_status_publish
-      - script.execute: tts_announce_format_apply
-
-# Re-seed the hint, and settle the codec before anything connects.
+# "Remote TTS Targets" was a text entity here. Deleted, and this is the change the whole redesign
+# turns on.
 #
-# TemplateText::setup() skips publish_state() for a restored empty string, so a cleared field would
-# read "unknown" in Home Assistant. publish_state() does not write the preference, so the field
-# stays cleared in flash and only the display is re-seeded.
+# It could not hold the selection. ESPHome caps a text entity at 255 characters - cv.int_range(max=255)
+# in the template text schema, because the restore saver writes the length in a single byte - and
+# TextCall::validate_() discards an over-length value and returns success. Measured on hardware: a 292
+# character write answered HTTP 200 and changed nothing. This device's own area holds twelve players, so
+# unticking one and storing the remaining eleven needs about 460 characters. The single most ordinary
+# interaction in the app could not be saved.
+#
+# The selection now lives in the satellite1_web_ui component, as whole-area ids plus individually
+# chosen players plus carve-outs, which makes that same edit cost about forty characters and keeps a
+# speaker added to the area later included automatically. It also has no Home Assistant face at all,
+# which is the point: a tree and a comma-separated text box are not two views of one control, they are
+# two controls that happen to agree until they do not.
+#
+# The hint string went with it. It existed because the native API has no placeholder field and Home
+# Assistant renders an empty text entity as "(empty value)", so an unset list had to be spelled out as
+# a real state that every reader then had to recognise. Nothing reads a string here now.
+
+# Re-check everything as the selection is edited, in place of the on_value the deleted text entity
+# carried. Each script's own api.connected guard makes this a no-op before Home Assistant connects,
+# which covers the restore at boot.
+#
+# The component fires this from its main loop, having collapsed however many writes arrived since the
+# last iteration into one - dragging through a tree in the app writes several times a second, and each
+# one would otherwise re-run every check here.
+satellite1_web_ui:
+  on_selection_change:
+    - script.execute: ha_action_probe
+    - script.execute: tts_targets_ma_check
+    - script.execute: tts_routing_status_publish
+    - script.execute: tts_announce_format_apply
+    # The local speaker lives in the selection too, and this is what carries a change to it - including
+    # one made mid-response, which is why it reconciles rather than latching at the start of a turn.
+    - script.execute: audio_gain_reconcile
+
+# Nothing republishes the two derived switches here, and nothing needs to. A template switch with a
+# lambda evaluates it in its own loop() and hands the result to publish_state, which dedupes through
+# Switch::publish_dedup_ - so each one follows the selection on its own and only sends a state change
+# when there is one. component.update would be the obvious thing to reach for and does not even
+# compile: TemplateSwitch is a Component, not a PollingComponent.
+
+# Settle the codec before anything connects.
 esphome:
   on_boot:
-    # -100 runs after all component setup, so TemplateText::setup() has already restored.
     - priority: -100
       then:
-        - lambda: |-
-            if (id(tts_target_media_player).state.empty()) {
-              id(tts_target_media_player).publish_state("${tts_targets_hint}");
-            }
         - script.execute: tts_routing_status_publish
         # The first ListEntities of the boot then carries the right format and no reload is needed.
         - script.execute: tts_announce_format_apply
@@ -189,25 +242,39 @@ api:
           - script.execute: tts_targets_ma_check
 
 switch:
-  # The master switch. Off, the response plays here and no call fires. On, it goes to Remote TTS
-  # Targets as one media_player.play_media with announce: true. Both halves of the configuration
-  # have to be set: this switch on, and targets filled in.
+  # "Send responses to every media player in this device's own area."
+  #
+  # No longer a master switch, and no longer a stored value. It is a projection of the selection the
+  # web app owns: the lambda reads "my own area is selected, with nothing carved out of it", and the
+  # two actions write exactly that. One store, one derived view, so the two can never disagree -
+  # which is the whole reason the fine-grained list left Home Assistant.
+  #
+  # Consequences worth knowing. There is no restore_mode, because there is nothing here to restore;
+  # the selection restores itself from NVS and this follows it. It reads off before the first data
+  # layer sync on a device that has never synced, because the area id is what the question is about
+  # and only Home Assistant knows it - after one sync the id is persisted and that stops happening.
+  # And it reads off whenever a single player in the area is unticked in the app, which is the
+  # behaviour asked for: the switch is about the whole area, and that is no longer the whole area.
+  #
+  # Whether a response is going anywhere at all is now ${tts_routing_active}, not this switch. A
+  # target picked in another room routes with this off, which the old master switch could not express.
   - platform: template
     id: tts_routing_enabled
-    name: "Remote TTS Routing"
+    name: "Route TTS To All Area Players"
     icon: "mdi:speaker-multiple"
     entity_category: config
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
-    # Switching on is when the checkbox and the target list start to matter.
-    on_turn_on:
-      - script.execute: ha_action_probe
-      - script.execute: tts_targets_ma_check
-      - script.execute: tts_routing_status_publish
-      - script.execute: tts_announce_format_apply
-    on_turn_off:
-      - script.execute: tts_routing_status_publish
-      - script.execute: tts_announce_format_apply
+    # DISABLED, and load bearing. With any other mode Switch::get_initial_state_with_restore_mode()
+    # returns a value, TemplateSwitch::setup() acts on it, and the action below writes to the store -
+    # so a reboot would push a stale "off" into the selection. It only fails to bite today because
+    # this switch sets up at HARDWARE-2 (798) and the store loads at WIFI (250), so the write lands
+    # while the area id is still empty and is refused. There is nothing to restore in any case: the
+    # state is derived, and publish_state would otherwise persist a bool that is already stored.
+    restore_mode: DISABLED
+    lambda: 'return id(web_ui_app)->selection().routing_whole_own_area();'
+    turn_on_action:
+      - lambda: 'id(web_ui_app)->selection().set_routing_whole_own_area(true);'
+    turn_off_action:
+      - lambda: 'id(web_ui_app)->selection().set_routing_whole_own_area(false);'
 
   # Whether the Remote TTS Targets sound their own wake chime when this device hears the wake word.
   # Eligibility is decided per call by wake_chime_targets_jinja, so targets need no reflash.
@@ -220,24 +287,16 @@ switch:
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
 
-  # Whether this device goes quiet while its response plays elsewhere. Off out of the box, so a
-  # routed response comes out of this speaker too.
+  # "Remote TTS Mutes Local Voice" was here. Deleted: whether this device speaks the answer aloud is
+  # now the "Local Speaker" row at the top of the app's target list, stored as `local_speaker` in the
+  # selection, where it sits next to the other places the answer can go instead of being a separate
+  # inverted switch someone has to reason about. Default flipped with it - the app's row is ticked out
+  # of the box, which is the same behaviour as this switch shipping off.
   #
-  # Carried out by audio_gain_reconcile, which ducks the local announcement channel rather than
+  # Still carried out by audio_gain_reconcile, which ducks the local announcement channel rather than
   # stopping the pipeline - so the wake chime still plays either way, and on_end and both watchdogs
-  # still have a local drain to wait for. Reconciling on both triggers is what lets a switch
-  # flipped mid-response land on that response.
-  - platform: template
-    id: tts_mute_local_voice
-    name: "Remote TTS Mutes Local Voice"
-    icon: "mdi:account-voice-off"
-    entity_category: config
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
-    on_turn_on:
-      - script.execute: audio_gain_reconcile
-    on_turn_off:
-      - script.execute: audio_gain_reconcile
+  # still have a local drain to wait for. It now reconciles from the selection-change trigger in
+  # common/web_ui.yaml, which is what lets a change made mid-response land on that response.
 
 number:
   # This device's own level for speech: its own responses, and every announcement it receives.
@@ -290,15 +349,19 @@ text_sensor:
     icon: "mdi:cast-audio"
     entity_category: "diagnostic"
     update_interval: never
+    # Rewritten for whole-area selection. Counting commas no longer describes the configuration: an
+    # area is one entry standing for however many speakers are in it today, so "Ready: 1 target" for a
+    # twelve-player room would be a lie the customer could not check. It now reports what was chosen -
+    # areas and individually picked players - and leaves the expansion to the call, which is the only
+    # moment the true count exists.
     lambda: |-
-      if (!id(tts_routing_enabled).state) {
-        return std::string("Off (local playback)");
+      const auto &sel = id(web_ui_app)->selection().routing();
+      if (sel.empty()) {
+        return std::string(id(web_ui_app)->selection().local_speaker() ? "Off (local playback)"
+                                                                      : "Nowhere to play the response");
       }
       if (id(ha_actions_allowed) == 2) {
         return std::string("Blocked: allow HA actions in device settings");
-      }
-      if (${tts_targets_unset}) {
-        return std::string("No targets set");
       }
       // Ahead of the version caveat, because this was established by a call HA actually ran.
       if (id(tts_targets_have_ma)) {
@@ -307,24 +370,36 @@ text_sensor:
       if (id(ha_actions_allowed) == 3) {
         return std::string("Cannot verify: Home Assistant older than 2025.12");
       }
-      // Counted the way Home Assistant reads the list, so a trailing comma does not inflate it.
-      const std::string &targets = id(tts_target_media_player).state;
-      int count = 0;
-      size_t start = 0;
-      while (start <= targets.size()) {
-        size_t comma = targets.find(',', start);
-        size_t end = comma == std::string::npos ? targets.size() : comma;
-        std::string entry = targets.substr(start, end - start);
-        if (entry.find_first_not_of(" \t") != std::string::npos) {
-          count++;
+      // Counted the way Home Assistant reads the lists, so a trailing comma does not inflate either.
+      const auto count = [](const std::string &csv) {
+        int n = 0;
+        size_t start = 0;
+        while (start <= csv.size()) {
+          size_t comma = csv.find(',', start);
+          size_t end = comma == std::string::npos ? csv.size() : comma;
+          if (csv.substr(start, end - start).find_first_not_of(" \t") != std::string::npos) {
+            n++;
+          }
+          if (comma == std::string::npos) {
+            break;
+          }
+          start = comma + 1;
         }
-        if (comma == std::string::npos) {
-          break;
-        }
-        start = comma + 1;
+        return n;
+      };
+      const int areas = count(sel.areas);
+      const int players = count(sel.extra);
+      std::string out("Ready: ");
+      if (areas > 0) {
+        out += std::to_string(areas) + (areas == 1 ? " area" : " areas");
       }
-      return std::string("Ready: ") + std::to_string(count) +
-             (count == 1 ? " target" : " targets");
+      if (players > 0) {
+        if (areas > 0) {
+          out += ", ";
+        }
+        out += std::to_string(players) + (players == 1 ? " player" : " players");
+      }
+      return out;
 
 script:
   # Outcome handlers for every action this package fires. Scripts rather than inline blocks, because
@@ -373,7 +448,7 @@ script:
           condition:
             and:
               - api.connected:
-              - switch.is_on: tts_routing_enabled
+              - lambda: 'return ${tts_routing_active};'
           then:
             - lambda: 'id(ha_action_probe_pending) = true;'
             - homeassistant.service:
@@ -447,17 +522,21 @@ script:
           condition:
             and:
               - api.connected:
-              - switch.is_on: tts_routing_enabled
               # Without replies neither branch fires, so this would be a question asked into a void.
-              - lambda: 'return !${tts_targets_unset} && id(ha_supports_action_replies);'
+              - lambda: 'return ${tts_routing_active} && id(ha_supports_action_replies);'
           then:
             - homeassistant.action:
                 action: music_assistant.get_queue
                 capture_response: true
                 data_template:
-                  entity_id: "{{ ${tts_targets_jinja} }}"
+                  entity_id: >-
+                    ${self_area_jinja}
+                    ${tts_targets_jinja}
                 variables:
-                  targets: !lambda 'return id(tts_target_media_player).state;'
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
                 # Only the ids the queues came back under matter, so they are rendered on Home
                 # Assistant's side to keep kilobytes off the wire. ESPHome wraps it as {"response":}.
                 response_template: "{{ response.keys() | list | join(', ') }}"
@@ -487,37 +566,40 @@ script:
     then:
       - component.update: tts_routing_status
 
-  # Applies the same normalization tts_targets_jinja applies on the other side, so the logged call is
-  # pasteable rather than a template. Every action is a lambda, so an execute returns with the global
-  # already filled.
+  # Renders the selection for the call log.
+  #
+  # It used to emit the resolved entity id list, which was pasteable straight into Developer Tools. It
+  # cannot any more: whole-area entries only become entity ids on Home Assistant's side, at the moment
+  # of the call, so the device genuinely does not know the resolved list. What it logs instead is what
+  # was chosen - `area:media_room` alongside any individually picked ids - which is the honest answer
+  # and still tells you where to look when a response goes somewhere unexpected.
   - id: tts_targets_parse
     then:
       - lambda: |-
+          const auto &sel = id(web_ui_app)->selection().routing();
           std::string all;
-          const std::string &raw = id(tts_target_media_player).state;
-          size_t start = 0;
-          size_t count = 0;
-          while (true) {
-            size_t comma = raw.find(',', start);
-            std::string entry =
-                raw.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
-            size_t begin = entry.find_first_not_of(" \t");
-            if (begin != std::string::npos) {
-              entry = entry.substr(begin, entry.find_last_not_of(" \t") - begin + 1);
-              for (char &c : entry) {
-                c = (char) ::tolower((unsigned char) c);
+          const auto append = [&all](const std::string &csv, const char *prefix) {
+            size_t start = 0;
+            while (start <= csv.size()) {
+              size_t comma = csv.find(',', start);
+              size_t end = comma == std::string::npos ? csv.size() : comma;
+              std::string entry = csv.substr(start, end - start);
+              size_t begin = entry.find_first_not_of(" \t");
+              if (begin != std::string::npos) {
+                entry = entry.substr(begin, entry.find_last_not_of(" \t") - begin + 1);
+                if (!all.empty()) {
+                  all += ", ";
+                }
+                all += std::string("'") + prefix + entry + "'";
               }
-              if (count > 0) {
-                all += ", ";
+              if (comma == std::string::npos) {
+                break;
               }
-              all += "'" + entry + "'";
-              count++;
+              start = comma + 1;
             }
-            if (comma == std::string::npos) {
-              break;
-            }
-            start = comma + 1;
-          }
+          };
+          append(sel.areas, "area:");
+          append(sel.extra, "");
           id(tts_targets_literal) = "[" + all + "]";
 
   # MP3 while routing is on, FLAC when it is off. Home Assistant reads this format off ListEntities
@@ -527,7 +609,7 @@ script:
     mode: restart
     then:
       - lambda: |-
-          const bool want_mp3 = id(tts_routing_enabled).state && !${tts_targets_unset};
+          const bool want_mp3 = ${tts_routing_active};
           if (want_mp3 != id(tts_announce_format_mp3)) {
             media_player::MediaPlayerSupportedFormat fmt;
             fmt.purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_ANNOUNCEMENT;
@@ -621,13 +703,18 @@ script:
                   media_content_type: music
                   announce: "true"
                 data_template:
-                  entity_id: "{{ ${tts_targets_jinja} }}"
+                  entity_id: >-
+                    ${self_area_jinja}
+                    ${tts_targets_jinja}
                   media_content_id: "{{ tts_url }}"
                   extra: >-
                     {{ {'use_pre_announce': false, 'volume': vol | int}
                        if vol | int > 0 else {'use_pre_announce': false} }}
                 variables:
-                  targets: !lambda 'return id(tts_target_media_player).state;'
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
                   tts_url: !lambda 'return url;'
                   vol: !lambda 'return (int) id(remote_tts_volume).state;'
                 on_success:
@@ -687,9 +774,7 @@ script:
             and:
               - api.connected:
               - switch.is_on: remote_wake_chime
-              # Both halves of the routing configuration, the same condition area_ducking.yaml
-              # shares as duck_routing_on_expr. Spelled out because that package merges later.
-              - lambda: 'return id(tts_routing_enabled).state && !${tts_targets_unset};'
+              - lambda: 'return ${tts_routing_active};'
           then:
             # No guard on the target list: an empty entity_id is a no-op, so every target being a
             # Sonos, or every target's chime being off, costs one ignored call.
@@ -701,12 +786,16 @@ script:
                   media_content_id: "${wake_chime_uri}"
                 data_template:
                   entity_id: >-
+                    ${self_area_jinja}
+                    ${tts_targets_resolve}
                     ${wake_chime_targets_jinja}
                     {{ chime_players }}
                   extra: "{{ {'bypass_proxy': true} }}"
                 variables:
-                  targets: !lambda 'return id(tts_target_media_player).state;'
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
                 on_error:
                   - script.execute:
                       id: remote_wake_chime_error
@@ -727,25 +816,23 @@ voice_assistant:
   on_start:
     # Whichever trigger sends this turn's response, it has not been sent yet.
     - lambda: 'id(tts_remote_sent) = false;'
-    # Routing needs both halves of the configuration. Either one alone means local playback.
+    # One question now, not two: anything chosen means routing. The old pairing could be half-set -
+    # switch on with an empty list - which is the warning that used to live in the else branch and can
+    # no longer happen, because the switch is a projection of the selection rather than a separate
+    # value that could disagree with it.
     - if:
         condition:
-          lambda: 'return id(tts_routing_enabled).state && !${tts_targets_unset};'
+          lambda: 'return ${tts_routing_active};'
         then:
-          # Whether this device also plays the response is Remote TTS Mutes Local Voice's decision,
-          # and audio_gain_reconcile's to carry out.
+          # Whether this device also plays the response is the app's "Local Speaker" row, and
+          # audio_gain_reconcile's to carry out.
+          - script.execute: tts_targets_parse
           - lambda: |-
               id(tts_routing_to_remote) = true;
-              ESP_LOGI("tts_routing", "Remote TTS routing enabled, target: %s",
-                       id(tts_target_media_player).state.c_str());
+              ESP_LOGI("tts_routing", "Remote TTS routing enabled, chosen: %s",
+                       id(tts_targets_literal).c_str());
         else:
-          - lambda: |-
-              id(tts_routing_to_remote) = false;
-              if (id(tts_routing_enabled).state) {
-                ESP_LOGW("tts_routing",
-                         "Remote TTS Routing is on but Remote TTS Targets "
-                         "is not set; playing on the local speaker");
-              }
+          - lambda: 'id(tts_routing_to_remote) = false;'
 
   # The response, handed on as soon as Home Assistant has a URL for it. `x` is empty on every
   # intent-progress event but the first.

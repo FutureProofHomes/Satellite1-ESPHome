@@ -32,9 +32,20 @@ substitutions:
   # 82 bytes per player, 90 per device, 4.3KB in total.
   #
   # Shape:
-  #   {"area": "Media Room",
-  #    "areas": [{"n": "Kitchen", "p": [["media_player.kitchen", "Kitchen Sonos"]]}],
+  #   {"area": "Media Room", "aid": "media_room",
+  #    "areas": [{"i": "kitchen", "n": "Kitchen", "p": [["media_player.kitchen", "Kitchen Sonos"]]}],
+  #    "loose": [["media_player.all_sonos", "All Sonos"]],
   #    "dev": [["Satellite1", "Satellite1 c5ac00", "Media Room", "3c:0f:02:c5:ac:00", "dev (ESP...)"]]}
+  #
+  # `i` is the area id and `aid` this device's own. Both are ids rather than names because the stored
+  # selection references areas, `area_entities()` takes an id directly, and an id survives a rename -
+  # a selection keyed on the display name would silently empty itself when someone renamed a room.
+  #
+  # `loose` is every media player Home Assistant has put in no area at all, which is most of them: 40
+  # of 104 on the test installation, against 37 that are in one. That is why the app has a "No Area
+  # Assigned" group rather than treating unassigned players as an edge case. Music Assistant entities
+  # are rejected from it for the same reason they are rejected from the areas - many of the duplicates
+  # are unassigned, and a group made mostly of speakers that clip on Sonos is a trap, not a feature.
   #
   # `dev` carries every FutureProofHomes device with its model, not only Satellite1s. The model is
   # what separates products - a Nexus registers through a config entry with no MAC connection, no
@@ -65,7 +76,7 @@ substitutions:
   web_ui_ha_jinja: >-
     ${self_area_jinja}
     {% set ma = integration_entities('music_assistant') %}
-    {% set out = namespace(areas=[], rows=[], dev=[]) %}
+    {% set out = namespace(areas=[], rows=[], dev=[], loose=[]) %}
     {% for a in areas() %}
       {% set out.rows = [] %}
       {% for e in area_entities(a) | select('match', 'media_player\.')
@@ -73,8 +84,14 @@ substitutions:
         {% set out.rows = out.rows + [[e, state_attr(e, 'friendly_name') or e]] %}
       {% endfor %}
       {% if out.rows | count > 0 %}
-        {% set out.areas = out.areas + [{'n': area_name(a), 'p': out.rows}] %}
+        {% set out.areas = out.areas + [{'i': a, 'n': area_name(a), 'p': out.rows}] %}
       {% endif %}
+    {% endfor %}
+    {% set assigned = areas() | map('area_entities') | sum(start=[])
+                      | select('match', 'media_player\.') | list %}
+    {% for e in states.media_player | map(attribute='entity_id')
+                | reject('in', ma) | reject('in', mine) | reject('in', assigned) %}
+      {% set out.loose = out.loose + [[e, state_attr(e, 'friendly_name') or e]] %}
     {% endfor %}
     {% for a in areas() %}
       {% for d in area_devices(a) %}
@@ -87,7 +104,7 @@ substitutions:
         {% endif %}
       {% endfor %}
     {% endfor %}
-    {% set lim = 24000 - (out.dev | to_json | length) %}
+    {% set lim = 24000 - (out.dev | to_json | length) - (out.loose | to_json | length) %}
     {% set keep = namespace(a=[], n=0) %}
     {% for ar in out.areas %}
       {% set sz = (ar | to_json | length) + 1 %}
@@ -97,7 +114,8 @@ substitutions:
       {% endif %}
     {% endfor %}
     {{ {'area': area_name(ns.area) if ns.area else '',
-        'areas': keep.a, 'dev': out.dev,
+        'aid': ns.area if ns.area else '',
+        'areas': keep.a, 'loose': out.loose, 'dev': out.dev,
         't': 1 if keep.a | count < out.areas | count else 0} | to_json }}
 
   # Nothing has ever recorded statistics under this id, so asking for them reads nothing and returns

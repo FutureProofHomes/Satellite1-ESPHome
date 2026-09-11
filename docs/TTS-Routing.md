@@ -8,15 +8,14 @@ same room while you talk to it.
 > reviewed with its reasoning attached. The customer-facing half of it will move to
 > [docs.futureproofhomes.net](https://docs.futureproofhomes.net) and this file will be removed.
 
-> [!NOTE]
-> **The entities below are not the long-term interface.** An upcoming firmware release moves most
-> of the TTS routing and area ducking configuration out of the ESPHome dashboard, where a dozen
-> switches, sliders and dropdowns sit flat in one list, and into the FutureProofHomes UI served by
-> the device's own built-in web server. Expect the mechanics described here to survive that move
-> and the entity list to shrink.
+> [!WARNING]
+> **Breaking change: this release moves the configuration into the device's web app.** The move the
+> note above promised has happened, and it renames two entities and deletes three. Nothing migrates
+> automatically. See [Upgrading](#upgrading) before you flash.
 
 ## Contents
 
+- [Upgrading](#upgrading)
 - [The three layers](#the-three-layers)
 - [Setup](#setup)
 - [Entities](#entities)
@@ -25,6 +24,58 @@ same room while you talk to it.
 - [Rejected alternatives](#rejected-alternatives)
 - [Known limits](#known-limits)
 - [Troubleshooting](#troubleshooting)
+
+## Upgrading
+
+**Which speakers to route to, and which to duck, now live in the device's own web app** rather than in
+Home Assistant. Open the device's IP in a browser and go to **Config**. The reason is a hard limit
+rather than a preference: the target list was an ESPHome `text` entity, those cap at 255 characters
+because the restore saver writes the length in a single byte, and one area's worth of players needs
+roughly twice that. A 292-character write returned HTTP 200 and was silently discarded.
+
+**Your existing target list is not migrated.** It was stored in an entity that no longer exists, and
+the new selection is a different shape — whole areas plus individual players plus carve-outs, rather
+than one flat list. Write down your target list before flashing, then re-pick it in the app. In most
+cases that is one click, because "everything in this room" is now a single tick.
+
+### Renamed
+
+Both keep their settings, but the `entity_id` changes, which breaks any automation, script, dashboard
+card or history that referenced the old one. Fix those references, or rename the entity back in Home
+Assistant under Settings > Devices & services > ESPHome > your device.
+
+| Was | Is now |
+| --- | --- |
+| `Remote TTS Routing` | `Route TTS To All Area Players` |
+| `Duck Area Players` | `Duck All Area Players` |
+
+Both also stop being independent switches and become views of the app's selection. If an automation
+turns one on, it now selects this device's whole area; if it reads one, it is asking "is my whole area
+selected". `Duck Area Volume` was not renamed — it already had that name.
+
+### Deleted
+
+| Entity | What replaced it |
+| --- | --- |
+| `Remote TTS Targets` | The tree in the app's Config route. |
+| `Remote TTS Mutes Local Voice` | The **Local Speaker** row at the top of that tree, ticked by default — the same default as this switch being off. |
+| `Duck TTS Targets` | Nothing. Routing targets are now always ducked. |
+
+Any automation referencing one of these will fail after flashing.
+
+### Also retired
+
+The **`Satellite1 Do Not Duck`** label no longer does anything. Untick the player in the app's ducking
+tree instead. The label can be deleted. This is the one place the change costs you something: see
+[Exempting a player](#exempting-a-player).
+
+### New capabilities
+
+Worth knowing, because they were not possible before: ducking can now reach **any room**, not just the
+device's own; a whole area can be selected such that speakers added to it later are included
+automatically; and players Home Assistant has put in **no area** — which on a typical install is most
+of them — are offered by name in a "No Area Assigned" group rather than having to be typed as entity
+ids.
 
 ## The three layers
 
@@ -81,8 +132,9 @@ answering, so nothing on the device hears a rejection. Ticking it goes through a
 `OptionsFlowWithReload`, which reconnects the device, so every check re-runs within seconds and
 nothing needs reflashing.
 
-**An area, for ducking only.** The device asks which players share a room with it, and a device in
-no area shares a room with nothing:
+**An area, for the two "all area players" switches.** Those two switches mean "my own room", and a
+device in no area has no room to refer to, so both read off and refuse to turn on. Everything else
+still works: from the web app you can route to and duck any room in the house, named or not.
 
 > Settings > Devices & services > **ESPHome** > your Satellite1 > pencil icon > **Area** > **Update**
 
@@ -90,37 +142,46 @@ no area shares a room with nothing:
 
 ### Routing
 
+**Which speakers** is configured in the device's own web app, not in Home Assistant. Open the device
+in a browser and use the **Config** route. Home Assistant keeps one switch for the common case.
+
 | Entity | Purpose |
 | --- | --- |
-| **Remote TTS Routing** | Switch. On sends the response to the targets; off keeps it on this device. |
-| **Remote TTS Targets** | Comma-separated `media_player` entity ids. Spaces, empty entries and capitals are all tolerated. |
+| **Route TTS To All Area Players** | Switch. On sends the response to every media player in this device's area. A projection of the selection, not a value of its own — see below. |
 | **Remote TTS Volume** | The level the response should arrive at on the targets. `0` leaves every target's volume alone. |
 | **Remote Wake Chime** | Switch, off by default. Satellite1 targets sound their own wake chime when this device hears the wake word. |
-| **Remote TTS Mutes Local Voice** | Switch, off by default. On, this device stays silent while the response plays on the targets. |
 | **Voice Override** | This device's own level for speech, local or received. `0` follows the media volume. |
 | **Remote TTS Status** | Diagnostic. Everything that has to be true before a response reaches a remote speaker, in one line. |
 
-Routing needs **both** halves: the switch on and the target list filled in. Either alone means
-local playback, and the switch on with an empty list logs a warning.
+**The switch is a view of the selection, not a separate setting.** It reads on when this device's own
+area is selected whole with nothing carved out of it. Turning it on selects that area; turning it off
+deselects it. Untick one speaker in that room in the web app and the switch reads off — correctly,
+because that is no longer the whole area. Pick a speaker in a *different* room and the response routes
+there with this switch off, which the old master switch had no way to express.
 
-**Remote TTS Targets** starts out reading `Enter media_player IDs, comma separated`. That is a real
-state rather than a placeholder — Home Assistant hardcodes `(empty value)` for an empty text entity
-and `ListEntitiesTextResponse` carries no field that could replace it — so the firmware treats that
-exact string as unset, exactly like the empty string.
+There is therefore no state in which routing is "enabled" with nothing to route to. Anything chosen
+means the answer is going somewhere; nothing chosen means it plays here.
 
-**Put native entity ids in the target list, not Music Assistant's.** A speaker MA has adopted has
-two `media_player` entities and both accept an announcement, so either appears to work. With MA
-ids, playback is serialized across the targets and Sonos starts seconds late and clips the first
-syllable. With native ids everything starts together and Sonos plays the response whole. The device
-checks and says so; see [Rejected alternatives](#rejected-alternatives).
+**Where the response plays locally** is the **Local Speaker** row at the top of the app's list, ticked
+by default. It replaced a switch called `Remote TTS Mutes Local Voice`, which said the same thing
+backwards.
+
+**Music Assistant duplicates are filtered out for you.** A speaker MA has adopted has two
+`media_player` entities and both accept an announcement, so either appears to work. With MA ids,
+playback is serialized across the targets and Sonos starts seconds late and clips the first syllable.
+With native ids everything starts together and Sonos plays the response whole. The app does not offer
+MA entities and whole-area expansion rejects them, so this is now hard to get wrong; the device still
+checks and says so if one arrives another way. See [Rejected alternatives](#rejected-alternatives).
 
 ### Ducking
 
+Which speakers get ducked is chosen in the web app's **Config** route, the same way routing targets
+are, and using the same tree. Home Assistant keeps the volume and one switch.
+
 | Entity | Purpose |
 | --- | --- |
-| **Duck Area Players** | Turns area ducking on. Off by default. |
+| **Duck All Area Players** | Switch. On ducks every media player in this device's area. A projection of the ducking selection, exactly as its routing counterpart is — same on/off rules. |
 | **Duck Area Volume** | The level ducked players are set to, default `20%`. |
-| **Duck TTS Targets** | Also ducks the speakers the response is routed to. Off by default. |
 
 **Duck Area Volume** is a target, not a reduction: every player is set to that level, so the room
 lands somewhere predictable however loud it started. Players already quieter are left alone. It is
@@ -129,12 +190,18 @@ is not a fixed amount of attenuation and is unrelated to the decibel ducking abo
 
 `0%` is literal for the room — a media player at volume `0` is a muted one on many integrations,
 every ESPHome speaker included, and that is the right answer for a speaker not about to speak. The
-Remote TTS Targets are floored at `1%` instead; see [Design decisions](#design-decisions).
+The routing targets are floored at `1%` instead; see [Design decisions](#design-decisions).
 
-**What gets ducked:** everything in the device's area that is a `media_player`, is not obviously
-silent, and reports a volume — minus this device, minus Music Assistant entities, minus anything
-paused/idle/off/unavailable/standby, minus anything labelled **Satellite1 Do Not Duck**, and minus
-the Remote TTS Targets unless **Duck TTS Targets** is on.
+**What gets ducked:** everything you have chosen in the app that is not obviously silent, reports a
+volume, and is currently louder than the duck level — minus this device, and minus Music Assistant
+entities.
+
+Two things are gone from that list. **Ducking is no longer confined to this device's area**: the tree
+offers every room in the house, so a Satellite1 in the hallway can quieten the living room. And the
+routing targets are ducked unconditionally; the **Duck TTS Targets** switch that used to gate them is
+deleted. That switch existed because ducking a target was only safe when the response arrived at a
+level not derived from the target's standing volume, and the peer Voice Override handling below is what
+closed the unsafe case.
 
 "Not obviously silent" rather than "playing" because `playing` is what a player reports when it
 *owns* the audio, and an amplifier does not. A Denon or Marantz receiver reports plain `on` for
@@ -142,20 +209,19 @@ every input that is not one of its own network sources, so an AVR carrying the r
 once says `playing` while it is the loudest thing in it. The cost is that a powered-but-silent
 speaker gets a volume change it did not need, and the same level back afterwards.
 
-### Exempting a player with a label
+### Exempting a player
 
-The one case no state test can recognise is a `media_player` that is really an amplifier: ducking
-an AVR turns down everything downstream of it, so a Sonos on one of its inputs goes quiet even
-though nothing touched the Sonos. Create a label named **Satellite1 Do Not Duck** in Settings >
-Areas, labels & zones and put it on the offending **entity**, **device** or **area** — all three
-work, because labels do not roll up on their own and the device and area forms are expanded in the
-template. It is matched on the label *id*, which Home Assistant derives once at creation, so
-renaming the label later keeps working. Needs Home Assistant **2024.4** for the `label_*` template
-functions.
+The one case no state test can recognise is a `media_player` that is really an amplifier: ducking an
+AVR turns down everything downstream of it, so a Sonos on one of its inputs goes quiet even though
+nothing touched the Sonos. Untick that player in the app's ducking tree. It stays unticked when the
+rest of its area is selected whole, and a speaker added to that room later is still picked up.
 
-The label suppresses **Duck Area Players** and **Duck TTS Targets**, and deliberately does *not*
-suppress **Remote TTS Volume**: setting a target's volume for a response is not ducking, it is what
-makes the answer audible. The label means "do not turn this down for me", not "never touch this".
+**This replaced a `Satellite1 Do Not Duck` label**, which was matched by label id and could be put on
+an entity, a device or an area. The label was one setting for a whole fleet; unticking is one setting
+per device. On an install with several Satellite1s that means visiting each one, and doing it again
+after a factory reset. The trade was made deliberately — one source of truth for the selection, and the
+web app is it — but if you have many devices and one problem amplifier, this is the part that costs
+you. If you were using the label, it now does nothing and can be deleted.
 
 ## How a routed interaction runs
 
@@ -164,7 +230,7 @@ sequenceDiagram
     participant Sat as Satellite1
     participant HA as Home Assistant
     participant Room as Area players
-    participant Tgt as Remote TTS Targets
+    participant Tgt as Routing targets
 
     Sat->>HA: wake word: remote_wake_chime_send
     HA->>Tgt: "play_media audio-file://... (bypass_proxy)"
@@ -172,7 +238,7 @@ sequenceDiagram
     Sat->>HA: "scene.create sat1_duck_<dev> + sat1_ducktts_<dev>"
     Sat->>HA: media_player.volume_set (duck level)
     HA->>Room: turn down
-    HA->>Tgt: "turn down (only if Duck TTS Targets)"
+    HA->>Tgt: turn down
     Note over Sat,HA: on_intent_start
     Sat->>HA: "media_player.volume_set (Remote TTS Volume)"
     HA->>Tgt: set level
@@ -233,7 +299,7 @@ the media player leaving `ANNOUNCING` — the very transition the first wait end
 and the next turn came off one event and the next turn lost, hit `area_duck_start`'s re-entrancy
 guard, and every turn after the first played at full volume.
 
-The Remote TTS Targets are the one thing that does move on every turn, because
+The routing targets are the one thing that does move on every turn, because
 `tts_targets_volume_apply` lifts them for each response and nothing else brings them down.
 
 ### Backstops
@@ -395,14 +461,13 @@ Measured against the announcement path it lost on every count: a noticeable dela
 word while MA established clock sync, music that never resumed because the response took over the
 queue, a requirement for Music Assistant entity ids, and a standing volume change on every target
 the firmware had no way to undo. Sample-accurate speech across a group is not worth any of those,
-so the mode is gone and **Remote TTS Routing is a switch**.
+so the mode is gone and routing is a plain on/off choice per speaker.
 
 > [!IMPORTANT]
-> Upgrading from the first routing firmware, where the target field was the whole interface: it is
-> now `text.<device>_remote_tts_targets` rather than `text.<device>_tts_target_media_player`, and
-> filling it in no longer enables routing by itself — **Remote TTS Routing** has to be switched on as
-> well. Home Assistant derives an ESPHome entity's id from its name, so the old entity is orphaned
-> rather than renamed in place, and anything referring to it needs updating.
+> The target field has been through two moves. It was `text.<device>_tts_target_media_player`, then
+> `text.<device>_remote_tts_targets`, and it is now not an entity at all — see
+> [Upgrading](#upgrading). Home Assistant derives an ESPHome entity's id from its name, so each move
+> orphaned the previous entity rather than renaming it in place.
 
 **Two calls, split by integration.** The response used to go out as one
 `media_player.play_media` for native entities and one `music_assistant.play_announcement` for MA
@@ -449,14 +514,14 @@ Ducking it here as well would fight that.
 **Muting the local speaker on every routed response.** Earlier firmware did, with no way to ask for
 anything else. A routed response now plays **here as well as there**, because in a room with more
 than one Satellite1 that is the only behavior that makes sense: which one hears the wake word first
-is luck, and whichever it is, the room should answer. **Remote TTS Mutes Local Voice** turns the
-local half off, for a device whose job is only to listen.
+is luck, and whichever it is, the room should answer. Unticking **Local Speaker** turns the local half
+off, for a device whose job is only to listen.
 
 > [!IMPORTANT]
-> This reverses the old behavior and the change arrives silently. A Satellite1 routing to a speaker
-> in the same room needs **Remote TTS Mutes Local Voice** switched on after updating.
+> This reversed the old behavior and the change arrived silently. A Satellite1 routing to a speaker in
+> the same room needs **Local Speaker** unticked.
 
-That switch is carried out in `audio_gain_reconcile`, not at `on_start`, and not by stopping the
+That choice is carried out in `audio_gain_reconcile`, not at `on_start`, and not by stopping the
 pipeline: the local announcement channel is ducked to its floor instead. Everything else about the
 interaction is then identical either way — the local pipeline receives the same URL and drains on
 the same schedule, which is what `on_end` and both watchdogs wait for. Ducking at `on_start`

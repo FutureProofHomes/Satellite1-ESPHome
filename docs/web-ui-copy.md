@@ -58,22 +58,26 @@ Attached to the small **i** beside a label. One is open at a time.
 
 ### Config
 
-Everything on this route writes to an entity that already exists in `config/common/tts_routing.yaml`
-or `config/common/area_ducking.yaml`, so the wording has to agree with what Home Assistant shows for
-the same control.
+Two controls here still write to entities in `config/common/tts_routing.yaml` and
+`config/common/area_ducking.yaml`, so their wording has to agree with what Home Assistant shows. The
+two trees do not: they write the device's own selection at `/api/sat1/sel`, and they are the only face
+that selection has.
 
 | Key | Where | Text |
 | --- | --- | --- |
-| `tts_routing` | Send responses elsewhere | Sends this device's spoken answers to other speakers instead of, or as well as, its own. The microphones and wake word stay here - only the reply moves. |
-| `tts_local_speaker` | Also speak here | Whether this device also speaks the answer aloud. It is not a member of the list below, because it is this device rather than something Home Assistant knows about. |
-| `tts_targets` | Send to | Every area Home Assistant knows, expandable to the media players in it. Tick a whole area or pick speakers across several. This device's own speaker is not listed - the checkbox above covers it. |
-| `tts_manual_ids` | Other entity ids | For players Home Assistant has not put in an area: TV casts, AirPlay targets, speaker groups. Comma separated entity ids. On a typical house most media players are in this category, so this is a normal thing to use rather than a workaround. |
 | `remote_tts_volume` | Remote TTS volume | How loud the answer is on the remote speakers. It does not touch this device's own level - that is Voice Override, on the Audio card. |
 | `remote_wake_chime` | Remote wake chime | Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to. |
-| `duck_area` | Quieten this room while talking | Turns down whatever is already playing in this device's area while the assistant is listening and answering, then puts it back. |
-| `duck_volume` | Duck volume | The level everything in the area drops to. Players already quieter than this are left alone, so a whole-house group does not get turned up. |
-| `duck_players` | (the ducking tree) | Which players to quieten. An area ticked as a whole includes speakers added to it later; individual picks do not. Rows marked with a slash cannot be ducked, and say why. |
-| `duck_tts_targets` | Duck routing targets too | Whether the speakers you are routing answers to also get ducked first. Usually off: turning a speaker down and then speaking through it is self-defeating. |
+| `duck_volume` | Duck volume | The level everything you have chosen drops to while the assistant is listening and answering. Players already quieter than this are left alone, so a whole-house group does not get turned up. |
+
+Six hints were deleted rather than reworded, and the reason is worth recording: they explained
+switches that no longer exist (`tts_routing`, `tts_local_speaker`, `duck_area`, `duck_tts_targets`) or
+described the tree in prose when the tree now shows the same thing directly (`tts_targets`,
+`duck_players`). `tts_manual_ids` went with the free-text entity id field it belonged to, replaced by
+the "No Area Assigned" group, which names those players instead of asking someone to know their ids.
+
+The trees carry no ⓘ hints at all. A list of rooms with checkboxes and `Local Speaker` at the top of it
+is the explanation; a tooltip on top of that would be describing a control the reader is already
+looking at.
 
 ## Standing text
 
@@ -81,7 +85,9 @@ The `ha_*` block below is the Home Assistant data layer explaining its own absen
 different cause with a different fix, which is why they are not collapsed into one "unavailable"
 message: `ha_pending` is a five-second wait on a fresh boot rather than a fault, `ha_refused` is the
 only one that asks the customer to change a setting, and the last three are properties of their Home
-Assistant rather than of the device.
+Assistant rather than of the device. `sel_failed` is not one of them: it is the device refusing a
+write, and it is shown as a banner rather than a silent revert because the checkbox has already moved
+back, which on its own looks like a page that ignores clicks.
 
 | Key | Text |
 | --- | --- |
@@ -96,9 +102,10 @@ Assistant rather than of the device.
 | `ha_pending` | Asking Home Assistant which speakers you have. |
 | `ha_never` | Not connected to Home Assistant, so the device does not know which areas or speakers exist. The controls below still hold their current settings and will apply as soon as the connection returns. |
 | `ha_refused` | Home Assistant did not answer. Either it is older than 2025.12, or this device is not allowed to perform actions: Settings › Devices & services › ESPHome › this device › CONFIGURE, then tick "Allow the device to perform Home Assistant actions". |
-| `ha_no_area` | This device is not in a Home Assistant area, so there is no room for it to duck or route within. Assign it to an area in Home Assistant and refresh. |
-| `ha_no_players` | Home Assistant has no media players in any area. Speakers only appear here once they are assigned to an area; anything else can be entered by entity id. |
-| `ha_truncated` | Too many speakers to send in one go, so the list is cut short. Anything missing can still be entered by entity id. |
+| `ha_no_area` | This device is not in a Home Assistant area, so "Route TTS To All Area Players" and "Duck All Area Players" have no room to refer to. You can still pick any room below. Assign it to an area in Home Assistant and refresh. |
+| `ha_no_players` | Home Assistant has no media players at all, so there is nothing to choose between. |
+| `ha_truncated` | Too many areas to send in one go, so the list is cut short. Players already chosen are still used, whether or not they appear below. |
+| `sel_failed` | That change was not saved. The device rejected it, or the connection dropped. |
 | `ha_refresh` | Refresh |
 | `ha_refreshing` | Asking… |
 
@@ -116,8 +123,9 @@ edit:
 - The confirm-button verbs: `Reflash now`, `Erase it`, `Restart into safe mode`, `Erase everything`.
 - The Remote TTS volume disclosure, which is a paragraph rather than a hint because it is three
   sentences and belongs on screen rather than behind an ⓘ.
-- `Everything in <area> is ducked, including speakers added later. Choosing individual players is not
-  available yet.` under the read-only ducking tree.
+- `Local Speaker`, `No Area Assigned`, `whole area` and the `n/m` counts in the two trees. All four are
+  structure rather than explanation - the first two are row labels and the last two are state readouts.
+- `Play responses on` and `Quieten while talking`, the two tree headings.
 - `From Home Assistant Ns ago`, next to the Refresh button.
 
 The voice assistant phase names — Idle, Waiting for a command, Listening, Thinking, Replying, Not

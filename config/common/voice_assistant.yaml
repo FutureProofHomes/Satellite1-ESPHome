@@ -312,10 +312,10 @@ script:
           }
 
           int ann_duck;
-          if (id(tts_routing_to_remote) && id(tts_playing) && id(tts_mute_local_voice).state) {
-            // Silence the local response; it has been asked to play only on the Remote TTS
-            // Targets. With that switch off - which is how it ships - the response is routed and
-            // played here as well, falling through below like any other speech.
+          if (id(tts_routing_to_remote) && id(tts_playing) && !id(web_ui_app)->selection().local_speaker()) {
+            // Silence the local response; it has been asked to play only on the remote targets. With
+            // the app's "Local Speaker" row ticked - which is how it ships - the response is routed
+            // and played here as well, falling through below like any other speech.
             ann_duck = max_duck;
           } else {
             // Announcements arriving over HTTP are speech, whoever sent them: this device's own

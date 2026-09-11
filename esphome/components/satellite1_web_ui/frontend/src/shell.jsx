@@ -8,7 +8,7 @@
 import { useEffect, useState } from "preact/hooks";
 
 import { TEXT } from "./copy.js";
-import { useDeviceState, useEvents, useHaData } from "./lib/device.js";
+import { useDeviceState, useEvents, useHaData, useSelection } from "./lib/device.js";
 import { Config } from "./routes/config.jsx";
 import { Controls } from "./routes/controls.jsx";
 import { Diagnostics } from "./routes/diagnostics.jsx";
@@ -112,10 +112,14 @@ export function App() {
   // Read once for the tab rather than per route, so switching to Config and back does not re-ask the
   // device - and therefore does not re-ask Home Assistant - for a list that changes hourly at most.
   const ha = useHaData();
+  // Same reasoning, and one read per tab: the selection is small but it is what both trees on Config
+  // are editing, so re-fetching it on every route change would be a chance for a stale copy to
+  // overwrite an edit the customer just made.
+  const selection = useSelection();
 
   const active = ROUTES.find((r) => r.id === route) || ROUTES[0];
   const View = active.view;
-  const ctx = { device, deviceError, ...events, ...ha };
+  const ctx = { device, deviceError, ...events, ...ha, ...selection };
 
   return (
     <div class="app">

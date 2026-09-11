@@ -747,15 +747,13 @@ hr {
   color: var(--fg-4);
   white-space: nowrap;
 }
-/* The reason sits under the name rather than beside it: "duplicate of Kitchen Sonos" next to a
-   speaker called "Kitchen Sonos" reads as one long name on a phone. */
-.tree-why {
-  display: block;
-  font-size: 10.5px;
-  color: var(--fg-4);
-}
-.tree-off {
-  color: var(--fg-4);
+/* The Local Speaker row. Sits at the top of the tree at the same indent as an area heading rather than
+   as a player under one, because it is a peer of the rooms, not a member of any of them - and it is
+   the default, so it should not look like an afterthought below them. */
+.tree-self {
+  padding-left: 8px;
+  color: var(--fg);
+  border-bottom: 1px solid var(--line);
 }
 
 /* A control, not an input: a real checkbox needs a ref for the mixed state, and three glyphs cost

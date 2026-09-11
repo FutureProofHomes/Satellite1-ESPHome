@@ -27,38 +27,52 @@ substitutions:
     {% endfor %}
     {% set mine = device_entities(ns.dev) if ns.dev else [] %}
 
-  # The players in this device's area worth ducking, split into `players` and `tts_players`. Expects
-  # `mac`, `duck` and `targets`; all three are sent with every call, because the two lists are
-  # rendered independently and only agree because the inputs do.
+  # The chosen players worth ducking, split into `players` and `tts_players`. Expects `mac`, `duck`,
+  # the three `duck_*` selection parts and the three `sel_*` routing ones; all of them are sent with
+  # every call, because the two lists are rendered independently and only agree because the inputs do.
   #
-  # Silent states are rejected rather than audible ones selected, because an amplifier never reports
-  # `playing` while it is the loudest thing in the room. Music Assistant entities are rejected
-  # outright so a speaker with two entity ids cannot be ducked twice. The "Satellite1 Do Not Duck"
-  # label is rejected from `room`, which gives it scope over both lists at once; labels do not roll
-  # up, hence the device and area expansions, and it is matched by id so a rename keeps working.
-  # Needs Home Assistant 2024.4 for the label_* functions.
+  # Three things changed here, and they are the substance of the redesign on the ducking side.
+  #
+  # It is no longer scoped to this device's own area. `room` used to intersect with
+  # area_entities(ns.area), which made "duck the room" the only thing ducking could ever mean. It now
+  # intersects with what the app chose, which may be several areas, individual players, or players in
+  # rooms this device is not in. A deliberate feature expansion, not a side effect.
+  #
+  # The "Satellite1 Do Not Duck" label is gone. It was a global opt-out expanded over labelled
+  # entities, devices and areas; unticking a player in the app now says the same thing per device. The
+  # trade recorded, because it is a real loss: the label was one setting for a whole fleet, and its
+  # replacement is one setting per device - eleven visits on an eleven-device install, and eleven more
+  # after a factory reset. Worth reinstating if that friction shows up in practice.
+  #
+  # `tts_players` is now split off using the resolved routing list rather than a raw target string,
+  # which is why ${tts_targets_resolve} runs first. Silent states are still rejected rather than
+  # audible ones selected, because an amplifier never reports `playing` while it is the loudest thing
+  # in the room, and Music Assistant entities are still rejected outright so a speaker with two entity
+  # ids cannot be ducked twice - now doubly necessary, since expanding a whole area returns them.
   duck_players_jinja: >-
     ${self_area_jinja}
-    {% set skip = targets.split(',') | map('trim') | map('lower') | reject('eq', '') | list %}
-    {% set nd = namespace(e=label_entities('satellite1_do_not_duck')) %}
-    {% for d in label_devices('satellite1_do_not_duck') %}
-      {% set nd.e = nd.e + device_entities(d) %}
+    ${tts_targets_resolve}
+    {% set ma = integration_entities('music_assistant') %}
+    {% set dcut = duck_cut.split(',') | map('trim') | reject('eq', '')
+                  | map('regex_replace', '^[^:]*:', '') | list %}
+    {% set chosen = namespace(e=[]) %}
+    {% for a in duck_areas.split(',') | map('trim') | reject('eq', '') %}
+      {% set chosen.e = chosen.e + (area_entities(a) | select('match', 'media_player\.') | list) %}
     {% endfor %}
-    {% for a in label_areas('satellite1_do_not_duck') %}
-      {% set nd.e = nd.e + area_entities(a) %}
-    {% endfor %}
+    {% set chosen.e = chosen.e
+                      + (duck_extra.split(',') | map('trim') | map('lower') | reject('eq', '') | list) %}
+    {% set pick = chosen.e | unique | reject('in', dcut) | list %}
     {% set room = states.media_player
          | rejectattr('state', 'in', ['off', 'idle', 'paused', 'standby', 'unavailable', 'unknown'])
          | selectattr('attributes.volume_level', 'defined')
          | selectattr('attributes.volume_level', 'gt', duck | float)
-         | selectattr('entity_id', 'in', area_entities(ns.area) if ns.area else [])
+         | selectattr('entity_id', 'in', pick)
          | rejectattr('entity_id', 'in', mine)
          | rejectattr('attributes.active_queue', 'in', mine)
-         | rejectattr('entity_id', 'in', integration_entities('music_assistant'))
-         | rejectattr('entity_id', 'in', nd.e)
+         | rejectattr('entity_id', 'in', ma)
          | map(attribute='entity_id') | list %}
-    {% set players = room | reject('in', skip) | list %}
-    {% set tts_players = room | select('in', skip) | list %}
+    {% set players = room | reject('in', targets_list) | list %}
+    {% set tts_players = room | select('in', targets_list) | list %}
 
   # The Remote TTS Targets whose volume has to be set for them, as `vol_players`. Expects `targets`
   # and defines nothing else, so it can be pasted after the walk above.
@@ -69,7 +83,7 @@ substitutions:
   # no volume_level are dropped: nothing to snapshot, so nothing this firmware could hand back.
   tts_volume_targets_jinja: >-
     {% set vns = namespace(v=[]) %}
-    {% for t in targets.split(',') | map('trim') | map('lower') | reject('eq', '') %}
+    {% for t in targets_list %}
       {% set d = device_id(t) %}
       {% set vo = (device_entities(d) | select('search', 'voice_override') | list)
                   if d and device_attr(d, 'manufacturer') == 'FutureProofHomes' else [] %}
@@ -80,6 +94,31 @@ substitutions:
       {% endif %}
     {% endfor %}
     {% set vol_players = vns.v %}
+
+  # The peer Satellite1 Voice Override numbers among the targets, as `vo_players`, with the entity ids
+  # themselves rather than their media players - a number entity is what has to be written.
+  #
+  # This is the other side of tts_volume_targets_jinja above, which deliberately skips a Satellite1
+  # whose Voice Override is already above 0 because that peer has its own standing preference. That
+  # left the case the app's Remote TTS Volume slider is actually about: a Satellite1 target at 0, where
+  # "no override" means speech follows the media volume and volume_set is the wrong lever because it
+  # moves music too. Setting the peer's Voice Override is the right lever, and the entity says so.
+  #
+  # Only for the duration of the announcement. That number also governs the peer's *own* speech, so
+  # leaving it changed silently reconfigures another device from this one's settings page - the kind of
+  # cross-device write that is very hard to explain when someone notices it months later. Peers with no
+  # such entity simply do not appear here, which covers the older builds among them.
+  tts_volume_override_jinja: >-
+    {% set ons = namespace(v=[]) %}
+    {% for t in targets_list %}
+      {% set d = device_id(t) %}
+      {% set vo = (device_entities(d) | select('search', 'voice_override') | list)
+                  if d and device_attr(d, 'manufacturer') == 'FutureProofHomes' else [] %}
+      {% if vo | count > 0 and states(vo | first) | float(-1) == 0 %}
+        {% set ons.v = ons.v + [vo | first] %}
+      {% endif %}
+    {% endfor %}
+    {% set vo_players = ons.v %}
 
   # The scene this package parks the pre-duck volumes in, as a slug. scene.create validates the id
   # with cv.slug, and App.get_name() carries the MAC suffix, so every Satellite1 owns its own.
@@ -103,16 +142,32 @@ substitutions:
   # 0: a player not about to speak has no use for the distinction.
   duck_tts_level_jinja: "[duck | float, 0.01] | max"
 
-  # "A response is going somewhere else": both halves of the routing configuration. tts_routing.yaml
-  # owns the condition; it is written once here and shared. An expression rather than a lambda body
-  # because the two callers want it in different shapes.
-  duck_routing_on_expr: >-
-    (id(tts_routing_enabled).state && !(${tts_targets_unset}))
+  # "A response is going somewhere else". tts_routing.yaml owns the condition and defines it as
+  # ${tts_routing_active}; this alias stays so the callers below read as they always did, and because
+  # that package merges after this one.
+  duck_routing_on_expr: "${tts_routing_active}"
 
-  # The players the response is about to come out of, as the same string Remote TTS Targets holds, or
-  # empty when nothing is being routed. This is what separates `players` from `tts_players`.
-  duck_skip_targets_lambda: |-
-    return ${duck_routing_on_expr} ? id(tts_target_media_player).state : std::string("");
+  # Is anything configured to be ducked at all?
+  #
+  # This replaced "Duck Area Players is on", which was also the gate that "Duck TTS Targets" was ANDed
+  # with at three sites. Both switches are gone as stored values - the first is a projection of the
+  # selection, the second is deleted because TTS targets are now always ducked - so the question is
+  # asked of the selection instead.
+  duck_active_expr: "(!id(web_ui_app)->selection().duck().empty())"
+
+  # The routing selection as the ducking calls send it: the real thing while a response is being
+  # routed, and empty otherwise. This is what separates `players` from `tts_players`, and the gating
+  # matters - fed the real selection unconditionally, every chosen player would be classed as a TTS
+  # target even on a turn that never left this speaker, and `players` would come back empty.
+  #
+  # Three lambdas because the selection is three fields. They replaced duck_skip_targets_lambda, which
+  # did the same job for the one string the deleted text entity held.
+  duck_skip_areas_lambda: >-
+    return ${duck_routing_on_expr} ? id(web_ui_app)->selection().routing().areas : std::string("");
+  duck_skip_extra_lambda: >-
+    return ${duck_routing_on_expr} ? id(web_ui_app)->selection().routing().extra : std::string("");
+  duck_skip_cut_lambda: >-
+    return ${duck_routing_on_expr} ? id(web_ui_app)->selection().routing().excluded : std::string("");
 
   # The room scene as an entity_id list, empty unless it exists. Not defensive padding: the empty
   # case is the common one, since scene.create refuses an empty scene, so every interaction in a
@@ -183,30 +238,46 @@ globals:
     initial_value: 'false'
 
 switch:
-  # The on/off control, and the only thing area_duck_start gates on. Two things outside this
-  # firmware have to be true as well and neither can be checked from here: the device needs an area,
-  # and the Home Assistant actions checkbox has to be ticked. With the box unticked the calls are
-  # dropped without an answer, so the only symptom is a room that does not duck.
+  # "Duck every media player in this device's own area."
+  #
+  # Like its routing counterpart in tts_routing.yaml, no longer a stored value: a projection of the
+  # ducking selection the app owns. Same reasoning, same consequences - it reads off before the first
+  # data layer sync on a device that has never synced, and off the moment a single player in the area
+  # is unticked, because that is no longer the whole area.
+  #
+  # It is also no longer the only thing area_duck_start gates on; that is ${duck_active_expr} now, so a
+  # room this device is not in can be ducked with this off. Two things outside this firmware still have
+  # to be true and neither can be checked from here: the device needs an area, and the Home Assistant
+  # actions checkbox has to be ticked. With the box unticked the calls are dropped without an answer,
+  # so the only symptom is a room that does not duck.
   - platform: template
     id: duck_area_players
-    name: "Duck Area Players"
+    name: "Duck All Area Players"
     icon: "mdi:volume-low"
     entity_category: config
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
+    # DISABLED, and load bearing. With any other mode Switch::get_initial_state_with_restore_mode()
+    # returns a value, TemplateSwitch::setup() acts on it, and the action below writes to the store -
+    # so a reboot would push a stale "off" into the selection. It only fails to bite today because
+    # this switch sets up at HARDWARE-2 (798) and the store loads at WIFI (250), so the write lands
+    # while the area id is still empty and is refused. There is nothing to restore in any case: the
+    # state is derived, and publish_state would otherwise persist a bool that is already stored.
+    restore_mode: DISABLED
+    lambda: 'return id(web_ui_app)->selection().duck_whole_own_area();'
+    turn_on_action:
+      - lambda: 'id(web_ui_app)->selection().set_duck_whole_own_area(true);'
+    turn_off_action:
+      - lambda: 'id(web_ui_app)->selection().set_duck_whole_own_area(false);'
 
-  # Whether the Remote TTS Targets are ducked with the rest of the room. Opt-in, because it is only
-  # safe when the response reaches the target at a level that does not come from the target's
-  # standing volume - true for a Satellite1 with its own Voice Override, for a Sonos reading the
-  # per-call level, and for anything once Remote TTS Volume is above 0. With none of those, the
-  # response arrives ducked. docs/TTS-Routing.md has the matrix.
-  - platform: template
-    id: duck_tts_targets
-    name: "Duck TTS Targets"
-    icon: "mdi:volume-off"
-    entity_category: config
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
+  # "Duck TTS Targets" was here. Deleted, and its behaviour is now unconditional: a player chosen for
+  # ducking is ducked whether or not the response is also going to it.
+  #
+  # It was opt-in because ducking a target was only safe when the response reached that target at a
+  # level not derived from its standing volume - true for a Satellite1 with its own Voice Override, for
+  # a Sonos reading the per-call level, and for anything once Remote TTS Volume is above 0, but not
+  # otherwise, where the response would arrive ducked. What closed that gap is the peer Voice Override
+  # work below: the level a Satellite1 target plays at is now set for the call and put back afterwards,
+  # so the unsafe case has stopped being reachable through the app. duck_tts_level_jinja still floors
+  # the level for targets, which is the other half of the same protection.
 
 number:
   # The level every ducked player is set to. Absolute, not a reduction: one volume_set carries a
@@ -247,7 +318,7 @@ script:
       - if:
           condition:
             and:
-              - switch.is_on: duck_area_players
+              - lambda: 'return ${duck_active_expr};'
               - api.connected:
               - lambda: 'return !id(area_duck_active);'
           then:
@@ -279,7 +350,12 @@ script:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
                   name: !lambda 'return App.get_name();'
                   duck: !lambda '${duck_level_lambda}'
-                  targets: !lambda '${duck_skip_targets_lambda}'
+                  sel_areas: !lambda '${duck_skip_areas_lambda}'
+                  sel_extra: !lambda '${duck_skip_extra_lambda}'
+                  sel_cut: !lambda '${duck_skip_cut_lambda}'
+                  duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas;'
+                  duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra;'
+                  duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded;'
                 on_error:
                   - script.execute:
                       id: area_duck_call_error
@@ -298,7 +374,12 @@ script:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
                   name: !lambda 'return App.get_name();'
                   duck: !lambda '${duck_level_lambda}'
-                  targets: !lambda '${duck_skip_targets_lambda}'
+                  sel_areas: !lambda '${duck_skip_areas_lambda}'
+                  sel_extra: !lambda '${duck_skip_extra_lambda}'
+                  sel_cut: !lambda '${duck_skip_cut_lambda}'
+                  duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas;'
+                  duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra;'
+                  duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded;'
                 on_error:
                   - script.execute:
                       id: area_duck_call_error
@@ -317,8 +398,7 @@ script:
           condition:
             and:
               - api.connected:
-              - switch.is_on: duck_tts_targets
-              - switch.is_on: duck_area_players
+              - lambda: 'return ${duck_active_expr};'
               - lambda: |-
                   return id(area_duck_conversation_held) && id(area_duck_tts_active);
           then:
@@ -334,7 +414,12 @@ script:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
                   name: !lambda 'return App.get_name();'
                   duck: !lambda '${duck_level_lambda}'
-                  targets: !lambda '${duck_skip_targets_lambda}'
+                  sel_areas: !lambda '${duck_skip_areas_lambda}'
+                  sel_extra: !lambda '${duck_skip_extra_lambda}'
+                  sel_cut: !lambda '${duck_skip_cut_lambda}'
+                  duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas;'
+                  duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra;'
+                  duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded;'
                 on_error:
                   - script.execute:
                       id: area_duck_call_error
@@ -355,8 +440,7 @@ script:
               - api.connected:
               - lambda: |-
                   return !id(area_duck_tts_active) && ${duck_routing_on_expr} &&
-                         ((id(duck_tts_targets).state && id(duck_area_players).state) ||
-                          id(remote_tts_volume).state > 0);
+                         (${duck_active_expr} || id(remote_tts_volume).state > 0);
           then:
             - lambda: |-
                 id(area_duck_tts_active) = true;
@@ -368,34 +452,41 @@ script:
                   entities: >-
                     ${duck_players_jinja}
                     ${tts_volume_targets_jinja}
+                    ${tts_volume_override_jinja}
                     {% set s = namespace(snap={}) %}
                     {% for p in (tts_players if do_duck | int else [])
                                 | union(vol_players if do_vol | int else []) %}
                       {% set s.snap = s.snap | combine({p: {'state': 'unknown',
                                                             'volume_level': state_attr(p, 'volume_level')}}) %}
                     {% endfor %}
+                    {% for v in (vo_players if do_vol | int else []) %}
+                      {% set s.snap = s.snap | combine({v: {'state': states(v)}}) %}
+                    {% endfor %}
                     {{ s.snap }}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
                   name: !lambda 'return App.get_name();'
                   duck: !lambda '${duck_level_lambda}'
-                  targets: !lambda '${duck_skip_targets_lambda}'
-                  do_duck: !lambda 'return (id(duck_tts_targets).state && id(duck_area_players).state) ? 1 : 0;'
+                  sel_areas: !lambda '${duck_skip_areas_lambda}'
+                  sel_extra: !lambda '${duck_skip_extra_lambda}'
+                  sel_cut: !lambda '${duck_skip_cut_lambda}'
+                  duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas;'
+                  duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra;'
+                  duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded;'
+                  do_duck: !lambda 'return ${duck_active_expr} ? 1 : 0;'
                   do_vol: !lambda 'return id(remote_tts_volume).state > 0 ? 1 : 0;'
                 on_error:
                   - script.execute:
                       id: area_duck_call_error
                       call: "scene.create"
                       reason: !lambda 'return error;'
-            # The duck itself, still the Duck TTS Targets switch's decision, so it keeps both
-            # switches. `duck` is still sent unfloored, because the filter inside duck_players_jinja
+            # The duck itself, now unconditional for anything chosen. `duck` is still sent unfloored, because the filter inside duck_players_jinja
             # compares against it and this list has to be the one scene.create snapshotted; the floor
             # belongs to the level being written, not to who is being written to.
             - if:
                 condition:
                   and:
-                    - switch.is_on: duck_tts_targets
-                    - switch.is_on: duck_area_players
+                    - lambda: 'return ${duck_active_expr};'
                 then:
                   - homeassistant.action:
                       action: media_player.volume_set
@@ -408,7 +499,12 @@ script:
                         mac: !lambda 'return esphome::get_mac_address_pretty();'
                         name: !lambda 'return App.get_name();'
                         duck: !lambda '${duck_level_lambda}'
-                        targets: !lambda '${duck_skip_targets_lambda}'
+                        sel_areas: !lambda '${duck_skip_areas_lambda}'
+                        sel_extra: !lambda '${duck_skip_extra_lambda}'
+                        sel_cut: !lambda '${duck_skip_cut_lambda}'
+                        duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas;'
+                        duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra;'
+                        duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded;'
                       on_error:
                         - script.execute:
                             id: area_duck_call_error
@@ -672,16 +768,45 @@ script:
                 action: media_player.volume_set
                 data_template:
                   entity_id: >-
+                    ${self_area_jinja}
+                    ${tts_targets_resolve}
                     ${tts_volume_targets_jinja}
                     {{ vol_players }}
                   volume_level: "{{ (vol | int) / 100 }}"
                 variables:
-                  targets: !lambda 'return id(tts_target_media_player).state;'
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
                   vol: !lambda 'return id(area_duck_tts_volume);'
                 on_error:
                   - script.execute:
                       id: area_duck_call_error
                       call: "media_player.volume_set"
+                      reason: !lambda 'return error;'
+            # The Satellite1 targets sitting at "no override", where volume_set would move music
+            # instead of speech. Their Voice Override is set for this announcement and handed back by
+            # area_duck_restore, which released the snapshot scene this was recorded in. Same empty-list
+            # reasoning as above: an installation with no such peer costs one call that does nothing.
+            - homeassistant.action:
+                action: number.set_value
+                data_template:
+                  entity_id: >-
+                    ${self_area_jinja}
+                    ${tts_targets_resolve}
+                    ${tts_volume_override_jinja}
+                    {{ vo_players }}
+                  value: "{{ vol | int }}"
+                variables:
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  vol: !lambda 'return id(area_duck_tts_volume);'
+                on_error:
+                  - script.execute:
+                      id: area_duck_call_error
+                      call: "number.set_value"
                       reason: !lambda 'return error;'
 
   # Reporting for every call this package fires, in a script of its own for the same reason

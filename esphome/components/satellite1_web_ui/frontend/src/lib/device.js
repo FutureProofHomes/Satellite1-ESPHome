@@ -179,6 +179,93 @@ export function useHaData() {
 }
 
 /* ------------------------------------------------------------------ */
+/* The selection: which players routing and ducking are aimed at       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Reads and writes the selection the device owns at /api/sat1/sel.
+ *
+ * Not an entity, which is the point of the whole redesign: it used to be a text entity and could not
+ * hold a real selection, because ESPHome caps a text entity at 255 characters and one area's worth of
+ * players needs roughly twice that.
+ *
+ * Held as Sets in the app and as comma-separated strings on the device. The conversion happens here so
+ * neither the tree nor the route has to think about it.
+ */
+export function useSelection() {
+  const [sel, setSel] = useState(null);
+  const [error, setError] = useState(false);
+
+  const parse = (json) => ({
+    local: json.local === 1 || json.local === true,
+    area: json.area || "",
+    routing: {
+      areas: new Set(json.routing?.areas || []),
+      extra: new Set(json.routing?.extra || []),
+      excluded: new Set(json.routing?.excluded || []),
+    },
+    duck: {
+      areas: new Set(json.duck?.areas || []),
+      extra: new Set(json.duck?.extra || []),
+      excluded: new Set(json.duck?.excluded || []),
+    },
+  });
+
+  useEffect(() => {
+    let live = true;
+    fetch("/api/sat1/sel")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((json) => live && setSel(parse(json)))
+      .catch(() => live && setError(true));
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  /**
+   * Writes the whole selection, not a delta.
+   *
+   * Optimistic, and deliberately so: ticking a checkbox has to move it now, and the device's own copy
+   * is what the next read returns anyway. A rejected write puts the previous selection back, because
+   * a checkbox that stays ticked after the device refused it is the worst of the three outcomes.
+   *
+   * JSON rather than form fields, which is what routes it to handleBody on the device side. The form
+   * branch in web_server_idf rejects a body over CONFIG_HTTPD_MAX_REQ_HDR_LEN, 1024 here, and a
+   * selection can legitimately exceed that.
+   */
+  const write = async (next) => {
+    const previous = sel;
+    setSel(next);
+    const body = JSON.stringify({
+      local: next.local ? 1 : 0,
+      routing: {
+        areas: [...next.routing.areas],
+        extra: [...next.routing.extra],
+        excluded: [...next.routing.excluded],
+      },
+      duck: {
+        areas: [...next.duck.areas],
+        extra: [...next.duck.extra],
+        excluded: [...next.duck.excluded],
+      },
+    });
+    try {
+      const r = await fetch("/api/sat1/sel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    } catch {
+      setSel(previous);
+      setError(true);
+    }
+  };
+
+  return { sel, selError: error, selWrite: write };
+}
+
+/* ------------------------------------------------------------------ */
 /* Voice: timers and the assistant's phase                             */
 /* ------------------------------------------------------------------ */
 
