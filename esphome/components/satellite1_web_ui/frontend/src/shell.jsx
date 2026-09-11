@@ -12,13 +12,18 @@ import { useDeviceState, useEvents, useHaData, useSelection } from "./lib/device
 import { Config } from "./routes/config.jsx";
 import { Controls } from "./routes/controls.jsx";
 import { Diagnostics } from "./routes/diagnostics.jsx";
+import { Presence } from "./routes/presence.jsx";
 
 /**
- * Three of the canvas's four. Presence arrives with the tuner integration; a nav entry that opens an
- * empty page is worse than one that is not there yet.
+ * All four of the canvas's routes.
+ *
+ * Presence sits second, next to the sensor pills that link into it. It is the only route that keeps
+ * polling while it is open, and the only one whose data does not come from entities at all - the radar
+ * settings live in the module's own config, behind `satellite1_radar`'s /api/v1 endpoints.
  */
 const ROUTES = [
   { id: "controls", label: "Controls", view: Controls },
+  { id: "presence", label: "Presence", view: Presence },
   { id: "config", label: "Config", view: Config },
   { id: "diagnostics", label: "Diagnostics", view: Diagnostics },
 ];

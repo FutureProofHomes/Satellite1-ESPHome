@@ -163,25 +163,71 @@ function Buttons({ ctx }) {
 
 const LEVELS = { E: "err", C: "err", W: "warn", I: "info", D: "dim", V: "dim", VV: "dim" };
 
+/** Splits a line around every case-insensitive occurrence of `term`, so matches can be wrapped in
+ *  <mark> as real elements. Built this way rather than with innerHTML: log text is device output that
+ *  routinely contains angle brackets and quotes, and one entity named with a "<" would be an injection
+ *  point on the one page you go to when something is already wrong. */
+function highlight(text, term) {
+  if (!term) return text;
+  const lower = text.toLowerCase();
+  const needle = term.toLowerCase();
+  const out = [];
+  let at = 0;
+  for (;;) {
+    const hit = lower.indexOf(needle, at);
+    if (hit === -1) break;
+    if (hit > at) out.push(text.slice(at, hit));
+    out.push(<mark>{text.slice(hit, hit + needle.length)}</mark>);
+    at = hit + needle.length;
+  }
+  if (out.length === 0) return text;
+  if (at < text.length) out.push(text.slice(at));
+  return out;
+}
+
 function Log({ ctx }) {
-  const { log, logSeq, pausedRef } = ctx;
+  const { log, logSeq, pausedRef, clearLog } = ctx;
   const [paused, setPaused] = useState(false);
   const [minLevel, setMinLevel] = useState("D");
+  const [filter, setFilter] = useState("");
+  // Hide rather than Show: the invert is the reason the filter is useful on a device that logs a lot,
+  // because the useful query is far more often "everything except the chatty component" than it is
+  // "only this component".
+  const [hide, setHide] = useState(false);
+  const [mark, setMark] = useState("");
   const box = useRef(null);
+  const atBottom = useRef(true);
 
   const order = ["VV", "V", "D", "I", "W", "E"];
   const floor = order.indexOf(minLevel);
-  const lines = log.filter((l) => order.indexOf(l.lvl) >= floor || l.lvl === "C" || l.lvl === "?");
+  const needle = filter.trim().toLowerCase();
+  const lines = log.filter((l) => {
+    if (!(order.indexOf(l.lvl) >= floor || l.lvl === "C" || l.lvl === "?")) return false;
+    if (!needle) return true;
+    return l.text.toLowerCase().includes(needle) !== hide;
+  });
 
+  // Only when the view is already at the bottom. Scrolling to the newest line unconditionally means
+  // that reading anything on a chatty device is impossible - you get yanked away mid-sentence.
   useEffect(() => {
-    if (!paused && box.current) box.current.scrollTop = box.current.scrollHeight;
-  }, [logSeq, paused]);
+    if (!paused && atBottom.current && box.current) box.current.scrollTop = box.current.scrollHeight;
+  }, [logSeq, paused, needle, hide, minLevel]);
 
-  // Pause is a flag on the shared stream, not local state, so leaving the page while paused would
-  // otherwise stop the ring filling for the rest of the session.
   useEffect(() => () => (pausedRef.current = false), [pausedRef]);
 
-  const copy = () => navigator.clipboard?.writeText(lines.map((l) => l.text).join("\n"));
+  const text = () => lines.map((l) => l.text).join("\n");
+  const copy = () => navigator.clipboard?.writeText(text());
+
+  // Downloads what is on screen, filters and all, because that is the thing worth sending to someone
+  // else. Object URL revoked immediately; the click is synchronous.
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([text()], { type: "text/plain" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `satellite1-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.log`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <Card
@@ -208,20 +254,76 @@ function Log({ ctx }) {
           >
             {paused ? "Resume" : "Pause"}
           </button>
-          <button class="btn sm" onClick={copy}>
-            Copy
-          </button>
         </span>
       }
     >
-      <div class="log" ref={box}>
-        {lines.length === 0 && <p class="dim sm">Waiting for the device to say something.</p>}
+      <div class="log-bar">
+        <input
+          class="inp sm grow"
+          type="search"
+          placeholder={"Filter\u2026"}
+          value={filter}
+          onInput={(e) => setFilter(e.currentTarget.value)}
+        />
+        <button
+          class={`btn sm${hide ? " on" : ""}`}
+          disabled={!needle}
+          title={hide ? "Hiding matching lines" : "Showing only matching lines"}
+          onClick={() => setHide(!hide)}
+        >
+          {hide ? "Hide" : "Show"}
+        </button>
+      </div>
+
+      <div class="log-bar">
+        <input
+          class="inp sm grow"
+          type="search"
+          placeholder={"Highlight\u2026"}
+          value={mark}
+          onInput={(e) => setMark(e.currentTarget.value)}
+        />
+        <button class="btn sm" onClick={copy}>
+          Copy
+        </button>
+        <button class="btn sm" onClick={download}>
+          Save
+        </button>
+        <button class="btn sm" onClick={clearLog}>
+          Clear
+        </button>
+      </div>
+
+      <div
+        class="log"
+        ref={box}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          // A few pixels of slack, because a fractional scrollHeight on a zoomed display never lands
+          // exactly on the bottom and the panel would stop following.
+          atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+        }}
+      >
+        {lines.length === 0 && (
+          <p class="dim sm">
+            {log.length === 0
+              ? "Waiting for the device to say something."
+              : "No lines match. Every line is filtered out."}
+          </p>
+        )}
         {lines.map((l, i) => (
           <div key={i} class={`ln t-${LEVELS[l.lvl] || "dim"}`}>
-            {l.text}
+            {highlight(l.text, mark.trim())}
           </div>
         ))}
       </div>
+
+      <p class="log-count dim xs">
+        {lines.length === log.length
+          ? `${log.length} lines`
+          : `${lines.length} of ${log.length} lines`}
+        {paused ? " \u00b7 paused" : ""}
+      </p>
     </Card>
   );
 }

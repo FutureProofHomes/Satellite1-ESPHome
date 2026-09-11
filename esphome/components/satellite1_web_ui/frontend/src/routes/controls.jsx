@@ -118,9 +118,10 @@ function SensorPills({ ctx }) {
           />
         ))}
         {presence && (
-          // The Presence route is Phase 3. Until then the pill goes somewhere real: the radar tuner
-          // already served by this device, which is what someone tapping "Presence" actually wants.
-          <a class="pill" href="/radar_tuner" title={module?.value ? `${module.value} tuner` : "Radar tuner"}>
+          // Now the Presence route rather than the legacy /radar_tuner page. Still a link rather than a
+          // button, so a long-press still offers "open in new tab" - someone comparing the plot against
+          // what they can see in the room wants both at once.
+          <a class="pill" href="#/presence" title={module?.value ? `${module.value} settings` : "Presence"}>
             <span class={`pill-v${String(presence.value).length > 8 ? " sm" : ""}`}>{presence.value || "\u2014"}</span>
             <span class="pill-l">
               Presence<span class="accent"> &#8594;</span>

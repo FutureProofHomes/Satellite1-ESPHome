@@ -266,6 +266,130 @@ export function useSelection() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Radar: the presence route's live feed and settings                  */
+/* ------------------------------------------------------------------ */
+
+/** How often the live feed is polled while the Presence route is mounted. The LD2450 reports at 10 Hz
+ *  and the plot is a room, not an oscilloscope; 250ms tracks a walking person smoothly and leaves the
+ *  single serialised fetch slot free most of the time. */
+export const RADAR_LIVE_MS = 250;
+
+/**
+ * Reads the radar tuner's own JSON API, which predates this app and needs no firmware work.
+ *
+ * `satellite1_radar` already serves `/api/v1/ld2450/config`, `/live`, `/api/v1/save` and
+ * `/api/v1/reboot`, and answers 404 with a JSON error for a module that is not fitted. Which module
+ * that is, is discovered by asking: the entity map only reports "Radar Detected" as display text, and
+ * probing the two config endpoints is the same question asked of the component that actually knows.
+ *
+ * Engineering mode needs no handling here. The LD2410 requires it for gate energies, and the handler
+ * arms it from the live poll itself and lets it lapse after the polling stops - so mounting this route
+ * is the whole protocol, and there is no enter/exit pair to leak if a tab closes mid-session.
+ */
+export function useRadar(enabled) {
+  const [kind, setKind] = useState(null); // "ld2450" | "ld2410" | "none" | null while probing
+  const [config, setConfig] = useState(null);
+  const [live, setLive] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const read = async (which) => {
+    const r = await fetch(`/api/v1/${which}/config`).catch(() => null);
+    if (!r || !r.ok) return null;
+    return r.json().catch(() => null);
+  };
+
+  // Probe once per mount rather than once per tab: a radar swap needs the device opened anyway, and a
+  // wrong answer cached for the life of the tab would be untraceable.
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let live_ = true;
+    (async () => {
+      for (const which of ["ld2450", "ld2410"]) {
+        const cfg = await read(which);
+        if (!live_) return;
+        if (cfg) {
+          setKind(which);
+          setConfig(cfg);
+          return;
+        }
+      }
+      if (live_) setKind("none");
+    })();
+    return () => {
+      live_ = false;
+    };
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled || !kind || kind === "none") return undefined;
+    let live_ = true;
+    let timer = null;
+
+    const tick = async () => {
+      const r = await fetch(`/api/v1/${kind}/live`).catch(() => null);
+      if (!live_) return;
+      if (r && r.ok) {
+        const json = await r.json().catch(() => null);
+        if (!live_) return;
+        if (json) setLive(json);
+      }
+      // Chained rather than an interval, so a slow device stretches the gap instead of queueing
+      // requests behind each other.
+      timer = setTimeout(tick, RADAR_LIVE_MS);
+    };
+
+    tick();
+    return () => {
+      live_ = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [enabled, kind]);
+
+  /** Writes one or more config fields. Every field on the device side is optional, so this sends only
+   *  what changed and lets the rest stand. Optimistic, like the selection, with the previous value put
+   *  back if the device refuses it. */
+  const writeConfig = async (patch) => {
+    const previous = config;
+    setConfig({ ...config, ...patch });
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/v1/${kind}/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      // Re-read rather than trusting the patch: `reboot_required` is the device's opinion, not ours,
+      // and it is the whole reason the restart row appears.
+      const fresh = await read(kind);
+      if (fresh) setConfig(fresh);
+    } catch {
+      setConfig(previous);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Through post() rather than a bare fetch, for the write queue - and because a bodyless POST needs a
+  // Content-Length or web_server_idf answers 411. The browser supplies one for a null body; curl does
+  // not, which is worth knowing before testing these two by hand.
+  const save = async () => {
+    setBusy(true);
+    try {
+      await post("/api/v1/save");
+      const fresh = await read(kind);
+      if (fresh) setConfig(fresh);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reboot = () => post("/api/v1/reboot").catch(() => {});
+
+  return { radarKind: kind, radarConfig: config, radarLive: live, radarBusy: busy, radarWrite: writeConfig, radarSave: save, radarReboot: reboot };
+}
+
+/* ------------------------------------------------------------------ */
 /* Voice: timers and the assistant's phase                             */
 /* ------------------------------------------------------------------ */
 
@@ -393,7 +517,14 @@ export function useEvents() {
     return () => es.close();
   }, []);
 
-  return { states, connected, log: logRef.current, logSeq, pausedRef };
+  // Empties the ring in place rather than swapping the array, because consumers hold the same
+  // reference; the sequence bump is what makes anyone re-render.
+  const clearLog = () => {
+    logRef.current.length = 0;
+    setLogSeq((n) => n + 1);
+  };
+
+  return { states, connected, log: logRef.current, logSeq, pausedRef, clearLog };
 }
 
 /* ------------------------------------------------------------------ */

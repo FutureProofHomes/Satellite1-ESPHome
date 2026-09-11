@@ -490,6 +490,11 @@ hr {
 }
 
 .btn {
+  /* inline-flex so the rule works on an <a> as well as a <button>: an inline anchor ignores vertical
+     padding for layout purposes and sits a couple of pixels off from a real button beside it. */
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
   background: var(--fill);
   color: var(--fg);
   border: 1px solid var(--line-2);
@@ -818,4 +823,156 @@ hr {
   justify-content: space-between;
   gap: 8px;
   margin-top: 5px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Presence: the LD2450 plot and the LD2410 gate bars                  */
+/* ------------------------------------------------------------------ */
+
+/* The SVG viewBox is in centimetres, so nothing here scales coordinates - the aspect ratio is fixed to
+   the plotted area (800cm wide by 600cm deep) and the browser does the rest. */
+.plot-svg {
+  display: block;
+  width: 100%;
+  aspect-ratio: 800 / 600;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+/* Stroke widths are in centimetres too, which is why they look large as numbers. */
+.plot-ring,
+.plot-axis {
+  fill: none;
+  stroke: var(--line-2);
+  stroke-width: 2;
+}
+.plot-ring {
+  stroke-dasharray: 10 14;
+}
+.plot-range {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  opacity: 0.55;
+}
+.plot-zone {
+  fill: var(--accent);
+  fill-opacity: 0.14;
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+/* An exclusion is the inverse of a zone, so it reads as a hole rather than a highlight. */
+.plot-excl {
+  fill: var(--fg-4);
+  fill-opacity: 0.22;
+  stroke: var(--fg-3);
+  stroke-width: 3;
+  stroke-dasharray: 12 10;
+}
+.plot-target {
+  fill: var(--accent);
+}
+/* Sized in centimetres like everything else in the viewBox, so it scales with the plot rather than
+   staying a fixed pixel size and swamping the rings on a narrow screen. */
+.plot-tick {
+  fill: var(--fg-4);
+  font-size: 30px;
+  font-family: inherit;
+}
+
+.gates-g + .gates-g {
+  margin-top: 10px;
+}
+.gate {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.gate-n {
+  width: 12px;
+  text-align: right;
+  color: var(--fg-4);
+}
+.gate-v {
+  width: 26px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.gate-bar {
+  flex: 1;
+  height: 7px;
+  background: var(--fill);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.gate-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+/* Not animated. It is lit whenever the route is mounted, which is exactly when polling is happening, so
+   a pulse would imply it means something more specific than it does. */
+.live-dot {
+  font-size: 10.5px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.row-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Log panel: filter, highlight and counts                             */
+/* ------------------------------------------------------------------ */
+
+/* Matched to .sel and .btn rather than left to the browser default, which on iOS is a rounded white
+   field that looks like it belongs to a different application. */
+.inp {
+  background: var(--fill);
+  color: var(--fg);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  padding: 5px 7px;
+  font: 12px inherit;
+  min-width: 0;
+}
+.inp.sm {
+  padding: 3px 6px;
+  font-size: 10.5px;
+}
+.inp::placeholder {
+  color: var(--fg-4);
+}
+/* min-width:0 above plus this, or a flex item with an input in it refuses to shrink below its
+   intrinsic width and pushes the buttons off the card on a narrow screen. */
+.inp.grow {
+  flex: 1;
+}
+
+.log-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+/* The invert is a mode, not an action, so it stays visibly latched while it is on. */
+.btn.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+.log-count {
+  margin: 5px 0 0;
+  text-align: right;
+}
+.log mark {
+  background: var(--accent);
+  color: var(--bg);
+  border-radius: 2px;
+  padding: 0 1px;
 }
