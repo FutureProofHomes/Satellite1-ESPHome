@@ -1,5 +1,7 @@
 #include "web_ui_handler.h"
 
+#include <cstring>
+
 #include "esphome/core/application.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
@@ -81,8 +83,14 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
   if (request->method() == HTTP_POST) {
     if (url == "/api/sat1/ha/refresh")
       return Route::HA_REFRESH;
+    if (url == "/api/sat1/ha/select")
+      return Route::HA_SELECT;
     if (url == "/api/sat1/sel")
       return Route::SEL_SET;
+#ifdef USE_MICRO_WAKE_WORD
+    if (url == "/api/sat1/wakewords")
+      return Route::WAKE_WORDS_SET;
+#endif
     return Route::NONE;
   }
 
@@ -97,6 +105,10 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
     return Route::HA;
   if (url == "/api/sat1/sel")
     return Route::SEL;
+#ifdef USE_MICRO_WAKE_WORD
+  if (url == "/api/sat1/wakewords")
+    return Route::WAKE_WORDS;
+#endif
 #ifdef USE_VOICE_ASSISTANT
   if (url == "/api/sat1/voice")
     return Route::VOICE;
@@ -115,14 +127,31 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
     case Route::STATE:
       this->handle_state_(request);
       break;
+// Guarded to match the definitions rather than left unconditional. An unreachable case label costs
+// nothing, but an unguarded *call* still needs its symbol at link time, and handle_voice_ is only
+// defined when voice_assistant is present - so without this the header's claim that a build without
+// voice_assistant still compiles was not true.
+#ifdef USE_VOICE_ASSISTANT
     case Route::VOICE:
       this->handle_voice_(request);
       break;
+#endif
+#ifdef USE_MICRO_WAKE_WORD
+    case Route::WAKE_WORDS:
+      this->handle_wake_words_(request);
+      break;
+    case Route::WAKE_WORDS_SET:
+      this->handle_wake_words_set_(request);
+      break;
+#endif
     case Route::HA:
       this->handle_ha_(request);
       break;
     case Route::HA_REFRESH:
       this->handle_ha_refresh_(request);
+      break;
+    case Route::HA_SELECT:
+      this->handle_ha_select_(request);
       break;
     case Route::SEL:
       this->handle_sel_(request);
@@ -257,6 +286,176 @@ void WebUIHandler::handle_sel_set_(AsyncWebServerRequest *request) {
   request->send(200, "application/json", "{\"ok\":1}");
 }
 
+#if defined(USE_VOICE_ASSISTANT) || defined(USE_MICRO_WAKE_WORD)
+/// Escapes the two characters that can break a JSON string, plus control characters.
+///
+/// Most strings this file emits are device names or versions, which are ours. Its two callers are the
+/// exceptions: a transcript line comes from speech recognition by way of Home Assistant, and a wake
+/// word's name comes from the model manifest fetched at build time. Both are the kind of string where
+/// a quotation mark is plausible, and one unescaped would truncate the response into invalid JSON.
+///
+/// Guarded on either caller, so a build with neither does not carry an unused static.
+static void write_json_string(AsyncResponseStream *stream, const std::string &text) {
+  stream->print("\"");
+  for (const char c : text) {
+    switch (c) {
+      case '"':
+        stream->print("\\\"");
+        break;
+      case '\\':
+        stream->print("\\\\");
+        break;
+      case '\n':
+        stream->print("\\n");
+        break;
+      case '\r':
+        stream->print("\\r");
+        break;
+      case '\t':
+        stream->print("\\t");
+        break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          stream->printf("\\u%04x", static_cast<unsigned int>(c));
+        } else {
+          stream->write(static_cast<uint8_t>(c));
+        }
+        break;
+    }
+  }
+  stream->print("\"");
+}
+#endif
+
+#ifdef USE_MICRO_WAKE_WORD
+/// The wake words this device can listen for, and which are armed.
+///
+/// Indexed by position, because that is the only key both ends can agree on cheaply and the list is
+/// fixed at build time. The id is sent as well, purely so a log or a bug report names something a
+/// human recognises; nothing reads it back.
+///
+/// internal_only models are left out, which is the same view Home Assistant takes of them. Here that
+/// means the `stop` model: timer.yaml arms it for the duration of a ringing timer and disarms it after,
+/// so a switch for it would be a switch over something that is rewritten from under the reader.
+void WebUIHandler::handle_wake_words_(AsyncWebServerRequest *request) {
+  auto *stream = request->beginResponseStream("application/json");
+  stream->print("[");
+
+  if (this->mww_ != nullptr) {
+    const uint32_t mask = this->ww_pending_mask_.load(std::memory_order_acquire);
+    const uint32_t wanted = this->ww_pending_on_.load(std::memory_order_relaxed);
+
+    size_t index = 0;
+    bool first = true;
+    for (auto *model : this->mww_->get_wake_words()) {
+      const size_t at = index++;
+      if (model == nullptr || model->get_internal_only())
+        continue;
+
+      // A press that the main loop has not picked up yet reads as though it already happened. The
+      // alternative is answering with the state the caller just changed, which looks like the press
+      // was ignored and invites a second one.
+      bool on = model->is_enabled();
+      if (at < 32 && (mask & (1UL << at)) != 0)
+        on = (wanted & (1UL << at)) != 0;
+
+      if (!first)
+        stream->print(",");
+      first = false;
+
+      stream->printf(R"({"i":%u,"id":)", static_cast<unsigned>(at));
+      write_json_string(stream, model->get_id());
+      stream->print(R"(,"w":)");
+      write_json_string(stream, model->get_wake_word());
+      stream->printf(R"(,"on":%s})", on ? "true" : "false");
+    }
+  }
+
+  stream->print("]");
+  stream->addHeader("Cache-Control", CACHE_REVALIDATE);
+  request->send(stream);
+}
+
+/// Arms or disarms one wake word. Query parameters rather than a JSON body, because two short values
+/// fit in a URL and getParam already reads the query string; the selection endpoint next door only
+/// posts a body because a selection can outgrow the 1024-byte form limit.
+void WebUIHandler::handle_wake_words_set_(AsyncWebServerRequest *request) {
+  if (this->mww_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  auto *index_param = request->getParam("i");
+  auto *on_param = request->getParam("on");
+  if (index_param == nullptr || on_param == nullptr) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  // strtoul rather than atoi so that a non-numeric i is rejected rather than silently read as model 0,
+  // which is a wake word the caller did not name.
+  const std::string &index_text = index_param->value();
+  char *end = nullptr;
+  const unsigned long parsed = strtoul(index_text.c_str(), &end, 10);
+  if (end == index_text.c_str() || *end != '\0' || parsed >= 32) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  const size_t at = static_cast<size_t>(parsed);
+  const auto &models = this->mww_->get_wake_words();
+  if (at >= models.size() || models[at] == nullptr || models[at]->get_internal_only()) {
+    // 404 rather than 400: the request was well formed and named something this device does not offer.
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  const std::string &on_text = on_param->value();
+  const bool on = on_text == "1" || on_text == "true";
+
+  // State first, then the mask, so apply_wake_word_requests can never see a claimed bit whose wanted
+  // value has not been written yet.
+  const uint32_t bit = 1UL << at;
+  if (on) {
+    this->ww_pending_on_.fetch_or(bit, std::memory_order_relaxed);
+  } else {
+    this->ww_pending_on_.fetch_and(~bit, std::memory_order_relaxed);
+  }
+  this->ww_pending_mask_.fetch_or(bit, std::memory_order_release);
+
+  // Queued, not done - see the comment on ww_pending_mask_. The caller is told which way it will go so
+  // it has something truthful to show before the next loop iteration.
+  request->send(200, "application/json", on ? "{\"ok\":1,\"on\":1}" : "{\"ok\":1,\"on\":0}");
+}
+
+void WebUIHandler::apply_wake_word_requests() {
+  const uint32_t mask = this->ww_pending_mask_.exchange(0, std::memory_order_acquire);
+  if (mask == 0 || this->mww_ == nullptr)
+    return;
+
+  const uint32_t wanted = this->ww_pending_on_.load(std::memory_order_relaxed);
+  const auto &models = this->mww_->get_wake_words();
+
+  for (size_t at = 0; at < models.size() && at < 32; at++) {
+    if ((mask & (1UL << at)) == 0 || models[at] == nullptr)
+      continue;
+
+    const bool on = (wanted & (1UL << at)) != 0;
+    if (models[at]->is_enabled() == on)
+      continue;
+
+    // enable() and disable() each save to flash, so this is deliberately skipped above when the state
+    // already matches: two browsers agreeing about a wake word should not cost an NVS write each.
+    if (on) {
+      models[at]->enable();
+    } else {
+      models[at]->disable();
+    }
+    ESP_LOGD(TAG_WU, "Wake word %s %s", models[at]->get_id().c_str(), on ? "enabled" : "disabled");
+  }
+}
+#endif
+
 void WebUIHandler::set_ha_payload(const std::string &json, int rung) {
   LockGuard guard{this->ha_lock_};
 
@@ -318,6 +517,118 @@ void WebUIHandler::handle_ha_refresh_(AsyncWebServerRequest *request) {
   request->send(200, "application/json", "{\"queued\":1}");
 }
 
+bool WebUIHandler::ha_payload_names_(const std::string &entity) {
+  // strstr over the buffer rather than a std::string built from it. The payload is several kilobytes in
+  // PSRAM and copying it to search it would put that on the internal heap, which is the one that is
+  // scarce. set_ha_payload copies the terminator with the payload, which is what makes this legal.
+  const std::string quoted = "\"" + entity + "\"";
+
+  LockGuard guard{this->ha_lock_};
+  if (this->ha_buf_ == nullptr || this->ha_len_ == 0)
+    return false;
+  return strstr(this->ha_buf_, quoted.c_str()) != nullptr;
+}
+
+/// Queues a change to one of the Home Assistant selects that decide which assistant answers which
+/// wake word.
+///
+/// This is the app's only write that lands somewhere other than this device, and the reason it has to
+/// exist is that the setting is not the device's to keep. Home Assistant's ESPHome integration creates
+/// two wake-word-and-assistant slot pairs per satellite, resolves which slot matched at the moment a
+/// wake word fires, and stores the whole mapping on its own side - so there is no local flag to write.
+/// See the `asst` notes in common/web_ui_ha.yaml for the mechanism.
+///
+/// Deliberately not a general "call any action" endpoint, and two guards keep it that way. The domain
+/// must be `select`, and the entity id must appear in the payload Home Assistant last rendered for this
+/// device - which is a walk of this device's own entities, so it cannot name a light in another room.
+/// Anyone reaching this endpoint has already passed the server's authentication and could drive every
+/// entity on the device through web_server anyway, so this is not the security boundary; it is what
+/// stops a bug in the app, or in something later built on it, from turning the device into a remote
+/// control for the whole installation.
+void WebUIHandler::handle_ha_select_(AsyncWebServerRequest *request) {
+  auto *entity_param = request->getParam("e");
+  auto *option_param = request->getParam("o");
+  if (entity_param == nullptr || option_param == nullptr) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  const std::string &entity = entity_param->value();
+  const std::string &option = option_param->value();
+
+  if (entity.rfind("select.", 0) != 0 || !this->ha_payload_names_(entity)) {
+    // 404 rather than 400: well formed, and naming something this device has not been told about. A
+    // browser holding a payload from before a rename lands here, and refetching is the right answer.
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  // An empty option is rejected rather than forwarded, because Home Assistant would refuse it and this
+  // endpoint cannot see that refusal - nothing here captures a response. Control characters go too:
+  // the value crosses the API as a protobuf string and is used as a template variable rather than
+  // interpolated into one, so there is nothing to escape, but a newline in a pipeline name is a
+  // mistake worth failing on rather than passing along.
+  if (option.empty() || option.size() > WU_SELECT_OPTION_MAX) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+  for (const char c : option) {
+    if (static_cast<unsigned char>(c) < 0x20) {
+      request->send(400, "application/json", "{\"ok\":0}");
+      return;
+    }
+  }
+
+  {
+    LockGuard guard{this->select_lock_};
+
+    bool queued = false;
+    for (auto &pending : this->select_queue_) {
+      if (pending.entity == entity) {
+        // Last choice wins. Picking twice from an open dropdown should leave Home Assistant with the
+        // second answer and cost one action call, not two whose order decides the outcome.
+        pending.option = option;
+        queued = true;
+        break;
+      }
+    }
+
+    if (!queued) {
+      if (this->select_queue_.size() >= WU_SELECT_QUEUE) {
+        // 409 rather than a silent drop, and 409 rather than 429 because init_response_ has no 429 and
+        // would answer 500. The app retries; the alternative is a control that looks like it worked.
+        request->send(409, "application/json", "{\"ok\":0}");
+        return;
+      }
+      this->select_queue_.push_back({entity, option});
+    }
+
+    this->select_pending_.store(true, std::memory_order_release);
+  }
+
+  // Queued, like the refresh above. The app learns what actually happened by resyncing and reading the
+  // states back out of the next payload, which is the only honest confirmation available: this call
+  // captures no response, so the device never finds out whether Home Assistant accepted the option.
+  request->send(200, "application/json", "{\"queued\":1}");
+}
+
+bool WebUIHandler::take_select_write(SelectWrite &out) {
+  if (!this->select_pending_.load(std::memory_order_acquire))
+    return false;
+
+  LockGuard guard{this->select_lock_};
+  if (this->select_queue_.empty()) {
+    this->select_pending_.store(false, std::memory_order_relaxed);
+    return false;
+  }
+
+  out = this->select_queue_.front();
+  this->select_queue_.erase(this->select_queue_.begin());
+  if (this->select_queue_.empty())
+    this->select_pending_.store(false, std::memory_order_relaxed);
+  return true;
+}
+
 void WebUIHandler::handle_index_(AsyncWebServerRequest *request) {
   if (this->index_gz_ == nullptr || this->index_gz_len_ == 0) {
     request->send(500, "text/plain", "no bundle");
@@ -354,42 +665,6 @@ void WebUIHandler::push_utterance(const std::string &text, bool heard) {
   if (this->transcript_.size() >= WU_TRANSCRIPT_RING)
     this->transcript_.erase(this->transcript_.begin());
   this->transcript_.push_back({text, static_cast<uint32_t>(millis_64() / 1000), heard});
-}
-
-/// Escapes the two characters that can break a JSON string, plus control characters.
-///
-/// Every other string this file emits is a device name or a version, but these come from speech
-/// recognition by way of Home Assistant, so they are the one place a quotation mark or a stray
-/// newline is plausible - and unescaped, one would truncate the whole response into invalid JSON.
-static void write_json_string(AsyncResponseStream *stream, const std::string &text) {
-  stream->print("\"");
-  for (const char c : text) {
-    switch (c) {
-      case '"':
-        stream->print("\\\"");
-        break;
-      case '\\':
-        stream->print("\\\\");
-        break;
-      case '\n':
-        stream->print("\\n");
-        break;
-      case '\r':
-        stream->print("\\r");
-        break;
-      case '\t':
-        stream->print("\\t");
-        break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20) {
-          stream->printf("\\u%04x", static_cast<unsigned int>(c));
-        } else {
-          stream->write(static_cast<uint8_t>(c));
-        }
-        break;
-    }
-  }
-  stream->print("\"");
 }
 
 /// Timers and the assistant's phase, neither of which web_server can express.

@@ -31,11 +31,6 @@ Attached to the small **i** beside a label. One is open at a time.
 | `humidity` | Calibration editor, title row | Measured at the board, so it drifts with the enclosure temperature. Calibrate against a hygrometer in the same room. |
 | `lux` | Calibration editor, title row | Ambient light at the front face. Useful for dimming the LED ring automatically from Home Assistant, or for a light-level trigger. |
 | `calibrate` | Calibration editor, offset row | Enter what a trusted instrument in the same room reads. The difference is saved as an offset and survives a restart. It does not change the raw reading, only what the device reports. |
-| `mute` | Mute microphones | Cuts the microphones in hardware, on the XMOS chip, not in software. Wake word detection stops with them. The mute button on the device does the same thing. |
-| `wake_sound` | Wake chime | Plays a short chime on the speaker the moment the wake word is detected. |
-| `wake_sensitivity` | Wake word sensitivity | How readily the wake word fires. Raise it if the device misses you from across the room; lower it if the television sets it off. |
-| `voice_override` | Assistant volume | Speaker volume used for assistant replies only, independent of media volume. Set to zero to follow the media volume instead. |
-| `speaker_channel` | Speaker channel | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
 | `led_ring` | LED ring | The ring the assistant animates. Colour and brightness set here are the resting state - the device still overrides both while it is listening, thinking or reporting an error. |
 | `timers` | Timers card | Timers set by voice, held on the device. They keep counting and still ring if Home Assistant goes away. |
 
@@ -70,6 +65,26 @@ with microphones in it: people assume presence is heard rather than sensed.
 | `radar_timeout` | Timeout | How long presence is held after the radar stops seeing anyone, in seconds. This is what stops the lights going out while you sit still. At zero it clears the moment you are lost, which is usually too eager. |
 | `radar_multi` | Multi-target | Tracks several people at once instead of only the strongest return. Needed for the target plot to show more than one person, and for the zone counts to be right in a busy room. |
 | `radar_bt` | Bluetooth | The radar module's own Bluetooth radio, used by the manufacturer's configuration app. Nothing here needs it, and leaving it on means an unauthenticated radio in the room, so it is off unless you are pairing that app. |
+
+`PRESENCE` is the one table here that shortens the firmware's words rather than explaining them, so it is a
+display map rather than a hint: the key is what the radar reports and the value is what the pill shows.
+
+| Key | Where | Text |
+| --- | --- | --- |
+| `Approaching` | Presence pill on Controls | Closer |
+| `Moving Away` | Presence pill on Controls | Away |
+
+Only these two are listed because only these two are too long. The firmware also reports `Still` and
+`Clear` on an LD2450, and `Clear`, `Moving` and `Still` on an LD2410, and anything absent from the table
+falls through unchanged — which is what should happen when a future radar module reports a state nobody has
+seen yet. The measurement behind it: at the pill's 17px, "Approaching" wants 103px, and 70px even at 11px,
+against 60px of room at a 360px viewport. The pill used to halve its own font past eight characters, which
+made one chip look like a different design from the three beside it. The full phrase is still the pill's
+hover title, and the firmware's wording is untouched, so Home Assistant is unaffected.
+
+These two rows were missing until the mirror check was widened to cover `PRESENCE` as well as `HINTS` and
+`TEXT`. Worth noting rather than quietly fixing: a checker that reported "all strings mirror" while never
+looking at a third of them was the more expensive problem.
 
 ### Diagnostics
 
@@ -110,11 +125,55 @@ that selection has.
 
 | Key | Where | Text |
 | --- | --- | --- |
+| `mute` | Voice Input, Mute microphones | Cuts the microphones in hardware, on the XMOS chip, not in software. Wake word detection stops with them. The mute button on the device does the same thing. |
+| `wake_words` | Voice Input, first wake word row | Which wake words this device answers to, and which assistant answers each one. Off stops it responding to that word and leaves more of the processor for the ones you do use. The assistants are the voice pipelines you have set up in Home Assistant, and Preferred follows whichever one is marked preferred there. Home Assistant keeps this pairing rather than the device, which is why it needs to be reachable to change one, and why there is room for two wake words at a time - these are the Assistant and Assistant 2 settings on this device's Home Assistant page. |
+| `wake_sensitivity` | Voice Input, Wake word sensitivity | How readily the wake word fires. Raise it if the device misses you from across the room; lower it if the television sets it off. |
+| `wake_sound` | Voice Input, Wake chime | Plays a short chime on the speaker the moment the wake word is detected. |
+| `voice_override` | Audio Output, Assistant volume | How loud this device's own speaker is when the assistant replies, independent of media volume. Set to zero to follow the media volume instead. For the speakers you route answers to, see Remote TTS volume in Remote routing below. |
+| `speaker_channel` | Audio Output, Channel | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
 | `remote_routing` | Remote routing card title | Plays the assistant's spoken answer on other speakers as well as this one. Tick a room to include every player in it, or open the room and pick players individually. Local Speaker is this device's own speaker - untick it and the answer is heard only where you have chosen. |
 | `area_ducking` | Area ducking card title | Turns other speakers down while the assistant is busy, then puts them back where they were. It runs from the wake word to the end of the answer, so the room is quiet while it listens to you as well as while it answers. Tick a room to cover every player in it. |
-| `remote_tts_volume` | Remote TTS volume | How loud the answer is on the remote speakers. It does not touch this device's own level - that is Voice Override, on the Audio card. Sonos reads the level off the announcement; another Satellite1 has its Voice Override set and put back; anything else has its media volume set and restored. |
+| `remote_tts_volume` | Remote TTS volume | How loud the answer is on the remote speakers. It does not touch this device's own level - that is Assistant volume, in Audio Output above. Sonos reads the level off the announcement; another Satellite1 has its Voice Override set and put back; anything else has its media volume set and restored. |
 | `remote_wake_chime` | Remote wake chime | Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to. |
 | `duck_volume` | Duck volume | The level they drop to. Players already quieter than this are left alone, so a whole-house group does not get turned up. |
+
+The first six rows were on Controls, in cards called Voice and Speaker. They are settings rather than
+readings — you change them once and leave them — so they moved to this route as **Voice Input** and
+**Audio Output**, named for the two directions sound travels through the device so that neither card has
+to explain which it is. Controls keeps the live voice phase and the transcript.
+
+`wake_words` is one hint for the whole group, on the first row, rather than the same sentence repeated with
+a different wake word in it. The switches it describes are the only control in the app with no entity
+behind them: `micro_wake_word` creates neither a switch nor a select for its models, so they never reach
+`/events`, and the list comes from `GET /api/sat1/wakewords`.
+
+It also dropped an earlier claim — "Home Assistant can change these too, and both are reading the same
+setting" — which was true about the stored flag and misleading about everything else. Home Assistant keeps
+which assistant answers which wake word, in two slots of its own, and it answers any change to one of those
+slots by pushing the whole active set back to the device. So the app clears a wake word's slot when that
+word is switched off and claims one when it is switched on, and the hint says as much, because giving up a
+pairing is a consequence the old wording implied did not exist.
+
+Each wake word is **one dropdown**, not a switch and a separate assistant row. `Off` is the first item,
+then `Preferred`, then the customer's pipelines sorted case-insensitively. There is only one decision on
+that row — whether this device answers to this word, and if so which assistant answers — and that is the
+shape Home Assistant stores, since a slot either names a wake word and a pipeline or holds `no_wake_word`
+and means nothing. Two controls made it look like two settings, one of which could contradict the other.
+An earlier attempt did have two rows, with a second hint called `assistant`; it is gone, and its content is
+folded into `wake_words`.
+
+The row label quotes the wake word — `"Hey Jarvis" wake word` — because it is a phrase someone says out
+loud rather than the name of a setting. Unquoted beside a dropdown full of assistant names, `Hey Jarvis`
+reads like another one of them.
+
+With Home Assistant unreachable the row falls back to a plain on/off toggle, because there are no assistants
+to list and a dropdown holding one real option would be a worse lie than a switch. `assistant_needs_ha`
+below says what that costs.
+
+`voice_override` and `remote_tts_volume` are the pair most easily confused, and the plan asked that they
+never share a screen. They now sit two cards apart on this route, so each names the speakers it moves and
+points at the other by its on-screen label. That is the stronger protection of the two: a reader with both
+in front of them can compare, where a reader relying on memory of the other route cannot.
 
 Six hints were deleted rather than reworded, and the reason is worth recording: they explained
 switches that no longer exist (`tts_routing`, `tts_local_speaker`, `duck_area`, `duck_tts_targets`) or
@@ -157,6 +216,12 @@ back, which on its own looks like a page that ignores clicks.
 | `ha_disconnected_detail` | Everything on this page still works - it talks to the device directly. Media and anything that needs your smart home will be unavailable until the connection returns. |
 | `stream_lost` | Lost the connection to the device. Retrying. |
 | `no_devices` | Only this device. Other Satellite1s on your network will appear here once they are running firmware with this web app. |
+| `nothing_said` | Nothing said yet. What you say and what it replies will appear here. |
+| `no_wake_words` | No wake words are on, so the device will not respond to being spoken to. The mute button and Home Assistant still work. |
+| `pipeline_off` | Off |
+| `pipeline_preferred` | Preferred |
+| `assistant_needs_ha` | Home Assistant keeps which assistant answers each wake word, so that cannot be set from here until it is reachable. Turning a wake word on and off is the device's own setting and still works. |
+| `assistant_slots_full` | Home Assistant can pair only two wake words with an assistant of their own. The rest are answered by the first one's assistant, which is what their dropdowns show. |
 | `confirm` | Confirm |
 | `cancel` | Cancel |
 | `copied` | Copied |
@@ -177,6 +242,25 @@ so `navigator.clipboard` was undefined and the `?.` made the whole thing a silen
 work in development only because `127.0.0.1` gets a secure-context exemption that `192.168.x.x` does not.
 There is now an `execCommand` fallback, which is deprecated but is not restricted by origin, and this
 string is what would make the same failure visible next time.
+
+`pipeline_off` and `pipeline_preferred` are labels rather than names, and both sit above the pipeline list in
+every wake word's dropdown. Home Assistant stores `no_wake_word` for a slot holding nothing and `preferred`
+for "whichever pipeline is marked preferred"; the dropdown has to show something readable for each, but
+neither can be matched by its label, because a customer who names one of their own pipelines "Preferred" or
+"Off" would otherwise get two indistinguishable entries and a wake word pointed at the wrong one. So both
+travel as values and this is the only place their display text exists. Reusing `no_wake_word` rather than
+inventing a sentinel for Off keeps the entire value space Home Assistant's.
+
+`assistant_needs_ha` appears under the wake words when the four selects could not be read at all: Home
+Assistant unreachable, older than 2025.10, or those entities disabled in its registry. It says which half of
+the card is affected on purpose — whether the device listens is the device's own setting and keeps working,
+so a single "unavailable" over the whole card would be false.
+
+`assistant_slots_full` needs three or more wake words listening at once, which this product cannot reach: it
+ships two models. It is written anyway because the payload and the card are both general, and because the
+failure it describes is a dropdown quietly disagreeing with itself — Home Assistant sends anything it cannot
+match to the first slot's assistant, so a third wake word works but shares, and its dropdown shows the shared
+answer rather than whatever was last chosen for it.
 
 `theme_to_dark` and `theme_to_light` are the light/dark button's accessible label and tooltip in the
 header. The button itself is only an icon, so this text is the whole of its name.
@@ -210,7 +294,15 @@ edit:
   a heading that stopped short of naming the trigger.
 - The four route names in the nav drawer — `Controls`, `Presence`, `Config`, `Diagnostics` — which are the
   same strings as the routes themselves. The drawer has no heading; the device name is in the bar above it.
+- `Connected` and `Nothing plugged in` on Audio Output's Line out row, and `follow media` where Assistant
+  volume reads zero. Both are readouts of a value rather than descriptions of a control.
+
+The wake word switch labels are not copy at all: they are the wake words themselves, read from the device
+at `GET /api/sat1/wakewords`, which reports each model's friendly name from the manifest it was built from.
+So the rows on a device with a custom model are named by that model, and nothing here needs changing for it.
 
 The voice assistant phase names — Idle, Waiting for a command, Listening, Thinking, Replying, Not
 ready, Error — are in `frontend/src/lib/device.js`, keyed by the `voice_assist_*_phase_id`
 substitutions in `config/common/voice_assistant.yaml`. They have to stay aligned with those numbers.
+They now sit in the header of the Voice card on Controls, above the transcript rather than above a set of
+settings: the settings moved to Config, and the phase and the words it produced belong together.

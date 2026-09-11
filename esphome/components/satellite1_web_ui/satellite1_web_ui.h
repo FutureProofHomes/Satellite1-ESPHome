@@ -46,6 +46,10 @@ class Satellite1WebUI : public Component {
   void push_utterance(const std::string &text, bool heard) { this->handler_.push_utterance(text, heard); }
 #endif
 
+#ifdef USE_MICRO_WAKE_WORD
+  void set_micro_wake_word(micro_wake_word::MicroWakeWord *mww) { this->handler_.set_micro_wake_word(mww); }
+#endif
+
   /// Both called from the rung lambdas in common/web_ui_ha.yaml.
   ///
   /// This one also lifts `aid` out of the payload into the selection store, which is the only moment
@@ -58,6 +62,14 @@ class Satellite1WebUI : public Component {
   /// direct call, because the work is a Home Assistant action and the script that owns it lives in
   /// YAML - which also keeps the ladder's only caller in one file.
   Trigger<> *get_ha_refresh_trigger() { return &this->ha_refresh_trigger_; }
+
+  /// Fired from loop() with an entity id and an option, for the Home Assistant selects that decide
+  /// which assistant answers which wake word. The action call itself is in YAML for the same reason the
+  /// refresh ladder is: homeassistant.action belongs next to the rest of the data layer.
+  ///
+  /// At most one per iteration, so the automation behind this is never re-entered while running. A
+  /// `delay:` in it would still be a mistake - it would stall the queue rather than corrupt it.
+  Trigger<std::string, std::string> *get_ha_select_trigger() { return &this->ha_select_trigger_; }
 
   /// Fired from loop() after the app has written a new selection. tts_routing.yaml hangs its re-check
   /// scripts here, in place of the `on_value` the deleted Remote TTS Targets text entity carried.
@@ -74,6 +86,7 @@ class Satellite1WebUI : public Component {
   WebUIHandler handler_;
   Selection selection_;
   Trigger<> ha_refresh_trigger_;
+  Trigger<std::string, std::string> ha_select_trigger_;
   Trigger<> selection_change_trigger_;
   std::atomic<bool> selection_changed_{false};
 

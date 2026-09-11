@@ -281,14 +281,26 @@ export function Slider({ value, min, max, step, disabled, format, onCommit }) {
   );
 }
 
+/**
+ * Options are plain strings, or [value, label] pairs where the two differ.
+ *
+ * Every entity-backed select passes strings, because an ESPHome select's options are the labels. The
+ * pair form exists for the assistant list, where Home Assistant stores `preferred` and displays
+ * "Preferred": mapping that by label instead would break for anyone who named a pipeline "Preferred",
+ * and silently send their wake word to the wrong one. Pairs are already how the Home Assistant payload
+ * carries an entity id beside a name, so this is the house shape rather than a new one.
+ */
 export function Select({ value, options, disabled, onChange }) {
   return (
     <select class="sel" disabled={disabled} value={value} onChange={(e) => onChange(e.currentTarget.value)}>
-      {(options || []).map((o) => (
-        <option key={o} value={o}>
-          {o}
-        </option>
-      ))}
+      {(options || []).map((o) => {
+        const [v, label] = Array.isArray(o) ? o : [o, o];
+        return (
+          <option key={v} value={v}>
+            {label}
+          </option>
+        );
+      })}
     </select>
   );
 }

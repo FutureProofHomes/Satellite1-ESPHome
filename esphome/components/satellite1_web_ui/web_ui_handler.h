@@ -13,6 +13,10 @@
 #include <string>
 #include <vector>
 
+#ifdef USE_MICRO_WAKE_WORD
+#include "esphome/components/micro_wake_word/micro_wake_word.h"
+#endif
+
 #ifdef USE_VOICE_ASSISTANT
 #include "esphome/components/voice_assistant/voice_assistant.h"
 #endif
@@ -46,6 +50,31 @@ struct Utterance {
   uint32_t at_uptime;
   bool heard;
 };
+
+/// One queued change to a Home Assistant select, waiting for the main loop to turn it into an action
+/// call. See the queue itself for why it cannot be made from the request.
+struct SelectWrite {
+  std::string entity;
+  std::string option;
+};
+
+/// How many of those can be outstanding. Four is the most one press can produce: choosing an assistant
+/// for a wake word may have to move that wake word into a slot and set the slot's pipeline, and doing
+/// that for both slots at once is four. A fifth is refused rather than dropped, so the app finds out.
+static constexpr size_t WU_SELECT_QUEUE = 4;
+
+/// Longest option this will forward, and it is the transport's number rather than a guess.
+///
+/// The option arrives in the query string, and esp_http_server rejects a URI over
+/// CONFIG_HTTPD_MAX_URI_LEN - 512 in this build - before any handler sees it, answering 414. So a cap
+/// above what fits would not be a cap at all: the request would fail at the server with a status this
+/// code never chose, instead of failing here with an explanation.
+///
+/// The budget: 21 bytes of path, 6 for the two parameter names, and up to 160 for an entity id, leaves
+/// 325 for the option. Percent-encoding can treble a byte, so 100 is the most that is certain to arrive
+/// whatever it contains. Pipeline names are typed by people into Home Assistant's Voice assistants page
+/// and run to a couple of dozen characters, so this is far from binding in practice.
+static constexpr size_t WU_SELECT_OPTION_MAX = 100;
 
 /// One row of the key -> "<domain>/<name>" table the frontend reads from GET /api/sat1/state.
 /// `key` and `domain` are string literals from generated code; `entity` is resolved to its name
@@ -135,8 +164,34 @@ class WebUIHandler : public AsyncWebHandler {
   /// the same split satellite1_radar's engineering-mode gating uses.
   bool take_ha_refresh_request() { return this->ha_refresh_requested_.exchange(false); }
 
+  /// Hands back the oldest queued select write, if there is one. Runs on the main loop.
+  ///
+  /// One at a time rather than the whole queue, so the component fires its trigger at most once per
+  /// iteration. That removes the question of what an ESPHome automation does when it is re-triggered
+  /// while still running - ActionList has no re-entrancy guard, and a YAML author who puts a `delay:`
+  /// in this trigger should not be able to turn four writes into a corrupted action list. Four writes
+  /// then take four iterations, which on this device is a few tens of milliseconds.
+  ///
+  /// Checks the flag before taking the lock, so the common case of an idle queue costs one relaxed
+  /// load per main-loop iteration and nothing else.
+  bool take_select_write(SelectWrite &out);
+
   /// Set from the component's setup(), before this handler is registered.
   void set_selection(Selection *selection) { this->selection_ = selection; }
+
+#ifdef USE_MICRO_WAKE_WORD
+  /// Set from the component's setup(), before this handler is registered.
+  ///
+  /// Wake words are the one thing this app controls that is not an entity. micro_wake_word creates no
+  /// switch and no select - the models are plain C++ objects, and a model's `internal:` is a model
+  /// parameter meaning "do not offer this to Home Assistant", not the usual entity flag. So they never
+  /// reach /events or the entity REST API, and until this endpoint the only way to change the active
+  /// set was from Home Assistant.
+  void set_micro_wake_word(micro_wake_word::MicroWakeWord *mww) { this->mww_ = mww; }
+
+  /// Applies whatever a browser asked for since the last call. Must run on the main loop.
+  void apply_wake_word_requests();
+#endif
 
   // NOLINTNEXTLINE(readability-identifier-naming)
   bool canHandle(AsyncWebServerRequest *request) const override;
@@ -155,26 +210,52 @@ class WebUIHandler : public AsyncWebHandler {
   /// One route table for canHandle and handleRequest, so the two can never disagree about which
   /// paths exist. Deliberately narrow: this handler is first in web_server_base's vector, so
   /// anything it claims by accident it steals from /events, the entity REST API or /radar_tuner.
+  ///
+  /// The optional routes are compiled out with the component they serve, rather than kept and left
+  /// unreachable, so that -Wswitch still means something: an enumerator that exists in every build but
+  /// is only handled in some turns a useful warning into noise that has to be suppressed. The values
+  /// are never stored or sent, so it does not matter that they renumber with the config.
   enum class Route : uint8_t {
     NONE = 0,
     INDEX,
     STATE,
+#ifdef USE_VOICE_ASSISTANT
     VOICE,
+#endif
     HA,
     HA_REFRESH,
+    HA_SELECT,
     SEL,
     SEL_SET,
+#ifdef USE_MICRO_WAKE_WORD
+    WAKE_WORDS,
+    WAKE_WORDS_SET,
+#endif
   };
 
   static Route match_route_(AsyncWebServerRequest *request);
 
   void handle_index_(AsyncWebServerRequest *request);
   void handle_state_(AsyncWebServerRequest *request);
+#ifdef USE_VOICE_ASSISTANT
   void handle_voice_(AsyncWebServerRequest *request);
+#endif
   void handle_ha_(AsyncWebServerRequest *request);
   void handle_ha_refresh_(AsyncWebServerRequest *request);
+  void handle_ha_select_(AsyncWebServerRequest *request);
+
+  /// True if the last Home Assistant payload contained `entity` as a complete JSON string.
+  ///
+  /// The quotes are part of the search, which is what makes it an exact token match rather than a
+  /// prefix one - without them "select.x_assistant" would be found inside "select.x_assistant_2".
+  /// A find rather than a parse, for the reason the payload buffer's own comment gives.
+  bool ha_payload_names_(const std::string &entity);
   void handle_sel_(AsyncWebServerRequest *request);
   void handle_sel_set_(AsyncWebServerRequest *request);
+#ifdef USE_MICRO_WAKE_WORD
+  void handle_wake_words_(AsyncWebServerRequest *request);
+  void handle_wake_words_set_(AsyncWebServerRequest *request);
+#endif
 
   const uint8_t *index_gz_{nullptr};
   size_t index_gz_len_{0};
@@ -201,6 +282,21 @@ class WebUIHandler : public AsyncWebHandler {
   Mutex ha_lock_;
   std::atomic<bool> ha_refresh_requested_{false};
 
+  /// Select writes queued by a browser, waiting for the main loop.
+  ///
+  /// Deferred for the same reason the refresh is: the endpoint runs on the httpd task, and what this
+  /// ultimately starts is a Home Assistant action call, which has to be issued from the main loop.
+  ///
+  /// Coalesced by entity rather than appended blindly. Dragging a dropdown open and picking twice
+  /// should end with the second choice and one action call, not two calls racing to decide what Home
+  /// Assistant ends up storing. A queue rather than the wake words' bitmask because the payload here is
+  /// two strings, and because the entities are Home Assistant's rather than a fixed local list.
+  std::vector<SelectWrite> select_queue_;
+  Mutex select_lock_;
+  /// Read once per main-loop iteration, so it is worth not taking the lock to find out the queue is
+  /// empty. Only ever set true under the lock, and cleared under it when the last entry leaves.
+  std::atomic<bool> select_pending_{false};
+
   Selection *selection_{nullptr};
 
   /// Ceiling on a posted selection, comfortably above what the store itself accepts, so an oversized
@@ -212,6 +308,26 @@ class WebUIHandler : public AsyncWebHandler {
   /// buffer is cleared at index 0 so a connection that died mid-body cannot leave a fragment behind to
   /// be parsed as the front of the next one.
   std::string body_;
+
+#ifdef USE_MICRO_WAKE_WORD
+  micro_wake_word::MicroWakeWord *mww_{nullptr};
+
+  /// A wake word toggle is recorded here and applied from the main loop, never from the httpd task.
+  ///
+  /// Three reasons, any one of them sufficient. micro_wake_word runs inference on its own task and
+  /// reads each model's `enabled_`, which is a plain bool - writing it from here would be a data race.
+  /// WakeWordModel::enable() also saves to flash, and an NVS write on the server task can stall it.
+  /// And ESPHome's own API for this component says model changes must come from the main loop, because
+  /// the inference task is paused at a safe point first.
+  ///
+  /// Coalesced rather than queued: one bit per model in `mask`, and the wanted state in `on`. Two
+  /// presses of the same switch before the next loop iteration collapse to the last one, which is the
+  /// correct answer, and no request can be dropped for want of queue space. Written mask last, so the
+  /// loop never sees a bit set without its state beside it. 32 models is far past anything that fits
+  /// in the tensor arenas, and the index is bounds-checked against it anyway.
+  std::atomic<uint32_t> ww_pending_mask_{0};
+  std::atomic<uint32_t> ww_pending_on_{0};
+#endif
 
 #ifdef USE_VOICE_ASSISTANT
   voice_assistant::VoiceAssistant *va_{nullptr};

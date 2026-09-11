@@ -6,9 +6,9 @@
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 
-import { HINTS, PRESENCE } from "../copy.js";
+import { HINTS, PRESENCE, TEXT } from "../copy.js";
 import { entity, pathFor, PHASE, post, useVoice } from "../lib/device.js";
-import { Arrow, Card, Chevron, Hint, Missing, Row, Select, Slider, Toggle } from "../ui.jsx";
+import { Arrow, Card, Chevron, Hint, Missing, Row, Slider, Toggle } from "../ui.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Sensor pills, with calibration on the pill itself                   */
@@ -290,64 +290,6 @@ function Leds({ ctx }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Voice and audio                                                     */
-/* ------------------------------------------------------------------ */
-
-function Voice({ ctx, voice }) {
-  const mute = entity(ctx, "mute_mics");
-  const chime = entity(ctx, "wake_sound");
-  const sens = entity(ctx, "wake_sensitivity");
-  const vol = entity(ctx, "voice_override");
-
-  // The phase is the same global the LED ring animates from, so what the card says and what the ring
-  // is doing cannot disagree. "Not ready" is the honest reading with Home Assistant gone: the
-  // microphones work, but there is nothing on the other end to answer.
-  const phase = voice ? PHASE[voice.phase] : null;
-
-  return (
-    <Card title="Voice" right={phase && <span class={`dim xs${voice.running ? " accent" : ""}`}>{phase}</span>}>
-      {mute && (
-        <Row label="Mute microphones" hint={HINTS.mute}>
-          <Toggle
-            checked={mute.value === true || mute.state === "ON"}
-            onChange={(v) => post(pathFor(ctx, "mute_mics", v ? "turn_on" : "turn_off"))}
-          />
-        </Row>
-      )}
-      {chime && (
-        <Row label="Wake chime" hint={HINTS.wake_sound}>
-          <Toggle
-            checked={chime.value === true || chime.state === "ON"}
-            onChange={(v) => post(pathFor(ctx, "wake_sound", v ? "turn_on" : "turn_off"))}
-          />
-        </Row>
-      )}
-      {sens && (
-        <Row label="Wake word sensitivity" hint={HINTS.wake_sensitivity}>
-          <Select
-            value={sens.value}
-            options={sens.option}
-            onChange={(v) => post(`${pathFor(ctx, "wake_sensitivity", "set")}?option=${encodeURIComponent(v)}`)}
-          />
-        </Row>
-      )}
-      {vol && (
-        <Row label="Assistant volume" hint={HINTS.voice_override}>
-          <Slider
-            value={Number(vol.value)}
-            min={Number(vol.min_value ?? 0)}
-            max={Number(vol.max_value ?? 100)}
-            step={Number(vol.step ?? 1)}
-            format={(v) => (v === 0 ? "follow media" : `${v}%`)}
-            onCommit={(v) => post(`${pathFor(ctx, "voice_override", "set")}?value=${v}`)}
-          />
-        </Row>
-      )}
-    </Card>
-  );
-}
-
-/* ------------------------------------------------------------------ */
 /* Timers and what was said                                            */
 /* ------------------------------------------------------------------ */
 
@@ -383,50 +325,42 @@ function Timers({ voice }) {
 }
 
 /**
- * The last few exchanges, so a misheard command is visible without opening the log.
+ * What the assistant is doing, and the last few exchanges so a misheard command is visible without
+ * opening the log.
  *
- * Only rendered once there is something to show. On a device that has not been spoken to since boot
- * an empty panel would read as a fault rather than as an absence.
+ * One card rather than two. It used to be a "Voice" card of settings with the phase in its header and
+ * a separate "Recently" card of lines; the settings have gone to Config, and putting the phase over
+ * the transcript is what the mockup drew in the first place - the label and the words it produced
+ * belong together.
+ *
+ * The phase is the same global the LED ring animates from, so what this says and what the ring is
+ * doing cannot disagree. "Not ready" is the honest reading with Home Assistant gone: the microphones
+ * work, but there is nothing on the other end to answer.
+ *
+ * Present as soon as the device answers, unlike the old transcript card, which hid itself when there
+ * was nothing to list. A phase is always something, so the card is never empty - and on a device that
+ * has not been spoken to since boot, one grey line is a better answer than no card at all, which
+ * reads as the page having failed to load a section.
  */
-function Transcript({ voice }) {
+function VoiceStatus({ voice }) {
+  const phase = voice ? PHASE[voice.phase] : null;
   const lines = voice?.transcript || [];
-  if (!lines.length) return null;
+  if (!phase && !lines.length) return null;
 
   return (
-    <Card title="Recently">
-      {lines
-        .slice()
-        .reverse()
-        .map((l, i) => (
-          <p key={i} class={`utt${l.heard ? " heard" : ""}`}>
-            <span class="utt-who">{l.heard ? "heard" : "said"}</span>
-            {l.text}
-          </p>
-        ))}
-    </Card>
-  );
-}
-
-function Speaker({ ctx }) {
-  const chan = entity(ctx, "speaker_channel");
-  const lineOut = entity(ctx, "line_out");
-  if (!chan && !lineOut) return null;
-
-  return (
-    <Card title="Speaker">
-      {chan && (
-        <Row label="Channel" hint={HINTS.speaker_channel}>
-          <Select
-            value={chan.value}
-            options={chan.option}
-            onChange={(v) => post(`${pathFor(ctx, "speaker_channel", "set")}?option=${encodeURIComponent(v)}`)}
-          />
-        </Row>
-      )}
-      {lineOut && (
-        <Row label="Line out">
-          <span class="dim">{lineOut.value ? "Connected" : "Nothing plugged in"}</span>
-        </Row>
+    <Card title="Voice" right={phase && <span class={`dim xs${voice.running ? " accent" : ""}`}>{phase}</span>}>
+      {lines.length ? (
+        lines
+          .slice()
+          .reverse()
+          .map((l, i) => (
+            <p key={i} class={`utt${l.heard ? " heard" : ""}`}>
+              <span class="utt-who">{l.heard ? "heard" : "said"}</span>
+              {l.text}
+            </p>
+          ))
+      ) : (
+        <p class="dim sm">{TEXT.nothing_said}</p>
       )}
     </Card>
   );
@@ -492,10 +426,11 @@ export function Controls({ ctx }) {
       <Card>
         <SensorPills ctx={ctx} />
       </Card>
-      <Voice ctx={ctx} voice={voice} />
+      {/* The settings that used to sit here - mute, the wake chime, sensitivity, the speaker channel
+          and the assistant's own volume - are on Config as Voice Input and Audio Output. What is left
+          on this route is what you look at rather than what you set once. */}
+      <VoiceStatus voice={voice} />
       <Timers voice={voice} />
-      <Transcript voice={voice} />
-      <Speaker ctx={ctx} />
       <Leds ctx={ctx} />
       <Buttons ctx={ctx} />
     </>

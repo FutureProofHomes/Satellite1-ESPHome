@@ -476,6 +476,207 @@ export function useVoice(enabled) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Wake words, which are not entities                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * GET /api/sat1/wakewords, read once, then kept in step locally.
+ *
+ * Not polled, unlike the voice endpoint above. A wake word changes only when a person changes it, so
+ * a poll would ask a question with the same answer every time for the life of the page. The cost is
+ * that a change made in Home Assistant while this page is open is not picked up until it is reloaded;
+ * that is the same deal every non-entity value on the page gets, and the cheaper trade on a device
+ * that is also doing audio.
+ *
+ * Writes are optimistic, and honestly so: the device applies the change on its next main-loop
+ * iteration rather than inside the request, so there is nothing to re-read that would be newer than
+ * what we already know. A failed write puts the switch back.
+ */
+export function useWakeWords() {
+  const [words, setWords] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    fetch("/api/sat1/wakewords")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (live && Array.isArray(d)) setWords(d);
+      })
+      .catch(() => {
+        // Left as null, which the card reads as "this build has no wake words to show" and renders
+        // nothing for. A build without micro_wake_word answers 404 here and means exactly that.
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const set = async (i, on) => {
+    setWords((prev) => prev && prev.map((w) => (w.i === i ? { ...w, on } : w)));
+    try {
+      const r = await post(`/api/sat1/wakewords?i=${i}&on=${on ? 1 : 0}`);
+      if (!r.ok) throw new Error(String(r.status));
+    } catch {
+      setWords((prev) => prev && prev.map((w) => (w.i === i ? { ...w, on: !on } : w)));
+    }
+  };
+
+  return { words, set };
+}
+
+/* ------------------------------------------------------------------ */
+/* Which assistant answers which wake word                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Home Assistant's value for an empty wake word slot, and for "use whichever pipeline is preferred".
+ *
+ * Internal constants of Home Assistant's, which it translates only for display - which is why the
+ * payload finds the four selects by these and not by the names on the device page. `preferred` is
+ * exported because it needs a label of its own, and that is the view's business rather than this file's.
+ */
+export const NO_WAKE_WORD = "no_wake_word";
+export const PIPELINE_PREFERRED = "preferred";
+
+/**
+ * How many wake-word-and-assistant pairs exist. Two, and not our two: Home Assistant's ESPHome
+ * integration creates exactly this many for every voice satellite, in its select platform, without
+ * asking the device how many it could use. So this is a fact to be reported, not a limit to be raised.
+ */
+export const ASSIST_SLOTS = 2;
+
+/**
+ * Reads and writes which assistant answers which wake word.
+ *
+ * This is the only control in the app whose value does not live on the device. Home Assistant pairs each
+ * of its two slots with a wake word and a pipeline, and when a wake word fires it walks those pairs
+ * looking for the name the device reported - so the mapping is Home Assistant's, and there is no local
+ * flag that could hold it. The four selects arrive in the Home Assistant payload as `asst`; writes go
+ * out through the device, which turns them into select.select_option calls.
+ *
+ * `enabled` is the wake words currently listening, by display name, and it is what makes a slot free or
+ * taken. It matters because a slot write has a side effect worth knowing about: Home Assistant answers
+ * one by pushing the union of both slots back to the device as the complete set of active wake words,
+ * disabling anything not in it. Keeping the slots equal to the enabled set is therefore not tidiness -
+ * it is what stops Home Assistant from silently switching a wake word off later.
+ */
+export function useAssist(ha, haRefresh, enabled) {
+  // What we have asked for and not yet seen confirmed, keyed by entity id. Home Assistant is two round
+  // trips away - the write, then the resync that reads it back - so without this the dropdown would sit
+  // on its old value for the better part of three seconds and read as though the choice was refused.
+  const [local, setLocal] = useState({});
+  const [busy, setBusy] = useState(false);
+
+  const raw = ha?.d?.asst;
+  const ready = Array.isArray(raw?.s) && raw.s.length === ASSIST_SLOTS;
+
+  // The customer's own pipelines, by name, exactly as Home Assistant rebuilds them from its pipeline
+  // store whenever one is added or renamed. `preferred` is not in here: the payload leaves it out
+  // because it needs a label rather than a name, and the card puts it back at the front of the list.
+  const pipelines = raw?.o || [];
+
+  const slots = ready
+    ? raw.s.map(([we, ws, pe, ps]) => ({ we, word: local[we] ?? ws, pe, pipeline: local[pe] ?? ps }))
+    : [];
+
+  /**
+   * Sends one select to Home Assistant and waits for the payload to be read back.
+   *
+   * The optimistic entries are dropped once the resync lands rather than kept until contradicted. If
+   * Home Assistant took the option the fresh payload already says so and dropping them changes nothing
+   * on screen; if it refused - an option that no longer exists, actions not permitted - the control
+   * snaps back, which is the truth and the only signal available. The device cannot tell us: this call
+   * captures no response.
+   */
+  const send = async (writes) => {
+    setBusy(true);
+    setLocal((prev) => ({ ...prev, ...Object.fromEntries(writes) }));
+    try {
+      for (const [entity, option] of writes) {
+        // Not through post(): that chain serialises entity writes, and this one waits on Home Assistant.
+        await fetch(`/api/sat1/ha/select?e=${encodeURIComponent(entity)}&o=${encodeURIComponent(option)}`, {
+          method: "POST",
+        });
+      }
+      await haRefresh();
+    } finally {
+      setLocal((prev) => {
+        const next = { ...prev };
+        for (const [entity] of writes) delete next[entity];
+        return next;
+      });
+      setBusy(false);
+    }
+  };
+
+  /** Which slot holds `word`, or -1. */
+  const slotOf = (word) => slots.findIndex((s) => s.word === word);
+
+  /**
+   * A slot `word` could move into: an empty one first, then one held by a wake word that is not
+   * listening any more. A slot held by another enabled wake word is not available, because taking it
+   * would turn that wake word off.
+   */
+  const freeSlot = (word) => {
+    const at = slots.findIndex((s) => s.word === NO_WAKE_WORD);
+    if (at >= 0) return at;
+    return slots.findIndex((s) => s.word !== word && !(enabled || []).includes(s.word));
+  };
+
+  return {
+    ready,
+    busy,
+    pipelines,
+
+    /** Which assistant answers `word`, or null if it holds no slot and so falls back to the first. */
+    pipelineFor: (word) => {
+      const at = slotOf(word);
+      return at < 0 ? null : slots[at].pipeline;
+    },
+
+    /** The assistant an unslotted wake word ends up at, which is whatever the first slot points to. */
+    fallbackPipeline: () => (ready ? slots[0].pipeline : null),
+
+    /** Points `word` at `option`, moving it into a slot first if it does not already hold one. */
+    setPipeline: async (word, option) => {
+      if (!ready) return;
+      let at = slotOf(word);
+      const writes = [];
+      if (at < 0) {
+        at = freeSlot(word);
+        if (at < 0) return;
+        writes.push([slots[at].we, word]);
+      }
+      writes.push([slots[at].pe, option]);
+      await send(writes);
+    },
+
+    /**
+     * Puts `word` into a slot, or takes it out, so the slots keep matching the wake words that are
+     * listening. Called after a wake word is switched on or off, and the reason it has to be: a slot
+     * still naming a wake word that is off would have Home Assistant switch it back on, and a wake word
+     * in no slot at all gets switched off the next time Home Assistant writes one.
+     *
+     * Silent when Home Assistant is not there. The device has already stored the change either way, so
+     * the wake word does what the switch said; what is lost is only the agreement, and the card says so.
+     */
+    syncSlot: async (word, on) => {
+      if (!ready) return;
+      const at = slotOf(word);
+      if (on) {
+        if (at >= 0) return;
+        const free = freeSlot(word);
+        if (free < 0) return;
+        await send([[slots[free].we, word]]);
+      } else {
+        if (at < 0) return;
+        await send([[slots[at].we, NO_WAKE_WORD]]);
+      }
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Live state and the log, over one /events stream                     */
 /* ------------------------------------------------------------------ */
 

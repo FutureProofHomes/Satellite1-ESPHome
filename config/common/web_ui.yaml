@@ -119,6 +119,24 @@ satellite1_web_ui:
   voice_assistant_id: va
   voice_phase: !lambda "return id(voice_assistant_phase);"
 
+  # Which wake words are armed, for GET/POST /api/sat1/wakewords. Also not an entity: micro_wake_word
+  # creates no switch and no select for its models, so before this the only place to turn "Hey Jarvis"
+  # off was Home Assistant's own wake word picker. The models' enabled flags are persisted by ESPHome
+  # itself, and voice_assistant is the only other thing that writes them, so both ends move one stored
+  # flag rather than keeping rival copies of it.
+  #
+  # That last point is true and not the whole story, which is worth knowing before changing anything here.
+  # Home Assistant does not think in flags: it keeps two slots, each pairing a wake word with a pipeline,
+  # and VoiceAssistant::on_set_configuration answers a slot write by disabling every model and re-enabling
+  # only the ones the slots name. So a wake word this endpoint turned on, but that no slot names, is one
+  # Home Assistant will turn off again the next time anybody touches a slot. The app closes that by keeping
+  # the slots equal to the armed set - see useAssist in frontend/src/lib/device.js and the `asst` notes in
+  # web_ui_ha.yaml - which is why the two endpoints are not as independent as their URLs suggest.
+  #
+  # The `stop` model is not offered here. It is declared internal in voice_assistant.yaml and timer.yaml
+  # arms it only while a timer is ringing, so a switch over it would be rewritten from under the reader.
+  micro_wake_word_id: mww
+
   # Which entity backs which control in the app.
   #
   # web_server identifies entities by their display name in both directions - /events publishes

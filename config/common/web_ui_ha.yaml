@@ -35,7 +35,10 @@ substitutions:
   #   {"area": "Media Room", "aid": "media_room",
   #    "areas": [{"i": "kitchen", "n": "Kitchen", "p": [["media_player.kitchen", "Kitchen Sonos"]]}],
   #    "loose": [["media_player.all_sonos", "All Sonos"]],
-  #    "dev": [["Satellite1", "Ceiling Mount", "Media Room", "3c:0f:02:c5:ac:00", "dev (ESP...)"]]}
+  #    "dev": [["Satellite1", "Ceiling Mount", "Media Room", "3c:0f:02:c5:ac:00", "dev (ESP...)"]],
+  #    "asst": {"o": ["Home Assistant Cloud", "OllamaBradStudio"],
+  #             "s": [["select.sat1_wake_word", "Hey Jarvis", "select.sat1_assistant", "preferred"],
+  #                   ["select.sat1_wake_word_2", "no_wake_word", "select.sat1_assistant_2", "preferred"]]}}
   #
   # `i` is the area id and `aid` this device's own. Both are ids rather than names because the stored
   # selection references areas, `area_entities()` takes an id directly, and an id survives a rename -
@@ -60,6 +63,44 @@ substitutions:
   # of how an integration registers itself. The frontend renders the models it understands, which
   # makes recognising another product later a change there rather than here, and means an unknown
   # one appears in the payload the day Home Assistant learns about it.
+  #
+  # `asst` is which assistant answers which wake word, and it is the one part of this payload that
+  # describes settings Home Assistant owns rather than facts it happens to know.
+  #
+  # Home Assistant's ESPHome integration creates two slots for every voice satellite, each pairing a
+  # wake word with a pipeline: the four selects shown on the device page as "Wake word"/"Assistant" and
+  # "Wake word 2"/"Assistant 2". When a wake word fires, the device reports its name, and
+  # homeassistant/components/esphome/assist_satellite.py walks the wake word selects comparing each
+  # one's state to that name; the first match decides which slot's pipeline runs, and no match falls
+  # back to slot one. So the mapping lives entirely on Home Assistant's side, which is why it has to
+  # come through here rather than out of /api/sat1/state - these four are not this device's entities.
+  #
+  # They are found by the option values `preferred` and `no_wake_word` rather than by name. Those are
+  # internal constants that Home Assistant only translates for display, so the match survives a rename
+  # and a non-English installation, where matching on "Assistant" would survive neither. The slots are
+  # then told apart by the `_2` suffix on the entity id, and if that does not produce exactly one of
+  # each the whole block is sent empty and the app hides the control - a wrong pairing would quietly
+  # route a wake word to the other slot's assistant, so guessing is worse than not offering it.
+  #
+  # The suffix is the weakest link here and it was worth testing rather than assuming. On this
+  # installation one device's slots do not even share a prefix - `satellite1_d095b4_wake_word` beside
+  # `satellite1_master_bedroom_wake_word_2`, because the second slot's entities were created after the
+  # device was renamed - so anything keyed on a common prefix would already be broken.
+  #
+  # `o` is the customer's own pipelines, which Home Assistant rebuilds from its pipeline store whenever
+  # one is added or renamed, so nothing here is fixed at build time. `preferred` is dropped from the
+  # list because the frontend has to give it a label of its own anyway.
+  #
+  # Sorted here rather than in the app, so it costs no bundle bytes, and re-sorted rather than kept in the
+  # order it arrives in. Home Assistant builds its own list with Python's `sorted`, which is case
+  # sensitive and so puts every capitalised name ahead of every lowercase one - a pipeline called `ollama`
+  # would sit after `OllamaBradStudio` rather than beside it. Jinja's `sort` is case-insensitive by
+  # default, so `case_sensitive=false` is there to say which behaviour is being relied on, not to switch
+  # it on. Both were rendered against a live installation to confirm the filter is one the template
+  # sandbox permits - `list.append` is not, so being accepted is not a given.
+  #
+  # Requires Home Assistant 2025.10, which is where the second slot arrived, and that is not a new
+  # floor: this whole file already needs 2025.12 for action replies.
   #
   # Areas with no eligible player are dropped rather than sent empty: the frontend has nothing to
   # offer for them, and on the installation above that is 11 areas of the 22.
@@ -113,7 +154,24 @@ substitutions:
         {% endif %}
       {% endfor %}
     {% endfor %}
-    {% set lim = 24000 - (out.dev | to_json | length) - (out.loose | to_json | length) %}
+    {% set sl = namespace(p=[], w=[]) %}
+    {% for e in mine | select('match', 'select\.') %}
+      {% set o = state_attr(e, 'options') or [] %}
+      {% if 'preferred' in o %}{% set sl.p = sl.p + [e] %}{% endif %}
+      {% if 'no_wake_word' in o %}{% set sl.w = sl.w + [e] %}{% endif %}
+    {% endfor %}
+    {% set p1 = sl.p | reject('search', '_2$') | list %}
+    {% set p2 = sl.p | select('search', '_2$') | list %}
+    {% set w1 = sl.w | reject('search', '_2$') | list %}
+    {% set w2 = sl.w | select('search', '_2$') | list %}
+    {% set asst = {'o': (state_attr(p1 | first, 'options') or []) | reject('eq', 'preferred')
+                        | sort(case_sensitive=false) | list,
+                   's': [[w1 | first, states(w1 | first), p1 | first, states(p1 | first)],
+                         [w2 | first, states(w2 | first), p2 | first, states(p2 | first)]]}
+                  if p1 | count == 1 and p2 | count == 1 and w1 | count == 1 and w2 | count == 1
+                  else {} %}
+    {% set lim = 24000 - (out.dev | to_json | length) - (out.loose | to_json | length)
+                       - (asst | to_json | length) %}
     {% set keep = namespace(a=[], n=0) %}
     {% for ar in out.areas %}
       {% set sz = (ar | to_json | length) + 1 %}
@@ -124,7 +182,7 @@ substitutions:
     {% endfor %}
     {{ {'area': area_name(ns.area) if ns.area else '',
         'aid': ns.area if ns.area else '',
-        'areas': keep.a, 'loose': out.loose, 'dev': out.dev,
+        'areas': keep.a, 'loose': out.loose, 'dev': out.dev, 'asst': asst,
         't': 1 if keep.a | count < out.areas | count else 0} | to_json }}
 
   # Nothing has ever recorded statistics under this id, so asking for them reads nothing and returns
@@ -294,6 +352,30 @@ script:
 satellite1_web_ui:
   on_ha_refresh:
     - script.execute: web_ui_ha_sync
+
+  # Moves one of the four selects behind `asst`, so the app can say which assistant answers which wake
+  # word. The component queues the request and fires this from the main loop, one write per iteration.
+  #
+  # No capture_response, so no on_success and no on_error: select.select_option returns nothing worth
+  # having, and asking for a response would make this need the 2025.12 reply support that the read path
+  # needs. The consequence is that the device never learns whether Home Assistant accepted the option,
+  # which is why the app resyncs afterwards and shows what came back rather than what it asked for.
+  #
+  # entity_id goes through data_template rather than data because only variables can carry a runtime
+  # value, and `{{ ent }}` renders a variable rather than interpolating text - so a pipeline name with a
+  # brace or a quote in it is a name, not a template.
+  #
+  # Deliberately no `delay:` and no condition on ha_actions_allowed. A delay would stall the queue, and
+  # an untickable "allow actions" box already breaks the read path far more visibly than this.
+  on_ha_select:
+    - homeassistant.action:
+        action: select.select_option
+        data_template:
+          entity_id: "{{ ent }}"
+          option: "{{ opt }}"
+        variables:
+          ent: !lambda 'return entity;'
+          opt: !lambda 'return option;'
 
 # The client test is the one ha_action_probe explains: only Home Assistant can answer an action call.
 #

@@ -19,6 +19,7 @@ from esphome.components import (
     update,
 )
 from esphome.components.light.types import LightState
+from esphome.components.micro_wake_word import MicroWakeWord
 from esphome.components.voice_assistant import VoiceAssistant
 from esphome.const import CONF_ID, Framework
 from esphome.core import HexInt
@@ -42,9 +43,11 @@ MULTI_CONF = False
 
 CONF_INDEX_ID = "index_id"
 CONF_ENTITIES = "entities"
+CONF_MICRO_WAKE_WORD_ID = "micro_wake_word_id"
 CONF_VOICE_ASSISTANT_ID = "voice_assistant_id"
 CONF_VOICE_PHASE = "voice_phase"
 CONF_ON_HA_REFRESH = "on_ha_refresh"
+CONF_ON_HA_SELECT = "on_ha_select"
 CONF_ON_SELECTION_CHANGE = "on_selection_change"
 
 satellite1_web_ui_ns = cg.esphome_ns.namespace("satellite1_web_ui")
@@ -101,11 +104,21 @@ CONFIG_SCHEMA = cv.All(
             # that a build without voice_assistant still compiles.
             cv.Optional(CONF_VOICE_ASSISTANT_ID): cv.use_id(VoiceAssistant),
             cv.Optional(CONF_VOICE_PHASE): cv.returning_lambda,
+            # Wake words are not entities. micro_wake_word creates no switch and no select, so the
+            # models never reach /events or the entity REST API, and the component itself is the only
+            # way to see or change which are armed. Optional for the same reason as the two above.
+            cv.Optional(CONF_MICRO_WAKE_WORD_ID): cv.use_id(MicroWakeWord),
             # Fired when a browser posts to /api/sat1/ha/refresh. The work is a Home Assistant action
             # call, which belongs in YAML next to the rest of the ladder, so the component only says
             # that someone asked. Optional: without common/web_ui_ha.yaml the endpoint accepts the
             # request and nothing listens, which is the honest behaviour for a build with no data layer.
             cv.Optional(CONF_ON_HA_REFRESH): automation.validate_automation(single=True),
+            # Fired with `entity` and `option` when a browser posts to /api/sat1/ha/select, which is how
+            # the app changes which assistant answers which wake word. That mapping is four select
+            # entities Home Assistant creates for this device and keeps on its own side, so unlike every
+            # other control in the app there is no local state to write - only an action to call, and
+            # calling it belongs in YAML beside the ladder.
+            cv.Optional(CONF_ON_HA_SELECT): automation.validate_automation(single=True),
             cv.Optional(CONF_ON_SELECTION_CHANGE): automation.validate_automation(single=True),
         }
     ).extend(cv.COMPONENT_SCHEMA),
@@ -163,6 +176,11 @@ async def to_code(config):
         phase = await cg.process_lambda(config[CONF_VOICE_PHASE], [], return_type=cg.int_)
         cg.add(var.set_voice_phase_fn(phase))
 
+    if CONF_MICRO_WAKE_WORD_ID in config:
+        cg.add(
+            var.set_micro_wake_word(await cg.get_variable(config[CONF_MICRO_WAKE_WORD_ID]))
+        )
+
     if CONF_ON_SELECTION_CHANGE in config:
         await automation.build_automation(
             var.get_selection_change_trigger(), [], config[CONF_ON_SELECTION_CHANGE]
@@ -171,6 +189,13 @@ async def to_code(config):
     if CONF_ON_HA_REFRESH in config:
         await automation.build_automation(
             var.get_ha_refresh_trigger(), [], config[CONF_ON_HA_REFRESH]
+        )
+
+    if CONF_ON_HA_SELECT in config:
+        await automation.build_automation(
+            var.get_ha_select_trigger(),
+            [(cg.std_string, "entity"), (cg.std_string, "option")],
+            config[CONF_ON_HA_SELECT],
         )
 
     if not _DIST.is_file():

@@ -34,7 +34,7 @@ export const HINTS = {
      need to read once is what a tooltip is for. Kept because one slider with three behaviours behind it
      is the kind of thing that gets reported as a bug. */
   remote_tts_volume:
-    "How loud the answer is on the remote speakers. It does not touch this device's own level - that is Voice Override, on the Audio card. Sonos reads the level off the announcement; another Satellite1 has its Voice Override set and put back; anything else has its media volume set and restored.",
+    "How loud the answer is on the remote speakers. It does not touch this device's own level - that is Assistant volume, in Audio Output above. Sonos reads the level off the announcement; another Satellite1 has its Voice Override set and put back; anything else has its media volume set and restored.",
 
   remote_wake_chime:
     "Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to.",
@@ -89,11 +89,25 @@ export const HINTS = {
 
   wake_sound: "Plays a short chime on the speaker the moment the wake word is detected.",
 
+  // One hint for the whole group, on the first row, rather than one per wake word saying the same thing
+  // with a different name in it.
+  //
+  // Covers the whole control, because the control is now one dropdown rather than a switch and a separate
+  // assistant row that each had their own bubble. It also drops an earlier claim - "Home Assistant can
+  // change these too, and both are reading the same setting" - which was true about the stored flag and
+  // misleading about everything else: Home Assistant answers any change to a pairing by pushing the whole
+  // active set back to the device, so switching a wake word off does cost something.
+  wake_words:
+    "Which wake words this device answers to, and which assistant answers each one. Off stops it responding to that word and leaves more of the processor for the ones you do use. The assistants are the voice pipelines you have set up in Home Assistant, and Preferred follows whichever one is marked preferred there. Home Assistant keeps this pairing rather than the device, which is why it needs to be reachable to change one, and why there is room for two wake words at a time - these are the Assistant and Assistant 2 settings on this device's Home Assistant page.",
+
   wake_sensitivity:
     "How readily the wake word fires. Raise it if the device misses you from across the room; lower it if the television sets it off.",
 
+  // Names the speaker it moves, and names the other slider, because the two now sit two cards apart on
+  // one route instead of on separate ones. Whichever of the pair you are reading, it points at the
+  // other by its on-screen label rather than by the entity name Home Assistant uses.
   voice_override:
-    "Speaker volume used for assistant replies only, independent of media volume. Set to zero to follow the media volume instead.",
+    "How loud this device's own speaker is when the assistant replies, independent of media volume. Set to zero to follow the media volume instead. For the speakers you route answers to, see Remote TTS volume in Remote routing below.",
 
   speaker_channel:
     "Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want.",
@@ -145,6 +159,36 @@ export const TEXT = {
 
   no_devices:
     "Only this device. Other Satellite1s on your network will appear here once they are running firmware with this web app.",
+
+  // Shown in place of the transcript, not instead of the card. The card carries the assistant's phase in
+  // its header, so it has something to say from the moment the device answers; this only fills the space
+  // where the lines will go.
+  nothing_said: "Nothing said yet. What you say and what it replies will appear here.",
+
+  // Only when every wake word is off. Phrased as a consequence rather than a warning: it is a reasonable
+  // thing to want, and the way back is the switches directly above it.
+  no_wake_words: "No wake words are on, so the device will not respond to being spoken to. The mute button and Home Assistant still work.",
+
+  // The first two entries of each wake word's dropdown, both labels for values rather than pipeline names.
+  // `no_wake_word` is what Home Assistant stores in a slot holding nothing, and `preferred` means whichever
+  // pipeline Home Assistant has been told to prefer. Labelled rather than matched by name so that a
+  // customer who calls one of their own pipelines "Preferred" still gets two distinguishable entries.
+  pipeline_off: "Off",
+  pipeline_preferred: "Preferred",
+
+  // Shown under the wake words when the assistant selects could not be read: Home Assistant unreachable,
+  // too old, or its four selects disabled. Says which half of the card is affected, because whether the
+  // device listens is its own to answer and that half keeps working - as a switch, since with no
+  // assistants to list a dropdown would have nothing in it.
+  assistant_needs_ha:
+    "Home Assistant keeps which assistant answers each wake word, so that cannot be set from here until it is reachable. Turning a wake word on and off is the device's own setting and still works.",
+
+  // Only with three or more wake words on at once, which needs a build with more models than this product
+  // ships. Home Assistant has two pairings, and sends anything it cannot match to the first one - so the
+  // surplus words work and share an assistant, and their dropdowns show the shared answer rather than
+  // whatever was last picked for them.
+  assistant_slots_full:
+    "Home Assistant can pair only two wake words with an assistant of their own. The rest are answered by the first one's assistant, which is what their dropdowns show.",
 
   confirm: "Confirm",
   cancel: "Cancel",

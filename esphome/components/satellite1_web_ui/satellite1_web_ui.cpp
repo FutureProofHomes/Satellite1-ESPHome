@@ -48,6 +48,18 @@ void Satellite1WebUI::loop() {
   // second, and each one would otherwise re-run every routing check.
   if (this->selection_changed_.exchange(false))
     this->selection_change_trigger_.trigger();
+
+  // One per iteration rather than draining the queue, so the automation cannot be re-entered. Choosing
+  // an assistant for a wake word can be up to four writes, which then land over four iterations.
+  SelectWrite pending;
+  if (this->handler_.take_select_write(pending))
+    this->ha_select_trigger_.trigger(pending.entity, pending.option);
+
+#ifdef USE_MICRO_WAKE_WORD
+  // Not a trigger, because nothing in YAML has to happen - this is the whole of the work. It runs here
+  // rather than in the endpoint because enabling a model writes NVS and races the inference task.
+  this->handler_.apply_wake_word_requests();
+#endif
 }
 
 void Satellite1WebUI::set_ha_payload(const std::string &json, int rung) {
