@@ -105,6 +105,62 @@ function writeOpen(key, open) {
 }
 
 /**
+ * The disclosure chevron, drawn rather than typed.
+ *
+ * This was U+25BE and U+25B8 in three places. Nothing here ships a webfont - the device has no network
+ * at runtime and no CDN is allowed - so those glyphs came from whatever the browser happened to have
+ * installed, and on the phone they arrived as a mark a few pixels wide that read as a speck of dirt
+ * rather than a control. Geometry renders identically everywhere, which a codepoint does not.
+ *
+ * Points right by default and rotates down when `down` is set, so a collapsed row and an expanded one
+ * are told apart by the same shape turning rather than by two different characters.
+ */
+export function Chevron({ down, up, cls }) {
+  return (
+    <svg
+      class={`chev${down ? " down" : ""}${up ? " up" : ""}${cls ? ` ${cls}` : ""}`}
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.9"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4.2 2.4 8.3 6l-4.1 3.6" />
+    </svg>
+  );
+}
+
+/**
+ * An arrow, which is a chevron with a shaft, and the distinction is the whole point of it existing.
+ *
+ * A chevron on a control means "this opens, here" - it points at the disclosure and flips when open. An
+ * arrow means "this takes you somewhere else". The sensor chips need both meanings in one row: three of
+ * them open an editor underneath and one of them is a link to another route, and drawing them with the
+ * same glyph is what made the row read as four identical things that behave differently.
+ *
+ * Shares .chev for its box so the two line up on the same 12px grid.
+ */
+export function Arrow({ cls }) {
+  return (
+    <svg
+      class={`chev${cls ? ` ${cls}` : ""}`}
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.9"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M1.9 6h8" />
+      <path d="M6.6 2.9 9.9 6l-3.3 3.1" />
+    </svg>
+  );
+}
+
+/**
  * `collapsible` opts a card in, and needs a stable `name` to remember itself by - deliberately not the
  * title, which is copy and will be reworded.
  *
@@ -126,7 +182,7 @@ export function Card({ title, hint, right, children, collapsible, name, defaultO
         <h2>
           {collapsible ? (
             <button class="card-t" aria-expanded={open} onClick={toggle}>
-              <span class="caret-s">{open ? "\u25BE" : "\u25B8"}</span>
+              <Chevron down={open} cls="caret-s" />
               <span>{title}</span>
             </button>
           ) : (
@@ -157,7 +213,7 @@ export function Row({ label, hint, children, sub }) {
 }
 
 /** A labelled read-only fact. The unit is separated so it can be dimmed. */
-export function Fact({ label, value, unit, hint, tone }) {
+export function Fact({ label, value, unit, hint, tone, sub }) {
   return (
     <div class="fact">
       <div class="fact-label">
@@ -168,6 +224,10 @@ export function Fact({ label, value, unit, hint, tone }) {
         {value}
         {unit && <span class="fact-unit">{unit}</span>}
       </div>
+      {/* Detail that belongs to this reading rather than beside it. The address and MAC used to sit in a
+          strip along the bottom of the Device card, which put them equally close to every fact above and so
+          to none of them; under "Network Type" they are obviously the address on that network. */}
+      {sub && <div class="fact-sub">{sub}</div>}
     </div>
   );
 }
@@ -216,7 +276,7 @@ export function Slider({ value, min, max, step, disabled, format, onCommit }) {
           onCommit(v);
         }}
       />
-      <span class="slider-val mono">{format ? format(shown) : shown}</span>
+      <span class="slider-val num">{format ? format(shown) : shown}</span>
     </div>
   );
 }

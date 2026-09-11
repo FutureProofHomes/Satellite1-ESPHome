@@ -4,11 +4,11 @@
  * Media is absent rather than greyed out. It needs the Home Assistant data layer, and a permanently
  * disabled card teaches people the app is broken.
  */
-import { useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 
-import { HINTS } from "../copy.js";
+import { HINTS, PRESENCE } from "../copy.js";
 import { entity, pathFor, PHASE, post, useVoice } from "../lib/device.js";
-import { Card, Missing, Row, Select, Slider, Toggle } from "../ui.jsx";
+import { Arrow, Card, Chevron, Hint, Missing, Row, Select, Slider, Toggle } from "../ui.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Sensor pills, with calibration on the pill itself                   */
@@ -21,44 +21,73 @@ import { Card, Missing, Row, Select, Slider, Toggle } from "../ui.jsx";
  * which is the only presentation in which "shows" being wrong is obviously the offset's fault.
  */
 function Pill({ id, open, setOpen, label, value }) {
+  const on = open === id;
   return (
-    <button class={`pill${open === id ? " on" : ""}`} onClick={() => setOpen(open === id ? null : id)}>
-      <span class={`pill-v${String(value).length > 8 ? " sm" : ""}`}>{value}</span>
-      <span class="pill-l">
-        {label}
-        <span class="accent"> &#9998;</span>
-      </span>
+    <button class={`pill${on ? " on" : ""}`} onClick={() => setOpen(on ? null : id)}>
+      <span class="pill-v">{value}</span>
+      <span class="pill-l">{label}</span>
+      {/* Under the label, not beside it. This was a pencil next to the words, and spelled out
+          "Temperature ✎" wants 66px against the 60px a quarter of a 360px screen gives it - so the glyph
+          wrapped to its own line on three chips of four and stayed inline on the fourth, which read as a
+          rendering fault rather than as an affordance. On its own line it cannot do that at any width.
+          Points down at the editor it opens and flips up while it is open, so the chip says which of the
+          four is responsible for the box underneath. */}
+      <Chevron down={!on} up={on} cls="pill-c" />
     </button>
   );
 }
 
-function Editor({ title, raw, unit, digits, step, offset, offsetPath, onClose }) {
+function Editor({ title, hint, raw, unit, digits, step, offset, offsetPath, onClose }) {
+  const box = useRef(null);
+
   const bump = (delta) => {
     const next = Number((offset + delta).toFixed(digits + 1));
     post(`${offsetPath}?value=${next}`);
   };
 
+  /**
+   * Dismissed by looking away from it, which is what replaced a Done button.
+   *
+   * There is nothing to confirm: every press has already been written to the device, so Done only ever
+   * meant "stop showing me this". Capture, and pointerdown rather than click, for the reason Hint does
+   * it - a tap that closes this should not also operate whatever sits underneath.
+   *
+   * The pills are excluded so the one that opened this can still toggle it shut without this handler and
+   * the pill's own onClick both firing and cancelling out.
+   */
+  useEffect(() => {
+    const away = (e) => {
+      if (!box.current?.contains(e.target) && !e.target.closest?.(".pills")) onClose();
+    };
+    document.addEventListener("pointerdown", away, true);
+    return () => document.removeEventListener("pointerdown", away, true);
+  }, [onClose]);
+
   return (
-    <div class="editor">
+    <div class="editor" ref={box}>
+      {/* Two hints, because there are two different questions and they have different answers.
+          The title's is about this particular reading - why it looks wrong, or what it is good for - and it
+          is per sensor. The offset row's is how calibration works at all, which is the same sentence for
+          every sensor and would be three-way duplication if it were folded into each one. */}
       <div class="row">
         <span class="grow strong">{title}</span>
-        <button class="link" onClick={onClose}>
-          Done
-        </button>
+        {hint && <Hint text={hint} />}
       </div>
       <div class="row sm">
         <span class="grow dim">sensor reads</span>
-        <span class="mono">
+        <span class="num">
           {raw.toFixed(digits)}
           {unit}
         </span>
       </div>
       <div class="row sm">
-        <span class="grow dim">offset</span>
+        <span class="dim">offset</span>
+        <Hint text={HINTS.calibrate} />
+        <span class="grow" />
         <button class="btn sq" onClick={() => bump(-step)}>
           &minus;
         </button>
-        <span class="mono w44">
+        <span class="num w44">
           {offset > 0 ? "+" : ""}
           {offset.toFixed(digits)}
         </span>
@@ -79,8 +108,8 @@ function Editor({ title, raw, unit, digits, step, offset, offsetPath, onClose })
 }
 
 const SENSORS = [
-  { id: "temp", key: "temp", offsetKey: "temp_offset", label: "Temp", title: "Temperature", unit: "\u00B0C", digits: 1, step: 0.1, hint: HINTS.temp },
-  { id: "hum", key: "humidity", offsetKey: "humidity_offset", label: "Humid", title: "Humidity", unit: " %", digits: 0, step: 1, hint: HINTS.humidity },
+  { id: "temp", key: "temp", offsetKey: "temp_offset", label: "Temperature", title: "Temperature", unit: "\u00B0C", digits: 1, step: 0.1, hint: HINTS.temp },
+  { id: "hum", key: "humidity", offsetKey: "humidity_offset", label: "Humidity", title: "Humidity", unit: " %", digits: 0, step: 1, hint: HINTS.humidity },
   { id: "lux", key: "lux", offsetKey: "lux_offset", label: "Light", title: "Ambient Light", unit: " lx", digits: 0, step: 5, hint: HINTS.lux },
 ];
 
@@ -121,11 +150,19 @@ function SensorPills({ ctx }) {
           // Now the Presence route rather than the legacy /radar_tuner page. Still a link rather than a
           // button, so a long-press still offers "open in new tab" - someone comparing the plot against
           // what they can see in the room wants both at once.
-          <a class="pill" href="#/presence" title={module?.value ? `${module.value} settings` : "Presence"}>
-            <span class={`pill-v${String(presence.value).length > 8 ? " sm" : ""}`}>{presence.value || "\u2014"}</span>
-            <span class="pill-l">
-              Presence<span class="accent"> &#8594;</span>
-            </span>
+          <a
+            class="pill"
+            href="#/presence"
+            // The firmware's full wording lives here, since the chip itself shows the short form.
+            title={[presence.value, module?.value ? `${module.value} settings` : "Presence"].filter(Boolean).join(" \u2014 ")}
+          >
+            <span class="pill-v">{PRESENCE[presence.value] || presence.value || "\u2014"}</span>
+            <span class="pill-l">Presence</span>
+            {/* An arrow rather than the chevron its three neighbours carry, because this chip leaves the
+                page instead of opening a box below it. Same position and same grey, so the row still reads
+                as one set of chips; the shaft is the only thing that differs, and it is the thing that
+                means "elsewhere". */}
+            <Arrow cls="pill-c" />
           </a>
         )}
       </div>
@@ -133,6 +170,7 @@ function SensorPills({ ctx }) {
       {openRow && openRow.offset !== null && (
         <Editor
           title={openRow.title}
+          hint={openRow.hint}
           raw={openRow.value - openRow.offset}
           unit={openRow.unit}
           digits={openRow.digits}
@@ -143,12 +181,6 @@ function SensorPills({ ctx }) {
         />
       )}
 
-      {!open && (
-        <p class="pills-foot">
-          Tap a reading to calibrate it.
-          {presence ? ` Presence opens the ${module?.value || "radar"} settings.` : ""}
-        </p>
-      )}
     </div>
   );
 }
@@ -253,9 +285,6 @@ function Leds({ ctx }) {
         />
       </Row>
       <Wheel hue={hue} sat={sat} disabled={!on} onPick={pick} />
-      <p class="dim xs center">
-        Tap the wheel to set a colour. Hue around the edge, whiter towards the middle.
-      </p>
     </Card>
   );
 }
@@ -345,7 +374,7 @@ function Timers({ voice }) {
             {!t.active && <span class="ctl-sub">paused</span>}
           </div>
           <div class="ctl-body">
-            <span class={`mono lg${t.active ? "" : " dim"}`}>{mmss(t.left)}</span>
+            <span class={`num lg${t.active ? "" : " dim"}`}>{mmss(t.left)}</span>
           </div>
         </div>
       ))}
@@ -405,6 +434,56 @@ function Speaker({ ctx }) {
 
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* Physical buttons                                                    */
+/* ------------------------------------------------------------------ */
+
+const BUTTONS = [
+  ["btn_up", "Volume up"],
+  ["btn_down", "Volume down"],
+  ["btn_mute", "Mute"],
+  ["btn_action", "Action"],
+];
+
+/**
+ * Live button states, so someone can tell a stuck button from a dead one without a serial cable.
+ * The action button's press type comes from the event entity, which is the only way to see that a
+ * double press is being registered as two singles.
+ *
+ * This was on Diagnostics. It reads as diagnostics only if you think of the device as a computer; to
+ * anyone holding one it answers "is this button working", about the same volume and mute the cards above
+ * it control in software. Last on the route because it is the only card here you operate by putting the
+ * phone down and touching the device.
+ */
+function Buttons({ ctx }) {
+  const ev = entity(ctx, "action_button");
+  const [lastPress, setLastPress] = useState(null);
+
+  // event entities publish the press type in `event_type` and hold no state, so the last one seen
+  // has to be latched here rather than read back.
+  useEffect(() => {
+    if (ev?.event_type) setLastPress(ev.event_type.replace(/_/g, " "));
+  }, [ev?.event_type]);
+
+  const rows = BUTTONS.map(([key, label]) => [label, entity(ctx, key)]).filter(([, e]) => e);
+  if (!rows.length) return null;
+
+  return (
+    <Card title="Buttons" right={lastPress && <span class="dim xs">last: {lastPress}</span>}>
+      <div class="btnstates">
+        {rows.map(([label, e]) => (
+          <span key={label} class={`bstate${e.value ? " on" : ""}`}>
+            {label}
+          </span>
+        ))}
+      </div>
+      <p class="dim xs">Press a button on the device; it lights up here.</p>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
 export function Controls({ ctx }) {
   const voice = useVoice(true);
 
@@ -418,6 +497,7 @@ export function Controls({ ctx }) {
       <Transcript voice={voice} />
       <Speaker ctx={ctx} />
       <Leds ctx={ctx} />
+      <Buttons ctx={ctx} />
     </>
   );
 }

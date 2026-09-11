@@ -7,12 +7,13 @@
  */
 import { useEffect, useState } from "preact/hooks";
 
-import { TEXT } from "./copy.js";
-import { useDeviceState, useEvents, useHaData, useSelection } from "./lib/device.js";
+import { HINTS, TEXT } from "./copy.js";
+import { deviceIdentity, useDeviceState, useEvents, useHaData, useSelection } from "./lib/device.js";
 import { Config } from "./routes/config.jsx";
 import { Controls } from "./routes/controls.jsx";
 import { Diagnostics } from "./routes/diagnostics.jsx";
 import { Presence } from "./routes/presence.jsx";
+import { Chevron, Hint } from "./ui.jsx";
 
 /**
  * All four of the canvas's routes.
@@ -45,11 +46,70 @@ function useHashRoute() {
 /* Overlays                                                            */
 /* ------------------------------------------------------------------ */
 
-function NavPane({ route, go, name, onClose }) {
+/**
+ * Light or dark, chosen by hand and remembered per browser.
+ *
+ * One icon that toggles, showing the theme it will switch to rather than the one in use - a moon while
+ * the room is light. Both readings of a lone sun-or-moon icon are common enough that neither is obvious,
+ * so the accessible name states the action outright instead of naming a state.
+ *
+ * The attribute is already on the root element by the time this mounts - index.html sets it from
+ * localStorage in <head> so there is no flash - so this reads the element rather than storage, which
+ * keeps the two from disagreeing if the write below ever fails.
+ *
+ * Guarded for the same reason the collapse state in ui.jsx is: localStorage throws rather than no-ops
+ * with site data blocked, and forgetting a preference is survivable where a white screen is not.
+ */
+function ThemeSwitch() {
+  const [theme, setTheme] = useState(() => (document.documentElement.dataset.theme === "dark" ? "dark" : "light"));
+  const dark = theme === "dark";
+  const label = dark ? TEXT.theme_to_light : TEXT.theme_to_dark;
+
+  const toggle = () => {
+    const next = dark ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    setTheme(next);
+    try {
+      localStorage.setItem("sat1.theme", next);
+    } catch {
+      /* Not remembering it is survivable; the page is already in the right theme. */
+    }
+  };
+
   return (
-    <div class="scrim" onClick={onClose}>
+    <button class="icon theme" aria-label={label} title={label} onClick={toggle}>
+      {dark ? (
+        <svg class="theme-i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <circle cx="8" cy="8" r="3.1" />
+          <path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3.1 3.1l1.1 1.1M11.8 11.8l1.1 1.1M12.9 3.1l-1.1 1.1M4.2 11.8l-1.1 1.1" />
+        </svg>
+      ) : (
+        <svg class="theme-i" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M13.9 10.4A6.1 6.1 0 0 1 5.6 2.1 6.5 6.5 0 1 0 13.9 10.4Z" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+/**
+ * The route menu, a drawer that slides in under the top bar.
+ *
+ * Always mounted and moved with a transform, rather than added and removed. An element unmounted the moment
+ * it closes cannot animate on the way out - it is gone from the DOM before the transition can run - so the
+ * usual fix is either to keep it and translate it, or to hold the unmount behind a timer. This is the
+ * cheaper of the two and has no state to get out of step.
+ *
+ * Hidden with visibility as well as opacity, so its buttons leave the tab order while it is shut. A menu
+ * that cannot be seen but can still be tabbed into is a worse bug than no animation.
+ *
+ * It no longer carries a heading. It used to repeat the device name that is already in the bar directly
+ * above it, which is now only inches away since the drawer starts below the bar rather than over it.
+ */
+function NavPane({ route, go, open, onClose }) {
+  return (
+    <div class={`scrim navscrim${open ? " on" : ""}`} onClick={onClose} aria-hidden={!open}>
       <nav class="navpane" onClick={(e) => e.stopPropagation()}>
-        <div class="navpane-head">{name}</div>
         {ROUTES.map((r) => (
           <button
             key={r.id}
@@ -75,26 +135,34 @@ function NavPane({ route, go, name, onClose }) {
  * paid on every device to populate a menu. So the sheet is honest about being a list of one, and
  * says what would make others appear.
  */
-function SwitcherSheet({ device, routeLabel, onClose }) {
+function SwitcherSheet({ device, label, area, onClose }) {
+  const haOn = !!device?.ha;
+  const haText = haOn ? TEXT.ha_connected : TEXT.ha_disconnected;
   return (
     <div class="scrim" onClick={onClose}>
       <div class="sheet" onClick={(e) => e.stopPropagation()}>
         <div class="sheet-head">
-          <span>Your Satellite1s</span>
+          <span>Satellite1 Device Switcher</span>
+          <Hint text={HINTS.switcher} />
           <button class="x" aria-label="Close" onClick={onClose}>
             &#10005;
           </button>
         </div>
         <div class="peer here">
           <div class="row">
-            <span class="dot accent" />
-            <span class="grow">{device?.friendly_name || device?.name || "This device"}</span>
-            <span class="dim xs">you are here</span>
+            {/* Home Assistant, which is the meaning this dot inherited when it left the top bar. Not the
+                device's own reachability: this row is the device serving the page, so that is always true
+                and would be a green light that could never go out. Green when connected and neutral when
+                not, so the colour is the signal rather than its presence. */}
+            <span class={`dot${haOn ? " ok" : ""}`} title={haText} aria-label={haText} />
+            <span class="grow">{label || "This device"}</span>
           </div>
-          <div class="peer-sub">{device?.ip || ""}</div>
+          {/* Address and room, which are the two things that tell one Satellite1 from another once the
+              sheet lists more than this one. The separator is dropped rather than left dangling when Home
+              Assistant has not placed the device in an area. */}
+          <div class="peer-sub">{[device?.ip, area].filter(Boolean).join(" \u2502 ")}</div>
         </div>
         <p class="sheet-foot">{TEXT.no_devices}</p>
-        <p class="sheet-foot">You will stay on {routeLabel} when you switch.</p>
       </div>
     </div>
   );
@@ -125,6 +193,9 @@ export function App() {
   const active = ROUTES.find((r) => r.id === route) || ROUTES[0];
   const View = active.view;
   const ctx = { device, deviceError, ...events, ...ha, ...selection };
+  // Resolved once here rather than in the three places that show it, so the bar, the nav pane and the
+  // switcher sheet cannot end up disagreeing about what this device is called.
+  const { name: label, area } = deviceIdentity(device, ha.ha);
 
   return (
     <div class="app">
@@ -132,18 +203,21 @@ export function App() {
         <button class="icon" aria-label="Menu" onClick={() => setNav(true)}>
           <span class="burger" />
         </button>
+        {/* The caret has to sit against the name for the two to read as one control. It used to be a
+            .grow span here, which pushed the caret to the far edge of the bar next to the status dot,
+            where it looked like a stray mark rather than "there is a menu on this". */}
         <button class="title" onClick={() => setSwitcher(true)}>
-          <span class="grow">{device?.friendly_name || device?.name || "Satellite1"}</span>
-          <span class="caret">&#9662;</span>
+          {/* A placeholder for the one paint before /api/sat1/state answers, not a prefix - the name is
+              whatever deviceLabel returns, on its own, so nothing here can double it up. */}
+          <span class="tname">{label || "Satellite1"}</span>
+          {/* Always down: this opens a sheet, and a dropdown that points sideways reads as a link. */}
+          <Chevron down cls="caret" />
         </button>
-        {/* Home Assistant, not the device stream. Whether the device itself is reachable is already
-            obvious from the page working at all, whereas a missing smart home is the thing that
-            explains why Media is not here and why the assistant does not answer. */}
-        <span
-          class={`dot${device?.ha ? " ok" : ""}`}
-          title={device?.ha ? TEXT.ha_connected : TEXT.ha_disconnected}
-          aria-label={device?.ha ? TEXT.ha_connected : TEXT.ha_disconnected}
-        />
+        {/* The Home Assistant dot used to sit here. It has moved into the switcher sheet, onto the row for
+            the device it describes, which is where it can say the same thing about a peer later without
+            the bar growing a dot per device. Diagnostics still carries the sentence explaining what a
+            missing connection costs. */}
+        <ThemeSwitch />
       </header>
 
       {!events.connected && <div class="banner warn">{TEXT.stream_lost}</div>}
@@ -152,8 +226,11 @@ export function App() {
         <View ctx={ctx} />
       </main>
 
-      {nav && <NavPane route={route} go={go} name={device?.friendly_name || device?.name || "Satellite1"} onClose={() => setNav(false)} />}
-      {switcher && <SwitcherSheet device={device} routeLabel={active.label} onClose={() => setSwitcher(false)} />}
+      {/* Mounted whether or not it is open - see NavPane. */}
+      <NavPane route={route} go={go} open={nav} onClose={() => setNav(false)} />
+      {switcher && (
+        <SwitcherSheet device={device} label={label} area={area} onClose={() => setSwitcher(false)} />
+      )}
     </div>
   );
 }

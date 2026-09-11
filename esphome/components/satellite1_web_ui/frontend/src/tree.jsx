@@ -22,21 +22,38 @@
  * knowing area membership, which is what the two derived switches read.
  */
 import { useState } from "preact/hooks";
+import { Chevron } from "./ui.jsx";
 
-/** ☐ ☑ ◪ as a control rather than an input: tri-state needs a ref on a real checkbox, and three
- *  glyphs cost nothing next to the CSS a custom box would. */
+/**
+ * A tri-state box, still a button rather than an input: an indeterminate checkbox needs a ref to set the
+ * property, and there is no attribute for it.
+ *
+ * Drawn rather than typed, for the reason ui.jsx's Chevron is. This used to be U+2610, U+2611 and U+25EA,
+ * and with no webfont on the device those came from whatever the browser had - U+25EA in particular, the
+ * half-filled square that carried the whole "some of this area is selected" meaning, is obscure enough to
+ * be missing from most system fonts and arrives as an empty rectangle. A tri-state control whose third
+ * state renders as a blank box is worse than no third state.
+ *
+ * Empty outline, filled with a tick, filled with a dash: the shapes people already read as off, all and
+ * some. The mark is coloured from CSS rather than a fill attribute so it follows the theme.
+ */
 function Check({ state, disabled, onClick, label }) {
-  const glyph = state === "on" ? "\u2611" : state === "mixed" ? "\u25EA" : "\u2610";
+  const on = state === "on";
+  const mixed = state === "mixed";
   return (
     <button
-      class={`cb${disabled ? " dim" : ""}`}
+      class={`cb ${state}${disabled ? " dim" : ""}`}
       role="checkbox"
-      aria-checked={state === "on" ? "true" : state === "mixed" ? "mixed" : "false"}
+      aria-checked={on ? "true" : mixed ? "mixed" : "false"}
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
     >
-      {glyph}
+      <svg class="cb-i" viewBox="0 0 16 16" aria-hidden="true">
+        <rect class="cb-box" x="1.6" y="1.6" width="12.8" height="12.8" rx="3.4" />
+        {on && <path class="cb-mark" d="M4.5 8.2 6.9 10.6l4.6-5.2" />}
+        {mixed && <path class="cb-mark" d="M4.8 8h6.4" />}
+      </svg>
     </button>
   );
 }
@@ -54,7 +71,7 @@ function Group({ label, count, state, expanded, onExpand, onBulk, disabled, chil
           aria-expanded={expanded ? "true" : "false"}
           onClick={onExpand}
         >
-          {expanded ? "\u25BE" : "\u25B8"}
+          <Chevron down={expanded} />
         </button>
         <Check state={state} disabled={disabled} onClick={onBulk} label={label} />
         <span class="grow">{label}</span>
@@ -63,12 +80,6 @@ function Group({ label, count, state, expanded, onExpand, onBulk, disabled, chil
       {expanded && <div class="tree-ps">{children}</div>}
     </div>
   );
-}
-
-/** Empty sets rather than undefined, so a caller that has not loaded a selection yet renders an empty
- *  tree instead of throwing. */
-export function emptySel() {
-  return { areas: new Set(), extra: new Set(), excluded: new Set() };
 }
 
 /**

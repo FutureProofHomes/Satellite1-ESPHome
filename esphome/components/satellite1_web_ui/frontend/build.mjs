@@ -47,7 +47,12 @@ const css = await esbuild.build({
   entryPoints: ["src/app.css"],
 });
 
+// HTML comments are stripped before the CSS and JS go in, and not after: minified JS can legitimately
+// contain "<!--" inside a string literal, and a regex run over the assembled document could eat it.
+// esbuild already drops comments from both other languages, so without this the only developer prose
+// that reaches flash would be whatever is in index.html - which is where the least obvious code lives.
 const html = readFileSync(join(here, "src", "index.html"), "utf8")
+  .replace(/\n?[ \t]*<!--[\s\S]*?-->/g, "")
   .replace("/*%CSS%*/", () => css.outputFiles[0].text.trimEnd())
   .replace("/*%JS%*/", () => js.outputFiles[0].text.trimEnd());
 

@@ -16,10 +16,12 @@
  * reasons applies and what to do about it, while the sliders keep working, because they are device
  * state that applies the moment Home Assistant comes back.
  */
+import { useEffect } from "preact/hooks";
+
 import { HINTS, TEXT } from "../copy.js";
 import { HA_NEVER, entity, pathFor, post } from "../lib/device.js";
 import { TargetTree } from "../tree.jsx";
-import { Btn, Card, Missing, Row, Slider, Toggle } from "../ui.jsx";
+import { Card, Missing, Row, Slider, Toggle } from "../ui.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Reading and writing the entity-backed controls                      */
@@ -59,7 +61,11 @@ function writeNumber(ctx, key, value) {
  * the two whole-my-area switches, which is why the message stays.
  */
 function haProblem(ctx, ha) {
-  if (!ha) return null;
+  // No response yet, which is a wait rather than a fault, and ha_pending is exactly that sentence. This
+  // used to return null, which said "no problem, go ahead and read ha.d" about a payload that was not
+  // there - so whether the route crashed came down to whether /api/sat1/sel answered before
+  // /api/sat1/ha, since the selection is what gates the first render.
+  if (!ha) return TEXT.ha_pending;
   if (ha.rung === -1) return TEXT.ha_refused;
   if (ha.age === HA_NEVER) return ctx.device?.ha ? TEXT.ha_pending : TEXT.ha_never;
   if (!ha.d) return TEXT.ha_never;
@@ -69,19 +75,21 @@ function haProblem(ctx, ha) {
   return null;
 }
 
-function HaState({ problem, ha, refresh, refreshing }) {
+/**
+ * Only the problems now. The age line and the Refresh button that used to sit under them are gone: the
+ * sync happens once when the app loads (see Config), so there is nothing here for anyone to operate, and
+ * a timestamp on a list of speakers is an answer to a question nobody was asking.
+ *
+ * Renders nothing at all rather than an empty box, which would otherwise leave its own margins behind
+ * above every tree.
+ */
+function HaState({ problem, ha }) {
+  const truncated = !problem && ha?.d?.t === 1;
+  if (!problem && !truncated) return null;
   return (
     <div class="ctl-sub habox">
       {problem && <div class="banner warn">{problem}</div>}
-      {!problem && ha?.d?.t === 1 && <div class="banner warn">{TEXT.ha_truncated}</div>}
-      <div class="harow">
-        <span class="dim xs">
-          {ha && ha.age !== HA_NEVER ? `From Home Assistant ${ha.age}s ago` : ""}
-        </span>
-        <Btn onClick={refresh} disabled={refreshing}>
-          {refreshing ? TEXT.ha_refreshing : TEXT.ha_refresh}
-        </Btn>
-      </div>
+      {truncated && <div class="banner warn">{TEXT.ha_truncated}</div>}
     </div>
   );
 }
@@ -90,30 +98,19 @@ function HaState({ problem, ha, refresh, refreshing }) {
 /* Remote routing                                                      */
 /* ------------------------------------------------------------------ */
 
-/**
- * What the Remote TTS volume slider actually does, which is three different things.
+/*
+ * The three mechanisms behind the Remote TTS volume slider - Sonos reading the level off the announcement,
+ * another Satellite1 having its Voice Override set and put back, everything else having its media volume
+ * set and restored - are now in HINTS.remote_tts_volume rather than a paragraph under the slider. Still
+ * said somewhere, because one slider with three behaviours behind it gets reported as a bug, but said
+ * where it explains a control instead of occupying the page permanently.
  *
- * Sonos reads the level off the announcement itself. Another Satellite1 has its Voice Override set to
- * this for the duration of the answer and put back afterwards. Everything else has its media volume
- * set before the announcement and restored after. One slider with three behaviours behind it is the
- * kind of thing that gets reported as a bug, so it says so.
- *
- * Deliberately not a per-target table, which is what the plan drew. Which of the three applies depends
- * on Sonos membership and on the target's own override value, and neither is in the payload - so a
- * table would be a confident guess per row. Saying it once and accurately is better than saying it per
- * target and wrongly.
+ * Deliberately still not a per-target table, which is what the plan drew. Which of the three applies
+ * depends on Sonos membership and on the target's own override value, and neither is in the payload, so
+ * a table would be a confident guess per row.
  */
-function Mechanisms() {
-  return (
-    <p class="ctl-sub">
-      How this reaches each speaker depends on what it is. Sonos takes the level from the announcement
-      itself. Another Satellite1 has its Voice Override set to this while the answer plays, then put
-      back. Everything else has its media volume set and restored the same way.
-    </p>
-  );
-}
 
-function RemoteRouting({ ctx, ha, sel, write, refresh, refreshing }) {
+function RemoteRouting({ ctx, ha, sel, write }) {
   const vol = useEntity(ctx, "remote_tts_volume");
   const chime = useEntity(ctx, "remote_wake_chime");
 
@@ -124,13 +121,15 @@ function RemoteRouting({ ctx, ha, sel, write, refresh, refreshing }) {
   const active = sel.routing.areas.size > 0 || sel.routing.extra.size > 0;
 
   return (
-    <Card title="Remote routing">
+    <Card title="Remote routing" hint={HINTS.remote_routing}>
+      {/* "Play responses on" left it open which responses - the device also plays media, and a bare
+          "responses" next to a list of speakers reads as either. */}
       <div class="ctl-label">
-        <span>Play responses on</span>
+        <span>Play assistant responses on selected players</span>
       </div>
-      <HaState problem={problem} ha={ha} refresh={refresh} refreshing={refreshing} />
+      <HaState problem={problem} ha={ha} />
       <TargetTree
-        payload={problem ? null : ha.d}
+        payload={problem ? null : ha?.d}
         sel={sel.routing}
         onSel={(next) => write({ ...sel, routing: next })}
         local={sel.local}
@@ -150,7 +149,6 @@ function RemoteRouting({ ctx, ha, sel, write, refresh, refreshing }) {
           />
         </Row>
       )}
-      {active && <Mechanisms />}
 
       {chime.exists && (
         <Row label="Remote wake chime" hint={HINTS.remote_wake_chime}>
@@ -169,24 +167,26 @@ function RemoteRouting({ ctx, ha, sel, write, refresh, refreshing }) {
 /* Area ducking                                                        */
 /* ------------------------------------------------------------------ */
 
-function AreaDucking({ ctx, ha, sel, write, refresh, refreshing }) {
+function AreaDucking({ ctx, ha, sel, write }) {
   const vol = useEntity(ctx, "duck_volume");
 
   const problem = haProblem(ctx, ha);
   const active = sel.duck.areas.size > 0 || sel.duck.extra.size > 0;
 
   return (
-    <Card title="Area ducking">
+    <Card title="Area ducking" hint={HINTS.area_ducking}>
+      {/* Was "Quieten while talking", which was wrong as well as vague: the duck starts at the wake word
+          and holds until the answer ends, so it is also quiet while the device listens. */}
       <div class="ctl-label">
-        <span>Quieten while talking</span>
+        <span>Lower the volume on selected players upon wake word detection</span>
       </div>
-      <HaState problem={problem} ha={ha} refresh={refresh} refreshing={refreshing} />
+      <HaState problem={problem} ha={ha} />
       {/* No Local Speaker row: this device's own volume while it is talking is the voice level, which
           lives on Controls, and its own player is filtered out of the payload anyway. Every area in
           the house is offered, not just this device's own - ducking a room this device is not in is a
           deliberate capability of the redesign rather than a side effect. */}
       <TargetTree
-        payload={problem ? null : ha.d}
+        payload={problem ? null : ha?.d}
         sel={sel.duck}
         onSel={(next) => write({ ...sel, duck: next })}
         local={null}
@@ -211,8 +211,30 @@ function AreaDucking({ ctx, ha, sel, write, refresh, refreshing }) {
 
 /* ------------------------------------------------------------------ */
 
+/**
+ * Whether this page load has already asked Home Assistant for a fresh list.
+ *
+ * Module scope, not component state, and deliberately not reset on unmount: the sync is once per load of
+ * the app, so switching to Diagnostics and back does not ask again. Reloading the page is the gesture that
+ * means "look again", and it clears this by definition.
+ *
+ * The sync matters because GET /api/sat1/ha returns the device's cached copy. The device only re-asks
+ * Home Assistant 5s after the native API connects, or when something POSTs /api/sat1/ha/refresh - there is
+ * no interval. Without this, a speaker added in Home Assistant would not appear here until Home Assistant
+ * reconnected or the device rebooted, no matter how many times the page was reloaded.
+ */
+let askedThisLoad = false;
+
 export function Config({ ctx }) {
-  const { ha, haRefresh, haRefreshing, sel, selError, selWrite } = ctx;
+  const { ha, haRefresh, sel, selError, selWrite } = ctx;
+
+  useEffect(() => {
+    if (askedThisLoad) return;
+    askedThisLoad = true;
+    haRefresh();
+    // haRefresh is stable for the life of the app and the guard above makes this run once regardless.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (!ctx.device) return <Missing what="the device" />;
   // Distinct from a device that is not there: the shell is up, so this is the selection endpoint
@@ -227,17 +249,8 @@ export function Config({ ctx }) {
         ha={ha}
         sel={sel}
         write={selWrite}
-        refresh={haRefresh}
-        refreshing={haRefreshing}
       />
-      <AreaDucking
-        ctx={ctx}
-        ha={ha}
-        sel={sel}
-        write={selWrite}
-        refresh={haRefresh}
-        refreshing={haRefreshing}
-      />
+      <AreaDucking ctx={ctx} ha={ha} sel={sel} write={selWrite} />
     </>
   );
 }

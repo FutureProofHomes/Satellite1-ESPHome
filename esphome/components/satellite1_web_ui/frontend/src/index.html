@@ -3,8 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="color-scheme" content="dark light">
+<meta name="color-scheme" content="light dark">
 <title>Satellite1</title>
+<!-- Applies the remembered theme before the stylesheet paints. In <head> and not in main.jsx on
+     purpose: the app script is at the end of <body>, and setting the attribute there is late enough
+     that a phone remembering dark can show a white background first. Inline and tiny for the same
+     reason - a separate request would be a second round trip on a seven-socket server.
+     Light is the default when nothing is stored. localStorage throws rather than no-ops with site
+     data blocked, so the whole thing is guarded; the cost of failure is the default theme. -->
+<script>try{var t=localStorage.getItem("sat1.theme");document.documentElement.dataset.theme=t==="dark"?"dark":"light"}catch(e){}</script>
 <style>/*%CSS%*/</style>
 </head>
 <body>

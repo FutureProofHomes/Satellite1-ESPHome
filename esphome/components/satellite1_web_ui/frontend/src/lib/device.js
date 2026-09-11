@@ -92,6 +92,40 @@ export const HA_NEVER = -1;
 const HA_STALE_S = 60;
 
 /**
+ * What to call this device and which room it is in, preferring what its owner set in Home Assistant.
+ *
+ * The firmware cannot know the name. `App.get_friendly_name()` is the `friendly_name` substitution with
+ * the MAC suffix that `name_add_mac_suffix: true` appends, so it reads "Satellite1 c5ac00" however the
+ * device is labelled in the app people actually use. Renaming it in Home Assistant writes `name_by_user`
+ * in the device registry and never reaches the firmware.
+ *
+ * So it arrives through the payload web_ui_ha.yaml was already sending: every FutureProofHomes device in
+ * every area, as [model, name, area, mac, version]. Matching on the MAC and not on the name is the whole
+ * point, since the name is the thing that differs - and it is the same way the device finds itself in
+ * `self_area_jinja`. Compared lowercased because the two sides format it differently: the device prints it
+ * uppercase through get_mac_address_pretty_into_buffer and Home Assistant stores its `connections`
+ * lowercase, so a plain equality test is a bug that only appears on hardware.
+ *
+ * Reading the area off the matched row rather than off the payload's own `area` field, because that field
+ * is this device's area specifically, and this wants to keep working unchanged when the sheet grows a list
+ * of peers with a row each. Falls back to it, since the two agree for this device.
+ *
+ * Both fall back to what the firmware knows, which is what shows for the paint before the payload lands
+ * and for as long as Home Assistant is not connected. The name is never concatenated with the firmware's:
+ * one or the other is returned, so a device called "Satellite1 Ceiling Mount" cannot come out doubled.
+ *
+ * A device Home Assistant has in no area at all is not in `dev` - it is built by walking areas - so it
+ * keeps the firmware's name. That is the same blind spot `self_area_jinja` has and the reason `ha_no_area`
+ * exists; worth knowing, not worth a second lookup.
+ */
+export function deviceIdentity(device, ha) {
+  const own = device?.friendly_name || device?.name || "";
+  const mac = device?.mac?.toLowerCase();
+  const hit = mac ? (ha?.d?.dev || []).find((d) => (d?.[3] || "").toLowerCase() === mac) : null;
+  return { name: hit?.[1] || own, area: hit?.[2] || ha?.d?.area || "" };
+}
+
+/**
  * GET /api/sat1/ha: the area, player and device tree Home Assistant rendered.
  *
  * The browser cannot ask Home Assistant itself - it has no token, and requiring one to open a

@@ -1,31 +1,137 @@
 /**
  * One stylesheet, inlined into the document by build.mjs.
  *
- * Dark by default and not themeable, because the device has no way to know the phone's preference
- * before first paint and a flash from light to dark on every load is worse than picking one. Sizes
- * are absolute rather than rem: this is a fixed-purpose control panel on a phone, and inheriting a
- * desktop browser's 20px root font would break the layout rather than scale it.
+ * Three things are worth knowing before editing it.
+ *
+ * Light is the default and dark is opt-in, both chosen by hand rather than from the phone's setting.
+ * prefers-color-scheme is deliberately not used: it would force the light block to be written twice,
+ * once in a media query and once behind the attribute, and the customer's own choice should win over
+ * the phone's anyway. index.html writes data-theme onto the root element from localStorage before this
+ * stylesheet paints anything, so there is no flash in either direction.
+ *
+ * Every radius, font size and gap comes from a scale. Before this there were 19 literal border-radius
+ * values across 9 distinct sizes and 12 distinct font sizes including four half-pixel steps, none of
+ * which was a decision anybody made - it was what a year of appending rules to the bottom of the file
+ * produced. Component dimensions are still literals, because a 38px switch or a 116px colour wheel is
+ * a size, not a step on a scale.
+ *
+ * Sizes are absolute rather than rem: this is a fixed-purpose control panel on a phone, and inheriting
+ * a desktop browser's 20px root font would break the layout rather than scale it.
  */
 
-:root {
-  --bg: #12141a;
-  --bg-elev: #1a1d26;
-  --bg-sunk: #0d0f14;
-  --fill: #22262f;
-  --fill-2: #2b303b;
-  --line: #2a2f3a;
-  --line-2: #363c49;
-  --fg: #e6e9ef;
-  --fg-2: #b6bdca;
-  --fg-3: #8b93a3;
-  --fg-4: #5f6673;
-  --accent: #3d8bfd;
-  --ok: #3fb950;
-  --warn: #d29922;
-  --err: #e5534b;
-  --r: 8px;
-  --pad: 11px;
+/* ---------------------------------------------------------------- */
+/* Tokens                                                           */
+/* ---------------------------------------------------------------- */
+
+:root,
+[data-theme="light"] {
+  --bg: #f2f4f7;
+  --bg-elev: #ffffff;
+  --bg-sunk: #f7f8fa;
+  --fill: #f0f2f5;
+  --fill-2: #e6e9ee;
+  --line: #e6e9ee;
+  --line-2: #d5dae1;
+  --fg: #12171d;
+  --fg-2: #414a56;
+  /* These three are a shade darker than they look like they want to be. On a white card the obvious
+     choices measured 4.15:1, 2.55:1 and 3.86:1 against WCAG AA, which wants 4.5 for text and 3 for the
+     faintest tier. Dark got away with the equivalents because its surfaces are further from its text. */
+  --fg-3: #656d7a;
+  --fg-4: #848d9b;
+
+  /* Light Blue 800 rather than 700. 700 is the nicer blue and fails at 3.86:1 both as a link on white
+     and under white text on a solid button, which is most of what the accent is for. */
+  --accent: #0277bd;
+  --ok: #2e7d32;
+  --warn: #b26a00;
+  --err: #c62828;
+
+  /* Anything drawn on top of --accent or --err. Was a hardcoded white in six places, which happened
+     to be right on a blue button and wrong the moment the accent moved. */
+  --on-accent: #ffffff;
+
+  /* The warn banner and the danger button used to carry five hand-mixed hex values that only worked on
+     a dark background. Tokenised so each theme can state its own, which is what made light possible. */
+  --warn-bg: #fff4e0;
+  --warn-fg: #7a4b00;
+  --warn-line: #f2ddb8;
+  --err-fg: #a32020;
+  --err-line: #f2c9c9;
+  /* The accent's equivalent, for the firmware update panel. Stated per theme rather than mixed with
+     colour-mix() or an rgba() accent: a translucent tint changes with whatever is behind it, and this sits
+     on --bg-elev on one route and would sit on --bg-sunk if it were ever reused. */
+  --accent-bg: #e8f3fa;
+
+  --knob: #ffffff;
+  --shadow: rgba(16, 24, 40, 0.1);
+  --scrim: rgba(0, 0, 0, 0.3);
+
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --bg: #111418;
+  --bg-elev: #1c2026;
+  --bg-sunk: #0b0e11;
+  --fill: #262b33;
+  --fill-2: #313842;
+  --line: #262b33;
+  --line-2: #39414c;
+  --fg: #eaeef3;
+  --fg-2: #b9c2cd;
+  --fg-3: #8b95a3;
+  --fg-4: #626c7a;
+
+  --accent: #03a9f4;
+  --ok: #4caf50;
+  --warn: #ffa726;
+  --err: #ef5350;
+
+  /* Near-black rather than white: the dark theme's accent is bright enough that white on it fails. */
+  --on-accent: #04121a;
+
+  --warn-bg: #3a2a08;
+  --warn-fg: #ffd28a;
+  --warn-line: #56400f;
+  --err-fg: #ffb0ad;
+  --err-line: #63302e;
+  --accent-bg: #0c2733;
+
+  --knob: #ffffff;
+  --shadow: rgba(0, 0, 0, 0.55);
+  --scrim: rgba(0, 0, 0, 0.5);
+
   color-scheme: dark;
+}
+
+/* The scales. Only colour changes with the theme, so these sit outside both blocks. */
+:root {
+  --r-1: 6px; /* bars, marks, hairline fills */
+  --r-2: 10px; /* controls: buttons, inputs, selects, pills */
+  --r-3: 14px; /* cards and the plot */
+  --r-pill: 999px; /* switches, dots, badges, the wheel */
+
+  --t-xs: 11px;
+  --t-s: 12px;
+  --t-m: 13px;
+  --t-l: 14px;
+  --t-xl: 17px;
+  --t-2xl: 22px;
+
+  --s-1: 6px;
+  --s-2: 9px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 22px;
+
+  /* The height of .topbar, which the nav drawer hangs directly beneath. Measured rather than derived: the
+     bar is 2 x --s-2 of padding around its tallest child, the title button, and that button's 33px comes
+     from the type scale plus its own padding rather than from any single token. Anything that needs to sit
+     under the bar adds env(safe-area-inset-top) as well, since the bar pads for the notch on top of this.
+     A test asserts the drawer's top edge meets the bar's bottom edge, so a change to the bar fails there
+     rather than drifting quietly. */
+  --bar-h: 51px;
 }
 
 * {
@@ -37,7 +143,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font: var(--t-l) / 1.5 Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
 }
@@ -46,30 +152,44 @@ a {
   color: var(--accent);
 }
 
+/* Form controls inherit neither font nor border from the page, so a rule that dresses one without
+   stating both silently gets a UA default instead - and the default is invisible in the stylesheet,
+   which is what makes it easy to ship. The sensor pills spent a release rendering in Arial for exactly
+   this reason. Every class below that sets its own font still wins on specificity; .hint-btn's serif is
+   deliberate and stays. Border is left alone here because most controls do want one. */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
 hr {
   border: 0;
   border-top: 1px solid var(--line);
-  margin: 7px 0 5px;
+  margin: var(--s-2) 0 var(--s-1);
 }
 
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11.5px;
+/* Was a monospace family two steps down in size, applied to a slider's readout, a countdown, an IP and a
+   MAC. The reason was digit stability - a percentage that changes width makes the row twitch - but a
+   different typeface is a heavy price for it, and it made a handful of values look like terminal output
+   dropped into the middle of the page. Tabular figures buy the same fixed advance width inside the font
+   already in use, so the numbers stop moving and nothing changes typeface. The log viewer keeps real
+   monospace, because that genuinely is terminal output and its column alignment carries meaning. */
+.num {
+  font-variant-numeric: tabular-nums;
 }
 .dim {
   color: var(--fg-3);
 }
 .sm {
-  font-size: 11.5px;
+  font-size: var(--t-s);
 }
 .xs {
-  font-size: 10.5px;
+  font-size: var(--t-xs);
 }
 .strong {
   font-weight: 600;
-}
-.center {
-  text-align: center;
 }
 .grow {
   flex: 1;
@@ -99,23 +219,24 @@ hr {
 /* Shell                                                            */
 /* ---------------------------------------------------------------- */
 
+/* Lifted on a shadow rather than closed with a border, like the cards below it. */
 .topbar {
   position: sticky;
   top: 0;
   z-index: 20;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 7px 9px;
-  padding-top: calc(7px + env(safe-area-inset-top));
+  gap: var(--s-1);
+  padding: var(--s-2) var(--s-3);
+  padding-top: calc(var(--s-2) + env(safe-area-inset-top));
   background: var(--bg-elev);
-  border-bottom: 1px solid var(--line);
+  box-shadow: 0 1px 3px var(--shadow);
 }
 
 .icon {
   background: none;
   border: 0;
-  padding: 6px;
+  padding: var(--s-1);
   cursor: pointer;
   line-height: 0;
 }
@@ -128,7 +249,7 @@ hr {
   width: 17px;
   height: 2px;
   background: var(--fg-2);
-  border-radius: 2px;
+  border-radius: var(--r-1);
 }
 .burger::before,
 .burger::after {
@@ -145,32 +266,57 @@ hr {
 .title {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--s-1);
   flex: 1;
   min-width: 0;
   background: none;
   border: 0;
   color: var(--fg);
-  font: 600 13px/1.2 inherit;
+  font: 600 var(--t-l) / 1.2 inherit;
   text-align: left;
   cursor: pointer;
-  padding: 4px 2px;
+  padding: var(--s-1) 2px;
+}
+/* Truncates rather than growing, so the caret stays against the name and a long friendly name cannot
+   push it, or the theme toggle, off the bar. overflow: hidden is also what lets this shrink at all:
+   a flex item's automatic minimum size is its content unless its overflow is something other than
+   visible, so without it a long name would refuse to ellipsis and would widen the bar instead. */
+.tname {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .title .grow {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Drawn by ui.jsx's Chevron, not a font glyph - see the comment there. Sized in real pixels rather than
+   from the type scale, because it is a shape now and not text: the old font-size: 11px triangle put about
+   four pixels of ink on screen, which is where "there is a menu on this" went to die. */
+.chev {
+  /* block, so it does not sit on a text baseline and drag a descender's worth of space around with it. */
+  display: block;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  transition: transform 0.12s;
+}
+.chev.down {
+  transform: rotate(90deg);
+}
+.chev.up {
+  transform: rotate(-90deg);
+}
 .caret {
-  color: var(--fg-4);
-  font-size: 10px;
+  color: var(--fg-3);
 }
 
 .dot {
   width: 8px;
   height: 8px;
-  border-radius: 5px;
-  margin-right: 4px;
+  border-radius: var(--r-pill);
+  margin-right: var(--s-1);
   background: transparent;
   border: 1px solid var(--fg-4);
   flex: none;
@@ -179,29 +325,29 @@ hr {
   background: var(--ok);
   border-color: var(--ok);
 }
-.dot.accent {
-  background: var(--accent);
-  border-color: var(--accent);
-}
+/* No .accent variant any more. It was the switcher's "this is the one you are on", which the sheet said in
+   words beside it as well - and a blue dot next to a device in a list of devices reads as a status, so it
+   competed with the green one in the bar for the same meaning. The row shows Home Assistant's state now,
+   and which device you are on is the only row there is. */
 
 .banner {
   margin: 0;
-  padding: 8px var(--pad);
-  font-size: 11.5px;
+  padding: var(--s-2) var(--s-4);
+  font-size: var(--t-s);
   color: var(--fg-2);
   background: var(--fill);
   border-bottom: 1px solid var(--line);
 }
 .banner.warn {
-  color: #f0d089;
-  background: #33280d;
-  border-color: #4d3a10;
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+  border-color: var(--warn-line);
 }
 
 .wrap {
   max-width: 720px;
   margin: 0 auto;
-  padding: 9px 9px calc(24px + env(safe-area-inset-bottom));
+  padding: var(--s-3) var(--s-3) calc(var(--s-5) + env(safe-area-inset-bottom));
 }
 
 /* ---------------------------------------------------------------- */
@@ -212,36 +358,74 @@ hr {
   position: fixed;
   inset: 0;
   z-index: 30;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--scrim);
+}
+
+/* The nav drawer's own scrim, which starts below the top bar rather than over it, so the bar stays legible
+   and the burger you just pressed does not disappear under a dark sheet.
+   Kept in the DOM at all times and animated, for the reason shell.jsx's NavPane explains. Visibility is
+   switched with a zero-length transition delayed by the fade rather than transitioned itself: discrete
+   properties flip at the halfway point, which would blank the drawer while it was still sliding out. */
+.navscrim {
+  top: calc(var(--bar-h) + env(safe-area-inset-top));
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.16s ease,
+    visibility 0s linear 0.16s;
+}
+.navscrim.on {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 0.16s ease,
+    visibility 0s;
 }
 .navpane {
   width: 172px;
   height: 100%;
   background: var(--bg-elev);
   border-right: 1px solid var(--line-2);
-  padding-top: env(safe-area-inset-top);
+  /* No safe-area padding: the notch is above the top bar, which this now sits underneath. */
+  transform: translateX(-100%);
+  transition: transform 0.16s ease;
 }
-.navpane-head {
-  padding: var(--pad);
-  font-weight: 600;
-  border-bottom: 1px solid var(--line);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.navscrim.on .navpane {
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .navscrim,
+  .navscrim.on,
+  .navpane {
+    transition: none;
+  }
 }
 .navpane-item {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 10px var(--pad);
+  padding: var(--s-2) var(--s-4);
   background: none;
   border: 0;
   color: var(--fg);
-  font: 12.5px inherit;
+  font: var(--t-m) inherit;
   cursor: pointer;
 }
 .navpane-item.on {
   background: var(--fill-2);
+}
+
+/* The theme toggle, in the top bar rather than behind the menu: one icon costs almost no room, and a
+   control panel that is uncomfortable to look at in the current light should not require finding a menu
+   to fix. Sized and coloured to match the burger at the other end of the bar. */
+.theme {
+  color: var(--fg-2);
+  flex: none;
+}
+.theme-i {
+  display: block;
+  width: 18px;
+  height: 18px;
 }
 
 .sheet {
@@ -252,23 +436,28 @@ hr {
 .sheet-head {
   display: flex;
   align-items: center;
-  padding: 9px var(--pad);
+  padding: var(--s-2) var(--s-4);
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--t-m);
   border-bottom: 1px solid var(--line);
 }
-.sheet-head span {
-  flex: 1;
+/* The title does not grow, and the close button is pushed over instead. It used to be `.sheet-head span
+   { flex: 1 }`, which was fine while the title was the only thing beside the X - but it puts anything
+   added after the title hard against the X at the far edge, which is exactly how the top bar's caret
+   ended up looking like a speck of dirt. The ⓘ has to sit against the words it belongs to. */
+.sheet-head .hint-btn {
+  margin-left: var(--s-1);
 }
 .x {
+  margin-left: auto;
   background: none;
   border: 0;
   color: var(--fg-3);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--t-l);
 }
 .peer {
-  padding: 8px var(--pad);
+  padding: var(--s-2) var(--s-4);
   border-bottom: 1px solid var(--line);
 }
 .peer.here {
@@ -276,13 +465,13 @@ hr {
 }
 .peer-sub {
   margin-left: 13px;
-  font-size: 10.5px;
+  font-size: var(--t-xs);
   color: var(--fg-3);
 }
 .sheet-foot {
   margin: 0;
-  padding: 7px var(--pad);
-  font-size: 10.5px;
+  padding: var(--s-2) var(--s-4);
+  font-size: var(--t-xs);
   color: var(--fg-3);
 }
 
@@ -292,20 +481,21 @@ hr {
 
 .card {
   background: var(--bg-elev);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  padding: var(--pad);
-  margin-bottom: 9px;
+  border-radius: var(--r-3);
+  padding: var(--s-4);
+  margin-bottom: var(--s-3);
+  box-shadow: 0 1px 2px var(--shadow), 0 6px 16px -8px var(--shadow);
 }
 .card > h2 {
   display: flex;
   align-items: center;
-  gap: 5px;
-  margin: 0 0 8px;
-  font-size: 12px;
+  gap: var(--s-1);
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-s);
   font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--fg);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--fg-3);
 }
 .card > h2 > span:first-child {
   flex: none;
@@ -314,78 +504,102 @@ hr {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--s-1);
 }
 
 .row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--s-1);
 }
 .row.gap {
-  gap: 5px;
+  gap: var(--s-1);
 }
 
+/* Rows separate by space rather than by rule. With 14px cards and a shadow the old hairline between
+   every row read as clutter competing with the card edge. */
 .ctl {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  border-top: 1px solid var(--line);
+  gap: var(--s-2);
+  padding: var(--s-1) 0;
 }
 .ctl:first-of-type {
-  border-top: 0;
+  padding-top: 0;
 }
 .ctl-label {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--s-1);
   flex-wrap: wrap;
   flex: 1;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: var(--t-m);
 }
 .ctl-sub {
   width: 100%;
-  font-size: 10.5px;
+  font-size: var(--t-xs);
   color: var(--fg-3);
 }
 .ctl-body {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--s-1);
   flex: none;
 }
 
 .facts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 10px;
+  gap: var(--s-2) var(--s-3);
 }
 .fact-label {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 10.5px;
+  gap: var(--s-1);
+  font-size: var(--t-xs);
   color: var(--fg-3);
 }
 .fact-value {
-  font-size: 14px;
+  font-size: var(--t-xl);
   font-weight: 600;
 }
 .fact-unit {
-  font-size: 10.5px;
+  font-size: var(--t-xs);
   font-weight: 400;
   color: var(--fg-3);
   margin-left: 3px;
 }
-.ids {
+/* Detail belonging to one fact, under its value. This replaced `.ids`, a full-width strip across the bottom
+   of the Device card that held the address, the MAC and a sentence about how much PSRAM was fitted. The
+   strip sat equally far from all six facts above it, so it read as a footnote to the card rather than as
+   the address of the network named directly above it.
+   Wraps, because an IPv4 address and a MAC do not fit side by side in half a phone's width. */
+.fact-sub {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 10px;
-  margin-top: 9px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
+  gap: 0 var(--s-2);
+  font-size: var(--t-xs);
+  color: var(--fg-3);
+}
+
+/* The firmware update offer. Present only when there is an update, so it does not have to work as a
+   permanent fixture - it can be tinted and take the full width, because when it is on screen it is the
+   most useful thing on the route. Tinted with the accent rather than the warning colours: an available
+   update is an invitation, and orange would make routine maintenance look like a fault. */
+.updbox {
+  margin-top: var(--s-3);
+  padding: var(--s-2) var(--s-3) var(--s-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-2);
+  background: var(--accent-bg);
+}
+.updbox .row {
+  margin-bottom: var(--s-2);
+}
+/* Full width, because it is the only action in the panel and a button that spans it cannot be missed. */
+.updbox .btn {
+  width: 100%;
 }
 
 /* ---------------------------------------------------------------- */
@@ -396,7 +610,7 @@ hr {
   flex: none;
   width: 14px;
   height: 14px;
-  border-radius: 8px;
+  border-radius: var(--r-pill);
   border: 1px solid var(--line-2);
   background: var(--fill);
   color: var(--fg-3);
@@ -413,12 +627,19 @@ hr {
   position: fixed;
   z-index: 40;
   max-width: min(280px, calc(100vw - 16px));
-  padding: 8px 10px;
+  padding: var(--s-2) var(--s-3);
   background: var(--fill-2);
   border: 1px solid var(--line-2);
-  border-radius: var(--r);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
-  font-size: 11.5px;
+  border-radius: var(--r-3);
+  box-shadow: 0 6px 20px var(--shadow);
+  /* Every inherited text property is restated, not just the size. A hint button inside a card title is
+     a child of that <h2> in the DOM even though the bubble is position: fixed, so it used to inherit the
+     header's 600 weight, uppercasing and 0.07em tracking - which is why the same tooltip read as two
+     different sizes depending on whether the "i" beside it was on a card title or a row. */
+  font-size: var(--t-s);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
   line-height: 1.4;
   color: var(--fg-2);
 }
@@ -429,13 +650,14 @@ hr {
 
 .sw {
   position: relative;
-  width: 38px;
-  height: 22px;
-  border-radius: 12px;
+  width: 42px;
+  height: 24px;
+  border-radius: var(--r-pill);
   border: 1px solid var(--line-2);
   background: var(--fill);
   cursor: pointer;
   padding: 0;
+  flex: none;
   transition: background 0.12s;
 }
 .sw.on {
@@ -450,20 +672,21 @@ hr {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 9px;
-  background: var(--fg);
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-pill);
+  background: var(--knob);
   transition: transform 0.12s;
 }
 .sw.on .sw-knob {
-  transform: translateX(16px);
+  transform: translateX(18px);
+  background: var(--on-accent);
 }
 
 .slider {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--s-1);
 }
 .slider input {
   width: 116px;
@@ -472,6 +695,8 @@ hr {
 .slider-val {
   width: 62px;
   text-align: right;
+  /* Its own, rather than borrowed from the monospace helper this used to carry. */
+  font-size: var(--t-s);
   color: var(--fg-2);
 }
 
@@ -479,14 +704,14 @@ hr {
   background: var(--fill);
   color: var(--fg);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
-  padding: 5px 6px;
-  font: 12px inherit;
+  border-radius: var(--r-2);
+  padding: var(--s-1) var(--s-1);
+  font: var(--t-m) inherit;
   max-width: 178px;
 }
 .sel.sm {
-  padding: 3px 4px;
-  font-size: 10.5px;
+  padding: 3px var(--s-1);
+  font-size: var(--t-xs);
 }
 
 .btn {
@@ -498,18 +723,19 @@ hr {
   background: var(--fill);
   color: var(--fg);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
-  padding: 5px 9px;
-  font: 12px inherit;
+  border-radius: var(--r-2);
+  padding: var(--s-1) var(--s-4);
+  font: 500 var(--t-m) inherit;
   cursor: pointer;
 }
 .btn.sm {
-  padding: 3px 6px;
-  font-size: 10.5px;
+  padding: 3px var(--s-2);
+  font-size: var(--t-xs);
 }
 .btn.sq {
   width: 28px;
-  padding: 4px 0;
+  padding: var(--s-1) 0;
+  justify-content: center;
   text-align: center;
 }
 .btn.ghost {
@@ -518,18 +744,24 @@ hr {
   color: var(--fg-3);
 }
 .btn.danger {
-  color: #f2a8a3;
-  border-color: #5c2b28;
+  color: var(--err-fg);
+  border-color: var(--err-line);
 }
 .btn.solid {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .btn.danger.solid {
   background: var(--err);
   border-color: var(--err);
-  color: #fff;
+  color: var(--on-accent);
+}
+/* The log filter's invert is a mode, not an action, so it stays visibly latched while it is on. */
+.btn.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
 }
 .btn:disabled {
   opacity: 0.4;
@@ -537,13 +769,13 @@ hr {
 }
 .confirm {
   display: flex;
-  gap: 4px;
+  gap: var(--s-1);
 }
 .link {
   background: none;
   border: 0;
   color: var(--accent);
-  font: 11px inherit;
+  font: var(--t-s) inherit;
   cursor: pointer;
   padding: 0;
 }
@@ -554,14 +786,22 @@ hr {
 
 .pills {
   display: flex;
-  gap: 5px;
+  gap: var(--s-1);
 }
 .pill {
   flex: 1;
   min-width: 0;
-  padding: 7px 3px;
-  border-radius: 7px;
-  border: 1px solid var(--line);
+  /* 2px of side padding rather than --s-1's 6px, which is off the spacing scale on purpose. "Temperature"
+     needs 67px and is a single word with nowhere to break, so it is the widest thing the row has to hold.
+     At 6px a chip offered it 60px on a 360px screen and 63px on a 375px one - the two commonest phone
+     widths there are - and it came out truncated on both, which defeats spelling the label out at all.
+     The 8px this returns clears it from 375px up. The value is centred, so the tighter sides only show on
+     the label, and only when it is nearly full. */
+  padding: var(--s-3) 2px;
+  /* Explicitly none, not merely unstated: three of these are <button> and one is an <a>, so leaving it
+     out gives the buttons a 2px outset UA border and the anchor nothing, and the row stops matching. */
+  border: 0;
+  border-radius: var(--r-2);
   background: var(--fill);
   color: var(--fg);
   text-align: center;
@@ -569,41 +809,56 @@ hr {
   text-decoration: none;
   display: block;
 }
+/* An inset ring rather than a border, so selecting a pill does not shift the text inside it. */
 .pill.on {
-  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 .pill-v {
   display: block;
-  font-size: 14px;
+  font-size: var(--t-xl);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pill-v.sm {
-  font-size: 10.5px;
-}
+/* No size-by-length variant any more: it halved the type past eight characters, so one chip in the row
+   rendered at 11px while its neighbours were at 17px. Long values now ellipsis, via the overflow rules
+   above, which degrades one chip instead of redesigning it. copy.js's PRESENCE table is what keeps the
+   radar's states inside the room available. */
+/* Ellipsis on the same terms as .pill-v above, because the labels are words now rather than abbreviations.
+   "Temperature" wants 66px and a 320px screen gives the chip 50px, and a single word has nowhere to break -
+   so without this it was sliced through the final letter, which reads as a rendering fault rather than as
+   a label that did not fit. Everything is comfortable from 360px up; this is only the narrow-phone floor. */
 .pill-l {
   display: block;
-  font-size: 9.5px;
+  font-size: var(--t-xs);
   color: var(--fg-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.pills-foot {
-  margin: 5px 0 0;
-  text-align: center;
-  font-size: 10px;
-  color: var(--fg-4);
+
+/* The mark that says the chip does something, centred under the label rather than beside it.
+   Beside it was the pencil, and it failed because it was a flow sibling of the label: it competed for the
+   same 50-60px of width, so it dropped to a second line on some chips and not others. Under the label it
+   has a line to itself and cannot affect the words above it at any width. Centred with auto margins, which
+   works because .chev is display:block and the chip's children are blocks in a centred column.
+   Not a tap target and not announced - .chev carries aria-hidden - because the whole chip is the control.
+   Grey to match .pill-l above it: this is a hint about the chip, not a second reading. */
+.pill-c {
+  margin: 2px auto 0;
+  color: var(--fg-3);
 }
 
 .editor {
-  margin-top: 7px;
-  padding: 9px 10px;
-  border-radius: 7px;
+  margin-top: var(--s-1);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-2);
   border: 1px solid var(--accent);
   background: var(--fill);
 }
 .editor .row {
-  margin-top: 5px;
+  margin-top: var(--s-1);
 }
 .editor .row:first-child {
   margin-top: 0;
@@ -616,17 +871,20 @@ hr {
 .wheel-wrap {
   display: flex;
   justify-content: center;
-  margin: 10px 0 4px;
+  margin: var(--s-3) 0 var(--s-1);
 }
 .wheel-wrap.off {
   opacity: 0.3;
   pointer-events: none;
 }
+/* The six hue stops and the white centre are deliberately absolute and deliberately not tokens. They
+   are the colour the customer is picking, so they must read the same in both themes - a hue wheel that
+   changed with the theme would be lying about what the LEDs will do. */
 .wheel {
   position: relative;
   width: 116px;
   height: 116px;
-  border-radius: 116px;
+  border-radius: var(--r-pill);
   border: 1px solid var(--line-2);
   cursor: crosshair;
   touch-action: none;
@@ -638,7 +896,7 @@ hr {
   position: absolute;
   width: 12px;
   height: 12px;
-  border-radius: 8px;
+  border-radius: var(--r-pill);
   border: 2px solid #fff;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
 }
@@ -650,21 +908,21 @@ hr {
 .btnstates {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
-  margin-bottom: 6px;
+  gap: var(--s-1);
+  margin-bottom: var(--s-1);
 }
 .bstate {
-  padding: 4px 8px;
-  border-radius: 12px;
+  padding: var(--s-1) var(--s-2);
+  border-radius: var(--r-pill);
   border: 1px solid var(--line-2);
   background: var(--fill);
   color: var(--fg-3);
-  font-size: 11px;
+  font-size: var(--t-s);
 }
 .bstate.on {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 /* ---------------------------------------------------------------- */
@@ -672,13 +930,13 @@ hr {
 /* ---------------------------------------------------------------- */
 
 .lg {
-  font-size: 18px;
+  font-size: var(--t-2xl);
   font-weight: 600;
 }
 
 .utt {
-  margin: 0 0 5px;
-  font-size: 12px;
+  margin: 0 0 var(--s-1);
+  font-size: var(--t-m);
   color: var(--fg-2);
 }
 .utt.heard {
@@ -687,8 +945,8 @@ hr {
 .utt-who {
   display: inline-block;
   min-width: 38px;
-  margin-right: 6px;
-  font-size: 9.5px;
+  margin-right: var(--s-1);
+  font-size: var(--t-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--fg-4);
@@ -698,12 +956,12 @@ hr {
   height: 220px;
   overflow: auto;
   overflow-wrap: anywhere;
-  padding: 7px 8px;
+  padding: var(--s-1) var(--s-2);
   background: var(--bg-sunk);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--r-2);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10.5px;
+  font-size: var(--t-xs);
   line-height: 1.4;
 }
 .ln {
@@ -718,7 +976,7 @@ hr {
   overflow: auto;
   background: var(--bg-sunk);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--r-2);
 }
 .tree-a + .tree-a {
   border-top: 1px solid var(--line);
@@ -727,12 +985,17 @@ hr {
 .tree-p {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  font-size: 12.5px;
+  gap: var(--s-1);
+  padding: var(--s-1) var(--s-2);
+  font-size: var(--t-m);
 }
+/* Indented past the area's checkbox, not merely past its chevron.
+   An area heading spends 9px of row padding, then 16px on the chevron and 6px of gap before its own
+   checkbox, so its box starts at 31px and its label at 54px. This was 26px, which put a player's
+   checkbox 5px to the LEFT of its own area's - the children were literally out-dented from their parent,
+   which is why the group read as a flat list. 47px is one 16px step beyond the parent's box. */
 .tree-p {
-  padding-left: 26px;
+  padding-left: 47px;
   color: var(--fg-2);
 }
 .tree-ps {
@@ -744,33 +1007,58 @@ hr {
   border: 0;
   padding: 0 2px;
   color: var(--fg-3);
-  font-size: 11px;
+  line-height: 0;
   cursor: pointer;
 }
 .tree-n {
-  font-size: 11px;
+  font-size: var(--t-s);
   color: var(--fg-4);
   white-space: nowrap;
 }
-/* The Local Speaker row. Sits at the top of the tree at the same indent as an area heading rather than
-   as a player under one, because it is a peer of the rooms, not a member of any of them - and it is
-   the default, so it should not look like an afterthought below them. */
+/* The Local Speaker row. Sits at the top of the tree as a peer of the rooms rather than as a player under
+   one, because it is a member of none of them - and it is the default, so it should not look like an
+   afterthought below them.
+   31px, not 9px: it has no chevron of its own, so matching an area heading means aligning with where that
+   heading's checkbox lands rather than where its row begins. */
 .tree-self {
-  padding-left: 8px;
+  padding-left: 31px;
   color: var(--fg);
   border-bottom: 1px solid var(--line);
 }
 
 /* A control, not an input: a real checkbox needs a ref for the mixed state, and three glyphs cost
    less than restyling one. */
+/* Drawn by tree.jsx's Check, not a font glyph - see the comment there. currentColor carries the accent
+   down into the box, and .dim overriding the colour is what greys the whole control when it is disabled,
+   so there is no separate disabled palette to keep in step. */
 .cb {
   background: none;
   border: 0;
   padding: 0;
   color: var(--accent);
-  font-size: 15px;
-  line-height: 1;
+  line-height: 0;
   cursor: pointer;
+}
+.cb-i {
+  display: block;
+  width: 17px;
+  height: 17px;
+}
+.cb-box {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+.cb.on .cb-box,
+.cb.mixed .cb-box {
+  fill: currentColor;
+}
+.cb-mark {
+  fill: none;
+  stroke: var(--on-accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .cb.dim,
 .cb:disabled {
@@ -778,19 +1066,16 @@ hr {
   cursor: default;
 }
 
-.ids {
-  margin-top: 9px;
-}
 .in {
   width: 100%;
   box-sizing: border-box;
-  margin-top: 4px;
+  margin-top: var(--s-1);
   background: var(--fill);
   color: var(--fg);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
-  padding: 6px 7px;
-  font: 12px inherit;
+  border-radius: var(--r-2);
+  padding: var(--s-1) var(--s-1);
+  font: var(--t-m) inherit;
 }
 .in:disabled {
   color: var(--fg-4);
@@ -802,9 +1087,9 @@ hr {
 .mech {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 2px 8px;
-  margin-top: 7px;
-  font-size: 11px;
+  gap: 2px var(--s-2);
+  margin-top: var(--s-1);
+  font-size: var(--t-s);
   color: var(--fg-3);
 }
 .mech b {
@@ -815,14 +1100,7 @@ hr {
 /* The data layer's own state, above each list it feeds. */
 .habox {
   display: block;
-  margin: 5px 0 7px;
-}
-.harow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 5px;
+  margin: var(--s-1) 0 var(--s-2);
 }
 
 /* ------------------------------------------------------------------ */
@@ -835,9 +1113,9 @@ hr {
   display: block;
   width: 100%;
   aspect-ratio: 800 / 600;
-  background: var(--bg);
+  background: var(--bg-sunk);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--r-3);
 }
 /* Stroke widths are in centimetres too, which is why they look large as numbers. */
 .plot-ring,
@@ -873,7 +1151,8 @@ hr {
   fill: var(--accent);
 }
 /* Sized in centimetres like everything else in the viewBox, so it scales with the plot rather than
-   staying a fixed pixel size and swamping the rings on a narrow screen. */
+   staying a fixed pixel size and swamping the rings on a narrow screen. Not on the type scale for
+   that reason: it is not a font size in CSS pixels. */
 .plot-tick {
   fill: var(--fg-4);
   font-size: 30px;
@@ -881,13 +1160,13 @@ hr {
 }
 
 .gates-g + .gates-g {
-  margin-top: 10px;
+  margin-top: var(--s-3);
 }
 .gate {
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-size: 11px;
+  gap: var(--s-1);
+  font-size: var(--t-s);
   color: var(--fg-3);
 }
 .gate-n {
@@ -904,7 +1183,7 @@ hr {
   flex: 1;
   height: 7px;
   background: var(--fill);
-  border-radius: 4px;
+  border-radius: var(--r-1);
   overflow: hidden;
 }
 .gate-fill {
@@ -915,15 +1194,15 @@ hr {
 /* Not animated. It is lit whenever the route is mounted, which is exactly when polling is happening, so
    a pulse would imply it means something more specific than it does. */
 .live-dot {
-  font-size: 10.5px;
+  font-size: var(--t-xs);
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 .row-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 10px;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
 }
 
 /* ------------------------------------------------------------------ */
@@ -936,14 +1215,14 @@ hr {
   background: var(--fill);
   color: var(--fg);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
-  padding: 5px 7px;
-  font: 12px inherit;
+  border-radius: var(--r-2);
+  padding: var(--s-1) var(--s-1);
+  font: var(--t-m) inherit;
   min-width: 0;
 }
 .inp.sm {
-  padding: 3px 6px;
-  font-size: 10.5px;
+  padding: 3px var(--s-1);
+  font-size: var(--t-xs);
 }
 .inp::placeholder {
   color: var(--fg-4);
@@ -956,24 +1235,18 @@ hr {
 
 .log-bar {
   display: flex;
-  gap: 6px;
+  gap: var(--s-1);
   align-items: center;
-  margin-bottom: 6px;
-}
-/* The invert is a mode, not an action, so it stays visibly latched while it is on. */
-.btn.on {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--bg);
+  margin-bottom: var(--s-1);
 }
 .log-count {
-  margin: 5px 0 0;
+  margin: var(--s-1) 0 0;
   text-align: right;
 }
 .log mark {
   background: var(--accent);
-  color: var(--bg);
-  border-radius: 2px;
+  color: var(--on-accent);
+  border-radius: var(--r-1);
   padding: 0 1px;
 }
 
@@ -982,7 +1255,7 @@ hr {
 .card-t {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--s-1);
   background: none;
   border: 0;
   padding: 0;
@@ -993,7 +1266,7 @@ hr {
   text-align: left;
 }
 .caret-s {
-  color: var(--fg-4);
-  font-size: 10px;
-  width: 9px;
+  color: var(--fg-3);
+  width: 11px;
+  height: 11px;
 }

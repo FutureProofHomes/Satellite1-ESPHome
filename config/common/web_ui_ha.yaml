@@ -35,7 +35,7 @@ substitutions:
   #   {"area": "Media Room", "aid": "media_room",
   #    "areas": [{"i": "kitchen", "n": "Kitchen", "p": [["media_player.kitchen", "Kitchen Sonos"]]}],
   #    "loose": [["media_player.all_sonos", "All Sonos"]],
-  #    "dev": [["Satellite1", "Satellite1 c5ac00", "Media Room", "3c:0f:02:c5:ac:00", "dev (ESP...)"]]}
+  #    "dev": [["Satellite1", "Ceiling Mount", "Media Room", "3c:0f:02:c5:ac:00", "dev (ESP...)"]]}
   #
   # `i` is the area id and `aid` this device's own. Both are ids rather than names because the stored
   # selection references areas, `area_entities()` takes an id directly, and an id survives a rename -
@@ -46,6 +46,13 @@ substitutions:
   # Assigned" group rather than treating unassigned players as an edge case. Music Assistant entities
   # are rejected from it for the same reason they are rejected from the areas - many of the duplicates
   # are unassigned, and a group made mostly of speakers that clip on Sonos is a trap, not a feature.
+  #
+  # The name is `name_by_user or name`, which is the order Home Assistant itself displays them in.
+  # Renaming a device writes name_by_user and leaves name as the integration registered it, so sending
+  # `name` alone meant every screen on the device showed a name its owner had already replaced - and it
+  # is the only route that name has. The firmware cannot work it out: App.get_friendly_name() is the
+  # `friendly_name` substitution with the MAC suffix that name_add_mac_suffix appends, so it is
+  # "Satellite1 c5ac00" however the device is labelled in the app people actually use.
   #
   # `dev` carries every FutureProofHomes device with its model, not only Satellite1s. The model is
   # what separates products - a Nexus registers through a config entry with no MAC connection, no
@@ -98,7 +105,9 @@ substitutions:
         {% if device_attr(d, 'manufacturer') == 'FutureProofHomes' %}
           {% set macs = device_attr(d, 'connections')
                         | selectattr(0, 'eq', 'mac') | map(attribute=1) | list %}
-          {% set out.dev = out.dev + [[device_attr(d, 'model'), device_attr(d, 'name'), area_name(a),
+          {% set out.dev = out.dev + [[device_attr(d, 'model'),
+                                       device_attr(d, 'name_by_user') or device_attr(d, 'name'),
+                                       area_name(a),
                                        macs | first if macs else '',
                                        device_attr(d, 'sw_version') or '']] %}
         {% endif %}

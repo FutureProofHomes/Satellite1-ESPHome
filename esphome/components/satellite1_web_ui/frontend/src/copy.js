@@ -15,8 +15,26 @@ export const HINTS = {
   // list of rooms with "Local Speaker" at the top of it. The manual id field was replaced by the "No
   // Area Assigned" group, which shows those players by name instead of asking for their entity ids.
 
+  /* The switcher sheet. What needs saying is not "this is a list of devices", which is visible, but that
+     each device has its own copy of this app - the single fact that makes the whole page make sense, and
+     the one someone who has just changed a setting on the wrong device wishes they had been told. Does not
+     repeat why the list has one entry in it; that sentence is already at the foot of the same sheet. */
+  switcher:
+    "Each Satellite1 serves its own copy of this page, so everything you change here applies to the device named above. This is where you move to a different one without typing in its address, and it keeps you on the page you were already on.",
+
+  /* On the card title rather than a row, because what needs explaining is the tree, and the tree has no
+     row of its own to hang an ⓘ off. This is also the only place Local Speaker is explained: it is the
+     one tick in there whose effect is not obvious from its name, since it silences this device rather
+     than adding a target. */
+  remote_routing:
+    "Plays the assistant's spoken answer on other speakers as well as this one. Tick a room to include every player in it, or open the room and pick players individually. Local Speaker is this device's own speaker - untick it and the answer is heard only where you have chosen.",
+
+  /* The last sentence used to be three sentences of its own paragraph under the slider. It is here
+     because it explains the control rather than the page, and a permanent paragraph for something you
+     need to read once is what a tooltip is for. Kept because one slider with three behaviours behind it
+     is the kind of thing that gets reported as a bug. */
   remote_tts_volume:
-    "How loud the answer is on the remote speakers. It does not touch this device's own level - that is Voice Override, on the Audio card.",
+    "How loud the answer is on the remote speakers. It does not touch this device's own level - that is Voice Override, on the Audio card. Sonos reads the level off the announcement; another Satellite1 has its Voice Override set and put back; anything else has its media volume set and restored.",
 
   remote_wake_chime:
     "Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to.",
@@ -24,10 +42,23 @@ export const HINTS = {
   // duck_area, duck_players and duck_tts_targets are gone for the same reason. Ducking is now the same
   // tree, and the answer to "which players" is visibly the thing being ticked.
 
-  duck_volume:
-    "The level everything you have chosen drops to while the assistant is listening and answering. Players already quieter than this are left alone, so a whole-house group does not get turned up.",
+  /* The window is stated here and nowhere else. It is wider than people assume: the duck goes out on the
+     voice assistant's on_start, which is the wake word, and the volumes come back on on_end - so it is
+     quiet while it listens to you, not only while it answers. The old label said "while talking", which
+     described half of it. */
+  area_ducking:
+    "Turns other speakers down while the assistant is busy, then puts them back where they were. It runs from the wake word to the end of the answer, so the room is quiet while it listens to you as well as while it answers. Tick a room to cover every player in it.",
 
-  temp: "Reads high by design - the sensor sits inside a warm enclosure, next to the board. Calibrate against a thermometer in the same room and the offset is stored on the device.",
+  /* Deliberately does not repeat when the ducking happens - that is on the card above this row, and
+     saying it twice made the two bubbles look like they were describing different things. What is left is
+     the part that only applies to this slider: it is a floor, not a reduction. */
+  duck_volume:
+    "The level they drop to. Players already quieter than this are left alone, so a whole-house group does not get turned up.",
+
+  // "and the offset is stored on the device" used to end this. It is what `calibrate` says two rows below
+  // it in the same editor, so it was cut. The instrument to compare against stays: that part is specific to
+  // this sensor, and the generic hint cannot name it.
+  temp: "Reads high by design - the sensor sits inside a warm enclosure, next to the board. Calibrate against a thermometer in the same room.",
 
   humidity:
     "Measured at the board, so it drifts with the enclosure temperature. Calibrate against a hygrometer in the same room.",
@@ -36,6 +67,20 @@ export const HINTS = {
 
   presence:
     "From the mmWave radar, not the microphones. It sees through the enclosure and does not need line of sight, so it reports an empty room faster than a motion sensor would.",
+
+  /* The radar's own settings, on Presence. These replaced two "sub" captions that only appeared at one
+     end of each slider - the caption explaining what zero meant was invisible at every other value,
+     which is the point at which someone needs to know what zero would do. */
+  radar_range:
+    "How far out the radar looks, in centimetres. Anything beyond this is ignored even if the radar can see it, which is how you stop it detecting the hallway or the room next door. At zero it uses the module's own default.",
+  radar_stability:
+    "How much agreement it needs before it changes its mind. Higher is steadier and slower: fewer false triggers from a curtain moving, but a longer wait before it admits the room is empty. Lower reacts faster and twitches more.",
+  radar_timeout:
+    "How long presence is held after the radar stops seeing anyone, in seconds. This is what stops the lights going out while you sit still. At zero it clears the moment you are lost, which is usually too eager.",
+  radar_multi:
+    "Tracks several people at once instead of only the strongest return. Needed for the target plot to show more than one person, and for the zone counts to be right in a busy room.",
+  radar_bt:
+    "The radar module's own Bluetooth radio, used by the manufacturer's configuration app. Nothing here needs it, and leaving it on means an unauthenticated radio in the room, so it is off unless you are pairing that app.",
 
   calibrate:
     "Enter what a trusted instrument in the same room reads. The difference is saved as an offset and survives a restart. It does not change the raw reading, only what the device reports.",
@@ -75,8 +120,9 @@ export const HINTS = {
   xmos_flash:
     "Rewrites the audio chip's firmware from the image embedded in this build. The device is deaf and mute until it finishes, which takes about a minute. Do not cut power.",
 
-  xmos_erase:
-    "Erases the audio chip's firmware. It will not process audio again until you flash it. Only useful when a flash has gone wrong and the chip will not accept a new image.",
+  // xmos_erase was here. The row it explained is gone from the app: erasing leaves the audio chip blank,
+  // which takes the microphones, the speaker and the wake word with it, and the only way back is the
+  // Reflash row - which needs the chip it just erased to be talking. Reflash overwrites anyway.
 
   safe_mode:
     "Restarts with everything but wifi and the updater switched off. Use it when the device is crash-looping and will not stay up long enough to accept an update.",
@@ -129,6 +175,29 @@ export const TEXT = {
      checkbox has already moved back and that on its own looks like a page that ignores clicks. */
   sel_failed: "That change was not saved. The device rejected it, or the connection dropped.",
 
-  ha_refresh: "Refresh",
-  ha_refreshing: "Asking\u2026",
+  /* The theme toggle. Deliberately not offering an "Auto" that follows the phone, because the device is
+     often used in a room whose lighting has nothing to do with what the phone last decided. Phrased as
+     an action rather than a state: the button shows the theme it switches to, and a bare "Dark theme"
+     read aloud gives no clue whether that is the current setting or the one on offer. */
+  theme_to_dark: "Switch to dark theme",
+  theme_to_light: "Switch to light theme",
+};
+
+/**
+ * Short forms of the radar's target state, for the sensor pill on Controls.
+ *
+ * The firmware's own words are Approaching, Moving Away, Still and Clear on an LD2450, and Clear, Moving
+ * and Still on an LD2410. Those are the right words for Home Assistant, where a row is as wide as the
+ * screen. They do not fit a quarter of a phone: measured in the shipped font, "Approaching" wants 103px
+ * at the pill's 17px and 70px even at 11px, against 60px of room at a 360px viewport. That is why the
+ * pill used to halve its own font size past eight characters, which made one chip look like a different
+ * design from the three beside it.
+ *
+ * So the display is shortened and the size left alone. Anything not listed falls through unchanged, which
+ * is what should happen when a future radar module reports a state this table has never heard of. The
+ * firmware's wording is untouched, and the full phrase is still in the pill's hover title.
+ */
+export const PRESENCE = {
+  Approaching: "Closer",
+  "Moving Away": "Away",
 };

@@ -196,7 +196,11 @@ satellite1_web_ui:
       safe_mode: safe_mode_button
       xmos_reset: xmos_hardware_reset
       xmos_flash: flash_satellite
-      xmos_erase: erase_xmos_flash
+      # erase_xmos_flash is deliberately not mapped. Erasing leaves the audio chip blank - no microphones,
+      # no speaker, no wake word - and the only way back is flash_satellite above, which needs the chip it
+      # just erased to be responding. Reflash overwrites without erasing first, so nothing in the app
+      # needed it. Unmapped means the app cannot reach it at all rather than merely not showing it; the
+      # ESPHome button still exists for a bench recovery over the native API.
 
     binary_sensors:
       btn_up: btn_up

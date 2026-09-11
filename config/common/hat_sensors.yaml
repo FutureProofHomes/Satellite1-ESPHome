@@ -1,3 +1,12 @@
+globals:
+  # The last ambient light reading as the hardware gave it, before the offset filter. Not restored: it is
+  # replaced by the first measurement after boot, and a value from the previous power-on describes a room
+  # that may have had its lights turned off since.
+  - id: lux_raw
+    type: float
+    restore_value: no
+    initial_value: '0'
+
 sensor:
   - platform: aht10
     id: "aht20_temp_hum_sensor"
@@ -27,6 +36,11 @@ sensor:
     ambient_light:
       name: "Ambient Light"
       id: ambient_light_sensor
+      # The reading before the offset is applied, kept so that changing the offset can republish without
+      # waiting for the hardware. See lux_offset_ui's on_value for why that is necessary here and not for
+      # the AHT20.
+      on_raw_value:
+        - lambda: 'id(lux_raw) = x;'
       filters:
         - lambda: "return x + id(lux_offset_ui).state;"
 
@@ -65,8 +79,28 @@ number:
     initial_value: 0
     icon: "mdi:brightness-6"
     entity_category: config
+    # Republishes the last hardware reading through the offset filter, rather than asking the LTR-329 to
+    # take a new one.
+    #
+    # This used to be `id(ltr_als_sensor).update();`, copied from the two AHT20 offsets above, where it
+    # works. It does not work here. ltr_als_ps::update() only starts a measurement when the component is
+    # in State::IDLE, and the collection that follows is a multi-pass state machine that reconfigures gain
+    # and integration time, waits, and can return to IDLE without publishing anything. Measured on
+    # hardware through the web app: after nudging the offset, the temperature figure moved in 238ms and
+    # the corrected ambient light figure had still not moved after 12 seconds - so with a 60s poll the
+    # correction appeared to do nothing, and the calibration editor showed a raw reading of -2 lx for a
+    # room reading 3 lx, because it derives the raw figure by subtracting the offset from a value that had
+    # not caught up.
+    #
+    # publish_state re-runs the filter chain, so this costs no I2C traffic and lands within a frame. The
+    # hardware reading itself has not changed - only the correction applied to it - so there is nothing to
+    # re-measure. Guarded on has_state so a nudge before the first measurement cannot publish the initial 0.
     on_value:
-      - lambda: 'id(ltr_als_sensor).update();'
+      - if:
+          condition:
+            lambda: 'return id(ambient_light_sensor).has_state();'
+          then:
+            - lambda: 'id(ambient_light_sensor).publish_state(id(lux_raw));'
 
   - platform: template
     name: "Offset Humidity"

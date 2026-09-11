@@ -18,6 +18,7 @@
  * permanent button labelled as a radar action; it appears only when the device says a restart is
  * needed, and says what it will actually do.
  */
+import { HINTS } from "../copy.js";
 import { RADAR_LIVE_MS, useRadar } from "../lib/device.js";
 import { Btn, Card, Missing, Row, Slider, Toggle } from "../ui.jsx";
 
@@ -160,7 +161,7 @@ function Gates({ live }) {
 function Ld2450Settings({ config, write, busy }) {
   return (
     <>
-      <Row label="Detection range" sub={config.detection_range === 0 ? "Module default" : null}>
+      <Row label="Detection range" hint={HINTS.radar_range}>
         <Slider
           value={config.detection_range}
           min={0}
@@ -172,7 +173,7 @@ function Ld2450Settings({ config, write, busy }) {
         />
       </Row>
 
-      <Row label="Stability">
+      <Row label="Stability" hint={HINTS.radar_stability}>
         <Slider
           value={config.stability}
           min={0}
@@ -184,7 +185,7 @@ function Ld2450Settings({ config, write, busy }) {
         />
       </Row>
 
-      <Row label="Timeout" sub={config.timeout === 0 ? "Clears as soon as the radar loses you" : null}>
+      <Row label="Timeout" hint={HINTS.radar_timeout}>
         <Slider
           value={config.timeout}
           min={0}
@@ -196,7 +197,7 @@ function Ld2450Settings({ config, write, busy }) {
         />
       </Row>
 
-      <Row label="Multi-target">
+      <Row label="Multi-target" hint={HINTS.radar_multi}>
         <Toggle
           checked={config.multi_target}
           disabled={busy}
@@ -204,7 +205,7 @@ function Ld2450Settings({ config, write, busy }) {
         />
       </Row>
 
-      <Row label="Bluetooth">
+      <Row label="Bluetooth" hint={HINTS.radar_bt}>
         <Toggle checked={config.bluetooth} disabled={busy} onChange={(v) => write({ bluetooth: v })} />
       </Row>
     </>
@@ -214,7 +215,8 @@ function Ld2450Settings({ config, write, busy }) {
 function Ld2410Settings({ config, write, busy }) {
   return (
     <>
-      <Row label="Timeout">
+      {/* Same control and same meaning as the LD2450's, so the same hint rather than a second wording. */}
+      <Row label="Timeout" hint={HINTS.radar_timeout}>
         <Slider
           value={config.timeout}
           min={0}
@@ -277,8 +279,13 @@ export function Presence({ ctx }) {
 
   return (
     <>
+      {/* HINTS.presence lives here rather than on the sensor chip that links to this route. The chip has no
+          room for an ⓘ that is not also a mis-tap risk at 50-80px wide, and this card is where someone who
+          followed that chip lands - so it is the first thing they can ask a question of. The answer is
+          worth having in a product with microphones in it: people assume presence is heard, not sensed. */}
       <Card
         title={is2450 ? "LD2450" : "LD2410"}
+        hint={HINTS.presence}
         right={
           // Lit only while this route is mounted, which is also exactly when polling happens - so the
           // dot is a true statement about the device rather than decoration.

@@ -50,21 +50,27 @@ function Device({ ctx }) {
             build without the sensor rather than showing an em dash for a reading that will never come. */}
         {espTemp?.value != null && (
           <Fact
-            label="Chip temperature"
+            label="ESP32 Temp"
             value={Number(espTemp.value).toFixed(1)}
-            unit=" \u00b0C"
+            unit=" °C"
             hint={HINTS.esp_temp}
             tone={Number(espTemp.value) > 80 ? "err" : Number(espTemp.value) > 70 ? "warn" : null}
           />
         )}
         <Fact label="Uptime" value={uptime(d.uptime)} />
         <Fact label="Last restart" value={d.reset} hint={HINTS.reset} />
-        <Fact label="Network" value={d.net === "ethernet" ? "Ethernet" : d.rssi != null ? `Wi-Fi ${d.rssi} dBm` : "Wi-Fi"} />
-      </div>
-      <div class="ids">
-        <span class="mono">{d.ip}</span>
-        <span class="mono dim">{d.mac}</span>
-        {d.psram.installed > 0 && <span class="dim xs">{mb(d.psram.installed)} PSRAM installed</span>}
+        {/* The address and MAC hang off this one rather than sitting in a strip of their own along the
+            bottom of the card, which is where they were and where they described nothing in particular. */}
+        <Fact
+          label="Network Type"
+          value={d.net === "ethernet" ? "Ethernet" : d.rssi != null ? `Wi-Fi ${d.rssi} dBm` : "Wi-Fi"}
+          sub={
+            <>
+              <span class="num">{d.ip}</span>
+              <span class="num">{d.mac}</span>
+            </>
+          }
+        />
       </div>
     </Card>
   );
@@ -83,88 +89,57 @@ function Firmware({ ctx }) {
   // Component-owned name, like Radar Target on Controls - registered from a C++ literal, with no
   // config id to route through the entity map.
   const radarFw = ctx.states["text_sensor/Radar Firmware"];
+  // ESPHome's update entity publishes one of "UNKNOWN", "NO UPDATE", "UPDATE AVAILABLE", "INSTALLING".
+  // Installing is kept on screen rather than treated as "nothing to offer": otherwise the panel vanishes
+  // the instant you press Install, which reads as the press having failed at the one moment the device is
+  // busy enough not to answer for a while.
   const available = upd && upd.state === "UPDATE AVAILABLE";
+  const installing = upd && upd.state === "INSTALLING";
 
   return (
     <Card title="Firmware">
       <div class="facts">
-        <Fact label="Project" value={d?.fw || "\u2014"} />
-        <Fact label="ESPHome" value={d?.esphome || "\u2014"} />
-        {xmos && <Fact label="Audio chip" value={xmos.value || "\u2014"} hint={HINTS.xmos} />}
+        {/* Named for the product rather than for ESPHome's word for it. "Project" is what the manifest
+            calls this, which means nothing to anyone who did not write the manifest. */}
+        {/* "Up to date" only when that is true of all three states the updater can be in. Excluding
+            `installing` matters: the panel below already says it is installing, and a version labelled up
+            to date directly above it contradicts that. */}
+        <Fact label="Sat1 firmware" value={d?.fw || "\u2014"} sub={upd && !available && !installing ? "Up to date" : null} />
+        <Fact label="ESPHome Version" value={d?.esphome || "\u2014"} />
+        {xmos && <Fact label="XMOS firmware" value={xmos.value || "\u2014"} hint={HINTS.xmos} />}
         <Fact label="Built" value={d?.built || "\u2014"} />
         {radarModule && <Fact label="Radar module" value={radarModule.value} />}
         {radarFw && <Fact label="Radar firmware" value={radarFw.value} />}
       </div>
 
-      {upd && (
-        <Row label="Update" sub={available ? `${upd.value} available` : "Up to date"}>
-          {available ? (
-            <Btn solid onClick={() => post(pathFor(ctx, "firmware", "install"))}>
-              Install {upd.value}
-            </Btn>
-          ) : (
-            <span class="dim sm">{upd.current_version || upd.value}</span>
-          )}
-        </Row>
-      )}
-      {available && upd.release_url && (
-        <p class="sm">
-          <a href={upd.release_url} target="_blank" rel="noreferrer">
-            Release notes
-          </a>
-        </p>
+      {/* Only when there is something to do. The row this replaced was always present and said "Up to date"
+          next to the version already shown two lines above it, so the common case was a whole row restating
+          a fact; that state is now a word under the version itself. When there IS an update, it gets the
+          accent panel: the version is the thing worth reading, and pressing it is the thing worth doing, so
+          the version is on the button rather than described next to one. */}
+      {(available || installing) && (
+        <div class="updbox">
+          <div class="row">
+            <span class="grow strong">{installing ? "Installing\u2026" : "Update available"}</span>
+            {upd.release_url && (
+              <a class="sm" href={upd.release_url} target="_blank" rel="noreferrer">
+                Release notes
+              </a>
+            )}
+          </div>
+          <Btn solid disabled={installing} onClick={() => post(pathFor(ctx, "firmware", "install"))}>
+            {installing ? "Do not cut power" : `Install ${upd.value}`}
+          </Btn>
+        </div>
       )}
       {beta && (
-        <Row label="Pre-release firmware" hint={HINTS.beta}>
+        <Row label="Beta updates" hint={HINTS.beta}>
           <Toggle
             checked={beta.value === true || beta.state === "ON"}
             onChange={(v) => post(pathFor(ctx, "beta_firmware", v ? "turn_on" : "turn_off"))}
           />
         </Row>
       )}
-    </Card>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Buttons                                                            */
-/* ------------------------------------------------------------------ */
-
-const BUTTONS = [
-  ["btn_up", "Volume up"],
-  ["btn_down", "Volume down"],
-  ["btn_mute", "Mute"],
-  ["btn_action", "Action"],
-];
-
-/**
- * Live button states, so someone can tell a stuck button from a dead one without a serial cable.
- * The action button's press type comes from the event entity, which is the only way to see that a
- * double press is being registered as two singles.
- */
-function Buttons({ ctx }) {
-  const ev = entity(ctx, "action_button");
-  const [lastPress, setLastPress] = useState(null);
-
-  // event entities publish the press type in `event_type` and hold no state, so the last one seen
-  // has to be latched here rather than read back.
-  useEffect(() => {
-    if (ev?.event_type) setLastPress(ev.event_type.replace(/_/g, " "));
-  }, [ev?.event_type]);
-
-  const rows = BUTTONS.map(([key, label]) => [label, entity(ctx, key)]).filter(([, e]) => e);
-  if (!rows.length) return null;
-
-  return (
-    <Card title="Buttons" right={lastPress && <span class="dim xs">last: {lastPress}</span>}>
-      <div class="btnstates">
-        {rows.map(([label, e]) => (
-          <span key={label} class={`bstate${e.value ? " on" : ""}`}>
-            {label}
-          </span>
-        ))}
-      </div>
-      <p class="dim xs">Press a button on the device; it lights up here.</p>
     </Card>
   );
 }
@@ -228,7 +203,62 @@ function Log({ ctx }) {
   useEffect(() => () => (pausedRef.current = false), [pausedRef]);
 
   const text = () => lines.map((l) => l.text).join("\n");
-  const copy = () => navigator.clipboard?.writeText(text());
+
+  /**
+   * Copies what is on screen, filters and all, same as Save.
+   *
+   * The old body was `navigator.clipboard?.writeText(text())` and it copied nothing on any real device. The
+   * Clipboard API is gated behind a secure context, this app is served over plain HTTP, so
+   * navigator.clipboard is undefined and the ?. turned the whole thing into a no-op - no copy, no error,
+   * and no feedback to notice the difference. It works when developing only because 127.0.0.1 gets a
+   * secure-context exemption that 192.168.x.x does not.
+   *
+   * So: try the modern API for the day this is served over TLS, and fall back to execCommand, which is
+   * deprecated but is not restricted by origin and is the only thing that works here. Confirmation is not
+   * decoration - it is the thing that would have made the original failure visible.
+   */
+  const [copied, setCopied] = useState(false);
+
+  const legacyCopy = (s) => {
+    const ta = document.createElement("textarea");
+    ta.value = s;
+    ta.setAttribute("readonly", "");
+    // Off-screen rather than hidden: display:none and visibility:hidden are not selectable, and the
+    // selection is what execCommand copies. Fixed, so adding it cannot scroll the log.
+    ta.style.cssText = "position:fixed;top:-1000px;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    ta.remove();
+    return ok;
+  };
+
+  const copy = async () => {
+    const s = text();
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(s);
+      ok = true;
+    } catch {
+      // Covers both the undefined navigator.clipboard on this origin and a permission refusal on a
+      // secure one.
+      ok = legacyCopy(s);
+    }
+    setCopied(ok);
+  };
+
+  // Back to "Copy" on its own. Also clears the timer if the card closes or the route changes while it is
+  // still counting, which would otherwise set state on something no longer mounted.
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1400);
+    return () => clearTimeout(t);
+  }, [copied]);
 
   // Downloads what is on screen, filters and all, because that is the thing worth sending to someone
   // else. Object URL revoked immediately; the click is synchronous.
@@ -299,7 +329,7 @@ function Log({ ctx }) {
           onInput={(e) => setMark(e.currentTarget.value)}
         />
         <button class="btn sm" onClick={copy}>
-          Copy
+          {copied ? TEXT.copied : "Copy"}
         </button>
         <button class="btn sm" onClick={download}>
           Save
@@ -353,31 +383,40 @@ function Maintenance({ ctx }) {
   const factory = pathFor(ctx, "factory_reset", "press");
   const xmosReset = pathFor(ctx, "xmos_reset", "press");
   const xmosFlash = pathFor(ctx, "xmos_flash", "press");
-  const xmosErase = pathFor(ctx, "xmos_erase", "press");
+  // Satellite1::status_string() returns "v1.2.3" when the chip is talking, and one of "XMOS not
+  // responding" / "Flashing Mode" / "" when it is not. Only the first is a version, so only the first goes
+  // in the label - "Reflash XMOS Flashing Mode" would be worse than saying nothing.
+  const xmosVer = entity(ctx, "xmos_firmware")?.value;
+  const flashLabel = /^v\d/.test(xmosVer || "") ? `Reflash XMOS ${xmosVer}` : "Reflash XMOS";
 
   return (
     <>
-      {(xmosReset || xmosFlash || xmosErase) && (
-        <Card title="Audio chip" collapsible name="xmos" hint={HINTS.xmos}>
+      {/* Named for the part rather than described, because the row below it talks about flashing firmware,
+          and at that point you need to know which chip you are aiming at. HINTS.xmos opens with "The audio
+          chip", so the ⓘ carries what the title used to say. */}
+      {(xmosReset || xmosFlash) && (
+        <Card title="XMOS" collapsible name="xmos" hint={HINTS.xmos}>
           {xmosReset && (
-            <Row label="Restart the audio chip">
+            <Row label="Restart XMOS">
               <Btn onClick={() => post(xmosReset)}>Restart</Btn>
             </Row>
           )}
+          {/* The version is in the label rather than left to the Firmware card, because this is the one
+              place where knowing what is on the chip decides whether to press the button. */}
           {xmosFlash && (
-            <Row label="Reflash its firmware" hint={HINTS.xmos_flash}>
+            <Row label={flashLabel} hint={HINTS.xmos_flash}>
               <Confirm label="Reflash" confirmLabel="Reflash now" onConfirm={() => post(xmosFlash)} />
             </Row>
           )}
-          {xmosErase && (
-            <Row label="Erase its firmware" hint={HINTS.xmos_erase}>
-              <Confirm label="Erase" confirmLabel="Erase it" danger onConfirm={() => post(xmosErase)} />
-            </Row>
-          )}
+          {/* "Erase its firmware" was here, wired to the erase_xmos_flash button. It is gone from the app
+              on purpose: it leaves the audio chip blank, which takes the microphones, the speaker and the
+              wake word with it, and the only route back is the Reflash row above - which needs the very
+              chip it just erased to be talking. Reflash already overwrites, so erase-then-flash was never
+              a step anyone needed. The ESPHome button still exists for a bench recovery over the API. */}
         </Card>
       )}
 
-      <Card title="This device" collapsible name="maint">
+      <Card title="Sat1 Device" collapsible name="maint">
         {restart && (
           <Row label="Restart">
             <Btn onClick={() => post(restart)}>Restart</Btn>
@@ -407,7 +446,9 @@ export function Diagnostics({ ctx }) {
       {ctx.device && ctx.device.ha === false && <p class="banner">{TEXT.ha_disconnected_detail}</p>}
       <Device ctx={ctx} />
       <Firmware ctx={ctx} />
-      <Buttons ctx={ctx} />
+      {/* Buttons moved to the foot of Controls. It is the one card here that answers "does the hardware
+          respond to me", which is a question about the thing you are holding rather than about its
+          internals - and it belongs beside the volume and mute controls it duplicates in hardware. */}
       <Log ctx={ctx} />
       <Maintenance ctx={ctx} />
     </>
