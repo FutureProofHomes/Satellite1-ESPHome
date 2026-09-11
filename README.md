@@ -89,6 +89,7 @@ The Satellite1 ESPHome firmware should be flashed on your [FutureProofHomes Core
 - 360 degree LEDs & Notification Animations
 - Support for TTS Announcements via Home Assistant
 - Routing voice responses to other speakers, and ducking the ones in the same room while you talk
+- A configuration web app served by the device itself, needing no internet connection and no cloud
 - USB-C Power Delivery for easy power input
 
 
@@ -138,6 +139,24 @@ Assistant setting switched on first.
 
 See [docs/TTS-Routing.md](docs/TTS-Routing.md) for setup, the full entity list, the design
 decisions behind the implementation and troubleshooting.
+
+### Configuring the device from your browser
+
+Every Satellite1 serves its own configuration app. Open `http://<device address>/` — or click **Visit
+device** on the ESPHome integration page in Home Assistant — and sign in with the username `satellite1`
+and the password shown by the device's **Web UI Password** sensor.
+
+It works without an internet connection and without a cloud service, because the whole app is embedded
+in the firmware. It also keeps working when Home Assistant is unreachable: sensor calibration, the LED
+ring, the radar, the live log and the maintenance actions are all local, and only the parts that
+genuinely need Home Assistant grey out.
+
+Four pages: **Controls** for readings and everyday adjustments, **Presence** for the mmWave radar,
+**Config** for TTS routing and room ducking, and **Diagnostics** for memory, firmware, the live log and
+recovery actions.
+
+See [docs/web-ui.md](docs/web-ui.md) for how it is built, what it costs in flash and memory, and how to
+rebuild the bundle.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
