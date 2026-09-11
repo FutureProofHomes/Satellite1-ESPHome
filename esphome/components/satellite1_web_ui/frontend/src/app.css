@@ -976,3 +976,24 @@ hr {
   border-radius: 2px;
   padding: 0 1px;
 }
+
+/* Collapsible card headers. The header is a button only when the card is collapsible, so the caret and
+   the title share one hit target rather than making people aim at a triangle. */
+.card-t {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.caret-s {
+  color: var(--fg-4);
+  font-size: 10px;
+  width: 9px;
+}

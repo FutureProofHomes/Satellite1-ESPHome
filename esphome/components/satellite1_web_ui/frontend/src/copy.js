@@ -66,6 +66,8 @@ export const HINTS = {
 
   loop: "Longest single pass through the main loop since this panel last read the value. Tens of milliseconds is normal. Sustained hundreds means something is blocking, and audio will stutter before anything else does.",
 
+  esp_temp:
+    "Temperature of the ESP32 itself, not the room. It reads well above ambient because it sits inside a sealed case next to an amplifier, so a warm number here is normal; sustained readings above 80 \u00b0C are worth investigating. The temperature on the Controls page is the one that measures the room.",
   reset: "Why the device last restarted. 'USB peripheral' means it was flashed. 'Power glitch' or 'Brownout' points at the power supply rather than at the firmware.",
 
   xmos: "The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's.",

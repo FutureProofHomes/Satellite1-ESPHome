@@ -35,10 +35,11 @@ sensor:
     psram:
       name: "Free PSRAM"
       entity_category: "diagnostic"
-  - platform: internal_temperature
-    name: "Internal ESP Temperature"
-    entity_category: "diagnostic"
-    update_interval: 60s
+  # Moved to common/web_ui.yaml for the same reason as the buttons below, and promoted rather than
+  # redeclared: two internal_temperature platforms would each install the chip's temperature driver,
+  # and declaring it in both files would collide on the id after package merging.
+  - id: !extend esp_temperature_sensor
+    internal: false
 
 # These four buttons now live in common/web_ui.yaml, which is always included, because the on-device
 # web app is built around them and they were unavailable on a stock device while they lived here.

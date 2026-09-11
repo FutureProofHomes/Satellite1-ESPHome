@@ -31,6 +31,7 @@ const uptime = (s) => {
 
 function Device({ ctx }) {
   const d = ctx.device;
+  const espTemp = entity(ctx, "esp_temp");
   if (!d) return <Card title="Device">{ctx.deviceError ? <p class="t-err sm">{ctx.deviceError}</p> : <p class="dim sm">Reading&hellip;</p>}</Card>;
 
   // Internal RAM is what runs out first, so it gets the warning colours; PSRAM is plentiful enough
@@ -45,6 +46,17 @@ function Device({ ctx }) {
         <Fact label="Internal RAM free" value={kb(d.heap.free)} unit={` of ${kb(d.heap.total)}`} hint={HINTS.heap} tone={heapTone} />
         <Fact label="PSRAM free" value={mb(d.psram.free)} unit={` of ${mb(d.psram.total)}`} hint={HINTS.psram} />
         <Fact label="Longest loop" value={d.loop_ms} unit=" ms" hint={HINTS.loop} tone={loopTone} />
+        {/* The only row here backed by an entity rather than by /api/sat1/state, so it is omitted on a
+            build without the sensor rather than showing an em dash for a reading that will never come. */}
+        {espTemp?.value != null && (
+          <Fact
+            label="Chip temperature"
+            value={Number(espTemp.value).toFixed(1)}
+            unit=" \u00b0C"
+            hint={HINTS.esp_temp}
+            tone={Number(espTemp.value) > 80 ? "err" : Number(espTemp.value) > 70 ? "warn" : null}
+          />
+        )}
         <Fact label="Uptime" value={uptime(d.uptime)} />
         <Fact label="Last restart" value={d.reset} hint={HINTS.reset} />
         <Fact label="Network" value={d.net === "ethernet" ? "Ethernet" : d.rssi != null ? `Wi-Fi ${d.rssi} dBm` : "Wi-Fi"} />
@@ -232,6 +244,9 @@ function Log({ ctx }) {
   return (
     <Card
       title="Log"
+      collapsible
+      name="log"
+      defaultOpen
       hint={HINTS.log}
       right={
         <span class="row gap">
@@ -343,7 +358,7 @@ function Maintenance({ ctx }) {
   return (
     <>
       {(xmosReset || xmosFlash || xmosErase) && (
-        <Card title="Audio chip" hint={HINTS.xmos}>
+        <Card title="Audio chip" collapsible name="xmos" hint={HINTS.xmos}>
           {xmosReset && (
             <Row label="Restart the audio chip">
               <Btn onClick={() => post(xmosReset)}>Restart</Btn>
@@ -362,7 +377,7 @@ function Maintenance({ ctx }) {
         </Card>
       )}
 
-      <Card title="This device">
+      <Card title="This device" collapsible name="maint">
         {restart && (
           <Row label="Restart">
             <Btn onClick={() => post(restart)}>Restart</Btn>

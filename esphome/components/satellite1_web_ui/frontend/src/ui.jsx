@@ -80,17 +80,65 @@ export function Hint({ text }) {
 /* Layout                                                              */
 /* ------------------------------------------------------------------ */
 
-export function Card({ title, hint, right, children, ...rest }) {
+/**
+ * Remembered per section, so a collapse survives a reload and a firmware update.
+ *
+ * Wrapped because localStorage throws rather than no-ops in a few real situations - Safari's private
+ * mode historically, and any browser with site data blocked - and a diagnostics page that white-screens
+ * because it could not remember a disclosure triangle would be a poor trade.
+ */
+function readOpen(key, fallback) {
+  try {
+    const v = localStorage.getItem(`sat1.open.${key}`);
+    return v === null ? fallback : v === "1";
+  } catch {
+    return fallback;
+  }
+}
+
+function writeOpen(key, open) {
+  try {
+    localStorage.setItem(`sat1.open.${key}`, open ? "1" : "0");
+  } catch {
+    /* Not remembering is survivable; failing to render is not. */
+  }
+}
+
+/**
+ * `collapsible` opts a card in, and needs a stable `name` to remember itself by - deliberately not the
+ * title, which is copy and will be reworded.
+ *
+ * The header becomes a button only when collapsible. Making every card's header a button would put a
+ * dozen useless tab stops in front of a keyboard user before they reach a control.
+ */
+export function Card({ title, hint, right, children, collapsible, name, defaultOpen = false, ...rest }) {
+  const [open, setOpen] = useState(() => (collapsible ? readOpen(name, defaultOpen) : true));
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    writeOpen(name, next);
+  };
+
   return (
-    <section class="card" {...rest}>
+    <section class={`card${collapsible ? " card-c" : ""}`} {...rest}>
       {title && (
         <h2>
-          <span>{title}</span>
+          {collapsible ? (
+            <button class="card-t" aria-expanded={open} onClick={toggle}>
+              <span class="caret-s">{open ? "\u25BE" : "\u25B8"}</span>
+              <span>{title}</span>
+            </button>
+          ) : (
+            <span>{title}</span>
+          )}
           {hint && <Hint text={hint} />}
+          {/* Kept mounted while collapsed: on the Log card this is the level filter and Pause, and
+              Pause is a flag on the shared stream that must stay reachable. */}
           {right && <span class="card-right">{right}</span>}
         </h2>
       )}
-      {children}
+      {open && children}
     </section>
   );
 }

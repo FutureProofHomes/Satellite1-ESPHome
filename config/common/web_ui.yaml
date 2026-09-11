@@ -139,6 +139,12 @@ satellite1_web_ui:
       temp: temperature_sensor
       humidity: humidity_sensor
       lux: ambient_light_sensor
+      # The one Diagnostics reading that is an entity rather than a field of GET /api/sat1/state.
+      # Heap, PSRAM, loop time, uptime and reset reason are all read straight from the IDF in the
+      # handler, which is cheaper and needs no entity - but the chip temperature means owning an
+      # esp_driver_tsens handle, and debug.yaml declares an internal_temperature platform of its own.
+      # Two owners of that driver is a conflict, so it is declared once below and promoted there.
+      esp_temp: esp_temperature_sensor
 
     numbers:
       temp_offset: temp_offset_ui
@@ -261,6 +267,18 @@ button:
     on_press:
       then:
         - memory_flasher.erase:
+
+sensor:
+  # Declared here rather than in debug.yaml for the same reason as the buttons above: that file is
+  # commented out on a stock device, so the Diagnostics page's temperature row had nothing behind it.
+  # 60s to match what debug.yaml used - it is a case temperature, not a control input, and polling it
+  # faster would only add loop work for a number that moves over minutes.
+  - platform: internal_temperature
+    id: esp_temperature_sensor
+    name: "Internal ESP Temperature"
+    entity_category: diagnostic
+    update_interval: 60s
+    internal: true
 
 text_sensor:
   # Deliberately visible in Home Assistant rather than internal: it is the only way a customer
