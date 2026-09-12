@@ -26,13 +26,14 @@ class XMOSFlasher : public MemoryFlasher, public Satellite1SPIService {
 
   bool flash_accessible() override {
     this->parent_->set_spi_flash_direct_access_mode(true);
-    bool got_id = this->read_JEDECID_();
+    bool got_id = this->wait_for_flash_id_();
     this->parent_->set_spi_flash_direct_access_mode(false);
     return got_id;
   }
 
  protected:
   bool read_JEDECID_();
+  bool wait_for_flash_id_();
   bool enable_writing_();
   bool disable_writing_();
   bool chip_erase_();

@@ -12,6 +12,12 @@ static const size_t FLASH_PAGE_SIZE = 256;
 static const size_t FLASH_SECTOR_SIZE = 4096;
 constexpr size_t FLASH_TOTAL_NUMBER_OF_SECTORS = 8388608 / FLASH_SECTOR_SIZE;
 
+// The XMOS only releases the shared flash pins a moment after its reset line is asserted, so the
+// first read after entering direct access mode can come back empty. Same settling time as
+// Satellite1::xmos_hardware_reset().
+static const uint32_t FLASH_RELEASE_DELAY_MS = 100;
+static const uint8_t JEDEC_READ_ATTEMPTS = 3;
+
 void XMOSFlasher::loop() {
   switch (this->state) {
     case FLASHER_IDLE:
@@ -35,6 +41,7 @@ void XMOSFlasher::loop() {
       } else if (remaining == 0) {
         this->state = FLASHER_FLASHING;
       } else if (remaining < 0) {
+        this->deinit_flashing_();
         this->state = FLASHER_ERROR_STATE;
       }
       break;
@@ -84,10 +91,25 @@ void XMOSFlasher::publish_progress_() {
   }
 }
 
+bool XMOSFlasher::wait_for_flash_id_() {
+  for (uint8_t attempt = 0; attempt < JEDEC_READ_ATTEMPTS; attempt++) {
+    delay(FLASH_RELEASE_DELAY_MS);
+    if (this->read_JEDECID_()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool XMOSFlasher::init_flasher() {
   ESP_LOGD(TAG, "Setting up XMOS flasher...");
   this->parent_->set_spi_flash_direct_access_mode(true);
-  this->read_JEDECID_();
+  // Erasing a flash that never identified itself destroys the XMOS firmware without being able to
+  // replace it, and leaves a device that can no longer clock its own I2S.
+  if (!this->wait_for_flash_id_()) {
+    ESP_LOGE(TAG, "Flash didn't report a JEDEC ID; refusing to erase it");
+    return false;
+  }
   this->dump_flash_info();
   this->total_number_of_sectors_ = FLASH_TOTAL_NUMBER_OF_SECTORS;
   return true;
