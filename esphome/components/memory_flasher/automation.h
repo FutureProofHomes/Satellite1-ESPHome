@@ -53,8 +53,8 @@ class FlashingStartedTrigger : public Trigger<> {
  public:
   explicit FlashingStartedTrigger(MemoryFlasher *xflash) {
     xflash->add_on_state_callback([this, xflash]() {
-      if (xflash->state == FLASHER_ERASING && this->last_reported_ != FLASHER_ERASING) {
-        this->last_reported_ = FLASHER_ERASING;
+      if (xflash->state == FLASHER_INITIALIZING && this->last_reported_ != FLASHER_INITIALIZING) {
+        this->last_reported_ = FLASHER_INITIALIZING;
         this->trigger();
       } else {
         this->last_reported_ = xflash->state;

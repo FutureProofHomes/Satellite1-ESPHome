@@ -18,8 +18,7 @@ ethernet:
         id(network_setup_completed) = true;
     - script.execute: control_leds
     - script.execute: set_network_connection_str
-    - tas2780.activate:
-        mode: 2
+    - script.execute: refresh_audio_output
   on_disconnect:
     - script.execute: set_network_connection_str
 

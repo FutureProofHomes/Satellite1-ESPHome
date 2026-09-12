@@ -18,7 +18,9 @@ void Satellite1::setup() {
   }
 
   memset(this->xmos_fw_version, 0, 5);
-  this->dfu_get_fw_version_();
+  if (this->check_for_xmos_() && !this->status_register_valid_) {
+    this->request_status_register_update();
+  }
 }
 
 void Satellite1::dump_config() {
@@ -33,10 +35,13 @@ void Satellite1::loop() {
     case SAT_DETACHED_STATE:
       if (this->connection_attempts <= MAX_CONNECTION_ATTEMPTS && (millis() - this->last_attempt_timestamp_) > 1000) {
         if (this->connection_attempts == MAX_CONNECTION_ATTEMPTS) {
+          ESP_LOGW(TAG, "XMOS did not respond after %u connection attempts",
+                   static_cast<unsigned>(MAX_CONNECTION_ATTEMPTS));
           this->state_callback_.call();
         } else if (this->check_for_xmos_()) {
           this->state = SAT_XMOS_CONNECTED_STATE;
           this->connection_attempts = 0;
+          ESP_LOGI(TAG, "XMOS Firmware Version: %s", this->status_string().c_str());
           this->state_callback_.call();
         }
         this->last_attempt_timestamp_ = millis();
@@ -44,6 +49,11 @@ void Satellite1::loop() {
       }
       break;
     case SAT_XMOS_CONNECTED_STATE:
+      if (!this->status_refresh_attempted_ ||
+          static_cast<uint32_t>(millis() - this->status_refresh_timestamp_) >= STATUS_REFRESH_INTERVAL_MS) {
+        this->request_status_register_update(false);
+      }
+      break;
     case SAT_FLASH_CONNECTED_STATE:
       break;
   }
@@ -82,13 +92,31 @@ std::string Satellite1::status_string() {
   }
 }
 
-bool Satellite1::request_status_register_update() {
-  bool ret = this->transfer(0, 0, NULL, 0);
-  uint8_t *arr = this->dc_status_register_;
-  return ret;
+bool Satellite1::request_status_register_update(bool retry) {
+  this->status_refresh_timestamp_ = millis();
+  this->status_refresh_attempted_ = true;
+  bool status_report_received = false;
+  if (!this->transfer(0, 0, nullptr, 0, &status_report_received, retry)) {
+    return false;
+  }
+  if (!status_report_received) {
+    return false;
+  }
+  return true;
 }
 
-bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload, uint8_t payload_len) {
+bool Satellite1::get_cached_dc_status(DC_STATUS_REGISTER::register_id reg, uint8_t *value) {
+  assert(reg < DC_STATUS_REGISTER::REGISTER_LEN);
+  assert(value != nullptr);
+  if (!this->status_register_valid_) {
+    return false;
+  }
+  *value = this->dc_status_register_[reg];
+  return true;
+}
+
+bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload, uint8_t payload_len,
+                          bool *status_report_received, bool retry) {
   if (this->spi_flash_direct_access_enabled_) {
     return false;
   }
@@ -96,8 +124,7 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
   uint8_t send_recv_buf[256 + 3] = {0};
   int status_report_dummies = std::max<int>(0, DC_STATUS_REGISTER::REGISTER_LEN - payload_len - 1);
 
-  int attempts = 3;
-  do {
+  for (int attempts = retry ? 3 : 0;; --attempts) {
     send_recv_buf[0] = resource_id;
     send_recv_buf[1] = command;
     send_recv_buf[2] = payload_len + !!(command & CONTROL_CMD_READ_BIT);
@@ -105,8 +132,11 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
     this->enable();
     this->transfer_array(&send_recv_buf[0], payload_len + 3 + status_report_dummies);
     this->disable();
+    if (send_recv_buf[0] != CONTROL_COMMAND_IGNORED_IN_DEVICE || attempts == 0) {
+      break;
+    }
     vTaskDelay(1);
-  } while (send_recv_buf[0] == CONTROL_COMMAND_IGNORED_IN_DEVICE && attempts-- > 0);
+  }
 
   if (send_recv_buf[0] == CONTROL_COMMAND_IGNORED_IN_DEVICE) {
     return false;
@@ -120,18 +150,24 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
   // Got status register report
   if (send_recv_buf[0] == DC_RESOURCE::CNTRL_ID && send_recv_buf[1] != DC_RET_STATUS::PAYLOAD_AVAILABLE) {
     memcpy(this->dc_status_register_, &send_recv_buf[2], DC_STATUS_REGISTER::REGISTER_LEN);
-    uint8_t *arr = this->dc_status_register_;
+    this->status_register_valid_ = true;
+    if (status_report_received != nullptr) {
+      *status_report_received = true;
+    }
   }
 
   if (command & CONTROL_CMD_READ_BIT) {
-    attempts = 3;
-    do {
+    vTaskDelay(1);
+    for (int attempts = retry ? 3 : 0;; --attempts) {
       memset(send_recv_buf, 0, payload_len + 3);
       this->enable();
       this->transfer_array(&send_recv_buf[0], payload_len + 3);
       this->disable();
+      if (send_recv_buf[0] != CONTROL_COMMAND_IGNORED_IN_DEVICE || attempts == 0) {
+        break;
+      }
       vTaskDelay(1);
-    } while (send_recv_buf[0] == CONTROL_COMMAND_IGNORED_IN_DEVICE && attempts-- > 0);
+    }
 
     if (send_recv_buf[0] == CONTROL_COMMAND_IGNORED_IN_DEVICE) {
       return false;
@@ -163,7 +199,6 @@ bool Satellite1::dfu_get_fw_version_() {
   }
 
   memcpy(this->xmos_fw_version, version_resp, 5);
-  ESP_LOGI(TAG, "XMOS Firmware Version: %s ", this->status_string().c_str());
 
   return true;
 }

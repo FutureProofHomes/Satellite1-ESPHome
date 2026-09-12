@@ -148,6 +148,7 @@ static const uint8_t TAS2780_INT_LDO = 0x36;      // Internal LDO Setting
 static const uint8_t TAS2780_SDOUT_HIZ_1 = 0x3D;  // Slots Control
 static const uint8_t TAS2780_SDOUT_HIZ_2 = 0x3E;  // Slots Control
 static const uint8_t TAS2780_SDOUT_HIZ_3 = 0x3F;  // Slots Control
+
 static const uint8_t TAS2780_SDOUT_HIZ_4 = 0x40;  // Slots Control
 static const uint8_t TAS2780_SDOUT_HIZ_5 = 0x41;  // Slots Control
 static const uint8_t TAS2780_SDOUT_HIZ_6 = 0x42;  // Slots Control
@@ -156,6 +157,12 @@ static const uint8_t TAS2780_SDOUT_HIZ_8 = 0x44;  // Slots Control
 static const uint8_t TAS2780_SDOUT_HIZ_9 = 0x45;  // Slots Control
 static const uint8_t TAS2780_TG_EN = 0x47;        // Thermal Detection Enable
 static const uint8_t TAS2780_EDGE_CTRL = 0x4C;    // Slew rate control
+
+static constexpr float TAS2780_POWER_MODE2_MIN_PVDD = 7.4f;
+static constexpr float TAS2780_EXTERNAL_VBAT1S_MIN = 2.9f;
+static constexpr float TAS2780_EXTERNAL_VBAT1S_MAX = 5.5f;
+static const uint8_t TAS2780_PVDD_UVLO_MODE0 = 0x03;  // 2.76 V
+static const uint8_t TAS2780_PVDD_UVLO_MODE2 = 0x11;  // 7.40 V
 
 /* PAGE 0x04*/
 static const uint8_t TAS2780_DG_DC_VAL1 = 0x08;    // Diagnostic DC Level
@@ -309,10 +316,8 @@ void TAS2780::init() {
   // this->reg(TAS2780_CHNL_0) = 0xA1;
   this->set_power_mode_(this->power_mode_);
 
-  // When Y bridge is used (eg. PWR_MODE1) PVDD UVLO threshold needs to be set 2.5 V above VBAT1S level.
-  //  UVLO = 1.753V + val * 0.332V
-  // this->reg(TAS2780_PVDD_UVLO) = 0x12; //PVDD UVLO set to 7.73V
-  this->reg(TAS2780_PVDD_UVLO) = 0x03;  // PVDD UVLO set to 2.76V
+  // PWR_MODE2 requires PVDD to remain at least 2.5 V above its 4.8 V internal VBAT1S LDO.
+  this->reg(TAS2780_PVDD_UVLO) = this->power_mode_ == 2 ? TAS2780_PVDD_UVLO_MODE2 : TAS2780_PVDD_UVLO_MODE0;
 
   // Set interrupt masks
   this->reg(TAS2780_PAGE_SELECT) = 0x00;
@@ -332,19 +337,49 @@ void TAS2780::init() {
   this->update_register();
 }
 
-void TAS2780::activate(uint8_t power_mode) {
-  ESP_LOGD(TAG, "Activating TAS2780 (PWR_MODE:%d)", power_mode);
+void TAS2780::activate() {
+  constexpr uint8_t bootstrap_power_mode = 0;
+  ESP_LOGD(TAG, "Activating TAS2780 in bootstrap PWR_MODE:%d", bootstrap_power_mode);
   // clear interrupt latches
   this->reg(TAS2780_INT_CLK_CFG) = 0x19 | (1 << 2);
-  if (power_mode != this->power_mode_) {
-    this->power_mode_ = power_mode;
+  if (bootstrap_power_mode != this->power_mode_) {
+    this->power_mode_ = bootstrap_power_mode;
     this->init();
     this->write_mute_();
   }
-  // activate
+  this->reg(TAS2780_MODE_CTRL) =
+      (TAS2780_MODE_CTRL_BOP_SRC__PVDD_UVLO & ~TAS2780_MODE_CTRL_MODE_MASK) | TAS2780_MODE_CTRL_MODE__ACTIVE_MUTED;
+  this->enable_loop();
+
+  // The TAS SAR ADC only provides valid supply measurements while active.
+  delay(100);
+  SupplyVoltages voltages;
+  if (!this->read_supply_voltages_(&voltages)) {
+    ESP_LOGE(TAG, "Couldn't read supply voltages; returning TAS2780 to software shutdown");
+    this->deactivate();
+    return;
+  }
+
+  // External VBAT1S from 2.7 V through 2.9 V requires separate OCP programming.
+  uint8_t selected_power_mode;
+  if (voltages.pvdd >= TAS2780_POWER_MODE2_MIN_PVDD) {
+    selected_power_mode = 2;
+  } else if (voltages.vbat1s > TAS2780_EXTERNAL_VBAT1S_MIN && voltages.vbat1s <= TAS2780_EXTERNAL_VBAT1S_MAX) {
+    selected_power_mode = 0;
+  } else {
+    ESP_LOGW(TAG, "No valid TAS2780 power mode for VBAT1S %.3f V and PVDD %.3f V", voltages.vbat1s, voltages.pvdd);
+    this->deactivate();
+    return;
+  }
+  ESP_LOGD(TAG, "Selecting PWR_MODE:%d", selected_power_mode);
+  if (selected_power_mode != this->power_mode_) {
+    this->power_mode_ = selected_power_mode;
+    this->init();
+    this->write_mute_();
+  }
   this->reg(TAS2780_MODE_CTRL) =
       (TAS2780_MODE_CTRL_BOP_SRC__PVDD_UVLO & ~TAS2780_MODE_CTRL_MODE_MASK) | TAS2780_MODE_CTRL_MODE__ACTIVE;
-  this->enable_loop();
+  this->active_ = true;
 }
 
 void TAS2780::deactivate() {
@@ -353,11 +388,40 @@ void TAS2780::deactivate() {
   this->reg(TAS2780_MODE_CTRL) =
       (TAS2780_MODE_CTRL_BOP_SRC__PVDD_UVLO & ~TAS2780_MODE_CTRL_MODE_MASK) | TAS2780_MODE_CTRL_MODE__SFTW_SHTDWN;
   this->disable_loop();
+  this->active_ = false;
 }
 
 void TAS2780::reset() {
   this->init();
-  this->activate(this->power_mode_);
+  this->activate();
+}
+
+bool TAS2780::read_adc12_(uint8_t msb_reg, uint8_t lsb_reg, uint16_t *raw) {
+  uint8_t msb;
+  uint8_t lsb;
+  if (!this->write_byte(TAS2780_PAGE_SELECT, 0x00) || !this->read_byte(msb_reg, &msb) ||
+      !this->read_byte(lsb_reg, &lsb)) {
+    ESP_LOGE(TAG, "TAS2780 I2C ADC read failed for registers 0x%02X/0x%02X", msb_reg, lsb_reg);
+    return false;
+  }
+  *raw = (static_cast<uint16_t>(msb) << 4) | (lsb >> 4);
+  return true;
+}
+
+bool TAS2780::read_supply_voltages_(SupplyVoltages *voltages) {
+  uint16_t vbat_raw;
+  uint16_t pvdd_raw;
+  if (!this->write_byte(TAS2780_PAGE_SELECT, 0x00) || !this->read_byte(TAS2780_MODE_CTRL, &voltages->mode_ctrl) ||
+      !this->read_adc12_(TAS2780_VBAT_MSB, TAS2780_VBAT_LSB, &vbat_raw) ||
+      !this->read_adc12_(TAS2780_PVDD_MSB, TAS2780_PVDD_LSB, &pvdd_raw)) {
+    ESP_LOGE(TAG, "TAS2780 I2C supply read failed");
+    return false;
+  }
+  voltages->vbat1s = static_cast<float>(vbat_raw) / 128.0f;
+  voltages->pvdd = static_cast<float>(pvdd_raw) / 64.0f;
+  ESP_LOGD(TAG, "MODE_CTRL: 0x%02X; VBAT1S: %.3f V; PVDD: %.3f V", voltages->mode_ctrl, voltages->vbat1s,
+           voltages->pvdd);
+  return true;
 }
 
 void TAS2780::set_power_mode_(const uint8_t power_mode) {
