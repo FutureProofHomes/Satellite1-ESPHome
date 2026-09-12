@@ -209,6 +209,9 @@ memory_flasher:
         - lambda: id(xmos_flashing_state) = 3;
         - script.execute: control_leds
         - lambda: id(xmos_flashing_state) = 0;
+        # on_flashing_start deactivated the amp, and a failed flash leaves nothing else to bring it
+        # back: the XMOS is released but never reconnects on its own if it has no firmware to run.
+        - script.execute: refresh_audio_output
 
     on_erasing_done:
       then:
