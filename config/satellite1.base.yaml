@@ -145,7 +145,7 @@ satellite1:
             - lambda: return ${xmos_auto_flash_on_boot};
             - lambda: return id(init_in_progress);
             - lambda: return id(xflash).has_image_embedded();
-            - lambda: return !id(xflash).flash_attempted_this_boot();
+            - lambda: return id(xflash).flash_attempts_this_boot() < 3;
           then:
             - memory_flasher.write_embedded_image:
 
@@ -163,7 +163,7 @@ satellite1:
             - lambda: return id(init_in_progress);
             - lambda: return id(xflash).has_image_embedded();
             - lambda: return !id(xflash).match_embedded(id(satellite1_id).xmos_fw_version);
-            - lambda: return !id(xflash).flash_attempted_this_boot();
+            - lambda: return id(xflash).flash_attempts_this_boot() < 3;
           then:
             - memory_flasher.write_embedded_image:
           else:
