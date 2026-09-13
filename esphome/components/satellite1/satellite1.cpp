@@ -163,13 +163,19 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
       this->enable();
       this->transfer_array(&send_recv_buf[0], payload_len + 3);
       this->disable();
-      if (send_recv_buf[0] != CONTROL_COMMAND_IGNORED_IN_DEVICE || attempts == 0) {
+      // A read the device served leads with CMD_SUCCESS. The W5500 shares this bus and drives it at
+      // a different mode and clock, and a frame does come back mangled often enough to matter - the
+      // payload of one of those is indistinguishable from real data, so the leading status byte is
+      // the only thing that says whether the rest can be trusted.
+      if (send_recv_buf[0] == DC_RET_STATUS::CMD_SUCCESS || attempts == 0) {
         break;
       }
       vTaskDelay(1);
     }
 
-    if (send_recv_buf[0] == CONTROL_COMMAND_IGNORED_IN_DEVICE) {
+    if (send_recv_buf[0] != DC_RET_STATUS::CMD_SUCCESS) {
+      ESP_LOGW(TAG, "Discarding read of resource %u command %u (status 0x%02X)", resource_id, command,
+               send_recv_buf[0]);
       return false;
     }
 
