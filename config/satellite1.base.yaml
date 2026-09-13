@@ -145,6 +145,8 @@ satellite1:
             - lambda: return ${xmos_auto_flash_on_boot};
             - lambda: return id(init_in_progress);
             - lambda: return id(xflash).has_image_embedded();
+            # A flash that aborts part-way leaves the XMOS unbootable, and this trigger is the one
+            # that fires when it is not answering, so it is worth a few goes.
             - lambda: return id(xflash).flash_attempts_this_boot() < 3;
           then:
             - memory_flasher.write_embedded_image:
@@ -163,7 +165,10 @@ satellite1:
             - lambda: return id(init_in_progress);
             - lambda: return id(xflash).has_image_embedded();
             - lambda: return !id(xflash).match_embedded(id(satellite1_id).xmos_fw_version);
-            - lambda: return id(xflash).flash_attempts_this_boot() < 3;
+            # Strictly one upgrade attempt per boot. The XMOS is answering here, so nothing is
+            # broken, and the reported version does not match ${xmos_fw_version} even straight
+            # after a good flash - retrying would just reflash on a loop.
+            - lambda: return id(xflash).flash_attempts_this_boot() == 0;
           then:
             - memory_flasher.write_embedded_image:
           else:
