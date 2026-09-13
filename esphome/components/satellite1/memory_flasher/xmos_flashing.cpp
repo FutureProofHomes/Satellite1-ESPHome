@@ -2,7 +2,6 @@
 #include "esphome/core/log.h"
 
 #include <endian.h>
-#include <algorithm>
 #include <cinttypes>
 
 namespace esphome {
@@ -13,12 +12,6 @@ static const char *const TAG = "xmos_flasher";
 static const size_t FLASH_PAGE_SIZE = 256;
 static const size_t FLASH_SECTOR_SIZE = 4096;
 static const uint32_t FLASH_DEFAULT_CAPACITY = 8388608;
-
-// The XMOS images are built with `xflash --boot-partition-size 0x100000`, so the boot partition is
-// 1 MB however small the factory image itself is. The bootloader prefers a valid upgrade image
-// later in that partition over the factory image, so erasing only the sectors the factory image
-// occupies leaves a stale upgrade image that keeps booting while the flash verifies clean.
-static const uint32_t FLASH_BOOT_PARTITION_SIZE = 0x100000;
 
 // The XMOS only releases the shared flash pins a moment after its reset line is asserted, so the
 // first read after entering direct access mode can come back empty. Same settling time as
@@ -434,9 +427,7 @@ bool XMOSFlasher::init_flashing_() {
   this->bytes_remaining_ = size_in_bytes;
   this->page_pos_ = 0;
 
-  size_t boot_partition_sectors = FLASH_BOOT_PARTITION_SIZE / FLASH_SECTOR_SIZE;
-  this->total_sectors_to_erase_ =
-      std::min(std::max(size_in_sectors, boot_partition_sectors), this->total_number_of_sectors_);
+  this->total_sectors_to_erase_ = size_in_sectors;
   this->current_sector_ = -1;
 
   return true;
