@@ -50,6 +50,35 @@ Heap, PSRAM, loop time, uptime and reset reason are read straight from the IDF i
 than mirrored into entities, so the Diagnostics page costs no entity overhead. The one exception is chip
 temperature, which needs the temperature-sensor driver and therefore is a real sensor.
 
+Every endpoint above builds its body in an `AsyncResponseStream` — the httpd task stack is 4,352 bytes,
+so a response cannot be assembled on it — except `GET /api/sat1/ha`, which is chunked straight out of
+PSRAM. A stream accumulates into a `std::string`, and with `CONFIG_SPIRAM_USE_CAPS_ALLOC` that is the
+internal heap, so printing the cached payload copied up to 24 KB of PSRAM into the scarcest memory on the
+device, needing a contiguous block of roughly twice the payload while the string grew. Exceptions are
+compiled out, so the failed allocation aborted the chip rather than failing the request: on a WiFi build
+the app rebooted the device every time it asked for this data. The handler now writes the header, the
+payload pointer and the closing brace as three `httpd_resp_send_chunk` calls, so the payload never
+touches the internal heap and the response carries no `Content-Length`, which is what chunked means.
+
+The write side of that payload had the same bug at the other end. The capture lambda in
+`common/web_ui_ha.yaml` used to `serializeJson` into a `std::string`, which is the same several kilobytes
+on the same heap, and it aborted the device on the sync itself once the read path stopped doing it first.
+So the component hands out its PSRAM buffer instead: `stage_ha_payload(capacity)` returns somewhere to
+write, the lambda serialises ArduinoJson's output directly into it, and `commit_ha_payload(len, rung)`
+publishes it by swapping that buffer with the one being served. The two buffers alternate, so after the
+first two syncs a resync allocates nothing and copies nothing, and the payload's bytes go from the API
+message to PSRAM and nowhere else.
+
+The routes that do still stream are guarded. If the largest free internal block is under 6 KB when one of
+them arrives, it is answered `503` with a `Retry-After` rather than attempted — a stale reading in the app
+instead of a reboot. The frontend already treats a failed fetch as "keep what I have", so nothing there had
+to change. That threshold is a floor and not a comfort margin, which matters more than it sounds: the first
+version asked for 16 KB, which is more contiguous internal memory than a WiFi build of this firmware ever
+has — measured at 7,680 bytes largest free block on hardware — so it refused every streamed route and left
+the app with no data at all. `GET /api/sat1/state` is the largest of them at about 2 KB, peaking at a 4 KB
+allocation while the 2 KB buffer it is copying from is still alive, so 6 KB clears a real response and only
+speaks when one genuinely could not have been served.
+
 ## Authentication
 
 `web_server` runs with auth enabled, so every request — the app, the entity API and the radar API — is
@@ -117,7 +146,7 @@ So the whole thing — the SPA, the component, the Home Assistant data layer, th
 Presence route, and moving the radar tuner onto the shared server — costs about 97 KB of flash and 1.7 KB
 of static RAM. Flash is 34.7% used of 8,126,464.
 
-Runtime, measured on hardware over HTTP after 25 minutes of uptime:
+Runtime, measured on hardware over HTTP after 25 minutes of uptime, on an **ethernet** build:
 
 | | Free | Of |
 |---|---|---|
@@ -127,6 +156,19 @@ Runtime, measured on hardware over HTTP after 25 minutes of uptime:
 Largest free internal block was 131,072 bytes and the longest single loop pass 24 ms. Internal heap is
 the number that matters, because it is what audio buffers and the network stack allocate from; PSRAM is
 plentiful by comparison, and cached Home Assistant payloads are deliberately put there.
+
+A WiFi build of the same tree has far less of it — tens of KB free rather than 148 KB, and a smaller total
+— and the difference is not this component. ESPHome's `wifi` component applies a high-performance profile
+whenever any component asks for one, and both `speaker.media_player` and `sendspin` do: the build gets
+`CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=16` and `CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8`, roughly 38 KB of
+DMA-capable internal buffers, and only WiFi builds pull in the BLE stack through `common/wifi_improv.yaml`
+for Improv provisioning. So the numbers above are the ethernet picture, not a regression when a WiFi
+device reads lower. Anything on the device that allocates a few KB of internal RAM is closer to the edge
+on WiFi, which is why the two measures above are worth reading as a pair rather than as one number.
+
+Note that plain `sdkconfig_options:` in YAML cannot be used to trim those WiFi buffers: the `wifi`
+component writes them from its own `to_code` at `CoroPriority.COMMUNICATION` (60), after the `esp32`
+platform has applied user options at priority 1000, so the component's value is the one that lands.
 
 Boot time has not yet been measured as a before-and-after pair. Doing it honestly needs the baseline
 firmware flashed to the same hardware, which has not been done.

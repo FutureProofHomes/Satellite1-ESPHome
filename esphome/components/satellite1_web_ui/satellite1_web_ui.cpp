@@ -62,22 +62,36 @@ void Satellite1WebUI::loop() {
 #endif
 }
 
-void Satellite1WebUI::set_ha_payload(const std::string &json, int rung) {
-  this->handler_.set_ha_payload(json, rung);
+char *Satellite1WebUI::stage_ha_payload(size_t capacity) { return this->handler_.stage_ha_payload(capacity); }
 
-  // A find rather than a JSON parse: ArduinoJson is only linked in when something in the config uses
-  // capture_response, and the area id is one flat string in a payload we generate ourselves. An empty
+void Satellite1WebUI::commit_ha_payload(size_t len, int rung) {
+  const char *json = this->handler_.commit_ha_payload(len, rung);
+  if (json == nullptr)
+    return;
+
+  // A find over the buffer rather than a JSON parse, and rather than a std::string built from it:
+  // ArduinoJson is only linked in when something in the config uses capture_response, the area id is one
+  // flat string in a payload we generate ourselves, and a copy of the payload to search it would put
+  // several kilobytes on the internal heap - which is the whole thing the staging pair avoids. An empty
   // or missing `aid` is left alone rather than written, so a sync that happens while the device is
   // between areas cannot clear an area the switches are currently projecting.
   static const char *const KEY = "\"aid\":\"";
-  const size_t at = json.find(KEY);
-  if (at == std::string::npos)
+  const char *at = strstr(json, KEY);
+  if (at == nullptr)
     return;
-  const size_t start = at + strlen(KEY);
-  const size_t end = json.find('"', start);
-  if (end == std::string::npos || end == start)
+  const char *start = at + strlen(KEY);
+  const char *end = strchr(start, '"');
+  if (end == nullptr || end == start)
     return;
-  this->selection_.set_own_area(json.substr(start, end - start));
+  this->selection_.set_own_area(std::string(start, static_cast<size_t>(end - start)));
+}
+
+void Satellite1WebUI::set_ha_payload(const std::string &json, int rung) {
+  char *staged = this->stage_ha_payload(json.size() + 1);
+  if (staged == nullptr)
+    return;
+  memcpy(staged, json.c_str(), json.size());
+  this->commit_ha_payload(json.size(), rung);
 }
 
 void Satellite1WebUI::dump_config() {

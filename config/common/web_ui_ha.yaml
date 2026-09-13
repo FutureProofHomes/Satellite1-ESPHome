@@ -189,25 +189,38 @@ substitutions:
   # an empty result rather than an error. Named here because rung 1's comment explains it.
   web_ui_ha_probe_statistic: "sensor.satellite1_web_ui_probe"
 
-  # Leaves the payload in `payload`, whichever of the two forms it arrived in. Each rung then stores it
+  # Writes the payload into the component's PSRAM staging buffer, whichever of the two forms it arrived
+  # in, and leaves `ha_len` bytes there with `ha_dst` non-null if it worked. Each rung then commits it
   # with its own number, which is the only part that differs between them.
+  #
+  # Never a std::string, and that is the whole point of the shape below. This used to be
+  # `serializeJson(captured, payload)` into one, which put several kilobytes on the internal heap - and
+  # with exceptions compiled out, an allocation that cannot find a contiguous block that size does not
+  # fail, it calls abort(). On a wifi build, where the WiFi driver's buffers leave the largest free block
+  # around 7KB, that rebooted the device on the sync itself. Staging into PSRAM means the bytes go from
+  # the API message straight to the buffer that serves them and nowhere else.
   #
   # Home Assistant puts every rendered template through literal_eval, so a payload with no boolean and
   # no none parses into a dict and comes back as a JSON object, while one with either raises, is
   # caught, and comes back as the original string. The template above is written to stay on one side of
   # that line, but both are handled: the alternative is a transport whose shape depends on whether
-  # someone's speaker is called something unusual.
+  # someone's speaker is called something unusual. The string form is copied with memcpy because its
+  # bytes are already in the API message; the object form is serialized directly into the buffer.
   #
   # This lives in YAML rather than in the component because ArduinoJson is only compiled in when
   # something in the config uses capture_response - which is exactly this file - and a lambda is part
   # of main.cpp, where it always is.
   web_ui_ha_payload_lambda: >-
-    std::string payload;
     auto captured = response["response"];
-    if (captured.is<const char *>()) {
-      payload = captured.as<std::string>();
-    } else {
-      serializeJson(captured, payload);
+    const char *ha_src = captured.is<const char *>() ? captured.as<const char *>() : nullptr;
+    size_t ha_len = ha_src != nullptr ? strlen(ha_src) : measureJson(captured);
+    char *ha_dst = id(web_ui_app)->stage_ha_payload(ha_len + 1);
+    if (ha_dst != nullptr) {
+      if (ha_src != nullptr) {
+        memcpy(ha_dst, ha_src, ha_len);
+      } else {
+        ha_len = serializeJson(captured, ha_dst, ha_len + 1);
+      }
     }
 
 globals:
@@ -303,8 +316,13 @@ script:
           on_success:
             - lambda: |-
                 ${web_ui_ha_payload_lambda}
-                id(web_ui_ha_rung) = 1;
-                id(web_ui_app)->set_ha_payload(payload, 1);
+                // A payload with no buffer to stage it in is not published, and the rung is left alone
+                // with it: the previous payload keeps being served with its real age, which is more use
+                // to the app than a rung number for data it never received.
+                if (ha_dst != nullptr) {
+                  id(web_ui_ha_rung) = 1;
+                  id(web_ui_app)->commit_ha_payload(ha_len, 1);
+                }
           on_error:
             - script.execute: web_ui_ha_rung_2
 
@@ -330,8 +348,10 @@ script:
           on_success:
             - lambda: |-
                 ${web_ui_ha_payload_lambda}
-                id(web_ui_ha_rung) = 2;
-                id(web_ui_app)->set_ha_payload(payload, 2);
+                if (ha_dst != nullptr) {
+                  id(web_ui_ha_rung) = 2;
+                  id(web_ui_app)->commit_ha_payload(ha_len, 2);
+                }
           on_error:
             - lambda: |-
                 id(web_ui_ha_rung) = -1;

@@ -1,5 +1,6 @@
 #include "web_ui_handler.h"
 
+#include <cstdio>
 #include <cstring>
 
 #include "esphome/core/application.h"
@@ -119,8 +120,71 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
 
 bool WebUIHandler::canHandle(AsyncWebServerRequest *request) const { return match_route_(request) != Route::NONE; }
 
+bool WebUIHandler::route_streams_(Route route) {
+  // An exhaustive switch rather than a set test, so a route added later has to say here whether it
+  // builds its body on the internal heap instead of quietly skipping the guard in handleRequest.
+  switch (route) {
+    case Route::STATE:
+#ifdef USE_VOICE_ASSISTANT
+    case Route::VOICE:
+#endif
+#ifdef USE_MICRO_WAKE_WORD
+    case Route::WAKE_WORDS:
+#endif
+    case Route::SEL:
+      return true;
+    case Route::NONE:
+    case Route::INDEX:
+    case Route::HA:
+    case Route::HA_REFRESH:
+    case Route::HA_SELECT:
+    case Route::SEL_SET:
+#ifdef USE_MICRO_WAKE_WORD
+    case Route::WAKE_WORDS_SET:
+#endif
+      // The bundle is sent from PROGMEM, the Home Assistant payload from PSRAM, and every write
+      // answers with a string literal. None of them need heap to reply.
+      return false;
+  }
+  return false;
+}
+
+void WebUIHandler::send_low_memory_(AsyncWebServerRequest *request) {
+  // 503 through the raw httpd API, because init_response_ knows 200, 204, 400, 401, 404, 409 and 422
+  // and maps everything else to 500 - and a 500 reads as a bug in this device rather than as "ask me
+  // again in a moment". handle_index_ reaches past it the same way for its 304.
+  //
+  // The status and header strings are literals: httpd_resp_set_status and httpd_resp_set_hdr store the
+  // pointer rather than copying, and must stay valid until the send below.
+  httpd_resp_set_status(*request, "503 Service Unavailable");
+  httpd_resp_set_type(*request, "application/json");
+  httpd_resp_set_hdr(*request, "Retry-After", "2");
+  httpd_resp_send(*request, R"({"ok":0,"low_memory":1})", HTTPD_RESP_USE_STRLEN);
+}
+
 void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
-  switch (match_route_(request)) {
+  const Route route = match_route_(request);
+
+  // A response that cannot be allocated must not be attempted. AsyncResponseStream accumulates into a
+  // std::string on the internal heap, and with exceptions off a failed operator new aborts the whole
+  // device - so a Diagnostics poll arriving during a squeeze used to reboot it. Answering 503 instead
+  // costs the app one stale reading: useDeviceState keeps its error state and useHaData keeps the
+  // payload it is holding, which is what they already do for a device that has gone away.
+  //
+  // Largest block rather than total free, because a response needs one contiguous allocation and not a
+  // sum. The threshold is a floor rather than a margin - see WU_STREAM_MIN_BLOCK - and the block that was
+  // actually seen is logged, because a 503 nobody can explain is worse than the reboot it replaced.
+  if (route_streams_(route)) {
+    const size_t block = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (block < WU_STREAM_MIN_BLOCK) {
+      ESP_LOGW(TAG_WU, "Largest free internal block is %u bytes; answering 503 rather than allocating",
+               static_cast<unsigned>(block));
+      this->send_low_memory_(request);
+      return;
+    }
+  }
+
+  switch (route) {
     case Route::INDEX:
       this->handle_index_(request);
       break;
@@ -456,54 +520,93 @@ void WebUIHandler::apply_wake_word_requests() {
 }
 #endif
 
-void WebUIHandler::set_ha_payload(const std::string &json, int rung) {
-  LockGuard guard{this->ha_lock_};
-
-  if (json.size() + 1 > this->ha_cap_) {
-    char *grown = this->ha_buf_ == nullptr ? this->ha_alloc_.allocate(json.size() + 1)
-                                           : this->ha_alloc_.reallocate(this->ha_buf_, json.size() + 1);
+char *WebUIHandler::stage_ha_payload(size_t capacity) {
+  // No lock: the staging buffer is only ever touched from the main loop, where the API callback that
+  // writes it runs. What a request can reach is ha_buf_, and the two only meet in commit_ha_payload.
+  if (capacity > this->ha_stage_cap_) {
+    char *grown = this->ha_stage_ == nullptr ? this->ha_alloc_.allocate(capacity)
+                                             : this->ha_alloc_.reallocate(this->ha_stage_, capacity);
     if (grown == nullptr) {
       // The previous payload is still intact and still served, with its real age. Losing the update
       // is better than dropping what we have for an installation that has not changed much.
-      ESP_LOGW(TAG_WU, "No room for a %u byte Home Assistant payload; keeping the previous one",
-               static_cast<unsigned>(json.size()));
-      return;
+      ESP_LOGW(TAG_WU, "No room to stage a %u byte Home Assistant payload; keeping the previous one",
+               static_cast<unsigned>(capacity));
+      return nullptr;
     }
-    this->ha_buf_ = grown;
-    this->ha_cap_ = json.size() + 1;
+    this->ha_stage_ = grown;
+    this->ha_stage_cap_ = capacity;
   }
-
-  memcpy(this->ha_buf_, json.c_str(), json.size() + 1);
-  this->ha_len_ = json.size();
-  this->ha_at_ = static_cast<uint32_t>(millis_64() / 1000);
-  this->ha_rung_ = rung;
-  ESP_LOGD(TAG_WU, "Home Assistant payload: %u bytes via rung %d", static_cast<unsigned>(json.size()), rung);
+  return this->ha_stage_;
 }
 
-void WebUIHandler::handle_ha_(AsyncWebServerRequest *request) {
-  auto *stream = request->beginResponseStream("application/json");
+const char *WebUIHandler::commit_ha_payload(size_t len, int rung) {
+  if (this->ha_stage_ == nullptr || len + 1 > this->ha_stage_cap_) {
+    ESP_LOGW(TAG_WU, "Commit of a %u byte payload with no staging buffer to match; ignored",
+             static_cast<unsigned>(len));
+    return nullptr;
+  }
 
+  // The terminator the served buffer is documented to carry, written here rather than by the caller so
+  // that ha_payload_names_'s strstr is legal whatever wrote the bytes.
+  this->ha_stage_[len] = '\0';
+
+  LockGuard guard{this->ha_lock_};
+
+  // A swap, not a copy. The buffer that was being served becomes the staging buffer for the next sync,
+  // so a resync costs no allocation and no memcpy at all - and the payload has still never been on the
+  // internal heap. Both buffers only grow, since a resync of the same installation is nearly the same
+  // size and churning PSRAM to save a few hundred bytes would fragment it for no gain.
+  std::swap(this->ha_buf_, this->ha_stage_);
+  std::swap(this->ha_cap_, this->ha_stage_cap_);
+  this->ha_len_ = len;
+  this->ha_at_ = static_cast<uint32_t>(millis_64() / 1000);
+  this->ha_rung_ = rung;
+  ESP_LOGD(TAG_WU, "Home Assistant payload: %u bytes via rung %d", static_cast<unsigned>(len), rung);
+  return this->ha_buf_;
+}
+
+/// The cached Home Assistant payload, sent out of PSRAM without ever being copied.
+///
+/// The one endpoint here that does not use an AsyncResponseStream, and the reason is that the stream
+/// accumulates into a std::string - which, with CONFIG_SPIRAM_USE_CAPS_ALLOC, is the internal heap. So
+/// printing the payload duplicated up to 24KB of PSRAM into the scarce heap, needing a contiguous
+/// block of about twice the payload size while the string grew. On a wifi build the WiFi driver's
+/// buffers leave that heap around 36KB free, the allocation failed, and a failed operator new with
+/// exceptions off calls abort() - the device rebooted every time the app asked for this.
+///
+/// Chunked, so the payload goes to the socket straight from the pointer. `httpd_resp_send_chunk` is
+/// reached through the request's operator httpd_req_t*(), the same way handle_index_ answers a 304 that
+/// ESPHome's response API cannot express. No Content-Length results, which is what chunked means and
+/// what every fetch() implementation handles.
+void WebUIHandler::handle_ha_(AsyncWebServerRequest *request) {
+  // Held across the send, so the buffer cannot be reallocated under a response that is still being
+  // written. commit_ha_payload is the only writer and runs on the main loop when Home Assistant connects
+  // or a browser asks for a resync, so a client slow enough to matter here is also rare enough; if the
+  // Diagnostics loop time ever shows it, the fix is a reader flag that makes that writer keep the
+  // payload it already has, which is a path it has for a failed allocation.
   LockGuard guard{this->ha_lock_};
 
   // `d` is whatever Home Assistant rendered, passed through byte for byte rather than reparsed. The
   // age is what lets the app decide to ask again; -1 says nothing has ever arrived, which is a
   // different thing from a payload that is merely old.
-  //
-  // AsyncResponseStream::print has overloads for const char * and float but not for an integer, so
-  // every number here goes through printf - a float would render an age as "12.00". The payload goes
-  // out through the const char * overload because there is no block write; set_ha_payload copies the
-  // terminator with it for exactly this reason.
   if (this->ha_at_ == 0) {
-    stream->printf(R"({"rung":%d,"age":-1,"d":null})", this->ha_rung_);
-  } else {
-    stream->printf(R"({"rung":%d,"age":%u,"d":)", this->ha_rung_,
-                   static_cast<unsigned int>(static_cast<uint32_t>(millis_64() / 1000) - this->ha_at_));
-    stream->print(this->ha_buf_);
-    stream->print("}");
+    char empty[48];
+    snprintf(empty, sizeof(empty), R"({"rung":%d,"age":-1,"d":null})", this->ha_rung_);
+    request->send(200, "application/json", empty);
+    return;
   }
 
-  stream->addHeader("Cache-Control", CACHE_REVALIDATE);
-  request->send(stream);
+  httpd_resp_set_type(*request, "application/json");
+  httpd_resp_set_hdr(*request, "Cache-Control", CACHE_REVALIDATE);
+
+  char head[48];
+  const int head_len =
+      snprintf(head, sizeof(head), R"({"rung":%d,"age":%u,"d":)", this->ha_rung_,
+               static_cast<unsigned int>(static_cast<uint32_t>(millis_64() / 1000) - this->ha_at_));
+  httpd_resp_send_chunk(*request, head, head_len);
+  httpd_resp_send_chunk(*request, this->ha_buf_, static_cast<ssize_t>(this->ha_len_));
+  httpd_resp_send_chunk(*request, "}", 1);
+  httpd_resp_send_chunk(*request, nullptr, 0);
 }
 
 void WebUIHandler::handle_ha_refresh_(AsyncWebServerRequest *request) {
@@ -520,7 +623,7 @@ void WebUIHandler::handle_ha_refresh_(AsyncWebServerRequest *request) {
 bool WebUIHandler::ha_payload_names_(const std::string &entity) {
   // strstr over the buffer rather than a std::string built from it. The payload is several kilobytes in
   // PSRAM and copying it to search it would put that on the internal heap, which is the one that is
-  // scarce. set_ha_payload copies the terminator with the payload, which is what makes this legal.
+  // scarce. commit_ha_payload writes the terminator with the payload, which is what makes this legal.
   const std::string quoted = "\"" + entity + "\"";
 
   LockGuard guard{this->ha_lock_};

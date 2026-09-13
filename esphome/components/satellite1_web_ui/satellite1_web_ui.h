@@ -50,11 +50,21 @@ class Satellite1WebUI : public Component {
   void set_micro_wake_word(micro_wake_word::MicroWakeWord *mww) { this->handler_.set_micro_wake_word(mww); }
 #endif
 
-  /// Both called from the rung lambdas in common/web_ui_ha.yaml.
+  /// All called from the rung lambdas in common/web_ui_ha.yaml.
   ///
-  /// This one also lifts `aid` out of the payload into the selection store, which is the only moment
-  /// the device can learn its own Home Assistant area. Done here rather than in the YAML lambda so
-  /// the one place that receives the payload is the one place that unpacks it.
+  /// The payload arrives as a buffer rather than a string, in two steps: stage hands out PSRAM to write
+  /// into, commit publishes what was written. What that buys is that the several kilobytes Home Assistant
+  /// renders never exist on the internal heap - a std::string of them did, and the allocation aborted the
+  /// device on syncs where the heap could not find one contiguous block that size.
+  ///
+  /// Commit also lifts `aid` out of the payload into the selection store, which is the only moment the
+  /// device can learn its own Home Assistant area. Done here rather than in the YAML lambda so the one
+  /// place that receives the payload is the one place that unpacks it.
+  char *stage_ha_payload(size_t capacity);
+  void commit_ha_payload(size_t len, int rung);
+
+  /// The same thing for a caller that already holds the payload as a string. Not what the sync uses: by
+  /// the time such a string exists, the internal-heap copy the pair above avoids has been paid for.
   void set_ha_payload(const std::string &json, int rung);
   void set_ha_failed() { this->handler_.set_ha_failed(); }
 
