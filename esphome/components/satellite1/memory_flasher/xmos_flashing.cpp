@@ -2,6 +2,7 @@
 #include "esphome/core/log.h"
 
 #include <endian.h>
+#include <cinttypes>
 
 namespace esphome {
 namespace satellite1 {
@@ -10,7 +11,29 @@ static const char *const TAG = "xmos_flasher";
 
 static const size_t FLASH_PAGE_SIZE = 256;
 static const size_t FLASH_SECTOR_SIZE = 4096;
-constexpr size_t FLASH_TOTAL_NUMBER_OF_SECTORS = 8388608 / FLASH_SECTOR_SIZE;
+static const uint32_t FLASH_DEFAULT_CAPACITY = 8388608;
+
+// The XMOS only releases the shared flash pins a moment after its reset line is asserted, so the
+// first read after entering direct access mode can come back empty. Same settling time as
+// Satellite1::xmos_hardware_reset().
+static const uint32_t FLASH_RELEASE_DELAY_MS = 100;
+static const uint8_t JEDEC_READ_ATTEMPTS = 3;
+
+static const uint8_t STATUS_BUSY = 1;
+static const uint8_t STATUS_WEL = 2;
+
+// This flash shares the SPI bus with the W5500, which drives it at a different mode and clock, and
+// a status byte does occasionally come back corrupt. A corrupt 0x00 is indistinguishable from "not
+// busy", so a single read is not enough to conclude a program or erase has finished - agreeing
+// reads in a row are. Getting this wrong sends the next command into a busy chip, which ignores it.
+static const uint8_t BUSY_CONFIRMATIONS = 3;
+
+// WREN is ignored while the chip is busy, so settle before each attempt rather than failing.
+static const uint8_t WREN_ATTEMPTS = 5;
+static const uint32_t WREN_BUSY_TIMEOUT_MS = 500;
+
+static const uint8_t PAGE_WRITE_ATTEMPTS = 5;
+static const uint8_t SECTOR_ERASE_ATTEMPTS = 5;
 
 void XMOSFlasher::loop() {
   switch (this->state) {
@@ -35,6 +58,7 @@ void XMOSFlasher::loop() {
       } else if (remaining == 0) {
         this->state = FLASHER_FLASHING;
       } else if (remaining < 0) {
+        this->deinit_flashing_();
         this->state = FLASHER_ERROR_STATE;
       }
       break;
@@ -84,12 +108,27 @@ void XMOSFlasher::publish_progress_() {
   }
 }
 
+bool XMOSFlasher::wait_for_flash_id_() {
+  for (uint8_t attempt = 0; attempt < JEDEC_READ_ATTEMPTS; attempt++) {
+    delay(FLASH_RELEASE_DELAY_MS);
+    if (this->read_JEDECID_()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool XMOSFlasher::init_flasher() {
   ESP_LOGD(TAG, "Setting up XMOS flasher...");
   this->parent_->set_spi_flash_direct_access_mode(true);
-  this->read_JEDECID_();
+  // Erasing a flash that never identified itself destroys the XMOS firmware without being able to
+  // replace it, and leaves a device that can no longer clock its own I2S.
+  if (!this->wait_for_flash_id_()) {
+    ESP_LOGE(TAG, "Flash didn't report a JEDEC ID; refusing to erase it");
+    return false;
+  }
   this->dump_flash_info();
-  this->total_number_of_sectors_ = FLASH_TOTAL_NUMBER_OF_SECTORS;
+  this->total_number_of_sectors_ = this->flash_capacity_() / FLASH_SECTOR_SIZE;
   return true;
 }
 
@@ -104,8 +143,18 @@ void XMOSFlasher::dump_flash_info() {
   ESP_LOGCONFIG(TAG, "	JEDEC-manufacturerID %hhu", this->manufacturerID_);
   ESP_LOGCONFIG(TAG, "	JEDEC-memoryTypeID %hhu", this->memoryTypeID_);
   ESP_LOGCONFIG(TAG, "	JEDEC-capacityID %hhu", this->capacityID_);
-  ESP_LOGCONFIG(TAG, "	JEDEC-capacityID %hhu", this->capacityID_);
-  ESP_LOGCONFIG(TAG, "	JEDEC-capacity: %hhu", 1 << this->capacityID_);
+  ESP_LOGCONFIG(TAG, "	JEDEC-capacity: %" PRIu32 " bytes", this->flash_capacity_());
+}
+
+// The capacity ID is the log2 of the chip's byte count for every part this board has shipped with.
+// It now sizes a full erase, so an ID outside the range any SPI NOR part reports falls back to the
+// 8 MB the board actually carries rather than erasing a made-up number of sectors.
+uint32_t XMOSFlasher::flash_capacity_() const {
+  if (this->capacityID_ < 16 || this->capacityID_ > 26) {
+    ESP_LOGW(TAG, "Implausible JEDEC capacity ID %hhu; assuming 8 MB", this->capacityID_);
+    return FLASH_DEFAULT_CAPACITY;
+  }
+  return static_cast<uint32_t>(1) << this->capacityID_;
 }
 
 void XMOSFlasher::erase_memory() {
@@ -132,7 +181,7 @@ void XMOSFlasher::flash_remote_image() {
     return;
   }
 
-  this->flash_attempted_this_boot_ = true;
+  this->flash_attempts_this_boot_++;
 
   if (this->md5_expected_.empty() && !this->http_get_md5_()) {
     ESP_LOGE(TAG, "Couldn't receive expected md5 sum.");
@@ -159,7 +208,7 @@ void XMOSFlasher::flash_embedded_image() {
     return;
   }
 
-  this->flash_attempted_this_boot_ = true;
+  this->flash_attempts_this_boot_++;
 
   this->md5_expected_ = this->embedded_image_.md5;
   this->requested_action = ACTION_FLASH_EMBEDDED_IMAGE;
@@ -187,38 +236,49 @@ bool XMOSFlasher::read_JEDECID_() {
   return false;
 }
 
-bool XMOSFlasher::wait_while_flash_busy_(uint32_t timeout_ms) {
-  int32_t timeout_invoke = millis();
-  const uint8_t WEL = 2;
-  const uint8_t BUSY = 1;
-
-  while ((millis() - timeout_invoke) < timeout_ms) {
-    this->enable();
-    this->transfer_byte(0x05);
-    uint8_t status = this->transfer_byte(0x00);
-    this->disable();
-    if ((status & BUSY) == 0) {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool XMOSFlasher::enable_writing_() {
-  // enable writing
-  this->enable();
-  this->transfer_byte(0x06);
-  this->disable();
-
+uint8_t XMOSFlasher::read_status_register_() {
   this->enable();
   this->transfer_byte(0x05);
   uint8_t status = this->transfer_byte(0x00);
   this->disable();
-  const uint8_t WEL = 2;
-  if (!(status & WEL)) {
-    return false;
+  return status;
+}
+
+bool XMOSFlasher::wait_while_flash_busy_(uint32_t timeout_ms) {
+  uint32_t timeout_invoke = millis();
+
+  do {
+    // Run the whole confirmation burst in one go. Callers poll with budgets as short as a
+    // millisecond, and a burst that could be cut off part-way would never confirm an idle chip.
+    uint8_t idle_reads = 0;
+    while ((this->read_status_register_() & STATUS_BUSY) == 0) {
+      if (++idle_reads >= BUSY_CONFIRMATIONS) {
+        return true;
+      }
+    }
+  } while ((millis() - timeout_invoke) < timeout_ms);
+  return false;
+}
+
+bool XMOSFlasher::enable_writing_() {
+  uint8_t status = 0;
+
+  for (uint8_t attempt = 0; attempt < WREN_ATTEMPTS; attempt++) {
+    this->wait_while_flash_busy_(WREN_BUSY_TIMEOUT_MS);
+
+    this->enable();
+    this->transfer_byte(0x06);
+    this->disable();
+
+    status = this->read_status_register_();
+    if (status & STATUS_WEL) {
+      this->wren_retries_ += attempt;
+      return true;
+    }
   }
-  return true;
+
+  ESP_LOGE(TAG, "Couldn't enable writing (status 0x%02X)", status);
+  return false;
 }
 
 bool XMOSFlasher::disable_writing_() {
@@ -269,7 +329,6 @@ bool XMOSFlasher::write_page_(uint32_t byte_addr, uint8_t *buffer) {
     return false;
   }
   if (!this->enable_writing_()) {
-    ESP_LOGE(TAG, "Couldn't enable writing");
     return false;
   }
 
@@ -319,6 +378,9 @@ bool XMOSFlasher::init_flashing_() {
   }
 
   this->flashing_start_time_ = millis();
+  this->wren_retries_ = 0;
+  this->page_retries_ = 0;
+  this->sector_attempts_ = 0;
 
   switch (this->requested_action) {
     case ACTION_FLASH_EMBEDDED_IMAGE:
@@ -403,8 +465,18 @@ int XMOSFlasher::erasing_step_() {
   this->current_sector_++;
   if (this->current_sector_ < this->total_sectors_to_erase_) {
     if (!this->erase_sector_(this->current_sector_)) {
-      this->error_code = WRITE_TO_FLASH_ERROR;
-      return -1;
+      if (++this->sector_attempts_ >= SECTOR_ERASE_ATTEMPTS) {
+        ESP_LOGE(TAG, "Giving up on sector %d after %u attempts", this->current_sector_, SECTOR_ERASE_ATTEMPTS);
+        this->error_code = WRITE_TO_FLASH_ERROR;
+        return -1;
+      }
+      // Take the same sector again next loop rather than erasing past it, which would leave the
+      // image written over stale bytes.
+      ESP_LOGW(TAG, "Retrying sector %d (attempt %u of %u)", this->current_sector_, this->sector_attempts_ + 1,
+               SECTOR_ERASE_ATTEMPTS);
+      this->current_sector_--;
+    } else {
+      this->sector_attempts_ = 0;
     }
   }
 
@@ -432,28 +504,32 @@ int XMOSFlasher::flashing_step_() {
     memset(this->reader_buffer_ + bytes_read, 0, FLASH_PAGE_SIZE - bytes_read);
   }
 
+  // Write and verify, retrying the pair. An aborted flash leaves the XMOS with no firmware to boot,
+  // so persisting through a glitched page is always better than giving up on one.
   int page_pos = this->page_pos_;
-  if (!this->write_page_(page_pos, this->reader_buffer_)) {
-    ESP_LOGE(TAG, "Error while writing page %d, retrying...", page_pos);
+  bool page_written = false;
+  for (uint8_t attempt = 0; attempt < PAGE_WRITE_ATTEMPTS && !page_written; attempt++) {
+    if (attempt > 0) {
+      ESP_LOGW(TAG, "Retrying page %d (attempt %u of %u)", page_pos, attempt + 1, PAGE_WRITE_ATTEMPTS);
+      this->page_retries_++;
+    }
+
+    if (!this->write_page_(page_pos, this->reader_buffer_)) {
+      continue;
+    }
+
+    // read back the page that has just been written
+    if (!this->read_page_(page_pos, this->compare_buffer_)) {
+      continue;
+    }
+
+    page_written = memcmp(this->reader_buffer_, this->compare_buffer_, FLASH_PAGE_SIZE) == 0;
   }
 
-  // read back the page that has just been written
-  this->read_page_(page_pos, this->compare_buffer_);
-
-  if (memcmp(this->reader_buffer_, this->compare_buffer_, FLASH_PAGE_SIZE) != 0) {
-    // not equal, give it a second try
-    if (!this->write_page_(page_pos, this->reader_buffer_)) {
-      ESP_LOGE(TAG, "Error while writing page %d, giving up...", page_pos);
-      this->error_code = WRITE_TO_FLASH_ERROR;
-      return -1;
-    }
-
-    this->read_page_(page_pos, this->compare_buffer_);
-    if (memcmp(this->reader_buffer_, this->compare_buffer_, FLASH_PAGE_SIZE) != 0) {
-      ESP_LOGE(TAG, "Read page mismatch, page addr: %d", page_pos);
-      this->error_code = WRITE_TO_FLASH_ERROR;
-      return -1;
-    }
+  if (!page_written) {
+    ESP_LOGE(TAG, "Giving up on page %d after %u attempts", page_pos, PAGE_WRITE_ATTEMPTS);
+    this->error_code = WRITE_TO_FLASH_ERROR;
+    return -1;
   }
 
   this->page_pos_ += FLASH_PAGE_SIZE;
@@ -470,6 +546,10 @@ int XMOSFlasher::flashing_step_() {
       return -1;
     } else {
       ESP_LOGD(TAG, "MD5 computed: %s - Matches!", this->md5_computed_.c_str());
+      // A handful of retries is bus noise being absorbed; hundreds means the chip needs attention.
+      ESP_LOGI(TAG, "Flashed %zu bytes in %" PRIu32 " ms (%" PRIu32 " write-enable, %" PRIu32 " page retries)",
+               this->total_number_of_bytes_, millis() - this->flashing_start_time_, this->wren_retries_,
+               this->page_retries_);
     }
   }
 

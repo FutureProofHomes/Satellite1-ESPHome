@@ -26,13 +26,16 @@ class XMOSFlasher : public MemoryFlasher, public Satellite1SPIService {
 
   bool flash_accessible() override {
     this->parent_->set_spi_flash_direct_access_mode(true);
-    bool got_id = this->read_JEDECID_();
+    bool got_id = this->wait_for_flash_id_();
     this->parent_->set_spi_flash_direct_access_mode(false);
     return got_id;
   }
 
  protected:
   bool read_JEDECID_();
+  bool wait_for_flash_id_();
+  uint32_t flash_capacity_() const;
+  uint8_t read_status_register_();
   bool enable_writing_();
   bool disable_writing_();
   bool chip_erase_();
@@ -60,6 +63,13 @@ class XMOSFlasher : public MemoryFlasher, public Satellite1SPIService {
 
   uint32_t flashing_start_time_{0};
   uint32_t last_published_{0};
+
+  // Retry tallies for the flash summary. A flash that succeeds with a handful of retries is bus
+  // noise being absorbed; one that needs hundreds is a chip on its way out.
+  uint32_t wren_retries_{0};
+  uint32_t page_retries_{0};
+  uint8_t sector_attempts_{0};
+
   size_t total_sectors_to_erase_{0};
   int current_sector_{-1};
   size_t total_number_of_bytes_{0};

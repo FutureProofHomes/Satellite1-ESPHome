@@ -235,6 +235,12 @@ void Sat1Microphone::mic_task(void *params) {
           samples_32[i / 3] = samples_32[i];
         }
         samples.resize((samples_read / 3) * sizeof(int32_t));
+        if (samples.empty()) {
+          // A read that timed out has nothing to hand on, and consumers read an empty chunk as a
+          // failed write rather than as no data - micro_wake_word logs a ring-buffer overflow for
+          // every one. read_() has already blocked for its timeout, so the loop stays rate-limited.
+          continue;
+        }
         if (this_microphone->correct_dc_offset_) {
           this_microphone->fix_dc_offset_(samples);
         }
