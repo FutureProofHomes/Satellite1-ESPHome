@@ -6,13 +6,91 @@
 #include "esphome/core/preferences.h"
 
 #include <cJSON.h>
+#include <algorithm>
 #include <cmath>
+#include <cstdarg>
 #include <cstring>
 
 namespace esphome {
 namespace satellite1_radar {
 
 static const char *const TAG_RT = "radar_tuner";
+
+namespace {
+
+/// Longest single fragment any printf below produces, rounded up. The LD2450 config header is the
+/// one that sets it, at about 130 bytes with every field at its maximum width.
+constexpr size_t RT_CHUNK_HEADROOM = 160;
+
+/// A fixed stack buffer that empties itself into the response as chunked-encoding pieces.
+///
+/// Replaces the AsyncResponseStream these four endpoints used to build their bodies in. That is a
+/// std::string, so it doubles on the internal heap as it grows, and both /live endpoints repeat the
+/// exercise four times a second for as long as the Presence tab is open. Nothing here allocates.
+///
+/// The same shape WebUIHandler::handle_ha_ uses, and legal for the same reason: the request's
+/// operator httpd_req_t*() hands back the raw handle. ESPHome's response API is skipped because a
+/// chunked body has no Content-Length and nothing in AsyncWebServerResponse can express one.
+///
+/// 512 bytes so the largest body leaves after two flushes and the rest after one. Kept small rather
+/// than sized past the largest response because the httpd task stack is 4352 bytes and not tunable -
+/// AsyncWebServer::begin() hardcodes HTTPD_DEFAULT_CONFIG().stack_size + 256.
+class ChunkWriter {
+ public:
+  explicit ChunkWriter(httpd_req_t *req) : req_(req) {}
+
+  void print(const char *text) { this->write(text, strlen(text)); }
+
+  void printf(const char *fmt, ...) __attribute__((format(printf, 2, 3))) {
+    // Flushed ahead of the format, not after: vsnprintf truncates to the space it is given, so a
+    // fragment that did not fit would go out half-written and cut the JSON mid-number.
+    if (sizeof(this->buf_) - this->len_ < RT_CHUNK_HEADROOM)
+      this->flush_();
+
+    va_list ap;
+    va_start(ap, fmt);
+    const int written = vsnprintf(this->buf_ + this->len_, sizeof(this->buf_) - this->len_, fmt, ap);
+    va_end(ap);
+    if (written > 0)
+      this->len_ += std::min(static_cast<size_t>(written), sizeof(this->buf_) - this->len_ - 1);
+  }
+
+  void write(const char *data, size_t len) {
+    while (len > 0) {
+      if (this->len_ == sizeof(this->buf_) && !this->flush_())
+        return;
+      const size_t take = std::min(len, sizeof(this->buf_) - this->len_);
+      memcpy(this->buf_ + this->len_, data, take);
+      this->len_ += take;
+      data += take;
+      len -= take;
+    }
+  }
+
+  /// Sends what is left and closes the chunked response.
+  void finish() {
+    if (this->flush_())
+      httpd_resp_send_chunk(this->req_, nullptr, 0);
+  }
+
+ private:
+  /// False once a send has failed. esp_http_server has already closed the connection by then, so
+  /// there is nobody left to report to and the rest of the body is dropped rather than retried.
+  bool flush_() {
+    if (!this->ok_ || this->len_ == 0)
+      return this->ok_;
+    this->ok_ = httpd_resp_send_chunk(this->req_, this->buf_, static_cast<ssize_t>(this->len_)) == ESP_OK;
+    this->len_ = 0;
+    return this->ok_;
+  }
+
+  httpd_req_t *req_;
+  size_t len_{0};
+  bool ok_{true};
+  char buf_[512];
+};
+
+}  // namespace
 
 /// Ceiling on an accumulated request body. The largest real payload is an LD2450 zone write -
 /// three zones plus an exclusion polygon at eight points each, roughly 700 bytes - so this is
@@ -176,21 +254,22 @@ void RadarTunerHandler::handle_ld2410_get_config_(AsyncWebServerRequest *request
   }
 
   const auto &cfg = ld2410_->get_backend_config();
-  auto *stream = request->beginResponseStream("application/json");
-  stream->printf("{\"timeout\":%u,\"max_move_gate\":%u,\"max_still_gate\":%u,\"distance_resolution\":\"%s\","
-                 "\"bluetooth\":%s,\"gate_move_thresholds\":[",
-                 static_cast<unsigned int>(cfg.timeout_seconds), static_cast<unsigned int>(cfg.max_move_gate),
-                 static_cast<unsigned int>(cfg.max_still_gate), cfg.distance_resolution ? "0.2m" : "0.75m",
-                 cfg.bluetooth_enabled ? "true" : "false");
+  httpd_resp_set_type(*request, "application/json");
+  ChunkWriter out(*request);
+  out.printf("{\"timeout\":%u,\"max_move_gate\":%u,\"max_still_gate\":%u,\"distance_resolution\":\"%s\","
+             "\"bluetooth\":%s,\"gate_move_thresholds\":[",
+             static_cast<unsigned int>(cfg.timeout_seconds), static_cast<unsigned int>(cfg.max_move_gate),
+             static_cast<unsigned int>(cfg.max_still_gate), cfg.distance_resolution ? "0.2m" : "0.75m",
+             cfg.bluetooth_enabled ? "true" : "false");
   for (size_t g = 0; g < LD2410Handler::NUM_GATES; g++) {
-    stream->printf("%s%u", g ? "," : "", static_cast<unsigned int>(cfg.gate_move_threshold[g]));
+    out.printf("%s%u", g ? "," : "", static_cast<unsigned int>(cfg.gate_move_threshold[g]));
   }
-  stream->print("],\"gate_still_thresholds\":[");
+  out.print("],\"gate_still_thresholds\":[");
   for (size_t g = 0; g < LD2410Handler::NUM_GATES; g++) {
-    stream->printf("%s%u", g ? "," : "", static_cast<unsigned int>(cfg.gate_still_threshold[g]));
+    out.printf("%s%u", g ? "," : "", static_cast<unsigned int>(cfg.gate_still_threshold[g]));
   }
-  stream->print("]}");
-  request->send(stream);
+  out.print("]}");
+  out.finish();
 }
 
 void RadarTunerHandler::handle_ld2410_set_config_(AsyncWebServerRequest *request) {
@@ -326,23 +405,24 @@ void RadarTunerHandler::handle_ld2410_live_(AsyncWebServerRequest *request) {
   // Recorded before the response, so the very first poll arms engineering mode even though its
   // own reply will still be all zeroes. The page polls twice a second and redraws.
   this->ld2410_live_poll_ms_.store(millis(), std::memory_order_relaxed);
-  auto *stream = request->beginResponseStream("application/json");
-  stream->print("{\"gates\":{\"move\":[");
+  httpd_resp_set_type(*request, "application/json");
+  ChunkWriter out(*request);
+  out.print("{\"gates\":{\"move\":[");
   for (int g = 0; g < RT_NUM_GATES; g++) {
     float val = ld2410_->get_gate_move_energy(static_cast<size_t>(g));
     if (std::isnan(val))
       val = 0;
-    stream->printf("%s%.0f", g ? "," : "", val);
+    out.printf("%s%.0f", g ? "," : "", val);
   }
-  stream->print("],\"still\":[");
+  out.print("],\"still\":[");
   for (int g = 0; g < RT_NUM_GATES; g++) {
     float val = ld2410_->get_gate_still_energy(static_cast<size_t>(g));
     if (std::isnan(val))
       val = 0;
-    stream->printf("%s%.0f", g ? "," : "", val);
+    out.printf("%s%.0f", g ? "," : "", val);
   }
-  stream->print("]}}");
-  request->send(stream);
+  out.print("]}}");
+  out.finish();
 }
 
 void RadarTunerHandler::handle_ld2450_get_config_(AsyncWebServerRequest *request) {
@@ -352,28 +432,29 @@ void RadarTunerHandler::handle_ld2450_get_config_(AsyncWebServerRequest *request
   }
 
   const auto &cfg = ld2450_->get_backend_config();
-  auto *stream = request->beginResponseStream("application/json");
-  stream->printf("{\"detection_range\":%u,\"stability\":%u,\"timeout\":%u,\"bluetooth\":%s,\"multi_target\":%s,"
-                 "\"reboot_required\":%s,\"zones\":[",
-                 static_cast<unsigned int>(cfg.detection_range_cm), static_cast<unsigned int>(cfg.stability),
-                 static_cast<unsigned int>(cfg.timeout_seconds), cfg.bluetooth_enabled ? "true" : "false",
-                 cfg.multi_target_enabled ? "true" : "false", ld2450_->is_reboot_required() ? "true" : "false");
+  httpd_resp_set_type(*request, "application/json");
+  ChunkWriter out(*request);
+  out.printf("{\"detection_range\":%u,\"stability\":%u,\"timeout\":%u,\"bluetooth\":%s,\"multi_target\":%s,"
+             "\"reboot_required\":%s,\"zones\":[",
+             static_cast<unsigned int>(cfg.detection_range_cm), static_cast<unsigned int>(cfg.stability),
+             static_cast<unsigned int>(cfg.timeout_seconds), cfg.bluetooth_enabled ? "true" : "false",
+             cfg.multi_target_enabled ? "true" : "false", ld2450_->is_reboot_required() ? "true" : "false");
 
   for (size_t z = 0; z < LD2450Handler::NUM_ZONES; z++) {
-    stream->printf("%s[", z ? "," : "");
+    out.printf("%s[", z ? "," : "");
     for (size_t p = 0; p < cfg.zones[z].points_count; p++) {
-      stream->printf("%s{\"x\":%d,\"y\":%d}", p ? "," : "", static_cast<int>(cfg.zones[z].points[p].x),
-                     static_cast<int>(cfg.zones[z].points[p].y));
+      out.printf("%s{\"x\":%d,\"y\":%d}", p ? "," : "", static_cast<int>(cfg.zones[z].points[p].x),
+                 static_cast<int>(cfg.zones[z].points[p].y));
     }
-    stream->print("]");
+    out.print("]");
   }
-  stream->print("],\"exclusion\":[");
+  out.print("],\"exclusion\":[");
   for (size_t p = 0; p < cfg.exclusion.points_count; p++) {
-    stream->printf("%s{\"x\":%d,\"y\":%d}", p ? "," : "", static_cast<int>(cfg.exclusion.points[p].x),
-                   static_cast<int>(cfg.exclusion.points[p].y));
+    out.printf("%s{\"x\":%d,\"y\":%d}", p ? "," : "", static_cast<int>(cfg.exclusion.points[p].x),
+               static_cast<int>(cfg.exclusion.points[p].y));
   }
-  stream->print("]}");
-  request->send(stream);
+  out.print("]}");
+  out.finish();
 }
 
 static bool parse_polygon_points_(cJSON *array, LD2450Handler::Polygon &polygon) {
@@ -500,10 +581,12 @@ void RadarTunerHandler::handle_ld2450_set_config_(AsyncWebServerRequest *request
 }
 
 void RadarTunerHandler::handle_ld2450_live_(AsyncWebServerRequest *request) {
-  auto *stream = request->beginResponseStream("application/json");
-  stream->printf("{\"targets\":[{\"x\":%.1f,\"y\":%.1f},{\"x\":%.1f,\"y\":%.1f},{\"x\":%.1f,\"y\":%.1f}]}",
-                 targets_[0].x, targets_[0].y, targets_[1].x, targets_[1].y, targets_[2].x, targets_[2].y);
-  request->send(stream);
+  // Always fits one fragment, so the writer buys nothing here beyond reading like the other three.
+  httpd_resp_set_type(*request, "application/json");
+  ChunkWriter out(*request);
+  out.printf("{\"targets\":[{\"x\":%.1f,\"y\":%.1f},{\"x\":%.1f,\"y\":%.1f},{\"x\":%.1f,\"y\":%.1f}]}",
+             targets_[0].x, targets_[0].y, targets_[1].x, targets_[1].y, targets_[2].x, targets_[2].y);
+  out.finish();
 }
 
 void RadarTunerHandler::handle_save_(AsyncWebServerRequest *request) {
