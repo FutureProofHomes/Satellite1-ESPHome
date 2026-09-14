@@ -71,15 +71,13 @@ static bool is_status_frame_with_error(const uint8_t *buf, size_t len, uint8_t *
 
 void Satellite1::setup() {
   this->spi_setup();
-  this->enable();
-  this->transfer_byte(0);
-  this->disable();
 
   if (this->xmos_rst_pin_) {
     this->xmos_rst_pin_->setup();
   }
 
   memset(this->xmos_fw_version, 0, 5);
+  this->request_status_register_update();
 }
 
 void Satellite1::dump_config() {
