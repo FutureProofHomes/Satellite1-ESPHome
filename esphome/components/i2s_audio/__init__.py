@@ -38,6 +38,7 @@ CONF_PRIMARY = "primary"
 CONF_SECONDARY = "secondary"
 
 CONF_I2S_ACCESS_MODE = "access_mode"
+CONF_ACCESS_GUARD = "access_guard"
 CONF_I2S_COMM_FMT = "i2s_comm_fmt"
 CONF_PDM = "pdm"
 
@@ -230,6 +231,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_I2S_BCLK_PIN): pins.internal_gpio_output_pin_number,
             cv.Optional(CONF_I2S_MCLK_PIN): pins.internal_gpio_output_pin_number,
             cv.Optional(CONF_I2S_ACCESS_MODE, default="exclusive"): cv.enum(ACCESS_MODES),
+            cv.Optional(CONF_ACCESS_GUARD): cv.lambda_,
             cv.Optional(CONF_I2S_MODE, default=CONF_PRIMARY): cv.one_of(
                 *I2S_MODE_OPTIONS, lower=True
             ),
@@ -255,11 +257,13 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     cg.add(var.set_i2s_role(I2S_ROLE_OPTIONS[config[CONF_I2S_MODE]]))
+    if CONF_ACCESS_GUARD in config:
+        access_guard = await cg.process_lambda(config[CONF_ACCESS_GUARD], [], return_type=cg.bool_)
+        cg.add(var.set_access_guard(access_guard))
     cg.add(var.set_lrclk_pin(config[CONF_I2S_LRCLK_PIN]))
     if CONF_I2S_BCLK_PIN in config:
         cg.add(var.set_bclk_pin(config[CONF_I2S_BCLK_PIN]))
     if CONF_I2S_MCLK_PIN in config:
         cg.add(var.set_mclk_pin(config[CONF_I2S_MCLK_PIN]))
     cg.add(var.set_access_mode(config[CONF_I2S_ACCESS_MODE]))
-
 
