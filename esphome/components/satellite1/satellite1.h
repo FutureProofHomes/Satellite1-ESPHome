@@ -12,6 +12,7 @@ static const uint8_t CONTROL_CMD_READ_BIT = 0x80;
 static const uint8_t CONTROL_SPECIAL_RESID = 0;
 static const uint8_t CONTROL_GET_VERSION = (0 | CONTROL_CMD_READ_BIT);
 static const uint8_t CONTROL_GET_LAST_COMMAND_STATUS = (1 | CONTROL_CMD_READ_BIT);
+static const uint8_t CONTROL_PROTOCOL_VERSION = 0x11;
 static const uint8_t DEVICE_STATUS_READY_REGISTER_IDX = 0;
 static const uint8_t DEVICE_STATUS_READY_VALUE = 1;
 

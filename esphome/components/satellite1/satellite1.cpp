@@ -80,9 +80,6 @@ void Satellite1::setup() {
   }
 
   memset(this->xmos_fw_version, 0, 5);
-  if (this->check_for_xmos_() && !this->status_register_valid_) {
-    this->request_status_register_update();
-  }
 }
 
 void Satellite1::dump_config() {
@@ -249,7 +246,7 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
                dc_status_to_string(status_code));
     }
 
-    if (send_recv_buf[0] != RET_STATUS_PAYLOAD_AVAIL) {
+    if (send_recv_buf[0] != DC_RET_STATUS::PAYLOAD_AVAILABLE) {
       ESP_LOGW(TAG, "SPI read unexpected frame: res=%u cmd=0x%02X rx=[0x%02X 0x%02X 0x%02X]", resource_id, command,
                send_recv_buf[0], send_recv_buf[1], send_recv_buf[2]);
       this->log_last_command_status_(resource_id, command, "unexpected read frame");
@@ -338,9 +335,7 @@ bool Satellite1::dfu_get_image_status_() {
   }
 
   const bool upgrade_present = (status_flags & (1u << 0)) != 0;
-  const bool data_partition_available = (status_flags & (1u << 1)) != 0;
-  ESP_LOGI(TAG, "XMOS DFU image status: upgrade_present=%s data_partition_available=%s (0x%02X)",
-           upgrade_present ? "true" : "false", data_partition_available ? "true" : "false", status_flags);
+  ESP_LOGI(TAG, "XMOS upgrade image present: %s", upgrade_present ? "true" : "false");
   return true;
 }
 
@@ -414,12 +409,18 @@ bool Satellite1::check_for_xmos_() {
   }
 
   uint8_t control_version = 0;
-  if (this->read_control_version_(&control_version)) {
-    this->control_version_ = control_version;
-    ESP_LOGI(TAG, "XMOS Control Protocol Version: 0x%02X", control_version);
-  } else {
-    ESP_LOGW(TAG, "Failed to read XMOS control protocol version");
+  if (!this->read_control_version_(&control_version)) {
+    ESP_LOGW(TAG, "XMOS control protocol version could not be read");
+    return false;
   }
+  if (control_version != CONTROL_PROTOCOL_VERSION) {
+    ESP_LOGW(TAG, "Unsupported XMOS control protocol 0x%02X; requires 0x%02X", control_version,
+             CONTROL_PROTOCOL_VERSION);
+    return false;
+  }
+
+  this->control_version_ = control_version;
+  ESP_LOGI(TAG, "XMOS Control Protocol Version: 0x%02X", control_version);
 
   if (!this->dfu_get_fw_version_()) {
     return false;
