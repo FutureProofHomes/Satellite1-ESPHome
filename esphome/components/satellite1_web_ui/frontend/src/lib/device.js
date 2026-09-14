@@ -1,29 +1,66 @@
 /**
- * The device layer: one SSE stream, one serialised write queue, and the key -> entity-id table.
+ * The device layer: one SSE stream, one serialised request queue, and the key -> entity-id table.
  *
  * Everything here is shaped by two limits of the server it talks to. esp_http_server is configured
  * with max_open_sockets = 7 and lru_purge_enable, so a fourth browser tab evicts the oldest SSE
  * connection rather than failing - which is why there is exactly one EventSource per tab and why
- * writes are single-flight instead of fired in parallel. And web_server addresses entities by
- * display name, so nothing in the UI may contain one: ids come from the table the device serves.
+ * every request in this file is single-flight instead of fired in parallel. And web_server
+ * addresses entities by display name, so nothing in the UI may contain one: ids come from the table
+ * the device serves.
  */
 import { useEffect, useReducer, useRef, useState } from "preact/hooks";
 
 /* ------------------------------------------------------------------ */
-/* Writes                                                              */
+/* The request queue                                                   */
 /* ------------------------------------------------------------------ */
 
-/**
- * Single-flight write chain. Dragging a slider produces a request per input event, and firing
- * those in parallel is how you exhaust seven sockets in one gesture.
- */
+/** Tail of the single-flight chain. Private to request(), which is the only way to join it. */
 let chain = Promise.resolve();
 
+/**
+ * Every request this app makes, one at a time.
+ *
+ * Reads are queued as well as writes, because each request the browser has in flight is a separate
+ * TCP connection and every connection costs the device about 2.1KB of internal RAM for its lwIP
+ * receive mailbox. The Presence route alone was good for three or four at once - the 4Hz radar
+ * poll, the state poll, the voice poll and SSE.
+ *
+ * The body is read inside the slot, not after it. `fetch` settles when the headers arrive while the
+ * body is still coming down the socket, so returning the Response would release the queue with the
+ * connection still busy and let the next request open a second one.
+ *
+ * What it does not serialise is time: callers waiting on Home Assistant sleep between requests
+ * rather than inside one, so a resync never holds a slider's writes behind a slow round trip.
+ */
+export function request(path, init) {
+  const run = async () => {
+    const r = await fetch(path, init);
+    return { ok: r.ok, status: r.status, text: await r.text() };
+  };
+  // Queued on both settlements, so one failed request does not wedge the queue for the session, and
+  // advanced by a swallowing continuation rather than by `next` - a caller that handles its own
+  // rejection should not also have to keep the queue alive.
+  const next = chain.then(run, run);
+  chain = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
+/** The parsed body, or null for a failed request or one that did not answer with JSON. */
+export async function requestJson(path, init) {
+  const r = await request(path, init);
+  if (!r.ok) return null;
+  try {
+    return JSON.parse(r.text);
+  } catch {
+    return null;
+  }
+}
+
 export function post(path) {
-  // Queued on both settlements, so one failed write does not wedge the queue for the session.
-  const run = () => fetch(path, { method: "POST" });
-  chain = chain.then(run, run);
-  return chain;
+  return request(path, { method: "POST" });
 }
 
 /**
@@ -59,9 +96,9 @@ export function useDeviceState(intervalMs) {
 
     const tick = async () => {
       try {
-        const r = await fetch("/api/sat1/state");
+        const r = await request("/api/sat1/state");
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const json = await r.json();
+        const json = JSON.parse(r.text);
         if (!live) return;
         setState(json);
         setError(null);
@@ -145,16 +182,13 @@ export function useHaData() {
   const [refreshing, setRefreshing] = useState(false);
 
   const read = async () => {
-    try {
-      const r = await fetch("/api/sat1/ha");
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setHa(await r.json());
-      return true;
-    } catch {
-      // The stream-lost banner in the shell already covers a device that has gone away, and the
-      // cached payload we may already be holding is still worth showing.
-      return false;
-    }
+    // The stream-lost banner in the shell already covers a device that has gone away, and the
+    // cached payload we may already be holding is still worth showing, so a failure is reported to
+    // the caller rather than surfaced.
+    const json = await requestJson("/api/sat1/ha").catch(() => null);
+    if (!json) return false;
+    setHa(json);
+    return true;
   };
 
   useEffect(() => {
@@ -162,17 +196,13 @@ export function useHaData() {
     let timer = null;
 
     const tick = async () => {
-      const r = await fetch("/api/sat1/ha").catch(() => null);
-      if (!live) return;
-      if (r && r.ok) {
-        const json = await r.json();
-        if (!live) return;
-        setHa(json);
-        // Nothing has arrived yet and the device is still inside the 5s it waits after Home
-        // Assistant connects. Ask again shortly rather than showing "unavailable" for a sync that
-        // has not been attempted.
-        if (json.age === HA_NEVER && json.rung === 0) timer = setTimeout(tick, 3000);
-      }
+      const json = await requestJson("/api/sat1/ha").catch(() => null);
+      if (!live || !json) return;
+      setHa(json);
+      // Nothing has arrived yet and the device is still inside the 5s it waits after Home
+      // Assistant connects. Ask again shortly rather than showing "unavailable" for a sync that
+      // has not been attempted.
+      if (json.age === HA_NEVER && json.rung === 0) timer = setTimeout(tick, 3000);
     };
 
     tick();
@@ -190,9 +220,9 @@ export function useHaData() {
   const refresh = async () => {
     setRefreshing(true);
     try {
-      // Not queued through post(): that chain serialises entity writes, and a slider mid-drag should
-      // not be held up behind a Home Assistant round trip.
-      await fetch("/api/sat1/ha/refresh", { method: "POST" });
+      // Safe to queue: the endpoint only records the request and returns, so it holds the slot for
+      // one round trip. The waiting below happens between requests, not inside one.
+      await post("/api/sat1/ha/refresh");
       // The device waits on Home Assistant, which took about a second on a real installation. Two
       // reads a second apart, so a slow answer still lands without polling for minutes.
       await new Promise((r) => setTimeout(r, 1200));
@@ -247,9 +277,12 @@ export function useSelection() {
 
   useEffect(() => {
     let live = true;
-    fetch("/api/sat1/sel")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((json) => live && setSel(parse(json)))
+    requestJson("/api/sat1/sel")
+      .then((json) => {
+        if (!live) return;
+        if (json) setSel(parse(json));
+        else setError(true);
+      })
       .catch(() => live && setError(true));
     return () => {
       live = false;
@@ -284,7 +317,7 @@ export function useSelection() {
       },
     });
     try {
-      const r = await fetch("/api/sat1/sel", {
+      const r = await request("/api/sat1/sel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
@@ -326,11 +359,7 @@ export function useRadar(enabled) {
   const [live, setLive] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const read = async (which) => {
-    const r = await fetch(`/api/v1/${which}/config`).catch(() => null);
-    if (!r || !r.ok) return null;
-    return r.json().catch(() => null);
-  };
+  const read = async (which) => requestJson(`/api/v1/${which}/config`).catch(() => null);
 
   // Probe once per mount rather than once per tab: a radar swap needs the device opened anyway, and a
   // wrong answer cached for the life of the tab would be untraceable.
@@ -360,13 +389,9 @@ export function useRadar(enabled) {
     let timer = null;
 
     const tick = async () => {
-      const r = await fetch(`/api/v1/${kind}/live`).catch(() => null);
+      const json = await requestJson(`/api/v1/${kind}/live`).catch(() => null);
       if (!live_) return;
-      if (r && r.ok) {
-        const json = await r.json().catch(() => null);
-        if (!live_) return;
-        if (json) setLive(json);
-      }
+      if (json) setLive(json);
       // Chained rather than an interval, so a slow device stretches the gap instead of queueing
       // requests behind each other.
       timer = setTimeout(tick, RADAR_LIVE_MS);
@@ -387,7 +412,7 @@ export function useRadar(enabled) {
     setConfig({ ...config, ...patch });
     setBusy(true);
     try {
-      const r = await fetch(`/api/v1/${kind}/config`, {
+      const r = await request(`/api/v1/${kind}/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
@@ -456,8 +481,8 @@ export function useVoice(enabled) {
 
     const tick = async () => {
       try {
-        const r = await fetch("/api/sat1/voice");
-        if (r.ok && live) setVoice(await r.json());
+        const json = await requestJson("/api/sat1/voice");
+        if (json && live) setVoice(json);
       } catch {
         // A dropped poll is not worth surfacing: the next one is a second away, and the stream
         // banner already covers the case where the device has actually gone.
@@ -497,8 +522,7 @@ export function useWakeWords() {
 
   useEffect(() => {
     let live = true;
-    fetch("/api/sat1/wakewords")
-      .then((r) => (r.ok ? r.json() : null))
+    requestJson("/api/sat1/wakewords")
       .then((d) => {
         if (live && Array.isArray(d)) setWords(d);
       })
@@ -593,10 +617,9 @@ export function useAssist(ha, haRefresh, enabled) {
     setLocal((prev) => ({ ...prev, ...Object.fromEntries(writes) }));
     try {
       for (const [entity, option] of writes) {
-        // Not through post(): that chain serialises entity writes, and this one waits on Home Assistant.
-        await fetch(`/api/sat1/ha/select?e=${encodeURIComponent(entity)}&o=${encodeURIComponent(option)}`, {
-          method: "POST",
-        });
+        // The endpoint queues the write and returns; the action call runs from the device's main
+        // loop, so this holds the slot for one round trip and no longer.
+        await post(`/api/sat1/ha/select?e=${encodeURIComponent(entity)}&o=${encodeURIComponent(option)}`);
       }
       await haRefresh();
     } finally {
