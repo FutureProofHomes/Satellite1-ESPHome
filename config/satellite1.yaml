@@ -25,6 +25,10 @@ packages:
       on_connect:
         - delay: 5s  # Gives time for improv results to be transmitted
         - ble.disable:
+        - wait_until:
+            not: ble.enabled
+        - delay: 1s  # Allow BLE allocations to be released before starting TLS.
+        - component.update: update_http_request
 
   home-assistant-voice: !include satellite1.base.yaml
 
@@ -54,6 +58,7 @@ update:
     name: None
     id: update_http_request
     source: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/manifest.json
+    update_interval: never
 
 switch:
   - platform: template
