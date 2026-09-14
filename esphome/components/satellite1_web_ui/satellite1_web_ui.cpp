@@ -65,7 +65,12 @@ void Satellite1WebUI::loop() {
 char *Satellite1WebUI::stage_ha_payload(size_t capacity) { return this->handler_.stage_ha_payload(capacity); }
 
 void Satellite1WebUI::commit_ha_payload(size_t len, int rung) {
-  const char *json = this->handler_.commit_ha_payload(len, rung);
+  this->adopt_ha_area_(this->handler_.commit_ha_payload(len, rung));
+}
+
+void Satellite1WebUI::commit_ha_pages(int rung) { this->adopt_ha_area_(this->handler_.commit_ha_pages(rung)); }
+
+void Satellite1WebUI::adopt_ha_area_(const char *json) {
   if (json == nullptr)
     return;
 

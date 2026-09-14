@@ -63,6 +63,12 @@ class Satellite1WebUI : public Component {
   char *stage_ha_payload(size_t capacity);
   void commit_ha_payload(size_t len, int rung);
 
+  /// The paged form of the pair above, for the ladder in common/web_ui_ha.yaml: one begin, a
+  /// stage_ha_page per reply, one commit. See WebUIHandler::begin_ha_pages for why it is paged.
+  void begin_ha_pages() { this->handler_.begin_ha_pages(); }
+  char *stage_ha_page(size_t len) { return this->handler_.stage_ha_page(len); }
+  void commit_ha_pages(int rung);
+
   /// The same thing for a caller that already holds the payload as a string. Not what the sync uses: by
   /// the time such a string exists, the internal-heap copy the pair above avoids has been paid for.
   void set_ha_payload(const std::string &json, int rung);
@@ -93,6 +99,10 @@ class Satellite1WebUI : public Component {
   Selection &selection() { return this->selection_; }
 
  protected:
+  /// Takes this device's own area id out of a freshly committed payload. Null is the refused-commit
+  /// case and does nothing.
+  void adopt_ha_area_(const char *json);
+
   WebUIHandler handler_;
   Selection selection_;
   Trigger<> ha_refresh_trigger_;

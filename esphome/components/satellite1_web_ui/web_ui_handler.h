@@ -189,6 +189,22 @@ class WebUIHandler : public AsyncWebHandler {
   /// commit was refused, which only happens when nothing was staged for it.
   const char *commit_ha_payload(size_t len, int rung);
 
+  /// Starts a paged sync, discarding anything a previous one had staged but not committed.
+  ///
+  /// common/web_ui_ha.yaml asks for the document a page at a time, because the API's receive buffer
+  /// grows to the largest message it has ever handled and is released only once. The pages are byte
+  /// slices of one ordered list of fragments rather than structured sub-documents, so appending them
+  /// yields the same JSON the single-shot path wrote.
+  void begin_ha_pages();
+
+  /// Reserves `len` bytes at the end of the staged payload for one page, or nullptr if PSRAM could
+  /// not provide them. Main loop only, like the API callback that calls it.
+  char *stage_ha_page(size_t len);
+
+  /// Publishes every page appended since begin_ha_pages as the payload from `rung`, and returns it
+  /// NUL-terminated. Null if nothing was staged.
+  const char *commit_ha_pages(int rung);
+
   /// Records that every rung refused, without discarding a payload an earlier sync managed to get.
   /// Stale data with an honest age is more use to the app than nothing.
   void set_ha_failed() { this->ha_rung_ = -1; }
@@ -322,6 +338,14 @@ class WebUIHandler : public AsyncWebHandler {
   /// and after the first two syncs neither one allocates again.
   char *ha_stage_{nullptr};
   size_t ha_stage_cap_{0};
+
+  /// Write offset into the staging buffer: how much the pages received so far have filled.
+  size_t ha_stage_len_{0};
+
+  /// Grows the staging buffer to `capacity` bytes, preserving its contents, or nullptr if PSRAM
+  /// could not provide it. Shared by the single-shot and paged paths, which differ only in whether
+  /// they reset ha_stage_len_ first.
+  char *ha_stage_grow_(size_t capacity);
   /// Uptime in seconds when the payload arrived, so the app can show its age and decide to resync.
   /// Zero means nothing has ever arrived, which is why the endpoint reports an age of -1 for it.
   uint32_t ha_at_{0};

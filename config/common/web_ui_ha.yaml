@@ -6,21 +6,46 @@
 # native API connection it already has, caches the answer, and serves it to the browser from
 # GET /api/sat1/ha.
 #
-# One call carries everything Home Assistant knows and this device does not: which areas exist, which
+# The sync carries everything Home Assistant knows and this device does not: which areas exist, which
 # media players are in them, and which other FutureProofHomes devices are on the network. It is
 # rendered on Home Assistant's side, exactly as tts_targets_ma_check already does, so only the result
 # crosses the wire rather than the whole entity registry.
+#
+# It arrives a page at a time, because the native API's receive buffer grows to the largest message
+# it has ever handled and is released only once, early in the connection - so one reply carrying the
+# whole document would pin that much internal heap for the rest of the boot. The pages concatenate
+# back into the same document, so nothing above the transport is aware of them.
 #
 # See docs/TTS-Routing.md for the routing this shares its area walk with.
 ####################################################################################################
 
 substitutions:
-  # The whole payload, rendered by Home Assistant.
+  # How many bytes of the document one page carries.
+  #
+  # The API's receive buffer grows to the largest message it has ever handled and is released
+  # exactly once, at the end of the initial entity sync (api_connection.cpp:416). Nothing releases
+  # it again, so what the device pays for the rest of the boot is set by the largest single reply
+  # rather than by the size of the sync.
+  #
+  # 1024 balances that against round trips, which are not free on the fallback rung: rung 2 takes
+  # about three seconds a call.
+  #
+  # Not a hard bound. The slicing below never splits a piece, because half a JSON object is not
+  # something the other end can be handed, so one area with many players can exceed it.
+  web_ui_ha_page_bytes: "1024"
+
+  # The bound on the page loop. The loop ends when Home Assistant says so, so this only catches a
+  # template that never does - well past what the size cap can produce, and inside the two digits
+  # `pg` is written into.
+  web_ui_ha_max_pages: "40"
+
+  # The whole payload, rendered by Home Assistant, one page at a time.
   #
   # Expects `mac`, which cannot be sent as a variable. Home Assistant renders a response_template
   # with only {"response": ...} in scope, while data_template gets the call's variables through
   # render_complex - so web_ui_ha_template below prepends its own `{% set mac = ... %}` and the
-  # shared walk reads it exactly as ducking's callers do.
+  # shared walk reads it exactly as ducking's callers do. `pg`, the page being asked for, arrives
+  # the same way and for the same reason.
   #
   # It is also rendered with strict=True, which makes any undefined reference a hard error with no
   # partial result. That is stricter than Developer Tools: a template that renders there can still
@@ -31,7 +56,16 @@ substitutions:
   # through `mine` from the shared walk. Measured against a 22-area, 104-media-player installation:
   # 82 bytes per player, 90 per device, 4.3KB in total.
   #
-  # Shape:
+  # One call returns {"m": 1, "d": "<fragment>"}: `m` is whether another page follows, `d` is this
+  # page's slice. Concatenating every `d` in order reproduces the document below byte for byte, so
+  # the component appends the slices into PSRAM and the frontend parses what it always did.
+  #
+  # The fragment is wrapped in an object rather than returned bare because Home Assistant puts every
+  # rendered template through literal_eval. An object parses and comes back as structure; a bare
+  # fragment raises and comes back as raw rendered text, carrying every newline and indent the loops
+  # below emit between their tags.
+  #
+  # Shape of the reassembled document:
   #   {"area": "Media Room", "aid": "media_room",
   #    "areas": [{"i": "kitchen", "n": "Kitchen", "p": [["media_player.kitchen", "Kitchen Sonos"]]}],
   #    "loose": [["media_player.all_sonos", "All Sonos"]],
@@ -105,16 +139,16 @@ substitutions:
   # Areas with no eligible player are dropped rather than sent empty: the frontend has nothing to
   # offer for them, and on the installation above that is 11 areas of the 22.
   #
-  # The size cap is enforced here, on Home Assistant's side, and it is not a nicety. An incoming API
-  # message larger than MAX_MESSAGE_SIZE - 32768 on ESP32, api_frame_helper.h:31 - does not arrive
-  # truncated: api_frame_helper_plaintext.cpp:145 sets State::FAILED and returns BAD_DATA_PACKET,
-  # which drops the connection. Since this syncs on reconnect, an installation too large to fit would
-  # disconnect, reconnect, ask again and disconnect again. So areas are added while they fit and `t`
-  # says some were left out; the frontend then falls back to the manual entity id field, which it
-  # needs regardless - only 38 of 104 media players on the test installation were in any area at all.
+  # The size cap is enforced here, on Home Assistant's side. Paging removed the reason it originally
+  # existed - an incoming message larger than MAX_MESSAGE_SIZE (32768 on ESP32, api_frame_helper.h:31)
+  # does not arrive truncated but drops the connection, and since this syncs on reconnect an
+  # installation too large to fit would loop - and no page comes near that now.
   #
-  # 24000 rather than 32768 leaves room for the device list, the wrapper and protobuf framing. At the
-  # measured 82 bytes per player that is roughly 290 players before anything is dropped.
+  # It is kept as a bound on the reassembled document. An installation needing more than 24000 bytes
+  # of areas has an area picker that has stopped being usable as one, and a truncated list is better
+  # than a list nobody can scroll. Areas are added while they fit and `t` says some were left out;
+  # the frontend falls back to the manual entity id field, which it needs regardless - only 38 of
+  # 104 media players on the test installation were in any area at all.
   #
   # Every value is a string or an int, never a boolean or none, and that is deliberate: Home Assistant
   # puts the rendered result through literal_eval, which parses a JSON object into a dict but raises
@@ -180,47 +214,99 @@ substitutions:
         {% set keep.n = keep.n + sz %}
       {% endif %}
     {% endfor %}
-    {{ {'area': area_name(ns.area) if ns.area else '',
-        'aid': ns.area if ns.area else '',
-        'areas': keep.a, 'loose': out.loose, 'dev': out.dev, 'asst': asst,
-        't': 1 if keep.a | count < out.areas | count else 0} | to_json }}
+    {% set P = namespace(l=['{"area":' ~ ((area_name(ns.area) if ns.area else '') | to_json)
+                            ~ ',"aid":' ~ ((ns.area if ns.area else '') | to_json)
+                            ~ ',"t":' ~ (1 if keep.a | count < out.areas | count else 0)
+                            ~ ',"asst":' ~ (asst | to_json)
+                            ~ ',"dev":[']) %}
+    {% for d in out.dev %}
+      {% set P.l = P.l + [(d | to_json) ~ ('' if loop.last else ',')] %}
+    {% endfor %}
+    {% set P.l = P.l + ['],"loose":['] %}
+    {% for e in out.loose %}
+      {% set P.l = P.l + [(e | to_json) ~ ('' if loop.last else ',')] %}
+    {% endfor %}
+    {% set P.l = P.l + ['],"areas":['] %}
+    {% for a in keep.a %}
+      {% set P.l = P.l + [(a | to_json) ~ ('' if loop.last else ',')] %}
+    {% endfor %}
+    {% set P.l = P.l + [']}'] %}
+    {% set S = namespace(n=0, at=0, buf='', last=0) %}
+    {% for p in P.l %}
+      {% if S.n > 0 and S.n + (p | length) > ${web_ui_ha_page_bytes} %}
+        {% set S.at = S.at + 1 %}
+        {% set S.n = 0 %}
+      {% endif %}
+      {% set S.n = S.n + (p | length) %}
+      {% if S.at == pg %}{% set S.buf = S.buf ~ p %}{% endif %}
+      {% set S.last = S.at %}
+    {% endfor %}
+    {{ {'m': 1 if pg < S.last else 0, 'd': S.buf} | to_json }}
 
   # Nothing has ever recorded statistics under this id, so asking for them reads nothing and returns
   # an empty result rather than an error. Named here because rung 1's comment explains it.
   web_ui_ha_probe_statistic: "sensor.satellite1_web_ui_probe"
 
-  # Writes the payload into the component's PSRAM staging buffer, whichever of the two forms it arrived
-  # in, and leaves `ha_len` bytes there with `ha_dst` non-null if it worked. Each rung then commits it
-  # with its own number, which is the only part that differs between them.
+  # Appends one page to the component's PSRAM staging buffer and records whether another follows.
+  # Each rung runs this and then commits or asks for the next page, which is the only part that
+  # differs between them.
   #
-  # Never a std::string, and that is the whole point of the shape below. This used to be
+  # Never a std::string, and that is the whole point of the shape. This used to be
   # `serializeJson(captured, payload)` into one, which put several kilobytes on the internal heap - and
   # with exceptions compiled out, an allocation that cannot find a contiguous block that size does not
   # fail, it calls abort(). On a wifi build, where the WiFi driver's buffers leave the largest free block
   # around 7KB, that rebooted the device on the sync itself. Staging into PSRAM means the bytes go from
   # the API message straight to the buffer that serves them and nowhere else.
   #
-  # Home Assistant puts every rendered template through literal_eval, so a payload with no boolean and
-  # no none parses into a dict and comes back as a JSON object, while one with either raises, is
-  # caught, and comes back as the original string. The template above is written to stay on one side of
-  # that line, but both are handled: the alternative is a transport whose shape depends on whether
-  # someone's speaker is called something unusual. The string form is copied with memcpy because its
-  # bytes are already in the API message; the object form is serialized directly into the buffer.
+  # `d` is read as a const char * rather than copied out, so the only move the bytes make is the
+  # memcpy into PSRAM. ArduinoJson has already unescaped it in place inside the API message.
+  #
+  # The test is on `d` being a string, not on the reply being an object: the trigger is
+  # Trigger<JsonObjectConst, ...> (homeassistant_service.h:158), and is<JsonObject>() is never true
+  # for a const variant.
+  #
+  # A page that does not arrive abandons the sync rather than committing - a document missing a
+  # slice out of its middle is not JSON - and the previous payload keeps being served with its real
+  # age.
   #
   # This lives in YAML rather than in the component because ArduinoJson is only compiled in when
   # something in the config uses capture_response - which is exactly this file - and a lambda is part
   # of main.cpp, where it always is.
-  web_ui_ha_payload_lambda: >-
+  web_ui_ha_page_lambda: >-
     auto captured = response["response"];
-    const char *ha_src = captured.is<const char *>() ? captured.as<const char *>() : nullptr;
-    size_t ha_len = ha_src != nullptr ? strlen(ha_src) : measureJson(captured);
-    char *ha_dst = id(web_ui_app)->stage_ha_payload(ha_len + 1);
-    if (ha_dst != nullptr) {
-      if (ha_src != nullptr) {
-        memcpy(ha_dst, ha_src, ha_len);
+    auto ha_frag = captured["d"];
+    const char *ha_src = ha_frag.is<const char *>() ? ha_frag.as<const char *>() : nullptr;
+    if (ha_src == nullptr) {
+      ESP_LOGW("web_ui", "Home Assistant page %d carried no fragment; sync abandoned",
+               id(web_ui_ha_page));
+      id(web_ui_ha_more) = -1;
+    } else {
+      size_t ha_len = strlen(ha_src);
+      char *ha_dst = id(web_ui_app)->stage_ha_page(ha_len);
+      if (ha_dst == nullptr) {
+        id(web_ui_ha_more) = -1;
       } else {
-        ha_len = serializeJson(captured, ha_dst, ha_len + 1);
+        memcpy(ha_dst, ha_src, ha_len);
+        id(web_ui_ha_more) = captured["m"] | 0;
       }
+    }
+
+  # Writes the page number the next call asks for into the template, in place.
+  #
+  # Two characters overwritten rather than the string rebuilt: the Jinja is about 1.7KB, and
+  # assembling a fresh copy per page would put that on the internal heap once per call - the cost
+  # paging exists to avoid. The offset is found once at boot.
+  #
+  # Padded with a space, never a zero. Jinja's integer lexer follows Python 3, where a leading zero
+  # on a decimal literal is a syntax error, and the template renders with strict=True - so `01`
+  # through `09` would fail the action call outright.
+  web_ui_ha_seek_lambda: >-
+    std::string &tpl = id(web_ui_ha_template);
+    int at = id(web_ui_ha_page_offset);
+    if (at > 0 && static_cast<size_t>(at) + 1 < tpl.size()) {
+      int tens = (id(web_ui_ha_page) / 10) % 10;
+      tpl[at] = tens == 0 ? ' ' : static_cast<char>('0' + tens);
+      tpl[at + 1] = static_cast<char>('0' + id(web_ui_ha_page) % 10);
     }
 
 globals:
@@ -239,11 +325,31 @@ globals:
   #   0  nothing asked yet                2  conversation.process
   #   1  recorder.get_statistics         -1  both refused
   #
-  # The ladder always restarts at rung 1 rather than resuming from this value. A refused rung costs
-  # one round trip to something that does nothing, syncs are rare, and steering from here would mean
-  # a dispatch chain for no measurable gain - so this records what worked rather than deciding what
-  # to try.
+  # A sync always restarts at rung 1 rather than resuming from this value. A refused rung costs one
+  # round trip to something that does nothing and syncs are rare, so this records what worked rather
+  # than deciding what to try.
+  #
+  # Within a sync it does steer: once a rung has answered page 0, every page after it goes to the
+  # same rung rather than re-probing from the top.
   - id: web_ui_ha_rung
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  # Which page the next call asks for, and where in web_ui_ha_template its two digits live.
+  - id: web_ui_ha_page
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: web_ui_ha_page_offset
+    type: int
+    restore_value: no
+    initial_value: '-1'
+
+  # What the last page said about the one after it: 1 another follows, 0 that was the last, -1 the
+  # sync failed partway and what is staged must not be committed.
+  - id: web_ui_ha_more
     type: int
     restore_value: no
     initial_value: '0'
@@ -261,7 +367,14 @@ esphome:
             // contain, which )JINJA" is.
             id(web_ui_ha_template) = std::string("{% set mac = '") +
                                      esphome::get_mac_address_pretty() +
-                                     R"JINJA(' %}${web_ui_ha_jinja})JINJA";
+                                     R"JINJA(' %}{% set pg =  0 %}${web_ui_ha_jinja})JINJA";
+
+            // Where those two digits ended up, so each call can overwrite them without rebuilding
+            // the string. Searched rather than computed, because the MAC ahead of them is not a
+            // fixed width.
+            static const char *const PG = "{% set pg = ";
+            size_t at = id(web_ui_ha_template).find(PG);
+            id(web_ui_ha_page_offset) = at == std::string::npos ? -1 : static_cast<int>(at + strlen(PG));
 
 script:
   # Home Assistant registers its action-call handler partway through its own connect sequence, and a
@@ -292,7 +405,42 @@ script:
               # this from the version on the connect handshake.
               - lambda: 'return id(ha_supports_action_replies);'
           then:
+            - lambda: |-
+                id(web_ui_app)->begin_ha_pages();
+                id(web_ui_ha_page) = 0;
+                id(web_ui_ha_more) = 0;
             - script.execute: web_ui_ha_rung_1
+
+  # Runs after every page: asks for the next one on whichever rung answered, or finishes.
+  #
+  # The loop is driven by a flag the other end sets, so ${web_ui_ha_max_pages} bounds a template
+  # that never says `m: 0`. Reaching it means something is wrong rather than something is large, so
+  # it commits nothing - a document missing its tail is not JSON.
+  #
+  # Only `m: 0` commits. -1 is the page lambda reporting a page it could not stage, which leaves the
+  # previous payload in place with its real age.
+  - id: web_ui_ha_advance
+    then:
+      - if:
+          condition:
+            lambda: 'return id(web_ui_ha_more) == 1 && id(web_ui_ha_page) + 1 < ${web_ui_ha_max_pages};'
+          then:
+            - lambda: 'id(web_ui_ha_page) = id(web_ui_ha_page) + 1;'
+            - if:
+                condition:
+                  lambda: 'return id(web_ui_ha_rung) == 1;'
+                then:
+                  - script.execute: web_ui_ha_rung_1
+                else:
+                  - script.execute: web_ui_ha_rung_2
+          else:
+            - lambda: |-
+                if (id(web_ui_ha_more) == 1) {
+                  ESP_LOGW("web_ui", "Home Assistant payload had not ended after %d pages; discarded",
+                           ${web_ui_ha_max_pages});
+                } else if (id(web_ui_ha_more) == 0) {
+                  id(web_ui_app)->commit_ha_pages(id(web_ui_ha_rung));
+                }
 
   # Rung 1. get_statistics is domain-level, so it needs no entity to exist, and aimed at a statistic
   # id nothing has ever written it returns {"statistics": {}} with changed_states empty - it succeeds
@@ -304,6 +452,8 @@ script:
   # it takes deliberate effort. That is why it is rung 1 and not the floor.
   - id: web_ui_ha_rung_1
     then:
+      - lambda: |-
+          ${web_ui_ha_seek_lambda}
       - homeassistant.action:
           action: recorder.get_statistics
           capture_response: true
@@ -315,14 +465,11 @@ script:
           response_template: !lambda 'return id(web_ui_ha_template);'
           on_success:
             - lambda: |-
-                ${web_ui_ha_payload_lambda}
-                // A payload with no buffer to stage it in is not published, and the rung is left alone
-                // with it: the previous payload keeps being served with its real age, which is more use
-                // to the app than a rung number for data it never received.
-                if (ha_dst != nullptr) {
-                  id(web_ui_ha_rung) = 1;
-                  id(web_ui_app)->commit_ha_payload(ha_len, 1);
-                }
+                ${web_ui_ha_page_lambda}
+                // Recorded per page rather than once at the end, because web_ui_ha_advance reads
+                // it to decide which rung to ask for the next page on.
+                id(web_ui_ha_rung) = 1;
+            - script.execute: web_ui_ha_advance
           on_error:
             - script.execute: web_ui_ha_rung_2
 
@@ -338,6 +485,8 @@ script:
   # second.
   - id: web_ui_ha_rung_2
     then:
+      - lambda: |-
+          ${web_ui_ha_seek_lambda}
       - homeassistant.action:
           action: conversation.process
           capture_response: true
@@ -347,11 +496,9 @@ script:
           response_template: !lambda 'return id(web_ui_ha_template);'
           on_success:
             - lambda: |-
-                ${web_ui_ha_payload_lambda}
-                if (ha_dst != nullptr) {
-                  id(web_ui_ha_rung) = 2;
-                  id(web_ui_app)->commit_ha_payload(ha_len, 2);
-                }
+                ${web_ui_ha_page_lambda}
+                id(web_ui_ha_rung) = 2;
+            - script.execute: web_ui_ha_advance
           on_error:
             - lambda: |-
                 id(web_ui_ha_rung) = -1;

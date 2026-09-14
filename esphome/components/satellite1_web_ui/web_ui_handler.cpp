@@ -520,10 +520,12 @@ void WebUIHandler::apply_wake_word_requests() {
 }
 #endif
 
-char *WebUIHandler::stage_ha_payload(size_t capacity) {
+char *WebUIHandler::ha_stage_grow_(size_t capacity) {
   // No lock: the staging buffer is only ever touched from the main loop, where the API callback that
   // writes it runs. What a request can reach is ha_buf_, and the two only meet in commit_ha_payload.
   if (capacity > this->ha_stage_cap_) {
+    // reallocate rather than allocate, because the paged path grows the buffer between pages and
+    // must not drop the ones already in it.
     char *grown = this->ha_stage_ == nullptr ? this->ha_alloc_.allocate(capacity)
                                              : this->ha_alloc_.reallocate(this->ha_stage_, capacity);
     if (grown == nullptr) {
@@ -537,6 +539,31 @@ char *WebUIHandler::stage_ha_payload(size_t capacity) {
     this->ha_stage_cap_ = capacity;
   }
   return this->ha_stage_;
+}
+
+char *WebUIHandler::stage_ha_payload(size_t capacity) {
+  this->ha_stage_len_ = 0;
+  return this->ha_stage_grow_(capacity);
+}
+
+void WebUIHandler::begin_ha_pages() { this->ha_stage_len_ = 0; }
+
+char *WebUIHandler::stage_ha_page(size_t len) {
+  // +1 for the terminator commit_ha_payload writes, since any page can turn out to be the last.
+  char *base = this->ha_stage_grow_(this->ha_stage_len_ + len + 1);
+  if (base == nullptr)
+    return nullptr;
+  char *at = base + this->ha_stage_len_;
+  this->ha_stage_len_ += len;
+  return at;
+}
+
+const char *WebUIHandler::commit_ha_pages(int rung) {
+  if (this->ha_stage_len_ == 0) {
+    ESP_LOGW(TAG_WU, "Home Assistant sync produced no pages; keeping the previous payload");
+    return nullptr;
+  }
+  return this->commit_ha_payload(this->ha_stage_len_, rung);
 }
 
 const char *WebUIHandler::commit_ha_payload(size_t len, int rung) {
