@@ -72,6 +72,12 @@ FlashAction = flasher_ns.class_(
 FlashEmbeddedAction = flasher_ns.class_(
     "FlashEmbeddedAction", automation.Action
 )
+RequestEmbeddedFlashRebootAction = flasher_ns.class_(
+    "RequestEmbeddedFlashRebootAction", automation.Action
+)
+RequestFullEraseFlashRebootAction = flasher_ns.class_(
+    "RequestFullEraseFlashRebootAction", automation.Action
+)
 
 FlashingStartedTrigger = flasher_ns.class_(
     "FlashingStartedTrigger", automation.Trigger
@@ -378,6 +384,17 @@ async def flash_embedded_image_action_to_code(config, action_id, template_arg, a
     await cg.register_parented(var, config[CONF_FLASHER_ID])
     return var
 
+@automation.register_action(
+    "memory_flasher.request_embedded_flash_reboot",
+    RequestEmbeddedFlashRebootAction,
+    FlASH_EMBEDDED_ACTION_SCHEMA,
+    synchronous=True,
+)
+async def request_embedded_flash_reboot_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_FLASHER_ID])
+    return var
+
 
 ERASE_MEMORY_ACTION_SCHEMA = automation.maybe_simple_id(
     {
@@ -395,6 +412,17 @@ async def erase_memory_action_to_code(config, action_id, template_arg, args):
     await cg.register_parented(var, config[CONF_FLASHER_ID])
     return var
 
+@automation.register_action(
+    "memory_flasher.request_full_erase_flash_reboot",
+    RequestFullEraseFlashRebootAction,
+    ERASE_MEMORY_ACTION_SCHEMA,
+    synchronous=True,
+)
+async def request_full_erase_flash_reboot_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_FLASHER_ID])
+    return var
+
 
 
 CONDITION_SCHEMA = automation.maybe_simple_id(
@@ -408,5 +436,3 @@ async def wifi_connected_to_code(config, condition_id, template_arg, args):
     var = cg.new_Pvariable(condition_id, template_arg)
     await cg.register_parented(var, config[CONF_FLASHER_ID])
     return var
-
-

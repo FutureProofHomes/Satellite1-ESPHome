@@ -39,6 +39,17 @@ template<typename... Ts> class EraseMemoryAction : public Action<Ts...>, public 
   void play(const Ts &...x) override { this->parent_->erase_memory(); }
 };
 
+template<typename... Ts> class RequestEmbeddedFlashRebootAction : public Action<Ts...>, public Parented<MemoryFlasher> {
+ public:
+  void play(const Ts &...x) override { this->parent_->request_embedded_flash_reboot(); }
+};
+
+template<typename... Ts>
+class RequestFullEraseFlashRebootAction : public Action<Ts...>, public Parented<MemoryFlasher> {
+ public:
+  void play(const Ts &...x) override { this->parent_->request_full_erase_flash_reboot(); }
+};
+
 template<FlasherState State> class FlasherStateTrigger : public Trigger<> {
  public:
   explicit FlasherStateTrigger(MemoryFlasher *xflash) {
@@ -70,7 +81,8 @@ class ErasingDoneTrigger : public Trigger<> {
  public:
   explicit ErasingDoneTrigger(MemoryFlasher *xflash) {
     xflash->add_on_state_callback([this, xflash]() {
-      if (xflash->state == FLASHER_SUCCESS_STATE && xflash->requested_action == ACTION_FULL_ERASE) {
+      if (xflash->state == FLASHER_SUCCESS_STATE && (xflash->requested_action == ACTION_FULL_ERASE ||
+                                                     xflash->requested_action == ACTION_FLASH_EMBEDDED_FULL_ERASE)) {
         this->trigger();
       }
     });

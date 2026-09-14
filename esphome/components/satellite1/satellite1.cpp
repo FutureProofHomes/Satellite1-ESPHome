@@ -88,21 +88,28 @@ void Satellite1::dump_config() {
 }
 
 void Satellite1::loop() {
+  if (static_cast<int32_t>(millis() - this->xmos_boot_ready_timestamp_) < 0) {
+    return;
+  }
+
   switch (this->state) {
     case SAT_DETACHED_STATE:
-      if (this->connection_attempts <= MAX_CONNECTION_ATTEMPTS && (millis() - this->last_attempt_timestamp_) > 1000) {
-        if (this->connection_attempts == MAX_CONNECTION_ATTEMPTS) {
+      if ((this->connection_attempts <= MAX_CONNECTION_ATTEMPTS || this->xmos_booting_) &&
+          (millis() - this->last_attempt_timestamp_) > 1000) {
+        if (!this->xmos_booting_ && this->connection_attempts == MAX_CONNECTION_ATTEMPTS) {
           ESP_LOGW(TAG, "XMOS did not respond after %u connection attempts",
                    static_cast<unsigned>(MAX_CONNECTION_ATTEMPTS));
           this->state_callback_.call();
-        } else if (this->check_for_xmos_()) {
+        } else if (this->check_for_xmos_(this->xmos_booting_)) {
           this->state = SAT_XMOS_CONNECTED_STATE;
           this->connection_attempts = 0;
+          this->xmos_booting_ = false;
           ESP_LOGI(TAG, "XMOS Firmware Version: %s", this->status_string().c_str());
           this->state_callback_.call();
         }
         this->last_attempt_timestamp_ = millis();
-        this->connection_attempts++;
+        if (!this->xmos_booting_)
+          this->connection_attempts++;
       }
       break;
     case SAT_XMOS_CONNECTED_STATE:
@@ -174,7 +181,7 @@ bool Satellite1::get_cached_dc_status(DC_STATUS_REGISTER::register_id reg, uint8
 
 bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload, uint8_t payload_len,
                           bool *status_report_received, bool retry) {
-  if (this->spi_flash_direct_access_enabled_) {
+  if (this->spi_flash_direct_access_enabled_ || static_cast<int32_t>(millis() - this->xmos_boot_ready_timestamp_) < 0) {
     return false;
   }
 
@@ -209,7 +216,9 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
 
   // XMOS not responding at all
   if ((send_recv_buf[0] + send_recv_buf[1] + send_recv_buf[2]) == 0) {
-    ESP_LOGW(TAG, "SPI no response: res=%u cmd=0x%02X rx=[00 00 00]", resource_id, command);
+    if (!this->xmos_booting_) {
+      ESP_LOGW(TAG, "SPI no response: res=%u cmd=0x%02X rx=[00 00 00]", resource_id, command);
+    }
     return false;
   }
 
@@ -269,9 +278,12 @@ void Satellite1::set_spi_flash_direct_access_mode(bool enable) {
   this->xmos_rst_pin_->digital_write(enable);
   if (enable) {
     this->state = SAT_FLASH_CONNECTED_STATE;
-  } else if (this->spi_flash_direct_access_enabled_) {
+  } else {
+    // Releasing direct-SPI mode restarts XMOS, which cannot answer control requests immediately.
     this->state = SAT_DETACHED_STATE;
     this->connection_attempts = 0;
+    this->xmos_booting_ = true;
+    this->xmos_boot_ready_timestamp_ = millis() + XMOS_BOOT_SETTLE_TIME_MS;
   }
   this->spi_flash_direct_access_enabled_ = enable;
   this->state_callback_.call();
@@ -337,18 +349,21 @@ bool Satellite1::dfu_get_image_status_() {
   return true;
 }
 
-bool Satellite1::is_device_ready_() {
+bool Satellite1::is_device_ready_(bool quiet) {
   if (!this->request_status_register_update()) {
-    ESP_LOGW(TAG, "XMOS status-register request failed");
+    if (!quiet)
+      ESP_LOGW(TAG, "XMOS status-register request failed");
     return false;
   }
   uint8_t status = 0;
   if (!this->get_cached_dc_status(DC_STATUS_REGISTER::DEVICE_STATUS, &status)) {
-    ESP_LOGW(TAG, "XMOS status-register response was not cached");
+    if (!quiet)
+      ESP_LOGW(TAG, "XMOS status-register response was not cached");
     return false;
   }
   if (status != DEVICE_STATUS_READY_VALUE) {
-    ESP_LOGW(TAG, "XMOS status-register not ready: 0x%02X", status);
+    if (!quiet)
+      ESP_LOGW(TAG, "XMOS status-register not ready: 0x%02X", status);
     return false;
   }
   return true;
@@ -401,8 +416,8 @@ void Satellite1::log_last_command_status_(uint8_t resource_id, uint8_t command, 
   this->status_query_in_progress_ = false;
 }
 
-bool Satellite1::check_for_xmos_() {
-  if (!this->is_device_ready_()) {
+bool Satellite1::check_for_xmos_(bool quiet) {
+  if (!this->is_device_ready_(quiet)) {
     return false;
   }
 

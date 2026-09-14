@@ -146,6 +146,7 @@ satellite1:
             - lambda: return id(init_in_progress);
             - lambda: return id(xflash).has_image_embedded();
             - lambda: return !id(xflash).flash_attempted_this_boot();
+            - lambda: return !id(xflash).boot_flash_pending();
           then:
             - memory_flasher.write_embedded_image:
 
@@ -164,16 +165,19 @@ satellite1:
             - lambda: return id(xflash).has_image_embedded();
             - lambda: return !id(xflash).match_embedded(id(satellite1_id).xmos_fw_version);
             - lambda: return !id(xflash).flash_attempted_this_boot();
+            - lambda: return !id(xflash).boot_flash_pending();
           then:
             - memory_flasher.write_embedded_image:
           else:
             - if:
                 condition:
                   lambda: |-
-                    return id(satellite1_id).is_xmos_connected() && !id(xflash).in_progress();
+                    return id(satellite1_id).is_xmos_connected() && !id(xflash).in_progress() &&
+                           !id(xflash).boot_flash_pending();
                 then:
                   - lambda: id(xmos_audio_ready) = true;
                   - script.execute: refresh_audio_output
+                  - script.execute: start_micro_wake_word
 
 memory_flasher:
   - platform: satellite1
@@ -186,19 +190,27 @@ memory_flasher:
     on_flashing_start:
       then:
         - lambda: id(xmos_audio_ready) = false;
-        - tas2780.deactivate:
-        - lambda: id(tas2780_active) = false;
+        - text_sensor.template.publish:
+            id: xmos_firmware_version_text
+            state: "Flashing... (0%)"
         - lambda: id(xmos_flashing_state) = 1;
         - script.execute: control_leds
 
     on_progress_update:
       then:
+        - text_sensor.template.publish:
+            id: xmos_firmware_version_text
+            state: !lambda |-
+              return std::string("Flashing... (") + std::to_string(id(xflash).flashing_progress) + "%)";
         - lambda: id(global_led_animation_index) = id(xflash).flashing_progress * 24 / 100;
         - script.execute: control_leds
 
     on_flashing_success:
       then:
         - logger.log: "success called"
+        - text_sensor.template.publish:
+            id: xmos_firmware_version_text
+            state: "Flashing... (100%)"
         - lambda: id(xmos_flashing_state) = 2;
         - script.execute: control_leds
         - lambda: id(xmos_flashing_state) = 0;
@@ -206,9 +218,17 @@ memory_flasher:
     on_flashing_failed:
       then:
         - logger.log: "failed called"
+        - text_sensor.template.publish:
+            id: xmos_firmware_version_text
+            state: "Flashing failed"
         - lambda: id(xmos_flashing_state) = 3;
         - script.execute: control_leds
         - lambda: id(xmos_flashing_state) = 0;
+        - if:
+            condition:
+              lambda: return id(factory_reset_requested);
+            then:
+              - button.press: factory_reset_button
 
     on_erasing_done:
       then:

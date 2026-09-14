@@ -26,6 +26,7 @@ static const uint8_t DFU_CONTROLLER_SERVICER_RESID = 240;
 
 static const uint8_t MAX_CONNECTION_ATTEMPTS = 3;
 static const uint32_t STATUS_REFRESH_INTERVAL_MS = 20;
+static const uint32_t XMOS_BOOT_SETTLE_TIME_MS = 4000;
 
 namespace DC_RESOURCE {
 enum dc_resource_enum {
@@ -157,19 +158,21 @@ class Satellite1 : public Component,
   bool dfu_get_flash_serial_();
   bool dfu_get_image_status_();
   bool read_control_version_(uint8_t *version);
-  bool is_device_ready_();
-  bool check_for_xmos_();
+  bool is_device_ready_(bool quiet = false);
+  bool check_for_xmos_(bool quiet = false);
   bool read_last_command_status_(uint8_t *status);
   void log_last_command_status_(uint8_t resource_id, uint8_t command, const char *context);
   CallbackManager<void()> state_callback_{};
 
   uint32_t last_attempt_timestamp_{0};
   uint32_t status_refresh_timestamp_{0};
+  uint32_t xmos_boot_ready_timestamp_{0};
 
   uint8_t dc_status_register_[DC_STATUS_REGISTER::REGISTER_LEN];
   bool status_register_valid_{false};
   bool status_refresh_attempted_{false};
   bool spi_flash_direct_access_enabled_{false};
+  bool xmos_booting_{false};
   bool status_query_in_progress_{false};
   uint8_t control_version_{0};
   std::string hat_serial_{};

@@ -13,7 +13,7 @@ globals:
 
   - id: factory_reset_requested
     type: bool
-    restore_value: no
+    restore_value: yes
     initial_value: 'false'
 
 event:
@@ -259,11 +259,7 @@ binary_sensor:
               condition:
                 lambda: return !id(action_button_touched);
               then:
-                - if:
-                    condition:
-                      - lambda: return id(xflash).flash_accessible();
-                    then:
-                      - lambda: id(factory_reset_requested) = true;
-                      - memory_flasher.erase:
-                    else:
-                      - button.press: factory_reset_button
+                - lambda: |-
+                    id(factory_reset_requested) = true;
+                    global_preferences->sync();
+                - memory_flasher.request_full_erase_flash_reboot:
