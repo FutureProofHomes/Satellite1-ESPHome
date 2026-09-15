@@ -144,6 +144,7 @@ class Satellite1 : public Component,
   std::string get_hat_serial();
 
   void set_spi_flash_direct_access_mode(bool enable);
+  void set_boot_recovery_pending(bool pending) { this->boot_recovery_pending_ = pending; }
   bool is_xmos_connected() const { return this->state == SAT_XMOS_CONNECTED_STATE; }
 
   void set_xmos_rst_pin(GPIOPin *xmos_rst_pin) { this->xmos_rst_pin_ = xmos_rst_pin; }
@@ -172,6 +173,7 @@ class Satellite1 : public Component,
   bool status_register_valid_{false};
   bool status_refresh_attempted_{false};
   bool spi_flash_direct_access_enabled_{false};
+  bool boot_recovery_pending_{false};
   bool xmos_booting_{false};
   bool status_query_in_progress_{false};
   uint8_t control_version_{0};

@@ -111,6 +111,7 @@ class XMOSFlasher : public MemoryFlasher, public Satellite1SPIService {
   bool verify_content_valid_{true};
   md5::MD5Digest md5_verify_;
   bool pending_boot_action_{false};
+  bool boot_recovery_active_{false};
   FlasherAction pending_boot_action_type_{ACTION_FLASH_EMBEDDED_IMAGE};
 };
 

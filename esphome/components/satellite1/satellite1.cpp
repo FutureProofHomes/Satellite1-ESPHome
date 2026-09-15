@@ -77,7 +77,9 @@ void Satellite1::setup() {
   }
 
   memset(this->xmos_fw_version, 0, 5);
-  this->request_status_register_update();
+  if (!this->boot_recovery_pending_) {
+    this->request_status_register_update();
+  }
 }
 
 void Satellite1::dump_config() {
@@ -88,6 +90,11 @@ void Satellite1::dump_config() {
 }
 
 void Satellite1::loop() {
+  // A persisted XMOS recovery owns the shared SPI bus until the flasher releases it.
+  if (this->boot_recovery_pending_) {
+    return;
+  }
+
   if (static_cast<int32_t>(millis() - this->xmos_boot_ready_timestamp_) < 0) {
     return;
   }

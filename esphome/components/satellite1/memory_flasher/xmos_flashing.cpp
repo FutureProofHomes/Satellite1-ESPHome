@@ -44,6 +44,13 @@ void XMOSFlasher::setup() {
     this->pending_boot_action_ = true;
     this->pending_boot_action_type_ = ACTION_FLASH_EMBEDDED_IMAGE;
   }
+
+  if (this->pending_boot_action_) {
+    // Prevent XMOS probing and state callbacks until this persisted recovery is terminal.
+    this->boot_recovery_active_ = true;
+    this->parent_->set_boot_recovery_pending(true);
+    this->parent_->set_spi_flash_direct_access_mode(true);
+  }
 }
 
 void XMOSFlasher::loop() {
@@ -183,6 +190,10 @@ bool XMOSFlasher::init_flasher() {
 bool XMOSFlasher::deinit_flasher() {
   ESP_LOGD(TAG, "Stopping XMOS flasher...");
   this->parent_->set_spi_flash_direct_access_mode(false);
+  if (this->boot_recovery_active_) {
+    this->parent_->set_boot_recovery_pending(false);
+    this->boot_recovery_active_ = false;
+  }
   return true;
 }
 

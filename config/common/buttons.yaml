@@ -42,10 +42,14 @@ binary_sensor:
     icon: "mdi:volume-plus"
     on_press:
       then:
-        - lambda: id(volume_buttons_touched) = true;
-        - script.execute:
-            id: control_volume
-            increase_volume: true
+        - if:
+            condition:
+              lambda: return id(xmos_audio_ready);
+            then:
+              - lambda: id(volume_buttons_touched) = true;
+              - script.execute:
+                  id: control_volume
+                  increase_volume: true
 
   - platform: gpio
     id: btn_down
@@ -58,10 +62,14 @@ binary_sensor:
     icon: "mdi:volume-minus"
     on_press:
       then:
-        - lambda: id(volume_buttons_touched) = true;
-        - script.execute:
-            id: control_volume
-            increase_volume: false
+        - if:
+            condition:
+              lambda: return id(xmos_audio_ready);
+            then:
+              - lambda: id(volume_buttons_touched) = true;
+              - script.execute:
+                  id: control_volume
+                  increase_volume: false
 
   - platform: gpio
     id: btn_left
@@ -75,7 +83,9 @@ binary_sensor:
     on_state:
       - if:
           condition:
-            binary_sensor.is_off: btn_left
+            and:
+              - lambda: return id(xmos_audio_ready);
+              - binary_sensor.is_off: btn_left
           then:
             - script.execute:
                 id: play_sound
@@ -85,13 +95,17 @@ binary_sensor:
                 id: master_mute_switch
                 state: OFF
           else:
-            - script.execute:
-                id: play_sound
-                priority: false
-                sound_file: "mute_switch_on_sound"
-            - switch.template.publish:
-                id: master_mute_switch
-                state: ON
+            - if:
+                condition:
+                  lambda: return id(xmos_audio_ready);
+                then:
+                  - script.execute:
+                      id: play_sound
+                      priority: false
+                      sound_file: "mute_switch_on_sound"
+                  - switch.template.publish:
+                      id: master_mute_switch
+                      state: ON
 
   - platform: gpio
     id: btn_action
