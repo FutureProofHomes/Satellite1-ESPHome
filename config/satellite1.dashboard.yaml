@@ -1,7 +1,6 @@
 substitutions:
   name: satellite1
   friendly_name: Satellite1
-  xmos_fw_version: "v1.0.3"
 
   # OPTIONALLY, set the log level to debug, info, warn, error
   log_level: debug
