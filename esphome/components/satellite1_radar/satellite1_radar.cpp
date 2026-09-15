@@ -205,7 +205,6 @@ void Satellite1Radar::attach_tuner_() {
   this->tuner_handler_.clear_registrations();
 
   if (detected_type_ == RadarType::LD2450) {
-    this->tuner_handler_.set_html_content(ld2450_html_gz_, ld2450_html_gz_len_);
     this->tuner_handler_.set_ld2450_handler(ld2450_.get());
 
     // Left registered for the life of the device rather than gated on someone watching, unlike
@@ -217,7 +216,6 @@ void Satellite1Radar::attach_tuner_() {
       };
     }
   } else if (detected_type_ == RadarType::LD2410) {
-    this->tuner_handler_.set_html_content(ld2410_html_gz_, ld2410_html_gz_len_);
     this->tuner_handler_.set_ld2410_handler(ld2410_.get());
     this->tuner_handler_.set_ld2410_apply_callback([this]() { this->write_config_pending_.store(true); });
   }
@@ -243,11 +241,8 @@ void Satellite1Radar::dump_config() {
       ESP_LOGCONFIG(TAG, "  Detected sensor: Unknown");
       break;
   }
-  if (detected_type_ == RadarType::LD2410 || detected_type_ == RadarType::LD2450) {
-    // The tuner used to need a switch turned on before it existed anywhere, so its address was
-    // never worth logging. Now it is always mounted and this is the only place that says where.
-    ESP_LOGCONFIG(TAG, "  Tuner UI: %s", RT_URL_ROOT);
-  }
+  // No tuner URL to log anymore: the pages retired in favour of the SPA's Presence route, and
+  // the JSON API needs no advertisement.
 }
 
 }  // namespace satellite1_radar

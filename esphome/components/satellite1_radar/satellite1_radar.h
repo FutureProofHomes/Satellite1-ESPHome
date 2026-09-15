@@ -51,16 +51,8 @@ class Satellite1Radar : public Component, public uart::UARTDevice {
     this->has_layout_automation_ = true;
   }
 
-  // --- Radar tuner ---
+  // --- Radar tuner API (JSON endpoints only; the pages retired in favour of the SPA) ---
   RadarTunerHandler &get_tuner_handler() { return tuner_handler_; }
-  void set_ld2410_html(const uint8_t *data, size_t len) {
-    ld2410_html_gz_ = data;
-    ld2410_html_gz_len_ = len;
-  }
-  void set_ld2450_html(const uint8_t *data, size_t len) {
-    ld2450_html_gz_ = data;
-    ld2450_html_gz_len_ = len;
-  }
 
   void set_device_class_indices(uint8_t distance, uint8_t illuminance, uint8_t occupancy, uint8_t motion) {
     this->device_class_meta_ = {distance, illuminance, occupancy, motion};
@@ -110,10 +102,6 @@ class Satellite1Radar : public Component, public uart::UARTDevice {
   bool has_layout_automation_{false};
   bool ld2410_engineering_on_{false};
   std::atomic_bool write_config_pending_{false};
-  const uint8_t *ld2410_html_gz_{nullptr};
-  size_t ld2410_html_gz_len_{0};
-  const uint8_t *ld2450_html_gz_{nullptr};
-  size_t ld2450_html_gz_len_{0};
 };
 
 class EntityLayoutChangedTrigger : public Trigger<> {

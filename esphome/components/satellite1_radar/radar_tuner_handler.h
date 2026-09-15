@@ -15,15 +15,11 @@ namespace satellite1_radar {
 static const int RT_NUM_TARGETS = 3;
 static const int RT_NUM_GATES = 9;
 
-/// Path the tuner page is served from. Deliberately not "/": web_server owns the root, and in
-/// Phase 2 the SPA takes it over. The tuner's API paths are absolute from the origin
-/// (`const BASE=window.location.origin` in both tuner_ui pages), so moving the page off the root
-/// needs no change to the HTML.
-static const char *const RT_URL_ROOT = "/radar_tuner";
-
 /**
- * The radar tuner's HTTP surface, as a handler on ESPHome's shared web server rather than a
- * second esp_http_server of its own.
+ * The radar's JSON API, as a handler on ESPHome's shared web server rather than a second
+ * esp_http_server of its own. The standalone /radar_tuner pages this once also served were
+ * retired in favour of the SPA's Presence route after parity testing; the /api/v1/* endpoints
+ * are the SPA's data source and stay unchanged.
  *
  * Two consequences of sharing that shaped this file:
  *
@@ -40,11 +36,6 @@ static const char *const RT_URL_ROOT = "/radar_tuner";
  */
 class RadarTunerHandler : public AsyncWebHandler {
  public:
-  void set_html_content(const uint8_t *data, unsigned int len) {
-    html_gz_ = data;
-    html_gz_len_ = len;
-  }
-
   void set_ld2410_handler(LD2410Handler *handler) { ld2410_ = handler; }
   void set_ld2450_handler(LD2450Handler *handler) { ld2450_ = handler; }
   void set_ld2410_apply_callback(std::function<void()> cb) { on_ld2410_apply_ = std::move(cb); }
@@ -81,7 +72,6 @@ class RadarTunerHandler : public AsyncWebHandler {
   /// paths exist.
   enum class Route : uint8_t {
     NONE = 0,
-    ROOT,
     LD2410_CONFIG_GET,
     LD2410_CONFIG_SET,
     LD2410_APPLY,
@@ -95,7 +85,6 @@ class RadarTunerHandler : public AsyncWebHandler {
 
   static Route match_route_(AsyncWebServerRequest *request);
 
-  void handle_root_(AsyncWebServerRequest *request);
   void handle_ld2410_get_config_(AsyncWebServerRequest *request);
   void handle_ld2410_set_config_(AsyncWebServerRequest *request);
   void handle_ld2410_apply_(AsyncWebServerRequest *request);
@@ -109,8 +98,6 @@ class RadarTunerHandler : public AsyncWebHandler {
   LD2410Handler *ld2410_{nullptr};
   LD2450Handler *ld2450_{nullptr};
 
-  const uint8_t *html_gz_{nullptr};
-  unsigned int html_gz_len_{0};
   std::function<void()> on_ld2410_apply_;
 
   /// Accumulated request body. Reset on the chunk at index 0 rather than after use, so a request

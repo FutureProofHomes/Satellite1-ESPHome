@@ -218,9 +218,6 @@ export const TEXT = {
   no_sensor_mid: ", you can purchase a presence sensor ",
   no_sensor_buy: "here",
   no_sensor_buy_url: "https://futureproofhomes.net/products/ld2450-mmwave-human-presence-sensor",
-  // The parity-testing companion, kept until the owner approves retiring the legacy page.
-  legacy_tuner: "Open the legacy radar tuner",
-
   // The source labels in the card header. "Group stream" rather than the protocol's name, because
   // what the customer configured is Music Assistant or something like it, and the fact it speaks
   // Sendspin underneath is not their vocabulary.

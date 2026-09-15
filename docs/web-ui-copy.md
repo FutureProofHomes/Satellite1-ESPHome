@@ -256,7 +256,6 @@ the last because `zi_more` already says a zone needs three corners.
 | `no_sensor_docs` | read our docs to learn more *(links to the presence-sensor docs)* |
 | `no_sensor_mid` | , you can purchase a presence sensor |
 | `no_sensor_buy` | here *(links to the LD2450 product page)* |
-| `legacy_tuner` | Open the legacy radar tuner |
 | `no_wake_words` | No wake words are on, so the device will not respond to being spoken to. The mute button and Home Assistant still work. |
 | `pipeline_off` | Off |
 | `pipeline_preferred` | Preferred |

@@ -3,9 +3,9 @@
  *
  * Built entirely on `satellite1_radar`'s existing JSON API rather than on entities. That is not a
  * shortcut - the radar's settings are not ESPHome entities at all, they live in the module's own
- * config and are read and written over `/api/v1/<module>/config`. During the parity-testing window
- * this route and the legacy `/radar_tuner` page are two faces on the same API, which is what makes
- * side-by-side comparison honest: an edit made in either is immediately visible in the other.
+ * config and are read and written over `/api/v1/<module>/config` - the same API the retired
+ * `/radar_tuner` pages used, which is what made side-by-side parity testing honest while both
+ * faces existed.
  *
  * Zone and exclusion polygons are edited here, on the same SVG plot that draws them - tap to add a
  * corner, drag a corner to move it. The plot's viewBox is radar centimetres, so a pointer position
@@ -896,14 +896,8 @@ export function Presence({ ctx }) {
         )}
       </Card>
 
-      {/* The legacy page stays reachable during the parity-testing window, per the owner: this route and
-          /radar_tuner share the same API, so comparing them side by side is the test. The link goes when
-          the owner approves the page's retirement, and not before. */}
-      {is2450 && !edit && (
-        <p class="dim xs">
-          <a href="/radar_tuner">{TEXT.legacy_tuner}</a>
-        </p>
-      )}
+      {/* The legacy /radar_tuner link lived here during the parity-testing window; the owner approved
+          the pages' retirement in September 2026 and the route 404s now. */}
     </>
   );
 }

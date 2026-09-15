@@ -150,8 +150,6 @@ RadarTunerHandler::Route RadarTunerHandler::match_route_(AsyncWebServerRequest *
   const http_method method = request->method();
 
   if (method == HTTP_GET) {
-    if (url == RT_URL_ROOT)
-      return Route::ROOT;
     if (url == "/api/v1/ld2410/config")
       return Route::LD2410_CONFIG_GET;
     if (url == "/api/v1/ld2410/live")
@@ -199,9 +197,6 @@ void RadarTunerHandler::handleBody(AsyncWebServerRequest *request, uint8_t *data
 
 void RadarTunerHandler::handleRequest(AsyncWebServerRequest *request) {
   switch (match_route_(request)) {
-    case Route::ROOT:
-      this->handle_root_(request);
-      break;
     case Route::LD2410_CONFIG_GET:
       this->handle_ld2410_get_config_(request);
       break;
@@ -235,16 +230,6 @@ void RadarTunerHandler::handleRequest(AsyncWebServerRequest *request) {
   // Dropped here rather than in handleBody so a parse failure can still report the size it saw.
   this->body_.clear();
   this->body_.shrink_to_fit();
-}
-
-void RadarTunerHandler::handle_root_(AsyncWebServerRequest *request) {
-  if (html_gz_ == nullptr || html_gz_len_ == 0) {
-    send_error_(request, 500, "{\"error\":\"no HTML content\"}");
-    return;
-  }
-  auto *response = request->beginResponse(200, "text/html", html_gz_, html_gz_len_);
-  response->addHeader("Content-Encoding", "gzip");
-  request->send(response);
 }
 
 void RadarTunerHandler::handle_ld2410_get_config_(AsyncWebServerRequest *request) {

@@ -1,6 +1,3 @@
-import gzip
-from pathlib import Path
-
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
@@ -11,7 +8,7 @@ from esphome.core.entity_helpers import (
     register_icon,
     register_unit_of_measurement,
 )
-from esphome.core import CORE, HexInt
+from esphome.core import CORE
 import esphome.final_validate as fv
 
 CODEOWNERS = ["@FutureProofHomes"]
@@ -39,8 +36,6 @@ RUNTIME_ENTITY_HEADROOM = {
     "button": 3,
 }
 
-CONF_LD2410_HTML_ID = "ld2410_html_id"
-CONF_LD2450_HTML_ID = "ld2450_html_id"
 CONF_SATELLITE1_RADAR_ID = "satellite1_radar_id"
 CONF_ON_ENTITY_LAYOUT_CHANGED = "on_entity_layout_changed"
 
@@ -56,8 +51,6 @@ CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(Satellite1Radar),
-            cv.GenerateID(CONF_LD2410_HTML_ID): cv.declare_id(cg.uint8),
-            cv.GenerateID(CONF_LD2450_HTML_ID): cv.declare_id(cg.uint8),
             # Fired after the LD2450 registers/hides entities for a changed zone or multi-target
             # layout. Presence of at least one automation here is what switches the handler from
             # "reboot required" to live re-registration plus a Home Assistant re-enumeration the
@@ -164,25 +157,6 @@ async def to_code(config):
             icon_indices["database_refresh"],
         )
     )
-
-    base_dir = Path(__file__).parent
-    ld2410_path = base_dir / "tuner_ui" / "radar_tuner_ld2410.html"
-    ld2450_path = base_dir / "tuner_ui" / "radar_tuner_ld2450.html"
-
-    ld2410_gz = gzip.compress(ld2410_path.read_bytes(), compresslevel=9)
-    ld2450_gz = gzip.compress(ld2450_path.read_bytes(), compresslevel=9)
-
-    ld2410_progmem = cg.progmem_array(
-        config[CONF_LD2410_HTML_ID],
-        tuple(map(HexInt, ld2410_gz)),
-    )
-    ld2450_progmem = cg.progmem_array(
-        config[CONF_LD2450_HTML_ID],
-        tuple(map(HexInt, ld2450_gz)),
-    )
-
-    cg.add(var.set_ld2410_html(ld2410_progmem, len(ld2410_gz)))
-    cg.add(var.set_ld2450_html(ld2450_progmem, len(ld2450_gz)))
 
     for conf in config.get(CONF_ON_ENTITY_LAYOUT_CHANGED, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
