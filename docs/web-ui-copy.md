@@ -216,7 +216,12 @@ back, which on its own looks like a page that ignores clicks.
 | `ha_disconnected` | Not connected to Home Assistant |
 | `ha_disconnected_detail` | Everything on this page still works - it talks to the device directly. Media and anything that needs your smart home will be unavailable until the connection returns. |
 | `stream_lost` | Lost the connection to the device. Retrying. |
-| `no_devices` | Only this device. Other Satellite1s on your network will appear here once they are running firmware with this web app. |
+| `no_devices` | Only this device. Other Satellite1s appear here once Home Assistant lists them - or add one below by its address. |
+| `peer_up` | Available, according to Home Assistant |
+| `peer_down` | Unavailable, according to Home Assistant |
+| `peer_manual` | Added by address. The page cannot check whether it is reachable. |
+| `peer_add_ph` | IP address or hostname |
+| `peer_add` | Add |
 | `nothing_said` | Nothing said yet. What you say and what it replies will appear here. |
 | `no_wake_words` | No wake words are on, so the device will not respond to being spoken to. The mute button and Home Assistant still work. |
 | `pipeline_off` | Off |

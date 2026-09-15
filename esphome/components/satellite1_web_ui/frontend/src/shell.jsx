@@ -128,16 +128,89 @@ function NavPane({ route, go, open, onClose }) {
 }
 
 /**
- * The device switcher, showing only this device.
- *
- * The canvas mocks a list of peers, which needs discovery this firmware does not do: mDNS browsing
- * from the browser is not a thing, and having every Satellite1 poll for its neighbours is a cost
- * paid on every device to populate a menu. So the sheet is honest about being a list of one, and
- * says what would make others appear.
+ * Where a peer row jumps to: the peer's address with the route that is open now on the end, so
+ * moving to another device keeps the page. The hash never reaches either server, so this works
+ * against old firmware too - it just falls off to whatever that firmware serves at "/".
  */
-function SwitcherSheet({ device, label, area, onClose }) {
+const peerHref = (base, route) => `${String(base).replace(/\/+$/, "")}/#/${route}`;
+
+/** "192.168.4.31" out of "http://192.168.4.31:80/", for the row's subtitle and for de-duplication. */
+const hostOf = (u) => String(u || "").replace(/^https?:\/\//, "").replace(/[/:].*$/, "");
+
+/** A typed address may or may not carry a scheme; a link needs one. */
+const withScheme = (a) => (/^https?:\/\//.test(a) ? a : `http://${a}`);
+
+/**
+ * The addresses someone typed in by hand - the fallback for everything the payload cannot list:
+ * Home Assistant away, or a peer it has in no area. Guarded like the theme, because localStorage
+ * throws rather than no-ops with site data blocked, and forgetting the list is survivable.
+ */
+function readManualPeers() {
+  try {
+    const v = JSON.parse(localStorage.getItem("sat1.peers") || "[]");
+    return Array.isArray(v) ? v.filter((a) => typeof a === "string") : [];
+  } catch {
+    return [];
+  }
+}
+function writeManualPeers(list) {
+  try {
+    localStorage.setItem("sat1.peers", JSON.stringify(list));
+  } catch {
+    /* Not remembering it is survivable; the rows already on screen keep working. */
+  }
+}
+
+/**
+ * The device switcher: this device on top, then every other Satellite1 the Home Assistant payload
+ * lists, then whatever was added by address.
+ *
+ * The roster is the `dev` block that already rides GET /api/sat1/ha - no discovery happens here.
+ * mDNS browsing from a browser is not a thing, and probing peers directly is not either: Digest
+ * credentials are scoped per origin and a cross-origin probe dies on the preflight. So each row's
+ * link is the peer's `configuration_url` - the same address behind Home Assistant's "Visit device" -
+ * and each row's dot is Home Assistant's availability view, which is better data anyway: it knows a
+ * device is off the moment it disconnects, where a probe would take a timeout to notice.
+ *
+ * Satellite1 models only. A Nexus is in `dev` too, and a row that jumps to a device with no page to
+ * serve is a trap. This device is dropped by MAC rather than by name, because the name is exactly
+ * the field owners change. A row with no URL renders unlinked rather than being hidden - a device
+ * that exists but cannot be jumped to is still worth seeing. An unavailable peer dims but keeps its
+ * link, since Home Assistant's view can lag a reboot by a few seconds.
+ */
+function SwitcherSheet({ device, label, area, route, ha, onClose }) {
   const haOn = !!device?.ha;
   const haText = haOn ? TEXT.ha_connected : TEXT.ha_disconnected;
+  const mac = (device?.mac || "").toLowerCase();
+
+  // Sorted by area then name, so a house full of these groups by room, matching the tree on Config.
+  const peers = (ha?.d?.dev || [])
+    .filter((d) => /satellite1/i.test(d?.[0] || "") && (d?.[3] || "").toLowerCase() !== mac)
+    .sort((x, y) => `${x[2]}\u0000${x[1]}`.localeCompare(`${y[2]}\u0000${y[1]}`));
+
+  const [manual, setManual] = useState(readManualPeers);
+  const [draft, setDraft] = useState("");
+
+  // A manual entry the roster also lists is hidden rather than deleted, so an address added while
+  // Home Assistant was away does not become a duplicate row when it comes back - and comes back as
+  // a row again if Home Assistant goes away again.
+  const rosterHosts = new Set(peers.map((d) => hostOf(d[5])).filter(Boolean));
+  const extras = manual.filter((a) => !rosterHosts.has(hostOf(withScheme(a))));
+
+  const add = () => {
+    const a = draft.trim();
+    if (!a) return;
+    const next = manual.includes(a) ? manual : [...manual, a];
+    setManual(next);
+    writeManualPeers(next);
+    setDraft("");
+  };
+  const drop = (a) => {
+    const next = manual.filter((x) => x !== a);
+    setManual(next);
+    writeManualPeers(next);
+  };
+
   return (
     <div class="scrim" onClick={onClose}>
       <div class="sheet" onClick={(e) => e.stopPropagation()}>
@@ -157,12 +230,62 @@ function SwitcherSheet({ device, label, area, onClose }) {
             <span class={`dot${haOn ? " ok" : ""}`} title={haText} aria-label={haText} />
             <span class="grow">{label || "This device"}</span>
           </div>
-          {/* Address and room, which are the two things that tell one Satellite1 from another once the
-              sheet lists more than this one. The separator is dropped rather than left dangling when Home
-              Assistant has not placed the device in an area. */}
+          {/* Address and room, which are the two things that tell one Satellite1 from another now that
+              the sheet lists more than this one. The separator is dropped rather than left dangling when
+              Home Assistant has not placed the device in an area. */}
           <div class="peer-sub">{[device?.ip, area].filter(Boolean).join(" \u2502 ")}</div>
         </div>
-        <p class="sheet-foot">{TEXT.no_devices}</p>
+        {peers.map((d) => {
+          const url = d[5] ? String(d[5]) : "";
+          const up = d[6] === 1 || d[6] === "1";
+          const dotText = up ? TEXT.peer_up : TEXT.peer_down;
+          const body = (
+            <>
+              <div class="row">
+                <span class={`dot${up ? " ok" : ""}`} title={dotText} aria-label={dotText} />
+                <span class="grow">{d[1]}</span>
+              </div>
+              <div class="peer-sub">{[hostOf(url), d[2]].filter(Boolean).join(" \u2502 ")}</div>
+            </>
+          );
+          return url ? (
+            <a key={d[3]} class={`peer go${up ? "" : " off"}`} href={peerHref(url, route)}>
+              {body}
+            </a>
+          ) : (
+            <div key={d[3]} class={`peer${up ? "" : " off"}`}>
+              {body}
+            </div>
+          );
+        })}
+        {extras.map((a) => (
+          <div key={a} class="peer">
+            <div class="row">
+              {/* Neutral on purpose: nothing here can check an address someone typed, and a green dot
+                  that means "assumed fine" beside one that means "Home Assistant saw it" is a lie. */}
+              <span class="dot" title={TEXT.peer_manual} aria-label={TEXT.peer_manual} />
+              <a class="grow peer-a" href={peerHref(withScheme(a), route)}>
+                {a}
+              </a>
+              <button class="x" aria-label={`Remove ${a}`} onClick={() => drop(a)}>
+                &#10005;
+              </button>
+            </div>
+          </div>
+        ))}
+        {peers.length + extras.length === 0 && <p class="sheet-foot">{TEXT.no_devices}</p>}
+        <div class="peer-add">
+          <input
+            class="inp sm grow"
+            placeholder={TEXT.peer_add_ph}
+            value={draft}
+            onInput={(e) => setDraft(e.currentTarget.value)}
+            onKeyDown={(e) => e.key === "Enter" && add()}
+          />
+          <button class="btn sm" onClick={add} disabled={!draft.trim()}>
+            {TEXT.peer_add}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -229,7 +352,14 @@ export function App() {
       {/* Mounted whether or not it is open - see NavPane. */}
       <NavPane route={route} go={go} open={nav} onClose={() => setNav(false)} />
       {switcher && (
-        <SwitcherSheet device={device} label={label} area={area} onClose={() => setSwitcher(false)} />
+        <SwitcherSheet
+          device={device}
+          label={label}
+          area={area}
+          route={route}
+          ha={ha.ha}
+          onClose={() => setSwitcher(false)}
+        />
       )}
     </div>
   );

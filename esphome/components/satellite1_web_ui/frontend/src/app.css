@@ -463,6 +463,32 @@ hr {
 .peer.here {
   background: var(--fill);
 }
+/* A peer row that can be jumped to is a whole-row <a>, which needs the anchor defaults undone or the
+   device names come out accent-coloured and underlined like prose links. */
+.peer.go {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+a.peer.go:hover {
+  background: var(--fill);
+}
+/* Home Assistant reports it unavailable. Dimmed, not removed, and still a link - that view can lag a
+   reboot by a few seconds, and a row that vanished would read as a device that was deleted. */
+.peer.off {
+  opacity: 0.45;
+}
+/* The manual rows keep the anchor on the name alone, because the ✕ beside it is a button and a
+   button inside a link answers both on one tap. */
+.peer-a {
+  color: inherit;
+  text-decoration: none;
+}
+.peer-add {
+  display: flex;
+  gap: var(--s-1);
+  padding: var(--s-2) var(--s-4);
+}
 .peer-sub {
   margin-left: 13px;
   font-size: var(--t-xs);

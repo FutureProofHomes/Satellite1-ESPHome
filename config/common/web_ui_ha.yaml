@@ -54,7 +54,8 @@ substitutions:
   # Music Assistant entities are rejected for the reason tts_targets_ma_check explains - a speaker
   # with two entity ids would otherwise appear twice - and this device's own media player is rejected
   # through `mine` from the shared walk. Measured against a 22-area, 104-media-player installation:
-  # 82 bytes per player, 90 per device, 4.3KB in total.
+  # 82 bytes per player, 90 per device, 4.3KB in total - before the switcher's URL and availability
+  # fields, which add roughly 30 bytes per device on top of that.
   #
   # One call returns {"m": 1, "d": "<fragment>"}: `m` is whether another page follows, `d` is this
   # page's slice. Concatenating every `d` in order reproduces the document below byte for byte, so
@@ -69,7 +70,8 @@ substitutions:
   #   {"area": "Media Room", "aid": "media_room",
   #    "areas": [{"i": "kitchen", "n": "Kitchen", "p": [["media_player.kitchen", "Kitchen Sonos"]]}],
   #    "loose": [["media_player.all_sonos", "All Sonos"]],
-  #    "dev": [["Satellite1", "Ceiling Mount", "Media Room", "3c:0f:02:c5:ac:00", "dev (ESP...)"]],
+  #    "dev": [["Satellite1", "Ceiling Mount", "Media Room", "3c:0f:02:c5:ac:00", "dev (ESP...)",
+  #             "http://192.168.4.31", 1]],
   #    "asst": {"o": ["Home Assistant Cloud", "OllamaBradStudio"],
   #             "s": [["select.sat1_wake_word", "Hey Jarvis", "select.sat1_assistant", "preferred"],
   #                   ["select.sat1_wake_word_2", "no_wake_word", "select.sat1_assistant_2", "preferred"]]}}
@@ -97,6 +99,18 @@ substitutions:
   # of how an integration registers itself. The frontend renders the models it understands, which
   # makes recognising another product later a change there rather than here, and means an unknown
   # one appears in the payload the day Home Assistant learns about it.
+  #
+  # The last two fields exist for the device switcher, which turns each row into a jump. The URL is
+  # `configuration_url` - the address behind Home Assistant's own "Visit device" link, which the
+  # ESPHome integration builds from the host and port it actually connects on - because the browser
+  # has no other way to an address: mDNS browsing from a page is not a thing, and the payload's MAC
+  # is not routable. On a peer running older firmware it points at whatever that firmware served
+  # (the radar tuner, or nothing), which is exactly what "Visit device" would do; sending it anyway
+  # keeps the choice of what to render in the frontend. The availability flag is Home Assistant's
+  # own view - a device counts as up while any of its entities reads something other than
+  # `unavailable` - and it is here because the browser cannot probe a peer itself: Basic/Digest
+  # credentials are scoped per origin and a cross-origin probe dies on the preflight. An int, never
+  # a boolean, for the literal_eval reason above.
   #
   # `asst` is which assistant answers which wake word, and it is the one part of this payload that
   # describes settings Home Assistant owns rather than facts it happens to know.
@@ -184,7 +198,11 @@ substitutions:
                                        device_attr(d, 'name_by_user') or device_attr(d, 'name'),
                                        area_name(a),
                                        macs | first if macs else '',
-                                       device_attr(d, 'sw_version') or '']] %}
+                                       device_attr(d, 'sw_version') or '',
+                                       device_attr(d, 'configuration_url') or '',
+                                       1 if expand(device_entities(d)) | map(attribute='state')
+                                            | reject('eq', 'unavailable') | list | count > 0
+                                       else 0]] %}
         {% endif %}
       {% endfor %}
     {% endfor %}

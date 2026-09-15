@@ -164,8 +164,20 @@ export const TEXT = {
 
   stream_lost: "Lost the connection to the device. Retrying.",
 
+  // Only when the sheet has no peer rows at all: Home Assistant listed none and nothing was added by
+  // hand. Names both ways a row can appear, because they are different fixes - one is Home Assistant's
+  // to make and one is the field directly below the sentence.
   no_devices:
-    "Only this device. Other Satellite1s on your network will appear here once they are running firmware with this web app.",
+    "Only this device. Other Satellite1s appear here once Home Assistant lists them - or add one below by its address.",
+
+  // Titles on the peer dots. Attributed to Home Assistant rather than stated as fact, because that is
+  // the only witness: the page cannot probe a peer itself, and its view can lag a reboot by seconds.
+  peer_up: "Available, according to Home Assistant",
+  peer_down: "Unavailable, according to Home Assistant",
+  peer_manual: "Added by address. The page cannot check whether it is reachable.",
+
+  peer_add_ph: "IP address or hostname",
+  peer_add: "Add",
 
   // Shown in place of the transcript, not instead of the card. The card carries the assistant's phase in
   // its header, so it has something to say from the moment the device answers; this only fills the space
