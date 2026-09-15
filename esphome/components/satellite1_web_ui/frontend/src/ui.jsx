@@ -255,8 +255,12 @@ export function Toggle({ checked, disabled, onChange }) {
  *
  * A number entity write is a round trip to the device, and dragging fires an input event per pixel.
  * Sending each one is what turns a gesture into forty queued requests against seven sockets.
+ *
+ * `onPreview` is the escape hatch for controls whose effect is drawn elsewhere on the page - the
+ * radar's detection-range ring follows the drag through it. It must be local-state-only in the
+ * caller; the device still hears nothing until release.
  */
-export function Slider({ value, min, max, step, disabled, format, onCommit }) {
+export function Slider({ value, min, max, step, disabled, format, onCommit, onPreview }) {
   const [local, setLocal] = useState(null);
   const shown = local ?? value;
 
@@ -269,7 +273,11 @@ export function Slider({ value, min, max, step, disabled, format, onCommit }) {
         step={step}
         value={shown}
         disabled={disabled}
-        onInput={(e) => setLocal(Number(e.currentTarget.value))}
+        onInput={(e) => {
+          const v = Number(e.currentTarget.value);
+          setLocal(v);
+          if (onPreview) onPreview(v);
+        }}
         onChange={(e) => {
           const v = Number(e.currentTarget.value);
           setLocal(null);

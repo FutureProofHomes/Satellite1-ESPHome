@@ -374,6 +374,10 @@ export function useSelection() {
  *  single serialised fetch slot free most of the time. */
 export const RADAR_LIVE_MS = 250;
 
+/** How long after the last settings write the automatic flash save fires. Long enough to span a whole
+ *  train of slider tweaks, short enough that walking away means it saved. */
+const RADAR_SAVE_MS = 10000;
+
 /**
  * Reads the radar tuner's own JSON API, which predates this app and needs no firmware work.
  *
@@ -437,6 +441,31 @@ export function useRadar(enabled) {
     };
   }, [enabled, kind]);
 
+  /* Settings persist on their own: /api/v1/save (a preferences flush to NVS) fires ten seconds after
+     the last successful write, so a tuning session ends saved without anyone thinking about it. It
+     replaced a "Save to flash" button, at the owner's call. Debounced rather than per-write because a
+     session is dozens of writes and NVS wear is real, if small; flushed on unmount because "left the
+     page eight seconds after the last tweak" must not mean "lost it". */
+  const saveTimer = useRef(null);
+  const savePending = useRef(false);
+
+  const scheduleSave = () => {
+    savePending.current = true;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      savePending.current = false;
+      post("/api/v1/save").catch(() => {});
+    }, RADAR_SAVE_MS);
+  };
+
+  useEffect(
+    () => () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (savePending.current) post("/api/v1/save").catch(() => {});
+    },
+    []
+  );
+
   /** Writes one or more config fields. Every field on the device side is optional, so this sends only
    *  what changed and lets the rest stand. Optimistic, like the selection, with the previous value put
    *  back if the device refuses it. */
@@ -451,10 +480,17 @@ export function useRadar(enabled) {
         body: JSON.stringify(patch),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      // The LD2410 config POST only stores; /apply is what pushes the stored config onto the module's
+      // command queue from the main loop. The standalone tuner page always paired the two, and this
+      // hook not doing so was a latent bug - every LD2410 write from the app looked accepted and then
+      // never reached the radar. The LD2450 path applies inside its own set_backend_config, so it has
+      // no such second step.
+      if (kind === "ld2410") await post("/api/v1/ld2410/apply");
       // Re-read rather than trusting the patch: `reboot_required` is the device's opinion, not ours,
       // and it is the whole reason the restart row appears.
       const fresh = await read(kind);
       if (fresh) setConfig(fresh);
+      scheduleSave();
     } catch {
       setConfig(previous);
     } finally {
@@ -462,23 +498,14 @@ export function useRadar(enabled) {
     }
   };
 
-  // Through post() rather than a bare fetch, for the write queue - and because a bodyless POST needs a
-  // Content-Length or web_server_idf answers 411. The browser supplies one for a null body; curl does
-  // not, which is worth knowing before testing these two by hand.
-  const save = async () => {
-    setBusy(true);
-    try {
-      await post("/api/v1/save");
-      const fresh = await read(kind);
-      if (fresh) setConfig(fresh);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const reboot = () => post("/api/v1/reboot").catch(() => {});
 
-  return { radarKind: kind, radarConfig: config, radarLive: live, radarBusy: busy, radarWrite: writeConfig, radarSave: save, radarReboot: reboot };
+  /** Local-only patch, no POST: what a slider calls while it is still moving, so the plot can follow
+   *  the drag in real time. The commit on release goes through writeConfig, whose re-read squares
+   *  whatever this previewed against what the device actually accepted. */
+  const preview = (patch) => setConfig((c) => (c ? { ...c, ...patch } : c));
+
+  return { radarKind: kind, radarConfig: config, radarLive: live, radarBusy: busy, radarWrite: writeConfig, radarPreview: preview, radarReboot: reboot };
 }
 
 /* ------------------------------------------------------------------ */

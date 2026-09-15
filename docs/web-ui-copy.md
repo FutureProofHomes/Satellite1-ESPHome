@@ -60,12 +60,21 @@ with microphones in it: people assume presence is heard rather than sensed.
 
 | Key | Where | Text |
 | --- | --- | --- |
-| `presence` | LD2450 / LD2410 card | From the mmWave radar, not the microphones. It sees through the enclosure and does not need line of sight, so it reports an empty room faster than a motion sensor would. |
-| `radar_range` | Detection range | How far out the radar looks, in centimetres. Anything beyond this is ignored even if the radar can see it, which is how you stop it detecting the hallway or the room next door. At zero it uses the module's own default. |
-| `radar_stability` | Stability | How much agreement it needs before it changes its mind. Higher is steadier and slower: fewer false triggers from a curtain moving, but a longer wait before it admits the room is empty. Lower reacts faster and twitches more. |
-| `radar_timeout` | Timeout | How long presence is held after the radar stops seeing anyone, in seconds. This is what stops the lights going out while you sit still. At zero it clears the moment you are lost, which is usually too eager. |
-| `radar_multi` | Multi-target | Tracks several people at once instead of only the strongest return. Needed for the target plot to show more than one person, and for the zone counts to be right in a busy room. |
-| `radar_bt` | Bluetooth | The radar module's own Bluetooth radio, used by the manufacturer's configuration app. Nothing here needs it, and leaving it on means an unauthenticated radio in the room, so it is off unless you are pairing that app. |
+| `presence` | LD2450 / LD2410 card | Sensed by radar, not the microphones. It works through the case and notices people even when they sit completely still. |
+| `radar_range` | Detection range | How far the radar looks. Anything farther away is ignored - use it to stop the radar seeing into the hallway or the next room. All the way left is the full 6m reach. |
+| `radar_stability` | Stability | How sure the radar must be before it changes its answer. Higher is steadier but slower to notice changes. Lower is quicker but can flicker. |
+| `radar_timeout` | Timeout | How long the room still counts as occupied after the radar loses sight of everyone. Set it high enough that the lights stay on while you sit still. |
+| `radar_multi` | Multi-target | Track up to three people at once instead of only the clearest one. |
+| `radar_bt` | Bluetooth | The radar's own Bluetooth, used only by the manufacturer's phone app. Leave it off unless you use that app. |
+| `radar_zones` | Zones card | Draw shapes on the map above. Each zone reports on its own whether someone is inside it. The ignore area is the opposite: anything in it never counts - useful for fans and curtains. |
+| `radar_resolution` | Distance resolution | How finely distance is split into the nine rows above: 0.75m steps reach the whole room, 0.2m steps reach less far but with more detail up close. Changing it changes what each row means, so re-check your levels after. |
+| `gate_move` | Movement column title | How much movement the radar sees at each distance, live. Drag a notch to set the trigger level for that distance - anything above it counts as a person moving. |
+| `gate_still` | Stillness column title | How much tiny motion - like breathing - the radar sees at each distance, live. Drag a notch to set the trigger level - anything above it counts as a person holding still. |
+| `gate_max_move` | Furthest movement gate | The farthest distance that counts for movement. Rows past it dim in the chart above and are ignored. |
+| `gate_max_still` | Furthest stillness gate | The farthest distance that counts for stillness. Rows past it dim in the chart above and are ignored. |
+
+There is no `radar_save`: the save button it explained was removed in favour of an automatic flash save
+ten seconds after the last settings write (flushed early if the page is left with one pending).
 
 `PRESENCE` is the one table here that shortens the firmware's words rather than explaining them, so it is a
 display map rather than a hint: the key is what the radar reports and the value is what the pill shows.
@@ -229,6 +238,25 @@ back, which on its own looks like a page that ignores clicks.
 | `media_idle` | Nothing playing. Group streams and media sent from Home Assistant show up here. |
 | `media_src_group` | group stream |
 | `media_src_local` | this speaker |
+| `zi_first` | Tap the map to place the first corner. |
+| `zi_more` | Keep tapping. A zone needs at least 3 corners. |
+| `zi_adjust` | Drag a corner to reshape. Drag the middle to move the shape. Tap a corner to select it. |
+| `zi_selected` | Corner selected. Tap Remove corner below to delete it. |
+| `zones_set` | Tap a zone button, or a shape on the map, to edit it. |
+| `zones_none` | No zones yet. The whole field of view counts as presence. |
+| `zone_excl` (hint) | Makes this shape an ignore area instead of a zone: anything inside it never counts as presence. Useful for fans, curtains and pets. There is one ignore area - saving a new one replaces it. |
+
+Every instruction prints in one place: the line between the plot and the zone buttons (or the editor
+subcard, which itself stays pure controls). Not editing it shows `zones_set` or `zones_none`; while
+editing the `zi_*` strings walk the person from first corner to reshape to corner removal.
+`zone_edit_help` (the static paragraph all of this replaced), `zi_tap` and `zone_needs_three` are gone -
+the last because `zi_more` already says a zone needs three corners.
+| `gate_thresholds_help` | Each row is a band of distance. The bar shows what the radar sees there right now; drag the notch to set where it triggers. Dimmed rows are out of range and ignored. Changes save automatically. |
+| `no_sensor_lead` | A presence sensor was not detected in your Sat1. Please |
+| `no_sensor_docs` | read our docs to learn more *(links to the presence-sensor docs)* |
+| `no_sensor_mid` | , you can purchase a presence sensor |
+| `no_sensor_buy` | here *(links to the LD2450 product page)* |
+| `legacy_tuner` | Open the legacy radar tuner |
 | `no_wake_words` | No wake words are on, so the device will not respond to being spoken to. The mute button and Home Assistant still work. |
 | `pipeline_off` | Off |
 | `pipeline_preferred` | Preferred |

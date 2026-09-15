@@ -884,6 +884,12 @@ a.peer.go:hover {
 .pill.on {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
+/* A read-only pill: the Presence status row states facts and opens nothing, so the pointer cursor
+   would be a promise the pill does not keep. Never carries .on - that ring means "selected, editor
+   open below" on the sensor chips, and a fact cannot be selected. */
+.pill.ro {
+  cursor: default;
+}
 .pill-v {
   display: block;
   font-size: var(--t-xl);
@@ -1210,15 +1216,72 @@ a.peer.go:hover {
   stroke: var(--accent);
   stroke-width: 3;
 }
-/* An exclusion is the inverse of a zone, so it reads as a hole rather than a highlight. */
+/* An exclusion is the inverse of a zone, and red is the colour that already means "not here" in this
+   palette - the grey it wore before read as a disabled zone rather than a forbidden area. */
 .plot-excl {
-  fill: var(--fg-4);
-  fill-opacity: 0.22;
-  stroke: var(--fg-3);
+  fill: var(--err);
+  fill-opacity: 0.14;
+  stroke: var(--err);
   stroke-width: 3;
   stroke-dasharray: 12 10;
 }
 .plot-target {
+  fill: var(--accent);
+  /* Placed by transform (see the plot), and the transition is what turns the 250ms poll steps into a
+     glide - the browser interpolates between positions instead of teleporting the dot. Linear, because
+     easing would make constant walking speed read as lurching. */
+  transition: transform 0.25s linear;
+}
+/* Every shape's name, at its middle. Sized in plot centimetres like the ticks, for the same reason. */
+.plot-name {
+  fill: var(--accent);
+  font-size: 30px;
+  font-family: inherit;
+  font-weight: 600;
+  text-anchor: middle;
+  pointer-events: none;
+}
+.plot-name.excl {
+  fill: var(--err);
+}
+/* Editing: the plot becomes the input surface, so the browser must not claim the finger for scrolling -
+   without touch-action:none the first drag on a phone pans the page and drops the corner. No accent
+   border: the Zones card already says "Editing zone 1", and the owner read the blue frame as a stray
+   focus ring rather than a mode. The cursor says what a press here would do: crosshair on a corner
+   (precise placement), grab on the draft's body (move the whole shape), plain arrow on empty field. */
+.plot-svg.editing {
+  touch-action: none;
+  cursor: default;
+}
+.plot-svg.editing .plot-vtx {
+  cursor: crosshair;
+}
+.plot-svg.editing .plot-zone.draft,
+.plot-svg.editing .plot-excl.draft {
+  cursor: grab;
+}
+/* The shape being edited, distinct from its committed siblings so it is obvious which one the corners
+   belong to. Also applied to the polyline the draft renders as before its third corner exists. */
+.plot-zone.draft,
+.plot-excl.draft {
+  fill-opacity: 0.08;
+  stroke-width: 4;
+  stroke-dasharray: none;
+}
+polyline.draft {
+  fill: none;
+}
+/* Corner handles, sized in plot centimetres like everything else. The radius the SVG draws (16cm) is
+   smaller than the grab radius the code uses (36cm), deliberately: the visual stays unobtrusive while
+   the touch target stays a finger's width. */
+.plot-vtx {
+  fill: var(--bg);
+  stroke: var(--accent);
+  stroke-width: 5;
+}
+/* The corner a tap selected, armed for Remove corner on the card below: filled where its siblings are
+   hollow, which survives the plot being small and busy better than a colour change would. */
+.plot-vtx.sel {
   fill: var(--accent);
 }
 /* Sized in centimetres like everything else in the viewBox, so it scales with the plot rather than
@@ -1240,15 +1303,23 @@ a.peer.go:hover {
   font-size: var(--t-s);
   color: var(--fg-3);
 }
+/* Wide enough for a distance span with its unit ("5.25-6m") rather than the bare index it used to
+   hold. Left-justified so the column reads as a list of ranges, not a ragged right edge of digits. */
 .gate-n {
-  width: 12px;
-  text-align: right;
+  width: 62px;
+  text-align: left;
   color: var(--fg-4);
-}
-.gate-v {
-  width: 26px;
-  text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* A gate beyond the group's furthest-gate setting: measured but ignored, so it fades rather than
+   vanishes - the faint energy is the evidence for extending the range. The bar keeps the editable
+   height so the column stays one rhythm; only the notch and the drag go. */
+.gate.off {
+  opacity: 0.35;
+}
+.gate.off .gate-bar {
+  height: 22px;
 }
 .gate-bar {
   flex: 1;
@@ -1260,6 +1331,64 @@ a.peer.go:hover {
 .gate-fill {
   height: 100%;
   background: var(--accent);
+  /* Matched to the live poll's cadence so consecutive readings blend into one motion; without it the
+     bars redraw in steps and the whole column reads as flicker. */
+  transition: width 0.25s linear;
+}
+/* A bar that takes a threshold drag. Sized for a thumb, not a cursor: 22px of height is what makes the
+   drag landable on a phone, and the row spacing below is what keeps a slightly-off press from landing
+   on the neighbouring gate. Overflow stays visible so the notch can stand proud of the track. */
+.gate-bar.editable {
+  position: relative;
+  height: 22px;
+  overflow: visible;
+  touch-action: none;
+  cursor: ew-resize;
+}
+/* Adjacent rows of touch targets need daylight between them, or a finger aimed at gate 4 edits gate 5.
+   6px, not 4: the handles stand 2px proud of their bars, so anything less and two aligned handles
+   touch - which is exactly the one-tall-bar illusion the knob styling exists to break. */
+.gate + .gate {
+  margin-top: 6px;
+}
+.gate-bar.editable .gate-fill {
+  border-radius: var(--r-1);
+}
+/* The threshold handle. A knob with grip lines rather than a bare bar: when neighbouring gates share
+   a threshold, aligned bars read as one tall unmovable wall - the owner's report - where a bordered
+   knob with texture stays nine separate handles that say "slide me". The touch target is still the
+   whole bar; this is only the affordance. */
+.gate-thr {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 14px;
+  margin-left: -7px;
+  background: var(--knob);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+/* Three vertical grip lines, the universal texture for "drag me sideways". */
+.gate-thr::after {
+  content: "";
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  left: 50%;
+  width: 7px;
+  transform: translateX(-50%);
+  background: repeating-linear-gradient(to right, var(--fg-3) 0 1px, transparent 1px 3px);
+}
+
+/* The no-sensor card's product photo. Rounded on the card's own radius so it reads as part of the
+   card, not a pasted-in rectangle; width-bound so it never overflows a narrow phone. */
+.promo {
+  display: block;
+  width: 100%;
+  margin-top: var(--s-2);
+  border-radius: var(--r-3);
 }
 
 /* Not animated. It is lit whenever the route is mounted, which is exactly when polling is happening, so

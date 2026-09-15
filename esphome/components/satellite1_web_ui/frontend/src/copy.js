@@ -65,22 +65,23 @@ export const HINTS = {
 
   lux: "Ambient light at the front face. Useful for dimming the LED ring automatically from Home Assistant, or for a light-level trigger.",
 
-  presence:
-    "From the mmWave radar, not the microphones. It sees through the enclosure and does not need line of sight, so it reports an empty room faster than a motion sensor would.",
+  presence: "Sensed by radar, not the microphones. It works through the case and notices people even when they sit completely still.",
 
-  /* The radar's own settings, on Presence. These replaced two "sub" captions that only appeared at one
-     end of each slider - the caption explaining what zero meant was invisible at every other value,
-     which is the point at which someone needs to know what zero would do. */
-  radar_range:
-    "How far out the radar looks, in centimetres. Anything beyond this is ignored even if the radar can see it, which is how you stop it detecting the hallway or the room next door. At zero it uses the module's own default.",
-  radar_stability:
-    "How much agreement it needs before it changes its mind. Higher is steadier and slower: fewer false triggers from a curtain moving, but a longer wait before it admits the room is empty. Lower reacts faster and twitches more.",
-  radar_timeout:
-    "How long presence is held after the radar stops seeing anyone, in seconds. This is what stops the lights going out while you sit still. At zero it clears the moment you are lost, which is usually too eager.",
-  radar_multi:
-    "Tracks several people at once instead of only the strongest return. Needed for the target plot to show more than one person, and for the zone counts to be right in a busy room.",
-  radar_bt:
-    "The radar module's own Bluetooth radio, used by the manufacturer's configuration app. Nothing here needs it, and leaving it on means an unauthenticated radio in the room, so it is off unless you are pairing that app.",
+  /* The radar's own settings, on Presence. Rewritten plain and short at the owner's request: one idea
+     per hint, no jargon, and the "why you'd change this" up front. */
+  radar_range: "How far the radar looks. Anything farther away is ignored - use it to stop the radar seeing into the hallway or the next room. All the way left is the full 6m reach.",
+  radar_stability: "How sure the radar must be before it changes its answer. Higher is steadier but slower to notice changes. Lower is quicker but can flicker.",
+  radar_timeout: "How long the room still counts as occupied after the radar loses sight of everyone. Set it high enough that the lights stay on while you sit still.",
+  radar_multi: "Track up to three people at once instead of only the clearest one.",
+  radar_bt: "The radar's own Bluetooth, used only by the manufacturer's phone app. Leave it off unless you use that app.",
+  radar_zones: "Draw shapes on the map above. Each zone reports on its own whether someone is inside it. The ignore area is the opposite: anything in it never counts - useful for fans and curtains.",
+  radar_resolution: "How finely distance is split into the nine rows above: 0.75m steps reach the whole room, 0.2m steps reach less far but with more detail up close. Changing it changes what each row means, so re-check your levels after.",
+  gate_move: "How much movement the radar sees at each distance, live. Drag a notch to set the trigger level for that distance - anything above it counts as a person moving.",
+  gate_still: "How much tiny motion - like breathing - the radar sees at each distance, live. Drag a notch to set the trigger level - anything above it counts as a person holding still.",
+  gate_max_move: "The farthest distance that counts for movement. Rows past it dim in the chart above and are ignored.",
+  gate_max_still: "The farthest distance that counts for stillness. Rows past it dim in the chart above and are ignored.",
+  zone_excl:
+    "Makes this shape an ignore area instead of a zone: anything inside it never counts as presence. Useful for fans, curtains and pets. There is one ignore area - saving a new one replaces it.",
 
   calibrate:
     "Enter what a trusted instrument in the same room reads. The difference is saved as an offset and survives a restart. It does not change the raw reading, only what the device reports.",
@@ -197,6 +198,28 @@ export const TEXT = {
   // The Media card's idle line. The card stays on the page - the volume slider still sets the level
   // whatever plays next arrives at - so this fills the space the transport controls will use.
   media_idle: "Nothing playing. Group streams and media sent from Home Assistant show up here.",
+
+  /* The Presence route: zone editing, gate thresholds, and the no-sensor card. The zi_* strings are
+     the one instruction line under the plot, swapped by what the person is doing right now - one short
+     sentence about the next step, instead of a paragraph explaining every gesture at once. */
+  zi_first: "Tap the map to place the first corner.",
+  zi_more: "Keep tapping. A zone needs at least 3 corners.",
+  zi_adjust: "Drag a corner to reshape. Drag the middle to move the shape. Tap a corner to select it.",
+  zi_selected: "Corner selected. Tap Remove corner below to delete it.",
+  zones_set: "Tap a zone button, or a shape on the map, to edit it.",
+  zones_none: "No zones yet. The whole field of view counts as presence.",
+  gate_thresholds_help:
+    "Each row is a band of distance. The bar shows what the radar sees there right now; drag the notch to set where it triggers. Dimmed rows are out of range and ignored. Changes save automatically.",
+  // The owner's wording, verbatim, for a Sat1 with no module fitted. Split into segments because the
+  // two links render as anchors; the URLs live here too so the copy review sees the whole sentence.
+  no_sensor_lead: "A presence sensor was not detected in your Sat1. Please ",
+  no_sensor_docs: "read our docs to learn more",
+  no_sensor_docs_url: "https://docs.futureproofhomes.net/satellite1-presence-sensors/#connecting-mmwave-sensors",
+  no_sensor_mid: ", you can purchase a presence sensor ",
+  no_sensor_buy: "here",
+  no_sensor_buy_url: "https://futureproofhomes.net/products/ld2450-mmwave-human-presence-sensor",
+  // The parity-testing companion, kept until the owner approves retiring the legacy page.
+  legacy_tuner: "Open the legacy radar tuner",
 
   // The source labels in the card header. "Group stream" rather than the protocol's name, because
   // what the customer configured is Music Assistant or something like it, and the fact it speaks
