@@ -6,6 +6,7 @@
 ethernet:
   id: ethernet_id
   type: W5500
+  spi_mode: 3
   spi_id: spi_0
   interrupt_pin: GPIO38
   cs_pin:
