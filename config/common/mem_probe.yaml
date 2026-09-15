@@ -1,0 +1,93 @@
+####################################################################################################
+# MEASUREMENT ONLY - temporary, not for release. Delete this file and its include in
+# satellite1.measure.yaml before merging anything.
+#
+# These sensors publish the same numbers the web UI's Diagnostics route reports, from the same IDF
+# calls, so a reading taken on any build can be compared directly against the web UI branch's
+# Diagnostics page and against the earlier RAM-reduction measurements.
+#
+# Matching the calls is the point. ESPHome's own debug platform asks for MALLOC_CAP_INTERNAL, which
+# includes the 32-bit-only region that no byte-addressable allocation can ever use, so its "Heap
+# Free" reads higher than the web UI's figure for what is nominally the same heap. Everything below
+# asks for MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT - what the web UI asks for, and what the audio and
+# network paths actually allocate out of.
+#
+# heap_caps comes in through esphome/core/helpers.h, which every lambda already includes.
+####################################################################################################
+
+sensor:
+  # The headline number. Matches "heap":{"free"} on the web UI branch.
+  - platform: template
+    name: "Internal RAM Free"
+    id: mem_probe_internal_free
+    entity_category: diagnostic
+    unit_of_measurement: "B"
+    device_class: data_size
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    lambda: |-
+      return (float) heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+
+  # Contiguity, which is the number that actually decides whether a large allocation succeeds. With
+  # exceptions compiled out, one that cannot find a block this size calls abort() rather than
+  # failing, so this can matter more than the free total. Matches "heap":{"block"}.
+  - platform: template
+    name: "Internal RAM Largest Block"
+    id: mem_probe_internal_block
+    entity_category: diagnostic
+    unit_of_measurement: "B"
+    device_class: data_size
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    lambda: |-
+      return (float) heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+
+  # Low-water mark since boot, which catches a transient dip during a voice pipeline run or an OTA
+  # that the sampled value never sees.
+  - platform: template
+    name: "Internal RAM Min Free"
+    id: mem_probe_internal_min
+    entity_category: diagnostic
+    unit_of_measurement: "B"
+    device_class: data_size
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    lambda: |-
+      return (float) heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+
+  # Matches "psram":{"free"}. Expected to be large and uninteresting - it is here to confirm that
+  # what left internal RAM arrived in PSRAM rather than simply not being allocated.
+  - platform: template
+    name: "PSRAM Free"
+    id: mem_probe_psram_free
+    entity_category: diagnostic
+    unit_of_measurement: "B"
+    device_class: data_size
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    lambda: |-
+      return (float) heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+
+# The same four numbers plus both totals, on the serial log. Free of total is what makes a figure
+# mean anything, and the totals are constant, so they go here rather than costing two more entities.
+# This also gives a reading during boot and over a reflash, when nothing is subscribed yet.
+interval:
+  - interval: 15s
+    then:
+      - lambda: |-
+          multi_heap_info_t internal{};
+          heap_caps_get_info(&internal, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+          multi_heap_info_t psram{};
+          heap_caps_get_info(&psram, MALLOC_CAP_SPIRAM);
+          ESP_LOGI("memprobe",
+                   "internal free %u of %u, largest block %u, min free %u | psram free %u of %u",
+                   (unsigned) internal.total_free_bytes,
+                   (unsigned) (internal.total_free_bytes + internal.total_allocated_bytes),
+                   (unsigned) internal.largest_free_block,
+                   (unsigned) internal.minimum_free_bytes,
+                   (unsigned) psram.total_free_bytes,
+                   (unsigned) (psram.total_free_bytes + psram.total_allocated_bytes));

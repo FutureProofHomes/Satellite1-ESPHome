@@ -1,0 +1,21 @@
+####################################################################################################
+# Scratch entry point for the internal-RAM reduction measurements. Not a shipping configuration.
+#
+# Exists so a reading can be taken without editing satellite1.yaml and satellite1.base.yaml for
+# every build and reverting them afterwards. Two things differ from a stock local build:
+#
+#   - network: wifi. The whole exercise is about the WiFi build, which is the one that is short of
+#     internal RAM; satellite1.yaml defaults to ethernet.
+#   - common/mem_probe.yaml is included, which logs internal heap totals every 15 seconds and
+#     publishes the same numbers as diagnostic sensors.
+#
+# Same device name as satellite1.yaml, so it shares the build directory and flashes the same node.
+# Switching between the two therefore costs a full rebuild.
+####################################################################################################
+
+packages:
+  sat1: !include
+    file: satellite1.yaml
+    vars:
+      network: wifi
+  mem_probe: !include common/mem_probe.yaml
