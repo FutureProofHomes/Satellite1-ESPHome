@@ -301,7 +301,7 @@ substitutions:
   # on a decimal literal is a syntax error, and the template renders with strict=True - so `01`
   # through `09` would fail the action call outright.
   web_ui_ha_seek_lambda: >-
-    std::string &tpl = id(web_ui_ha_template);
+    auto &tpl = id(web_ui_ha_template);
     int at = id(web_ui_ha_page_offset);
     if (at > 0 && static_cast<size_t>(at) + 1 < tpl.size()) {
       int tens = (id(web_ui_ha_page) / 10) % 10;
@@ -315,8 +315,12 @@ globals:
   # A global rather than a literal in each rung's lambda: the Jinja above is about 1.6KB, and pasting
   # it into every rung would put that many copies in flash to no purpose. Built at boot because the
   # MAC is the only runtime part and it never changes.
+  #
+  # PSRAM-backed rather than a plain std::string, which would hold those ~1.7KB on the internal
+  # heap for the life of the process for something read once per sync. RAMAllocator falls back to
+  # internal on a PSRAM-less board.
   - id: web_ui_ha_template
-    type: std::string
+    type: std::basic_string<char, std::char_traits<char>, esphome::RAMAllocator<char>>
     restore_value: no
 
   # Which rung of the ladder produced the payload, for the Diagnostics page and the frontend's
@@ -365,16 +369,22 @@ esphome:
             // A raw string literal, so the Jinja can carry quotes, backslashes and newlines without
             // any of it being escaped for C++. The delimiter has to be something the template cannot
             // contain, which )JINJA" is.
-            id(web_ui_ha_template) = std::string("{% set mac = '") +
-                                     esphome::get_mac_address_pretty() +
-                                     R"JINJA(' %}{% set pg =  0 %}${web_ui_ha_jinja})JINJA";
+            //
+            // assign/append rather than operator+, which would build the whole ~1.7KB in an
+            // internal-heap std::string temporary just to copy it out again.
+            auto &tpl = id(web_ui_ha_template);
+            static const char JINJA_TAIL[] = R"JINJA(' %}{% set pg =  0 %}${web_ui_ha_jinja})JINJA";
+            tpl.reserve(strlen("{% set mac = '") + 17 + sizeof(JINJA_TAIL));
+            tpl.assign("{% set mac = '");
+            tpl.append(esphome::get_mac_address_pretty().c_str());
+            tpl.append(JINJA_TAIL);
 
             // Where those two digits ended up, so each call can overwrite them without rebuilding
             // the string. Searched rather than computed, because the MAC ahead of them is not a
             // fixed width.
             static const char *const PG = "{% set pg = ";
-            size_t at = id(web_ui_ha_template).find(PG);
-            id(web_ui_ha_page_offset) = at == std::string::npos ? -1 : static_cast<int>(at + strlen(PG));
+            size_t at = tpl.find(PG);
+            id(web_ui_ha_page_offset) = at == tpl.npos ? -1 : static_cast<int>(at + strlen(PG));
 
 script:
   # Home Assistant registers its action-call handler partway through its own connect sequence, and a
@@ -462,7 +472,9 @@ script:
             statistic_ids: "${web_ui_ha_probe_statistic}"
             period: day
             types: mean
-          response_template: !lambda 'return id(web_ui_ha_template);'
+          response_template: !lambda |-
+            // A transient internal-heap copy for the call's encode; the resident copy is in PSRAM.
+            return std::string(id(web_ui_ha_template).c_str(), id(web_ui_ha_template).size());
           on_success:
             - lambda: |-
                 ${web_ui_ha_page_lambda}
@@ -493,7 +505,9 @@ script:
           data:
             agent_id: conversation.home_assistant
             text: "satellite1 web ui data layer probe"
-          response_template: !lambda 'return id(web_ui_ha_template);'
+          response_template: !lambda |-
+            // A transient internal-heap copy for the call's encode; the resident copy is in PSRAM.
+            return std::string(id(web_ui_ha_template).c_str(), id(web_ui_ha_template).size());
           on_success:
             - lambda: |-
                 ${web_ui_ha_page_lambda}

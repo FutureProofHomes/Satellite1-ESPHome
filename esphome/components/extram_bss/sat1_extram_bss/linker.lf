@@ -1,0 +1,26 @@
+# Moves an object's zero-initialized statics into PSRAM's .ext_ram.bss output section.
+# The extern_ram target only exists when CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY is set,
+# which the extram_bss component does. bss and common only: .ext_ram.bss is NOLOAD, so
+# initialized .data cannot move with it.
+[scheme:sat1_psram_bss]
+entries:
+    bss -> extern_ram
+    common -> extern_ram
+
+# "main" is ESPHome's generated main.cpp.obj, home of every component object (*__pstorage) and
+# the config's globals - all task-context state.
+#
+# The symbol-level exceptions stay in internal DRAM: FreeRTOS asserts that statically allocated
+# TCBs are internal (xPortCheckValidTCBMem), and esphome::StaticTask embeds its StaticTask_t in
+# the owning object - micro_wake_word, mixer_speaker and both resampler speakers do exactly that.
+# wifi embeds a statically-created queue and is kept internal out of caution. ~2.2KB stays;
+# ~44KB moves.
+[mapping:sat1_main_psram_bss]
+archive: libsrc.a
+entries:
+    main (sat1_psram_bss)
+    main:_ZL30micro_wake_word__mww__pstorage (default)
+    main:_ZL39mixer_speaker__mixing_speaker__pstorage (default)
+    main:_ZL45resampler__media_resampling_speaker__pstorage (default)
+    main:_ZL52resampler__announcement_resampling_speaker__pstorage (default)
+    main:_ZL23wifi__wifi_id__pstorage (default)

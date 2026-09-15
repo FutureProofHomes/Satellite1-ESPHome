@@ -30,6 +30,22 @@ globals:
     restore_value: true
     max_restore_data_length: 32
 
+  # Gates the Web UI switch's actions until the on_boot block at 200 below has applied the
+  # restored state. The switch restores long before WebServer::setup() takes its init()
+  # reference, and a deinit() fired that early would underflow web_server_base's refcount.
+  - id: web_ui_listener_ready
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  # Whether the listener is running, so the switch's actions are idempotent. HA re-sends turn_on
+  # for a switch that is already on; without this guard that would take a second init() reference
+  # the next turn_off could never release.
+  - id: web_ui_listener_on
+    type: bool
+    restore_value: no
+    initial_value: 'true'
+
 esphome:
   on_boot:
     # 600 is after globals restore (DATA, 800) and before WebServer::setup() starts listening
@@ -70,6 +86,21 @@ esphome:
             web_server_base::global_web_server_base->set_auth_password(
                 id(web_ui_password_value).c_str());
             id(web_ui_password_text).publish_state(id(web_ui_password_value));
+
+    # The on-demand listener. 200 runs after WebServer::setup() has taken web_server_base's one
+    # permanent init() reference - the reference that kept the server always-on. This applies the
+    # restored switch state once: deinit() at refcount zero stops httpd and frees its task stack,
+    # socket table and listener mailbox (~8KB); init() re-adds every registered handler, so the
+    # app and the radar tuner come back whole.
+    - priority: 200.0
+      then:
+        - lambda: |-
+            id(web_ui_listener_ready) = true;
+            if (!id(web_ui_enabled).state) {
+              id(web_ui_listener_on) = false;
+              web_server_base::global_web_server_base->deinit();
+              ESP_LOGI("web_ui", "Web UI switch is off; HTTP listener stopped");
+            }
 
 web_server:
   id: web_ui_server
@@ -239,6 +270,33 @@ satellite1_web_ui:
 
     events:
       action_button: action_button_press_event
+
+# Whether the device's HTTP server runs at all. On is today's behaviour, ~8KB of internal RAM
+# paid around the clock; off recovers it, and reaching the web UI then means flipping this switch
+# in Home Assistant first - as the old "Radar Tuner WebUI" switch worked. Restored ON by default
+# so nobody loses the web UI by taking a firmware update.
+switch:
+  - platform: template
+    id: web_ui_enabled
+    name: "Web UI"
+    icon: "mdi:web"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action:
+      - lambda: |-
+          if (id(web_ui_listener_ready) && !id(web_ui_listener_on)) {
+            id(web_ui_listener_on) = true;
+            web_server_base::global_web_server_base->init();
+            ESP_LOGI("web_ui", "HTTP listener started");
+          }
+    turn_off_action:
+      - lambda: |-
+          if (id(web_ui_listener_ready) && id(web_ui_listener_on)) {
+            id(web_ui_listener_on) = false;
+            web_server_base::global_web_server_base->deinit();
+            ESP_LOGI("web_ui", "HTTP listener stopped");
+          }
 
 # The maintenance buttons the Diagnostics page is built around.
 #

@@ -30,6 +30,10 @@ psram:
   speed: 80MHz
   ignore_not_found: false
 
+# Moves every ESPHome component object (~45KB of main.cpp .bss) from internal DRAM into PSRAM,
+# minus the objects embedding FreeRTOS TCBs. See esphome/components/extram_bss for the audit.
+extram_bss:
+
 i2c:
   - id: i2c_0
     sda: GPIO5

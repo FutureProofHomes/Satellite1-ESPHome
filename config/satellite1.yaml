@@ -90,6 +90,7 @@ external_components:
       type: local
       path: ../esphome/components
     components:
+      - extram_bss
       - fusb302b
       - i2s_audio
       - memory_flasher
