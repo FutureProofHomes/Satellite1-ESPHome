@@ -10,13 +10,13 @@ void LEDRing::setup() {
   this->buffer_size_ = this->size() * 3;
   this->buf_ = allocator.allocate(this->buffer_size_);
   if (this->buf_ == nullptr) {
-    esph_log_e(TAG, "Failed to allocate buffer of size %u", this->buffer_size_);
+    esph_log_e(TAG, "Failed to allocate buffer of size %zu", this->buffer_size_);
     this->mark_failed();
     return;
   }
   this->effect_data_ = allocator.allocate(this->size());
   if (this->effect_data_ == nullptr) {
-    esph_log_e(TAG, "Failed to allocate effect data of size %u", this->num_leds_);
+    esph_log_e(TAG, "Failed to allocate effect data of size %d", this->num_leds_);
     this->mark_failed();
     return;
   }

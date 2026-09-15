@@ -492,12 +492,15 @@ void LD2410Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
   uint8_t status = buf[8];
 
   if (status != 0) {
-    ESP_LOGW(TAG_LD2410, "Command 0x%04X failed (status=%u)", cmd_word, status);
+    ESP_LOGW(TAG_LD2410, "Command 0x%04X failed (status=%u)", static_cast<unsigned int>(cmd_word),
+             static_cast<unsigned int>(status));
   }
 
   if (cmd_word == 0x01A0 && status == 0 && len >= 18) {
     char ver[32];
-    snprintf(ver, sizeof(ver), "V%u.%02X.%02X%02X%02X%02X", buf[13], buf[12], buf[17], buf[16], buf[15], buf[14]);
+    snprintf(ver, sizeof(ver), "V%u.%02X.%02X%02X%02X%02X", static_cast<unsigned int>(buf[13]),
+             static_cast<unsigned int>(buf[12]), static_cast<unsigned int>(buf[17]), static_cast<unsigned int>(buf[16]),
+             static_cast<unsigned int>(buf[15]), static_cast<unsigned int>(buf[14]));
     if (version_text_sensor != nullptr)
       version_text_sensor->publish_state(ver);
     ESP_LOGI(TAG_LD2410, "Firmware version: %s", ver);
@@ -526,7 +529,8 @@ void LD2410Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
 
     save_backend_config_();
 
-    ESP_LOGI(TAG_LD2410, "Parameters: max_move=%u max_still=%u", max_move, max_still);
+    ESP_LOGI(TAG_LD2410, "Parameters: max_move=%u max_still=%u", static_cast<unsigned int>(max_move),
+             static_cast<unsigned int>(max_still));
   }
 
   if (cmd_word == 0x0162) {

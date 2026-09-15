@@ -258,7 +258,7 @@ bool XMOSFlasher::chip_erase_() {
 
 bool XMOSFlasher::write_page_(uint32_t byte_addr, uint8_t *buffer) {
   if ((byte_addr & (FLASH_PAGE_SIZE - 1)) != 0) {
-    ESP_LOGE(TAG, "Address needs to be page aligned (%d).", FLASH_PAGE_SIZE);
+    ESP_LOGE(TAG, "Address needs to be page aligned (%zu).", FLASH_PAGE_SIZE);
     return false;
   }
   if (!this->enable_writing_()) {
