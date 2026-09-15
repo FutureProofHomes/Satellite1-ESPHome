@@ -43,6 +43,7 @@ MULTI_CONF = False
 # web_server_base already reserves.
 
 CONF_INDEX_ID = "index_id"
+CONF_NO_SENSOR_ID = "no_sensor_id"
 CONF_ENTITIES = "entities"
 CONF_MICRO_WAKE_WORD_ID = "micro_wake_word_id"
 CONF_VOICE_ASSISTANT_ID = "voice_assistant_id"
@@ -100,6 +101,7 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(Satellite1WebUI),
             cv.GenerateID(CONF_INDEX_ID): cv.declare_id(cg.uint8),
+            cv.GenerateID(CONF_NO_SENSOR_ID): cv.declare_id(cg.uint8),
             cv.Optional(CONF_ENTITIES, default={}): _ENTITIES_SCHEMA,
             # Timers and the assistant's phase have no entity to read them from: get_timers() is a
             # plain vector on the component, and the phase is a `globals:` int that config/ already
@@ -136,6 +138,12 @@ CONFIG_SCHEMA = cv.All(
 )
 
 _DIST = Path(__file__).parent / "dist" / "index.html"
+
+# The Presence route's no-sensor product photo, pre-optimized (WebP q70, from the PNG kept at
+# frontend/assets/no-sensor-source.png for provenance). Committed as the encoded artifact rather than
+# encoded at codegen, because Pillow's WebP output is not guaranteed byte-stable across versions and
+# the CI drift check needs the shipped bytes to be the reviewed bytes.
+_NO_SENSOR = Path(__file__).parent / "assets" / "no_sensor.webp"
 
 
 def _final_validate(config):
@@ -243,3 +251,12 @@ async def to_code(config):
     _LOGGER.info(
         "Satellite1 web UI bundle: %d bytes raw, %d bytes gzipped", len(html), len(gz)
     )
+
+    if not _NO_SENSOR.is_file():
+        raise cv.Invalid(f"The no-sensor image is missing at {_NO_SENSOR}.")
+
+    # Not gzipped: WebP is already compressed, and a Content-Encoding layer would only add CPU at
+    # request time for negative savings. PROGMEM like the bundle, so serving it costs no heap.
+    webp = _NO_SENSOR.read_bytes()
+    no_sensor = cg.progmem_array(config[CONF_NO_SENSOR_ID], tuple(map(HexInt, webp)))
+    cg.add(var.set_no_sensor_image(no_sensor, len(webp)))

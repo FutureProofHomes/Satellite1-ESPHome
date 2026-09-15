@@ -107,6 +107,8 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
 
   if (url == WU_URL_ROOT || url == WU_URL_ALIAS || url == WU_URL_ALIAS_SLASH)
     return Route::INDEX;
+  if (url == "/ui/no-sensor.webp")
+    return Route::ASSET_NO_SENSOR;
   if (url == "/api/sat1/state")
     return Route::STATE;
   if (url == "/api/sat1/ha")
@@ -146,6 +148,8 @@ bool WebUIHandler::route_streams_(Route route) {
       return true;
     case Route::NONE:
     case Route::INDEX:
+    // The image is PROGMEM like the bundle, so it too answers without heap.
+    case Route::ASSET_NO_SENSOR:
     case Route::HA:
     case Route::HA_REFRESH:
     case Route::HA_SELECT:
@@ -204,6 +208,9 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
   switch (route) {
     case Route::INDEX:
       this->handle_index_(request);
+      break;
+    case Route::ASSET_NO_SENSOR:
+      this->handle_no_sensor_(request);
       break;
     case Route::STATE:
       this->handle_state_(request);
@@ -991,6 +998,20 @@ void WebUIHandler::handle_index_(AsyncWebServerRequest *request) {
   response->addHeader("Cache-Control", CACHE_REVALIDATE);
   if (this->etag_ != nullptr)
     response->addHeader("ETag", this->etag_);
+  request->send(response);
+}
+
+/// The no-sensor card's product photo, straight from PROGMEM. No Content-Encoding header - WebP is
+/// already compressed and ships uncompressed-by-gzip - and a plain max-age rather than the bundle's
+/// revalidate dance: the image changes when the firmware does, at which point a day-old cache entry
+/// is a cosmetic staleness on a card most devices never render, not a stale application.
+void WebUIHandler::handle_no_sensor_(AsyncWebServerRequest *request) {
+  if (this->no_sensor_webp_ == nullptr || this->no_sensor_webp_len_ == 0) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  auto *response = request->beginResponse(200, "image/webp", this->no_sensor_webp_, this->no_sensor_webp_len_);
+  response->addHeader("Cache-Control", "max-age=86400");
   request->send(response);
 }
 

@@ -146,6 +146,15 @@ class WebUIHandler : public AsyncWebHandler {
   /// strings are valid till send function is called". Codegen passes a string literal.
   void set_etag(const char *etag) { this->etag_ = etag; }
 
+  /// The no-sensor card's product photo, WebP straight from codegen - already compressed, so unlike
+  /// the bundle there is no gzip layer. Its own asset rather than a data URI in the bundle because at
+  /// ~24KB it is over half the bundle's entire gzipped budget, and only devices without a radar ever
+  /// fetch it.
+  void set_no_sensor_image(const uint8_t *webp, size_t len) {
+    this->no_sensor_webp_ = webp;
+    this->no_sensor_webp_len_ = len;
+  }
+
   /// Longest gap between two consecutive main-loop iterations since this was last read, in
   /// milliseconds. Written from the main loop, read from the httpd task, and reset by the read -
   /// which is why it is an exchange rather than a load. Diagnostics is the only reader.
@@ -296,6 +305,7 @@ class WebUIHandler : public AsyncWebHandler {
   enum class Route : uint8_t {
     NONE = 0,
     INDEX,
+    ASSET_NO_SENSOR,
     STATE,
 #ifdef USE_VOICE_ASSISTANT
     VOICE,
@@ -325,6 +335,7 @@ class WebUIHandler : public AsyncWebHandler {
   void send_low_memory_(AsyncWebServerRequest *request);
 
   void handle_index_(AsyncWebServerRequest *request);
+  void handle_no_sensor_(AsyncWebServerRequest *request);
   void handle_state_(AsyncWebServerRequest *request);
 #ifdef USE_VOICE_ASSISTANT
   void handle_voice_(AsyncWebServerRequest *request);
@@ -372,6 +383,8 @@ class WebUIHandler : public AsyncWebHandler {
   const uint8_t *index_gz_{nullptr};
   size_t index_gz_len_{0};
   const char *etag_{nullptr};
+  const uint8_t *no_sensor_webp_{nullptr};
+  size_t no_sensor_webp_len_{0};
   std::atomic<uint32_t> *max_loop_ms_{nullptr};
   std::vector<EntityRef> entities_;
 
