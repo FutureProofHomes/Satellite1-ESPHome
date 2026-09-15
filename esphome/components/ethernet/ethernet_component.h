@@ -175,11 +175,12 @@ class EthernetComponent final : public Component {
   void set_clk_pin(uint8_t clk_pin);
   void set_miso_pin(uint8_t miso_pin);
   void set_mosi_pin(uint8_t mosi_pin);
-  #endif
+#endif
   void set_cs_pin(uint8_t cs_pin);
   void set_interrupt_pin(uint8_t interrupt_pin);
   void set_reset_pin(uint8_t reset_pin);
   void set_clock_speed(int clock_speed);
+  void set_spi_mode(uint8_t spi_mode);
   void set_interface(spi_host_device_t interface);
 #ifdef USE_ETHERNET_SPI_POLLING_SUPPORT
   void set_polling_interval(uint32_t polling_interval);
@@ -264,6 +265,7 @@ class EthernetComponent final : public Component {
   int reset_pin_{-1};
   int phy_addr_spi_{-1};
   int clock_speed_;
+  uint8_t spi_mode_{0};
   spi_host_device_t interface_{SPI2_HOST};
 #ifdef USE_ETHERNET_SPI_POLLING_SUPPORT
   uint32_t polling_interval_{0};

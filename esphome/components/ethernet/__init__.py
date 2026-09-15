@@ -114,6 +114,7 @@ CONF_PHY_REGISTERS = "phy_registers"
 CONF_INTERFACE = "interface"
 
 CONF_CLOCK_SPEED = "clock_speed"
+CONF_SPI_MODE = "spi_mode"
 
 EthernetType = ethernet_ns.enum("EthernetType")
 ETHERNET_TYPES = {
@@ -443,47 +444,52 @@ GENERIC_SCHEMA = cv.All(
 )
 
 
-def _spi_schema(default_clock: str = "26.67MHz", max_clock: int = int(80e6)):
-    return cv.All(
-        BASE_SCHEMA.extend(
-            cv.Schema(
-                {
-                    cv.Optional(CONF_SPI_ID): cv.All(
-                        cv.only_on_esp32,
-                        cv.use_id(SPIComponent),
-                    ),
-                    cv.Optional(CONF_CLK_PIN): pins.internal_gpio_output_pin_number,
-                    cv.Optional(CONF_MISO_PIN): pins.internal_gpio_input_pin_number,
-                    cv.Optional(CONF_MOSI_PIN): pins.internal_gpio_output_pin_number,
-                    cv.Required(CONF_CS_PIN): pins.internal_gpio_output_pin_number,
-                    cv.Optional(
-                        CONF_INTERRUPT_PIN
-                    ): pins.internal_gpio_input_pin_number,
-                    cv.Optional(CONF_RESET_PIN): pins.internal_gpio_output_pin_number,
-                    cv.SplitDefault(CONF_CLOCK_SPEED, esp32=default_clock): cv.All(
-                        cv.only_on_esp32,
-                        cv.frequency,
-                        cv.int_range(int(8e6), max_clock),
-                    ),
-                    cv.Optional(CONF_INTERFACE): cv.All(
-                        cv.only_on_esp32,
-                        cv.one_of(*SPI_INTERFACE_MAP.keys(), lower=True),
-                    ),
-                    # Set default value (SPI_ETHERNET_DEFAULT_POLLING_INTERVAL) at _validate()
-                    cv.Optional(CONF_POLLING_INTERVAL): cv.All(
-                        cv.only_on_esp32,
-                        cv.positive_time_period_milliseconds,
-                        cv.Range(min=TimePeriodMilliseconds(milliseconds=1)),
-                    ),
-                }
-            ),
+def _spi_schema(
+    default_clock: str = "26.67MHz",
+    max_clock: int = int(80e6),
+    supports_spi_mode: bool = False,
+):
+    schema = {
+        cv.Optional(CONF_SPI_ID): cv.All(
+            cv.only_on_esp32,
+            cv.use_id(SPIComponent),
         ),
+        cv.Optional(CONF_CLK_PIN): pins.internal_gpio_output_pin_number,
+        cv.Optional(CONF_MISO_PIN): pins.internal_gpio_input_pin_number,
+        cv.Optional(CONF_MOSI_PIN): pins.internal_gpio_output_pin_number,
+        cv.Required(CONF_CS_PIN): pins.internal_gpio_output_pin_number,
+        cv.Optional(CONF_INTERRUPT_PIN): pins.internal_gpio_input_pin_number,
+        cv.Optional(CONF_RESET_PIN): pins.internal_gpio_output_pin_number,
+        cv.SplitDefault(CONF_CLOCK_SPEED, esp32=default_clock): cv.All(
+            cv.only_on_esp32,
+            cv.frequency,
+            cv.int_range(int(8e6), max_clock),
+        ),
+        cv.Optional(CONF_INTERFACE): cv.All(
+            cv.only_on_esp32,
+            cv.one_of(*SPI_INTERFACE_MAP.keys(), lower=True),
+        ),
+        # Set default value (SPI_ETHERNET_DEFAULT_POLLING_INTERVAL) at _validate()
+        cv.Optional(CONF_POLLING_INTERVAL): cv.All(
+            cv.only_on_esp32,
+            cv.positive_time_period_milliseconds,
+            cv.Range(min=TimePeriodMilliseconds(milliseconds=1)),
+        ),
+    }
+    if supports_spi_mode:
+        schema[cv.Optional(CONF_SPI_MODE)] = cv.All(
+            cv.only_on_esp32,
+            cv.int_range(min=0, max=3),
+        )
+    return cv.All(
+        BASE_SCHEMA.extend(cv.Schema(schema)),
         cv.only_on([Platform.ESP32, Platform.RP2]),
         _validate_spi_interface,
     )
 
 
 SPI_SCHEMA = _spi_schema()
+SPI_SCHEMA_W5500 = _spi_schema(supports_spi_mode=True)
 
 # The ENC28J60's SCK maximum is 20 MHz, so the shared 26.67 MHz default is out
 # of spec for it and makes the driver's CS hold time helper compute no hold
@@ -506,7 +512,7 @@ CONFIG_SCHEMA = cv.All(
             "KSZ8081": RMII_SCHEMA,
             "KSZ8081RNA": RMII_SCHEMA,
             "W5100": cv.All(SPI_SCHEMA, cv.only_on([Platform.RP2])),
-            "W5500": SPI_SCHEMA,
+            "W5500": SPI_SCHEMA_W5500,
             "OPENETH": cv.All(BASE_SCHEMA, cv.only_on([Platform.ESP32])),
             "DM9051": SPI_SCHEMA,
             "CH390": SPI_SCHEMA_CH390,
@@ -522,11 +528,13 @@ CONFIG_SCHEMA = cv.All(
     _validate,
 )
 
+
 def _get_spi_config(spi_id):
     for spi_conf in fv.full_config.get().get(CONF_SPI, []):
         if spi_conf[CONF_ID] == spi_id:
             return spi_conf
     raise cv.Invalid(f"Unable to resolve SPI bus '{spi_id.id}' for ethernet")
+
 
 def _final_validate_spi(config):
     if not CORE.is_esp32:
@@ -643,7 +651,7 @@ async def _to_code_esp32(var: cg.Pvariable, config: ConfigType) -> None:
     )
 
     if config[CONF_TYPE] in SPI_ETHERNET_TYPES:
-        if not CONF_SPI_ID in config:
+        if CONF_SPI_ID not in config:
             cg.add_define("USE_ETHERNET_SPI_LEGACY")
             cg.add(var.set_clk_pin(config[CONF_CLK_PIN]))
             cg.add(var.set_miso_pin(config[CONF_MISO_PIN]))
@@ -658,6 +666,8 @@ async def _to_code_esp32(var: cg.Pvariable, config: ConfigType) -> None:
         if CONF_RESET_PIN in config:
             cg.add(var.set_reset_pin(config[CONF_RESET_PIN]))
         cg.add(var.set_clock_speed(config[CONF_CLOCK_SPEED]))
+        if config[CONF_TYPE] == "W5500" and CONF_SPI_MODE in config:
+            cg.add(var.set_spi_mode(config[CONF_SPI_MODE]))
 
         cg.add_define("USE_ETHERNET_SPI")
 
