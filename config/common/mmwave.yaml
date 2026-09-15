@@ -1,6 +1,28 @@
 satellite1_radar:
   id: sat1_radar
   uart_id: uart_mmwave
+  # Fired from the main loop after the LD2450 registers new zone sensors or hides removed ones.
+  # Home Assistant only reads a device's entity list when it connects, so it is asked to reload
+  # this device's config entry: it disconnects, reconnects, re-runs ListEntities, and picks up
+  # the new layout - the effect the old reboot_required reboot existed for, minus the reboot.
+  # Same mechanism tts_routing.yaml uses for the codec re-advertisement, and the same jinja:
+  # tts_self_entry_jinja is defined there and both packages are always included together by
+  # satellite1.base.yaml (as web_ui_ha already does with area_ducking's self_area_jinja).
+  # If Home Assistant is not connected there is nothing to do: its next connection starts with a
+  # fresh ListEntities anyway.
+  on_entity_layout_changed:
+    - if:
+        condition: api.connected
+        then:
+          - logger.log: "Radar entity layout changed; asking Home Assistant to reload this device"
+          - homeassistant.service:
+              service: homeassistant.reload_config_entry
+              data_template:
+                entry_id: >-
+                  ${tts_self_entry_jinja}
+                  {{ ns.entry }}
+              variables:
+                mac: !lambda 'return esphome::get_mac_address_pretty();'
 
 text_sensor:
   - platform: satellite1_radar

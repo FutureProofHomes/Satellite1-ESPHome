@@ -45,8 +45,18 @@ inline uint32_t pack_entity_fields(uint8_t device_class_idx, uint8_t uom_idx, ui
          (static_cast<uint32_t>(entity_category) << ENTITY_FIELD_ENTITY_CATEGORY_SHIFT);
 }
 
+/// Runtime show/hide for the frontends, written against the protected flag rather than
+/// EntityBase::set_internal because the latter is deprecated for exactly the failure this
+/// component avoids: a bare flip notifies nobody. Here every flip is followed by a Home
+/// Assistant config-entry reload (LD2450Handler::sync_entity_layout_) that re-runs
+/// ListEntities - the missing notification - and both the API server and web_server test
+/// is_internal() at publish time, so state traffic stops and starts with the flag.
+#define SAT1_RADAR_DYNAMIC_VISIBILITY \
+  void set_frontend_hidden(bool hidden) { this->flags_.internal = hidden; }
+
 class Satellite1RadarDynamicSensor : public sensor::Sensor {
  public:
+  SAT1_RADAR_DYNAMIC_VISIBILITY
   void configure_dynamic(const char *name, EntityCategory entity_category = ENTITY_CATEGORY_NONE,
                          bool disabled_by_default = false, uint8_t device_class_idx = 0, uint8_t uom_idx = 0,
                          uint8_t icon_idx = 0, bool has_state_class = false,
@@ -71,6 +81,7 @@ class Satellite1RadarDynamicBinarySensor : public binary_sensor::BinarySensor {
 
 class Satellite1RadarDynamicTextSensor : public text_sensor::TextSensor {
  public:
+  SAT1_RADAR_DYNAMIC_VISIBILITY
   void configure_dynamic(const char *name, EntityCategory entity_category = ENTITY_CATEGORY_NONE,
                          bool disabled_by_default = false, uint8_t icon_idx = 0) {
     this->configure_entity_(name, 0, pack_entity_fields(0, 0, icon_idx, false, disabled_by_default, entity_category));

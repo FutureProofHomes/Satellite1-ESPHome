@@ -6,6 +6,7 @@
 #include "esphome/components/uart/uart.h"
 #include "esphome/core/preferences.h"
 #include "radar_entities.h"
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -84,6 +85,12 @@ class LD2450Handler {
   bool set_backend_config(const LD2450BackendConfig &cfg);
   void set_bluetooth_enabled(bool enabled);
   void set_multi_target_enabled(bool enabled);
+
+  /// When set, a changed entity layout (zone defined/undefined, multi-target toggled) is handled
+  /// live - new entities registered, dropped ones hidden - and this fires so YAML can ask Home
+  /// Assistant to reload the device's config entry and re-enumerate. Without it, the old
+  /// reboot_required contract stands.
+  void set_layout_changed_callback(std::function<void()> cb) { layout_changed_callback_ = std::move(cb); }
 
  protected:
   static constexpr size_t MAX_BUF = 160;
@@ -192,13 +199,44 @@ class LD2450Handler {
   static void publish_sensor_(sensor::Sensor *s, float val);
 
   bool validate_backend_config_(LD2450BackendConfig &cfg) const;
+
+  /// The subset of the config that decides which entities exist: everything else is a value
+  /// change on entities that are already there.
+  struct EntityLayout {
+    bool multi_target{false};
+    bool zone_defined[NUM_ZONES]{};
+    bool operator==(const EntityLayout &o) const {
+      if (multi_target != o.multi_target)
+        return false;
+      for (size_t i = 0; i < NUM_ZONES; i++) {
+        if (zone_defined[i] != o.zone_defined[i])
+          return false;
+      }
+      return true;
+    }
+  };
+  EntityLayout layout_of_(const LD2450BackendConfig &cfg) const;
   bool entity_layout_matches_(const LD2450BackendConfig &lhs, const LD2450BackendConfig &rhs) const;
+  void sync_entity_layout_();
   void save_backend_config_();
 
   LD2450BackendConfig config_{};
   LD2450BackendConfig boot_config_{};
   bool boot_config_initialized_{false};
   bool reboot_required_{false};
+
+  /// What the entity registry currently shows, as opposed to what config_ wants. Kept separate
+  /// from boot_config_ because with live sync the registered layout moves after boot.
+  EntityLayout registered_layout_{};
+  std::function<void()> layout_changed_callback_{};
+  /// Atomic: set from the httpd task in set_backend_config, consumed on the main loop, where
+  /// touching App's entity vectors is safe.
+  std::atomic<bool> layout_sync_pending_{false};
+  bool ha_reload_pending_{false};
+  uint32_t ha_reload_due_ms_{0};
+  /// Coalesces back-to-back layout changes (a zone save then an exclusion save) into one Home
+  /// Assistant reload instead of one per write.
+  static const uint32_t HA_RELOAD_DEBOUNCE_MS = 3000;
   ESPPreferenceObject config_pref_;
   float target_x_cm_[NUM_TARGETS]{};
   float target_y_cm_[NUM_TARGETS]{};

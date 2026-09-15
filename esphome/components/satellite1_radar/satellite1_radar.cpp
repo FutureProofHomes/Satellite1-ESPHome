@@ -185,6 +185,12 @@ void Satellite1Radar::finalize_detection_(RadarType type) {
     ld2450_->set_device_class_indices(this->device_class_meta_);
     ld2450_->set_unit_indices(this->unit_meta_);
     ld2450_->set_icon_indices(this->icon_meta_);
+    // Only when YAML wired an on_entity_layout_changed automation: setting the callback is what
+    // moves the handler off the reboot_required contract, and promising a Home Assistant
+    // re-enumeration nobody will deliver would strand new zone sensors as never-listed.
+    if (this->has_layout_automation_) {
+      ld2450_->set_layout_changed_callback([this]() { this->entity_layout_changed_callback_.call(); });
+    }
     ld2450_->setup();
     ld2450_->create_and_register_entities();
   }

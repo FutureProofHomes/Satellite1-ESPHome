@@ -1,6 +1,8 @@
 #pragma once
 
+#include "esphome/core/automation.h"
 #include "esphome/core/component.h"
+#include "esphome/core/helpers.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
@@ -38,6 +40,16 @@ class Satellite1Radar : public Component, public uart::UARTDevice {
   RadarType get_detected_type() const { return detected_type_; }
   bool is_detection_complete() const { return detection_complete_; }
   void set_radar_type_text_sensor(text_sensor::TextSensor *sensor) { this->radar_type_text_sensor_ = sensor; }
+
+  /// Fired from the main loop after the LD2450 has registered or hidden entities for a changed
+  /// zone/multi-target layout. The YAML automation on this trigger asks Home Assistant to reload
+  /// the device's config entry, which re-runs ListEntities - the reconnect a reboot used to be
+  /// for. Wiring at least one automation is what switches the LD2450 off the reboot_required
+  /// fallback (see finalize_detection_).
+  void add_on_entity_layout_changed_callback(std::function<void()> &&cb) {
+    this->entity_layout_changed_callback_.add(std::move(cb));
+    this->has_layout_automation_ = true;
+  }
 
   // --- Radar tuner ---
   RadarTunerHandler &get_tuner_handler() { return tuner_handler_; }
@@ -94,12 +106,21 @@ class Satellite1Radar : public Component, public uart::UARTDevice {
   // 404 for whichever radar is not present, which is the same answer it gave when the old server
   // was started after detection.
   RadarTunerHandler tuner_handler_{};
+  CallbackManager<void()> entity_layout_changed_callback_{};
+  bool has_layout_automation_{false};
   bool ld2410_engineering_on_{false};
   std::atomic_bool write_config_pending_{false};
   const uint8_t *ld2410_html_gz_{nullptr};
   size_t ld2410_html_gz_len_{0};
   const uint8_t *ld2450_html_gz_{nullptr};
   size_t ld2450_html_gz_len_{0};
+};
+
+class EntityLayoutChangedTrigger : public Trigger<> {
+ public:
+  explicit EntityLayoutChangedTrigger(Satellite1Radar *parent) {
+    parent->add_on_entity_layout_changed_callback([this]() { this->trigger(); });
+  }
 };
 
 }  // namespace satellite1_radar

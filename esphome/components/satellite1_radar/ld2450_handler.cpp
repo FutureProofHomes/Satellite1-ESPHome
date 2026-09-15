@@ -37,6 +37,9 @@ void LD2450Handler::setup() {
   boot_config_ = config_;
   boot_config_initialized_ = true;
   reboot_required_ = false;
+  // create_and_register_entities() runs right after this and registers exactly what config_
+  // asks for, so this snapshot describes the registry from the start.
+  registered_layout_ = layout_of_(config_);
 }
 
 void LD2450Handler::create_and_register_entities() {
@@ -139,6 +142,16 @@ void LD2450Handler::loop() {
     return;
 
   uint32_t now = millis();
+
+  // Layout changes land here rather than in set_backend_config because that runs on the httpd
+  // task, and App's entity vectors are only safe to grow from the main loop.
+  if (layout_sync_pending_.exchange(false))
+    sync_entity_layout_();
+
+  if (ha_reload_pending_ && deadline_passed_(ha_reload_due_ms_, now)) {
+    ha_reload_pending_ = false;
+    layout_changed_callback_();
+  }
 
   if (!fw_version_received_ && !fw_query_in_flight_ && fw_retry_count_ < FW_MAX_RETRIES &&
       deadline_passed_(fw_next_retry_ms_, now)) {
@@ -267,8 +280,17 @@ bool LD2450Handler::set_backend_config(const LD2450BackendConfig &cfg) {
 
   config_ = candidate;
   save_backend_config_();
-  if (boot_config_initialized_)
-    reboot_required_ = !entity_layout_matches_(config_, boot_config_);
+  if (boot_config_initialized_ && !(layout_of_(config_) == registered_layout_)) {
+    if (layout_changed_callback_) {
+      // Live path: the main loop registers what is new, hides what is gone, and then fires the
+      // callback so YAML can ask Home Assistant to reload this device's config entry and
+      // re-enumerate. No reboot, and reboot_required_ stays false.
+      layout_sync_pending_.store(true);
+    } else {
+      // No reload automation wired: the old contract, where only a reboot re-enumerates.
+      reboot_required_ = !entity_layout_matches_(config_, boot_config_);
+    }
+  }
 
   if (bluetooth_changed) {
     if (config_.bluetooth_enabled)
@@ -286,18 +308,43 @@ bool LD2450Handler::set_backend_config(const LD2450BackendConfig &cfg) {
   return true;
 }
 
+LD2450Handler::EntityLayout LD2450Handler::layout_of_(const LD2450BackendConfig &cfg) const {
+  EntityLayout layout;
+  layout.multi_target = cfg.multi_target_enabled;
+  for (size_t i = 0; i < NUM_ZONES; i++)
+    layout.zone_defined[i] = cfg.zones[i].points_count >= 3;
+  return layout;
+}
+
 bool LD2450Handler::entity_layout_matches_(const LD2450BackendConfig &lhs, const LD2450BackendConfig &rhs) const {
-  if (lhs.multi_target_enabled != rhs.multi_target_enabled)
-    return false;
+  return layout_of_(lhs) == layout_of_(rhs);
+}
+
+void LD2450Handler::sync_entity_layout_() {
+  // Registers whatever the new layout needs that does not exist yet. Existing objects are never
+  // destroyed, only hidden, so their object-id hashes - and with them Home Assistant's unique
+  // ids, entity ids, and history - survive any number of hide/show cycles.
+  create_and_register_entities();
 
   for (size_t i = 0; i < NUM_ZONES; i++) {
-    const bool lhs_defined = lhs.zones[i].points_count >= 3;
-    const bool rhs_defined = rhs.zones[i].points_count >= 3;
-    if (lhs_defined != rhs_defined)
-      return false;
+    if (runtime_zone_state_text_sensor_[i])
+      runtime_zone_state_text_sensor_[i]->set_frontend_hidden(config_.zones[i].points_count < 3);
   }
+  const bool hide_counts = !config_.multi_target_enabled;
+  if (runtime_target_count_sensor_)
+    runtime_target_count_sensor_->set_frontend_hidden(hide_counts);
+  if (runtime_still_target_count_sensor_)
+    runtime_still_target_count_sensor_->set_frontend_hidden(hide_counts);
+  if (runtime_moving_target_count_sensor_)
+    runtime_moving_target_count_sensor_->set_frontend_hidden(hide_counts);
 
-  return true;
+  registered_layout_ = layout_of_(config_);
+  reboot_required_ = false;
+
+  ha_reload_pending_ = true;
+  ha_reload_due_ms_ = millis() + HA_RELOAD_DEBOUNCE_MS;
+  ESP_LOGI(TAG_LD2450, "Entity layout updated in place; Home Assistant re-enumeration due in %ums",
+           static_cast<unsigned>(HA_RELOAD_DEBOUNCE_MS));
 }
 
 void LD2450Handler::set_bluetooth_enabled(bool enabled) {

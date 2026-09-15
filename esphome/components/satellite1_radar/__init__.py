@@ -3,8 +3,9 @@ from pathlib import Path
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
+from esphome import automation
 from esphome.components import uart
-from esphome.const import CONF_ID, Framework
+from esphome.const import CONF_ID, CONF_TRIGGER_ID, Framework
 from esphome.core.entity_helpers import (
     register_device_class,
     register_icon,
@@ -41,10 +42,14 @@ RUNTIME_ENTITY_HEADROOM = {
 CONF_LD2410_HTML_ID = "ld2410_html_id"
 CONF_LD2450_HTML_ID = "ld2450_html_id"
 CONF_SATELLITE1_RADAR_ID = "satellite1_radar_id"
+CONF_ON_ENTITY_LAYOUT_CHANGED = "on_entity_layout_changed"
 
 satellite1_radar_ns = cg.esphome_ns.namespace("satellite1_radar")
 Satellite1Radar = satellite1_radar_ns.class_(
     "Satellite1Radar", cg.Component, uart.UARTDevice
+)
+EntityLayoutChangedTrigger = satellite1_radar_ns.class_(
+    "EntityLayoutChangedTrigger", automation.Trigger.template()
 )
 
 CONFIG_SCHEMA = cv.All(
@@ -53,6 +58,17 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(): cv.declare_id(Satellite1Radar),
             cv.GenerateID(CONF_LD2410_HTML_ID): cv.declare_id(cg.uint8),
             cv.GenerateID(CONF_LD2450_HTML_ID): cv.declare_id(cg.uint8),
+            # Fired after the LD2450 registers/hides entities for a changed zone or multi-target
+            # layout. Presence of at least one automation here is what switches the handler from
+            # "reboot required" to live re-registration plus a Home Assistant re-enumeration the
+            # automation is expected to deliver (homeassistant.reload_config_entry).
+            cv.Optional(CONF_ON_ENTITY_LAYOUT_CHANGED): automation.validate_automation(
+                {
+                    cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(
+                        EntityLayoutChangedTrigger
+                    ),
+                }
+            ),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -167,4 +183,9 @@ async def to_code(config):
 
     cg.add(var.set_ld2410_html(ld2410_progmem, len(ld2410_gz)))
     cg.add(var.set_ld2450_html(ld2450_progmem, len(ld2450_gz)))
+
+    for conf in config.get(CONF_ON_ENTITY_LAYOUT_CHANGED, []):
+        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+        await automation.build_automation(trigger, [], conf)
+
     return var
