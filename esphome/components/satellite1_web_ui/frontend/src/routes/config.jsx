@@ -84,6 +84,7 @@ function VoiceInput({ ctx, wake, assist }) {
   const mute = entity(ctx, "mute_mics");
   const chime = entity(ctx, "wake_sound");
   const sens = entity(ctx, "wake_sensitivity");
+  const stopWord = entity(ctx, "stop_word");
   const words = wake.words || [];
 
   // Off, then Preferred, then the customer's pipelines - already sorted case-insensitively by the payload.
@@ -103,7 +104,7 @@ function VoiceInput({ ctx, wake, assist }) {
   // pipeline that has been deleted - see _update_options in its assist_pipeline select.
   const pick = (v) => (choices.some(([value]) => value === v) ? v : PIPELINE_PREFERRED);
 
-  if (!mute && !chime && !sens && !words.length) return null;
+  if (!mute && !chime && !sens && !stopWord && !words.length) return null;
 
   return (
     <Card title="Voice Input">
@@ -184,6 +185,18 @@ function VoiceInput({ ctx, wake, assist }) {
           this same card. It is worth saying out loud because the symptom - a device that ignores you -
           looks like a fault rather than like a setting. */}
       {words.length > 0 && words.every((w) => !w.on) && <p class="dim sm">{TEXT.no_wake_words}</p>}
+
+      {/* With the wake words rather than under Audio Output, because "stop" is a word the device
+          listens for - the reader deciding which words it answers to should meet this one too. The
+          label quotes the word for the same reason the wake word rows do: it is said, not set. */}
+      {stopWord && (
+        <Row label={'Say "stop" to interrupt'} hint={HINTS.stop_word}>
+          <Toggle
+            checked={stopWord.value === true || stopWord.state === "ON"}
+            onChange={(v) => post(pathFor(ctx, "stop_word", v ? "turn_on" : "turn_off"))}
+          />
+        </Row>
+      )}
 
       {sens && (
         <Row label="Wake word sensitivity" hint={HINTS.wake_sensitivity}>

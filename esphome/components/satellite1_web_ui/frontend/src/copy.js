@@ -100,6 +100,13 @@ export const HINTS = {
   wake_words:
     "Which wake words this device answers to, and which assistant answers each one. Off stops it responding to that word and leaves more of the processor for the ones you do use. The assistants are the voice pipelines you have set up in Home Assistant, and Preferred follows whichever one is marked preferred there. Home Assistant keeps this pairing rather than the device, which is why it needs to be reachable to change one, and why there is room for two wake words at a time - these are the Assistant and Assistant 2 settings on this device's Home Assistant page.",
 
+  // Names the two directions it reaches - answers this device sends elsewhere and answers other
+  // devices send here - because the remote half is the invisible one, and names the timer case
+  // because it works whichever way this is set and a reader who just turned this off should not
+  // think they lost it.
+  stop_word:
+    'While an answer is playing - this device\u2019s own, or one another Satellite1 routed here - the device listens for the single word "stop" and cuts it off everywhere it is playing. A ringing timer can always be silenced by saying stop, whichever way this is set.',
+
   wake_sensitivity:
     "How readily the wake word fires. Raise it if the device misses you from across the room; lower it if the television sets it off.",
 

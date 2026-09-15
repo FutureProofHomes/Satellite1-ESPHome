@@ -70,6 +70,70 @@ substitutions:
     {% endfor %}
     {% set chime_players = cns.t %}
 
+  # The Stop Announcement buttons of the Satellite1s among the targets, as a list, for
+  # tts_remote_stop below. Expects `targets_list`, so ${tts_targets_resolve} has to run ahead of it.
+  #
+  # A button rather than media_player.media_stop, and the distinction is load-bearing. Home
+  # Assistant's ESPHome integration sends a plain STOP with no announcement flag
+  # (async_media_stop in its media_player.py), and the speaker media player answers that by
+  # stopping the *media* pipeline - so media_stop aimed at a Satellite1 would kill its music and
+  # leave the routed response playing. The button runs on the peer and stops the announcement
+  # pipeline, which is the one the response rides. Peers on older firmware have no such button
+  # and simply do not appear here, the same mixed-fleet posture as tts_volume_targets_jinja.
+  tts_stop_buttons_jinja: >-
+    {% set sns = namespace(b=[]) %}
+    {% for t in targets_list %}
+      {% set d = device_id(t) %}
+      {% if d and device_attr(d, 'manufacturer') == 'FutureProofHomes' %}
+        {% set sns.b = sns.b + (device_entities(d) | select('search', 'stop_announcement') | list) %}
+      {% endif %}
+    {% endfor %}
+    {{ sns.b }}
+
+  # The targets media_player.media_stop is right for, as a list. Expects `targets_list`.
+  #
+  # Everyone except the two platforms where the generic stop does damage: a Satellite1 gets its
+  # button (above), and Sonos is skipped entirely - its announcement is an audio clip played over
+  # the queue, no Home Assistant action can stop a clip, and media_stop would stop the *queue*,
+  # so saying "stop" would kill the customer's music while the announcement played on. Letting the
+  # clip finish is the lesser wrong. For everything else the announcement is what is playing, so
+  # stop reaches it; whether the target resumes its own media afterwards is the integration's
+  # announce support, exactly as if the announcement had ended by itself.
+  tts_stop_players_jinja: >-
+    {% set sonos = integration_entities('sonos') %}
+    {% set pns = namespace(p=[]) %}
+    {% for t in targets_list %}
+      {% set d = device_id(t) %}
+      {% if (not d or device_attr(d, 'manufacturer') != 'FutureProofHomes') and t not in sonos %}
+        {% set pns.p = pns.p + [t] %}
+      {% endif %}
+    {% endfor %}
+    {{ pns.p }}
+
+  # Every other FutureProofHomes device's Stop Announcement button, as a list, for
+  # tts_stop_broadcast below. Expects `mac`. Unlike the two walks above this is not scoped to a
+  # target list, because the device pressing these is a *receiver* - it played an announcement
+  # someone else routed and has no idea who else got it. Pressing every button is safe precisely
+  # because the button is guarded: a device that is not announcing treats the press as a no-op,
+  # so music anywhere is untouched. The known cost: two unrelated announcements in one house stop
+  # together. The person who said "stop" wanted quiet, so that is the right default.
+  #
+  # One esphome entity per device is enough to find it, so devices already seen are skipped
+  # rather than re-walked.
+  tts_stop_all_jinja: >-
+    {% set bns = namespace(b=[], seen=[]) %}
+    {% for e in integration_entities('esphome') %}
+      {% set d = device_id(e) %}
+      {% if d and d not in bns.seen %}
+        {% set bns.seen = bns.seen + [d] %}
+        {% if device_attr(d, 'manufacturer') == 'FutureProofHomes'
+              and (mac | lower) not in device_attr(d, 'connections') | map(attribute=1) | list %}
+          {% set bns.b = bns.b + (device_entities(d) | select('search', 'stop_announcement') | list) %}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+    {{ bns.b }}
+
   # An audio_file id from media_player.yaml behind the scheme the target's own media source matches
   # on, so no audio crosses the network. Named here because the call and its log line must agree.
   wake_chime_uri: "audio-file://wake_word_triggered_sound"
@@ -297,6 +361,49 @@ switch:
   # stopping the pipeline - so the wake chime still plays either way, and on_end and both watchdogs
   # still have a local drain to wait for. It now reconciles from the selection-change trigger in
   # common/web_ui.yaml, which is what lets a change made mid-response land on that response.
+
+button:
+  # Stops whatever announcement this device is playing: a routed response from another Satellite1,
+  # its own answer's tail, a tts.speak. The receiving end of tts_remote_stop below - a router that
+  # hears "stop" presses this button on every Satellite1 target, because it is the only lever Home
+  # Assistant has that reaches the announcement pipeline (see tts_stop_buttons_jinja above for why
+  # media_player.media_stop cannot).
+  #
+  # NEVER make this internal: true, and do not disable it by default. Like wake_sound and
+  # tts_volume, other Satellite1s find it by substring over device_entities() -
+  # 'stop_announcement' - and internal removes an entity from the native API, while button.press
+  # refuses a disabled entity. Either would silently break every router's stop fan-out. It also
+  # has to keep this object id: rename the entity and every peer on older firmware stops finding
+  # it. diagnostic is as far out of the way as it can go - it moves the row into the collapsed
+  # Diagnostics group on the device page, which is the most the UI-surface budget can recover
+  # from an entity that has to stay callable.
+  #
+  # Deliberately narrow about voice: it does not touch a voice assistant session. A peer can be
+  # mid-conversation with the person in its own room while it plays an announcement from this
+  # one, and stopping the audio it is playing for us must not hang up the conversation it is
+  # having for them.
+  #
+  # The tts_remote_stop at the end is what makes one press stop the response *everywhere*. On a
+  # device that routed the playing response it fans out to the full target list - including the
+  # Cast-like targets only the router knows about - and on any other device its guard makes it
+  # free. So a peer that heard "stop" only has to reach this button, and the router carries the
+  # stop the rest of the way. No loop is possible: the fan-out presses buttons, and a button
+  # only fans out where a routing selection is active, which a mere receiver does not have.
+  - platform: template
+    id: stop_announcement_button
+    name: "Stop Announcement"
+    icon: "mdi:stop"
+    entity_category: diagnostic
+    on_press:
+      - if:
+          condition:
+            media_player.is_announcing:
+              id: external_media_player
+          then:
+            - media_player.stop:
+                announcement: true
+                id: external_media_player
+      - script.execute: tts_remote_stop
 
 number:
   # This device's own level for speech: its own responses, and every announcement it receives.
@@ -811,6 +918,111 @@ script:
       - lambda: |-
           id(ha_action_replies_seen) = true;
           ESP_LOGE("tts_routing", "wake chime call failed: %s", reason.c_str());
+
+  # Cuts a routed response off on its remote targets. Fired from on_wake_word_detected in
+  # voice_assistant.yaml alongside the local stop - by "stop", or by any wake word, since every
+  # wake word interrupts a running answer locally and the remote half should not behave differently.
+  #
+  # The guard is what keeps this honest. tts_remote_sent means this turn's play_media actually went
+  # out, and tts_routing_to_remote is cleared once the local pipeline drains - and the local
+  # pipeline always receives the response, ducked to silence when Local Speaker is off, so its
+  # lifetime tracks the remote playback closely enough to gate on. After it clears, a wake word is
+  # a new conversation, not an interruption, and stopping targets then could cut off resumed music.
+  #
+  # Two calls because the targets split by platform - see tts_stop_buttons_jinja and
+  # tts_stop_players_jinja for the reasoning. Either list can be empty; an empty entity_id is a
+  # no-op, same as the routing call itself.
+  - id: tts_remote_stop
+    mode: single
+    then:
+      - if:
+          condition:
+            and:
+              - api.connected:
+              - lambda: 'return id(tts_routing_to_remote) && id(tts_remote_sent);'
+          then:
+            - lambda: 'ESP_LOGI("tts_routing", "stopping the routed response on the remote targets");'
+            - homeassistant.action:
+                action: button.press
+                data_template:
+                  entity_id: >-
+                    ${self_area_jinja}
+                    ${tts_targets_resolve}
+                    ${tts_stop_buttons_jinja}
+                variables:
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                on_error:
+                  - script.execute:
+                      id: tts_remote_stop_error
+                      reason: !lambda 'return error;'
+            - homeassistant.action:
+                action: media_player.media_stop
+                data_template:
+                  entity_id: >-
+                    ${self_area_jinja}
+                    ${tts_targets_resolve}
+                    ${tts_stop_players_jinja}
+                variables:
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                on_error:
+                  - script.execute:
+                      id: tts_remote_stop_error
+                      reason: !lambda 'return error;'
+
+  # The receiver's half of stopping everywhere: fired from on_wake_word_detected when "stop" - or
+  # any wake word - cuts off an announcement this device did *not* send. It presses every other
+  # FutureProofHomes device's Stop Announcement button, and the router among them fans the stop
+  # out to its non-Satellite1 targets from its own button - see the button above for the whole
+  # relay and why it cannot loop.
+  #
+  # The guards, each doing one job. tts_playing false means this is not our own response - the
+  # router's case, where tts_remote_stop already knows the exact target list and a broadcast
+  # would be a blunter copy of it. The http_announcement_source test is what separates routed
+  # speech from a local chime or a ringing timer, neither of which plays anywhere else. It is
+  # read before the local media_player.stop lands - the caller orders it so - because stopping
+  # the pipeline is exactly what makes that state unreadable afterwards.
+  - id: tts_stop_broadcast
+    mode: single
+    then:
+      - if:
+          condition:
+            and:
+              - api.connected:
+              - lambda: 'return !id(tts_playing);'
+              - lambda: |-
+                  return id(http_announcement_source).get_state() ==
+                         media_source::MediaSourceState::PLAYING;
+          then:
+            - lambda: 'ESP_LOGI("tts_routing", "heard stop during a routed announcement; stopping it everywhere");'
+            - homeassistant.action:
+                action: button.press
+                data_template:
+                  entity_id: >-
+                    ${tts_stop_all_jinja}
+                variables:
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                on_error:
+                  - script.execute:
+                      id: tts_remote_stop_error
+                      reason: !lambda 'return error;'
+
+  # A stop that did not land, reported to the log and nowhere else. Not tts_call_error: that clears
+  # tts_announce_pending and flashes the ring red, both of which belong to the announcement call.
+  # The local stop has already happened by the time this fires, so the failure's whole cost is the
+  # remote tail playing out - worth a warning, not an alarm.
+  - id: tts_remote_stop_error
+    parameters:
+      reason: string
+    then:
+      - lambda: |-
+          id(ha_action_replies_seen) = true;
+          ESP_LOGW("tts_routing", "remote stop call failed: %s", reason.c_str());
 
 voice_assistant:
   on_start:

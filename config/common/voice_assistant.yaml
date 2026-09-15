@@ -89,7 +89,10 @@ micro_wake_word:
                     condition:
                       voice_assistant.is_running:
                     then:
-                      voice_assistant.stop:
+                      # A response this device routed elsewhere is playing there too, so the local
+                      # stop fans out. The script's own guard makes it free when nothing was routed.
+                      - voice_assistant.stop:
+                      - script.execute: tts_remote_stop
                     # Stop any other media player announcement
                     else:
                       - if:
@@ -98,9 +101,17 @@ micro_wake_word:
                               id: external_media_player
 
                           then:
+                            # Ahead of the local stop on purpose: the broadcast's guard reads the
+                            # announcement source's state, and stopping the pipeline is what makes
+                            # that unreadable. Order is enough - the stop below is a command the
+                            # media player processes on its own loop, after this guard has run.
+                            - script.execute: tts_stop_broadcast
                             - media_player.stop:
                                 announcement: true
                                 id: external_media_player
+                            # The usual path for "stop" mid-response: the pipeline has ended by the
+                            # time the audio is still playing, so is_running above is already false.
+                            - script.execute: tts_remote_stop
                           # Start the voice assistant and play the wake sound, if enabled
                           else:
                             # Ahead of the local chime so the call is out before the 300ms below,
@@ -245,13 +256,62 @@ script:
       # Enable stop wake word
       # - lambda: id(stop).enable();
 
+  # Arms the stop word for an announcement this device did not produce - a response another
+  # Satellite1 routed here, or a tts.speak - so the person standing next to whichever speaker is
+  # talking can say "stop" and be heard by it. Own responses are activate_stop_word_once's job
+  # below, told apart by tts_playing, which only this device's own pipeline sets.
+  #
+  # Fired from external_media_player's on_announcement, which is a state edge - it does not fire
+  # again when a chime hands over to the response with the state never leaving ANNOUNCING. Hence
+  # the wait: the script outlives the chime and arms when the HTTP source starts, rather than
+  # sampling once at an instant when the chime is what is playing. The timeout covers the case
+  # where no speech follows - a bare chime, a timer - and mode: restart makes a burst of
+  # announcements collapse into the newest.
+  - id: announce_stop_word_arm
+    mode: restart
+    then:
+      - wait_until:
+          condition:
+            lambda: |-
+              return id(http_announcement_source).get_state() ==
+                     media_source::MediaSourceState::PLAYING;
+          timeout: 5s
+      - if:
+          condition:
+            and:
+              - switch.is_on: stop_word_interrupt
+              - switch.is_off: timer_ringing
+              - lambda: 'return !id(tts_playing);'
+              - lambda: |-
+                  return id(http_announcement_source).get_state() ==
+                         media_source::MediaSourceState::PLAYING;
+              - media_player.is_announcing:
+                  id: external_media_player
+          then:
+            - micro_wake_word.enable_model: stop
+            - wait_until:
+                not:
+                  media_player.is_announcing:
+                    id: external_media_player
+            - if:
+                condition:
+                  and:
+                    - switch.is_off: timer_ringing
+                    - lambda: 'return !id(tts_playing);'
+                then:
+                  - micro_wake_word.disable_model: stop
+
   - id: activate_stop_word_once
     then:
       - delay: 1s
-      # Enable stop wake word
+      # Enable stop wake word. The toggle gates only this response-interrupt arming; a ringing
+      # timer arms the model from timer.yaml regardless, because silencing a timer by voice is
+      # behaviour people already have and should not lose to a switch about answers.
       - if:
           condition:
-            switch.is_off: timer_ringing
+            and:
+              - switch.is_off: timer_ringing
+              - switch.is_on: stop_word_interrupt
           then:
             - micro_wake_word.enable_model: stop
             - wait_until:
@@ -407,6 +467,23 @@ script:
           timeout: 30s
       - lambda: id(tts_playing) = false;
       - script.execute: audio_gain_reconcile
+
+switch:
+  # Whether a spoken "stop" can cut off the assistant mid-answer. Gates the arming in
+  # activate_stop_word_once above, not the model itself: the stop model stays internal and
+  # disabled at boot, and a ringing timer still arms it from timer.yaml with this off.
+  #
+  # internal: true - this is a web-app control (the Voice Input card), reached over the web
+  # server's REST under include_internal. Home Assistant's wake word slots know nothing about
+  # the stop model, so nothing there can fight this switch.
+  - platform: template
+    id: stop_word_interrupt
+    name: "Say Stop To Interrupt"
+    icon: "mdi:stop-circle-outline"
+    entity_category: config
+    internal: true
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
 
 select:
   - platform: template

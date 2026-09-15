@@ -86,6 +86,10 @@ media_player:
     # Duck the media channel while an announcement plays
     on_announcement:
       - script.execute: audio_gain_reconcile
+      # Arm the stop word if this announcement turns out to be speech - a response another
+      # Satellite1 routed here, or a tts.speak. The script waits out any chime in front and
+      # sorts speech from chimes itself; see voice_assistant.yaml, which owns it.
+      - script.execute: announce_stop_word_arm
 
     # Restore audio ducking when not actively playing announcements or running voice assistant
     on_state:

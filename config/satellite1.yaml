@@ -11,7 +11,7 @@ substitutions:
     file: common/ethernet.yaml
 
   # select network [wifi|ethernet]
-  network: ethernet
+  network: wifi
 
 globals:
   - id: network_setup_completed
