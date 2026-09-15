@@ -222,6 +222,8 @@ back, which on its own looks like a page that ignores clicks.
 | `peer_manual` | Added by address. The page cannot check whether it is reachable. |
 | `peer_add_ph` | IP address or hostname |
 | `peer_add` | Add |
+| `write_failed` | A change didn't reach the device, so it hasn't been applied. |
+| `write_failed_go` | Tap for the device log. |
 | `nothing_said` | Nothing said yet. What you say and what it replies will appear here. |
 | `no_wake_words` | No wake words are on, so the device will not respond to being spoken to. The mute button and Home Assistant still work. |
 | `pipeline_off` | Off |

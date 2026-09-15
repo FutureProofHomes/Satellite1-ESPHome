@@ -179,6 +179,13 @@ export const TEXT = {
   peer_add_ph: "IP address or hostname",
   peer_add: "Add",
 
+  // The failed-write toast, shown on any route. First line is the one fact every failure shares;
+  // the control involved has already put its old value back, which is why "hasn't been applied"
+  // needs saying - the reverted switch alone reads as a page that ignored the tap. Second line is
+  // where the specific reason lives.
+  write_failed: "A change didn't reach the device, so it hasn't been applied.",
+  write_failed_go: "Tap for the device log.",
+
   // Shown in place of the transcript, not instead of the card. The card carries the assistant's phase in
   // its header, so it has something to say from the moment the device answers; this only fills the space
   // where the lines will go.

@@ -18,6 +18,26 @@ import { useEffect, useReducer, useRef, useState } from "preact/hooks";
 let chain = Promise.resolve();
 
 /**
+ * Failed writes, announced to whoever is listening - in practice the shell's toast, but this file
+ * cannot import from there without a cycle, so it is a plain subscription.
+ *
+ * Writes only, and that is the whole design. Every optimistic control in the app already handles its
+ * own failure by putting the old value back, which is correct and completely silent - a checkbox
+ * that quietly un-ticks itself looks like a page that ignores clicks. Reads stay out of it: the
+ * stream-lost banner covers a device that has gone away, the degraded-mode copy covers Home
+ * Assistant, and the radar probe *expects* a 404 from the module that is not fitted - a toast on
+ * any of those would cry wolf on every mount or poll.
+ */
+const writeErrorListeners = new Set();
+export function onWriteError(fn) {
+  writeErrorListeners.add(fn);
+  return () => writeErrorListeners.delete(fn);
+}
+function reportWriteError(path, why) {
+  for (const fn of writeErrorListeners) fn({ path, why });
+}
+
+/**
  * Every request this app makes, one at a time.
  *
  * Reads are queued as well as writes, because each request the browser has in flight is a separate
@@ -33,9 +53,19 @@ let chain = Promise.resolve();
  * rather than inside one, so a resync never holds a slider's writes behind a slow round trip.
  */
 export function request(path, init) {
+  // `quiet` is this file's, not fetch's: a write whose failure is already surfaced by its own
+  // banner opts out of the toast here, so one failure cannot show up twice in different words.
+  const { quiet, ...opts } = init || {};
   const run = async () => {
-    const r = await fetch(path, init);
-    return { ok: r.ok, status: r.status, text: await r.text() };
+    try {
+      const r = await fetch(path, opts);
+      const out = { ok: r.ok, status: r.status, text: await r.text() };
+      if (!out.ok && opts.method === "POST" && !quiet) reportWriteError(path, `HTTP ${out.status}`);
+      return out;
+    } catch (e) {
+      if (opts.method === "POST" && !quiet) reportWriteError(path, String(e?.message || e));
+      throw e;
+    }
   };
   // Queued on both settlements, so one failed request does not wedge the queue for the session, and
   // advanced by a swallowing continuation rather than by `next` - a caller that handles its own
@@ -321,6 +351,9 @@ export function useSelection() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
+        // The sel_failed banner below is this write's own surface, and it says more than the toast
+        // could - the checkbox has already been put back, which is the part that needs explaining.
+        quiet: true,
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
     } catch {

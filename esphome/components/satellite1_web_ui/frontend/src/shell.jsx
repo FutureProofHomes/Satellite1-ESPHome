@@ -8,7 +8,7 @@
 import { useEffect, useState } from "preact/hooks";
 
 import { HINTS, TEXT } from "./copy.js";
-import { deviceIdentity, useDeviceState, useEvents, useHaData, useSelection } from "./lib/device.js";
+import { deviceIdentity, onWriteError, useDeviceState, useEvents, useHaData, useSelection } from "./lib/device.js";
 import { Config } from "./routes/config.jsx";
 import { Controls } from "./routes/controls.jsx";
 import { Diagnostics } from "./routes/diagnostics.jsx";
@@ -291,6 +291,51 @@ function SwitcherSheet({ device, label, area, route, ha, onClose }) {
   );
 }
 
+/**
+ * One toast for every write that did not land, on whatever route it happened.
+ *
+ * The controls already handle failure correctly and silently - each optimistic one puts its old
+ * value back - and the silence is the problem: a switch that un-flips itself a second after being
+ * tapped looks like a page that ignores clicks. This says the one thing all those cases share, and
+ * tapping it goes to Diagnostics, whose log panel is where the specific reason is.
+ *
+ * A button rather than a div with a handler, so it is focusable and announced. New failures reset
+ * the timer rather than stacking: a slider mid-drag against a dead device can fail a dozen writes a
+ * second, and a dozen identical toasts is a haranguing, not a notification. Six seconds, matching
+ * nothing in particular - long enough to read on a phone at arm's length, short enough that the
+ * page does not wear a permanent error for one dropped packet.
+ */
+function ErrorToast() {
+  const [shown, setShown] = useState(false);
+
+  useEffect(() => {
+    let timer;
+    const off = onWriteError(() => {
+      setShown(true);
+      clearTimeout(timer);
+      timer = setTimeout(() => setShown(false), 6000);
+    });
+    return () => {
+      off();
+      clearTimeout(timer);
+    };
+  }, []);
+
+  if (!shown) return null;
+  return (
+    <button
+      class="toast"
+      onClick={() => {
+        setShown(false);
+        location.hash = "#/diagnostics";
+      }}
+    >
+      <span class="toast-t">{TEXT.write_failed}</span>
+      <span class="toast-s">{TEXT.write_failed_go}</span>
+    </button>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Shell                                                               */
 /* ------------------------------------------------------------------ */
@@ -348,6 +393,8 @@ export function App() {
       <main class="wrap">
         <View ctx={ctx} />
       </main>
+
+      <ErrorToast />
 
       {/* Mounted whether or not it is open - see NavPane. */}
       <NavPane route={route} go={go} open={nav} onClose={() => setNav(false)} />

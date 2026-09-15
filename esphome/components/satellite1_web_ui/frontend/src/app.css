@@ -344,6 +344,51 @@ hr {
   border-color: var(--warn-line);
 }
 
+/* The failed-write toast. Fixed to the bottom rather than joining the banners at the top: banners
+   describe an ongoing state and can sit above the content they qualify, but this reports a moment,
+   and it appears where the thumb that just did the failing already is. z-index above the sheets and
+   the hint layer both, because a write can fail while either is open and a toast under a scrim is a
+   toast nobody saw. One shadowed elevated card, same grammar as the hint bubble; the error palette
+   is on the title line, not the whole card, so it catches the eye without shouting. */
+.toast {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--s-4) + env(safe-area-inset-bottom));
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: var(--s-2) var(--s-3);
+  background: var(--fill-2);
+  border: 1px solid var(--err-line);
+  border-radius: var(--r-3);
+  box-shadow: 0 6px 20px var(--shadow);
+  cursor: pointer;
+  text-align: left;
+  animation: toast-in 160ms ease-out;
+}
+.toast-t {
+  font: 600 var(--t-s) inherit;
+  color: var(--err-fg);
+}
+.toast-s {
+  font-size: var(--t-xs);
+  color: var(--fg-3);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
 .wrap {
   max-width: 720px;
   margin: 0 auto;
