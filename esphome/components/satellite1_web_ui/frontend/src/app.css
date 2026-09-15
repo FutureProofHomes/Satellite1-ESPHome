@@ -1277,6 +1277,35 @@ a.peer.go:hover {
 }
 
 /* ------------------------------------------------------------------ */
+/* Media card                                                          */
+/* ------------------------------------------------------------------ */
+
+.media-meta {
+  margin-bottom: var(--s-2);
+}
+.media-title {
+  font-weight: 600;
+  font-size: var(--t-m);
+}
+.media-artist {
+  font-size: var(--t-s);
+}
+/* Centred rather than left-aligned like every row above: transport buttons are thumb targets, and
+   the middle of the card is where both thumbs can reach them. Larger than .btn.sq's 28px for the
+   same reason. */
+.media-controls {
+  display: flex;
+  justify-content: center;
+  gap: var(--s-3);
+  margin: var(--s-2) 0;
+}
+.media-controls .btn.sq {
+  width: 44px;
+  padding: var(--s-2) 0;
+  font-size: var(--t-l);
+}
+
+/* ------------------------------------------------------------------ */
 /* Log panel: filter, highlight and counts                             */
 /* ------------------------------------------------------------------ */
 

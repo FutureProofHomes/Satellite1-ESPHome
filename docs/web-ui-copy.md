@@ -33,6 +33,7 @@ Attached to the small **i** beside a label. One is open at a time.
 | `calibrate` | Calibration editor, offset row | Enter what a trusted instrument in the same room reads. The difference is saved as an offset and survives a restart. It does not change the raw reading, only what the device reports. |
 | `led_ring` | LED ring | The ring the assistant animates. Colour and brightness set here are the resting state - the device still overrides both while it is listening, thinking or reporting an error. |
 | `timers` | Timers card | Timers set by voice, held on the device. They keep counting and still ring if Home Assistant goes away. |
+| `media` | Media card | Whatever this device is playing right now, from either source: a group stream, or media sent to it by Home Assistant. Track skipping belongs to group streams - media from Home Assistant is a single stream with no queue to skip within. The volume here is the media volume; what the assistant says has its own level, on Config. |
 
 The first four sit on the ⓘ inside the calibration editor, which opens by tapping a sensor chip — not on
 the chips themselves. A chip is 50–80px wide, and a finger-sized ⓘ inside one is indistinguishable from a
@@ -225,6 +226,9 @@ back, which on its own looks like a page that ignores clicks.
 | `write_failed` | A change didn't reach the device, so it hasn't been applied. |
 | `write_failed_go` | Tap for the device log. |
 | `nothing_said` | Nothing said yet. What you say and what it replies will appear here. |
+| `media_idle` | Nothing playing. Group streams and media sent from Home Assistant show up here. |
+| `media_src_group` | group stream |
+| `media_src_local` | this speaker |
 | `no_wake_words` | No wake words are on, so the device will not respond to being spoken to. The mute button and Home Assistant still work. |
 | `pipeline_off` | Off |
 | `pipeline_preferred` | Preferred |

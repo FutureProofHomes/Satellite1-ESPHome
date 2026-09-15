@@ -15,3 +15,33 @@ media_player:
     media_pipeline:
       sources:
         - sendspin_media_source
+
+# What the group stream is playing, for the web app's Media card. Declaring these is also what
+# enables the component's metadata role, so the cost is paid only because the card exists.
+#
+# internal: true keeps them out of Home Assistant - it has richer metadata of its own for this
+# stream - while include_internal on web_server carries them to the app over /events. That is the
+# whole transport: title changes arrive on the SSE stream the app already holds, so the Media card
+# polls nothing for them. The card reads them only while the Sendspin player is the active source,
+# because a stopped stream keeps its last track here and showing it would claim silence is playing.
+text_sensor:
+  - platform: sendspin
+    id: sendspin_title_text
+    type: title
+    name: "Media Title"
+    internal: true
+  - platform: sendspin
+    id: sendspin_artist_text
+    type: artist
+    name: "Media Artist"
+    internal: true
+
+# Merged into the block in common/web_ui.yaml, exactly as satellite1.yaml merges its own keys in.
+# The group player reference and the metadata entities live here, beside the things they name, so a
+# config built without this file loses the Sendspin half of the card and nothing else.
+satellite1_web_ui:
+  sendspin_media_player_id: sendspin_group_media_player
+  entities:
+    text_sensors:
+      media_title: sendspin_title_text
+      media_artist: sendspin_artist_text

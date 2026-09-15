@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
 import { HINTS, PRESENCE, TEXT } from "../copy.js";
-import { entity, pathFor, PHASE, post, useVoice } from "../lib/device.js";
+import { entity, pathFor, PHASE, post, useMedia, useVoice } from "../lib/device.js";
 import { Arrow, Card, Chevron, Hint, Missing, Row, Slider, Toggle } from "../ui.jsx";
 
 /* ------------------------------------------------------------------ */
@@ -367,6 +367,123 @@ function VoiceStatus({ voice }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Media                                                               */
+/* ------------------------------------------------------------------ */
+
+/** MediaPlayerState's numbers, which GET /api/sat1/media sends raw so neither end owns a second
+ *  vocabulary. Only the three worth a label; NONE/IDLE/OFF all read as the idle card. */
+const MEDIA_STATE = { 2: "Playing", 3: "Paused", 4: "Announcing" };
+
+/**
+ * Whichever source is actually making sound, labelled - the replacement the plan promised for the
+ * "This speaker" strip. The device resolves which player that is (see active_media_ in the
+ * component); this card mostly says what it was told, with one deliberate exception below.
+ *
+ * The exception is a group stream this card paused. The Sendspin protocol has no paused state -
+ * playing or stopped is its whole vocabulary - so the moment pause lands, the device sees an idle
+ * player and reports the card should go idle, stranding the resume it just promised. The card is the
+ * only witness that the group is resumable, so pausing sets `held`, which keeps the paused-group
+ * controls up and aims them at the group player by name (`src=`). Cleared when anything else starts
+ * playing, or when the group resumes. A stream paused from Music Assistant's own UI shows idle here,
+ * honestly: nothing on this device can tell that apart from a stream that ended.
+ *
+ * Title and artist come from the SSE stream, not the poll - they are Sendspin metadata text sensors -
+ * and render only while the group stream owns the card, because a stopped stream keeps its last track
+ * in those sensors and showing it would caption silence. The held pause keeps them: that track is
+ * exactly what resume will continue.
+ *
+ * Track skipping renders only for the group stream. The local speaker player has no queue to skip
+ * within - what it plays is one URL Home Assistant handed it - so on that source the buttons would be
+ * furniture that logs a warning. Play/pause is hidden while announcing, since pausing a doorbell or a
+ * TTS answer midway is not a control anyone reaches for on purpose; the stop word and the physical
+ * buttons own that moment.
+ *
+ * Every command names the source being shown, so a tap lands on the player it was aimed at even if
+ * the active one changes mid-flight.
+ *
+ * The card stays on the page when nothing is playing, by design: the volume slider is still this
+ * device's media volume - the level whatever plays next arrives at - and a vanishing card reads as a
+ * page that lost a section. Waits for the first poll rather than painting an empty shell.
+ */
+function Media({ ctx, media, mediaCmd }) {
+  const [held, setHeld] = useState(false);
+
+  const deviceActive = media ? media.state === 2 || media.state === 3 : false;
+  const ssPlaying = media?.ss_state === 2;
+
+  // The hold ends when the world moves on: the group resumed (from here or anywhere), or the local
+  // player started making sound, which means the next idle is that stream ending rather than our pause.
+  useEffect(() => {
+    if (ssPlaying || (media?.src === "local" && deviceActive)) setHeld(false);
+  }, [ssPlaying, media?.src, deviceActive]);
+
+  if (!media) return null;
+
+  const groupHeld = held && !deviceActive && media.ss_state != null;
+  const sendspin = groupHeld || media.src === "sendspin";
+  const playing = !groupHeld && media.state === 2;
+  const active = deviceActive || groupHeld;
+  const title = sendspin && active ? entity(ctx, "media_title")?.value : "";
+  const artist = sendspin && active ? entity(ctx, "media_artist")?.value : "";
+  const src = sendspin ? TEXT.media_src_group : TEXT.media_src_local;
+  const stateText = groupHeld ? MEDIA_STATE[3] : MEDIA_STATE[media.state];
+  const srcParam = sendspin ? "sendspin" : "local";
+
+  const pause = () => {
+    if (sendspin) setHeld(true);
+    mediaCmd("pause", null, srcParam);
+  };
+
+  return (
+    <Card
+      title="Media"
+      hint={HINTS.media}
+      right={stateText && <span class="dim xs">{`${stateText} \u00b7 ${src}`}</span>}
+    >
+      {active ? (
+        <>
+          {(title || artist) && (
+            <div class="media-meta">
+              <div class="media-title">{title}</div>
+              {artist && <div class="media-artist dim">{artist}</div>}
+            </div>
+          )}
+          <div class="media-controls">
+            {sendspin && (
+              <button class="btn sq" aria-label="Previous track" onClick={() => mediaCmd("prev", null, srcParam)}>
+                {"\u23ee"}
+              </button>
+            )}
+            <button
+              class="btn sq"
+              aria-label={playing ? "Pause" : "Play"}
+              onClick={() => (playing ? pause() : mediaCmd("play", null, srcParam))}
+            >
+              {playing ? "\u23f8" : "\u25b6"}
+            </button>
+            {sendspin && (
+              <button class="btn sq" aria-label="Next track" onClick={() => mediaCmd("next", null, srcParam)}>
+                {"\u23ed"}
+              </button>
+            )}
+          </div>
+        </>
+      ) : (
+        media.state !== 4 && <p class="dim sm">{TEXT.media_idle}</p>
+      )}
+      <Row label="Volume">
+        <Slider
+          value={groupHeld ? media.ss_volume : media.volume}
+          min={0}
+          max={100}
+          step={1}
+          format={(v) => `${v}%`}
+          onCommit={(v) => mediaCmd("volume", v, srcParam)}
+        />
+      </Row>
+    </Card>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /* Physical buttons                                                    */
@@ -420,6 +537,7 @@ function Buttons({ ctx }) {
 
 export function Controls({ ctx }) {
   const voice = useVoice(true);
+  const { media, mediaCmd } = useMedia(true);
 
   return (
     <>
@@ -429,6 +547,10 @@ export function Controls({ ctx }) {
       {/* The settings that used to sit here - mute, the wake chime, sensitivity, the speaker channel
           and the assistant's own volume - are on Config as Voice Input and Audio Output. What is left
           on this route is what you look at rather than what you set once. */}
+      {/* Media above Voice - the owner's call after using it on hardware, reversing the wireframe's
+          ordering. The transport controls are what a hand reaches for; the voice transcript is what
+          an eye glances at. */}
+      <Media ctx={ctx} media={media} mediaCmd={mediaCmd} />
       <VoiceStatus voice={voice} />
       <Timers voice={voice} />
       <Leds ctx={ctx} />

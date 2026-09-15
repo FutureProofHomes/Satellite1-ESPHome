@@ -125,6 +125,9 @@ export const HINTS = {
   timers:
     "Timers set by voice, held on the device. They keep counting and still ring if Home Assistant goes away.",
 
+  media:
+    "Whatever this device is playing right now, from either source: a group stream, or media sent to it by Home Assistant. Track skipping belongs to group streams - media from Home Assistant is a single stream with no queue to skip within. The volume here is the media volume; what the assistant says has its own level, on Config.",
+
   heap: "Internal RAM still available. This is the number that matters: it is what audio buffers and the network stack allocate from, and it is far scarcer than PSRAM.",
 
   psram:
@@ -190,6 +193,16 @@ export const TEXT = {
   // its header, so it has something to say from the moment the device answers; this only fills the space
   // where the lines will go.
   nothing_said: "Nothing said yet. What you say and what it replies will appear here.",
+
+  // The Media card's idle line. The card stays on the page - the volume slider still sets the level
+  // whatever plays next arrives at - so this fills the space the transport controls will use.
+  media_idle: "Nothing playing. Group streams and media sent from Home Assistant show up here.",
+
+  // The source labels in the card header. "Group stream" rather than the protocol's name, because
+  // what the customer configured is Music Assistant or something like it, and the fact it speaks
+  // Sendspin underneath is not their vocabulary.
+  media_src_group: "group stream",
+  media_src_local: "this speaker",
 
   // Only when every wake word is off. Phrased as a consequence rather than a warning: it is a reasonable
   // thing to want, and the way back is the switches directly above it.

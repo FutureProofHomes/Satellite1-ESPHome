@@ -10,6 +10,7 @@ from esphome.components import (
     binary_sensor,
     button,
     event,
+    media_player,
     number,
     select,
     sensor,
@@ -46,6 +47,8 @@ CONF_ENTITIES = "entities"
 CONF_MICRO_WAKE_WORD_ID = "micro_wake_word_id"
 CONF_VOICE_ASSISTANT_ID = "voice_assistant_id"
 CONF_VOICE_PHASE = "voice_phase"
+CONF_MEDIA_PLAYER_ID = "media_player_id"
+CONF_SENDSPIN_MEDIA_PLAYER_ID = "sendspin_media_player_id"
 CONF_ON_HA_REFRESH = "on_ha_refresh"
 CONF_ON_HA_SELECT = "on_ha_select"
 CONF_ON_SELECTION_CHANGE = "on_selection_change"
@@ -108,6 +111,13 @@ CONFIG_SCHEMA = cv.All(
             # models never reach /events or the entity REST API, and the component itself is the only
             # way to see or change which are armed. Optional for the same reason as the two above.
             cv.Optional(CONF_MICRO_WAKE_WORD_ID): cv.use_id(MicroWakeWord),
+            # Media players are not covered by web_server either - it registers no media_player
+            # handler, so they ride neither /events nor the entity REST API. These two back
+            # GET/POST /api/sat1/media: the local speaker player, and the Sendspin group player the
+            # endpoints prefer while it is playing. Both optional so a build with neither still
+            # compiles; the endpoints answer 404 without them.
+            cv.Optional(CONF_MEDIA_PLAYER_ID): cv.use_id(media_player.MediaPlayer),
+            cv.Optional(CONF_SENDSPIN_MEDIA_PLAYER_ID): cv.use_id(media_player.MediaPlayer),
             # Fired when a browser posts to /api/sat1/ha/refresh. The work is a Home Assistant action
             # call, which belongs in YAML next to the rest of the ladder, so the component only says
             # that someone asked. Optional: without common/web_ui_ha.yaml the endpoint accepts the
@@ -179,6 +189,18 @@ async def to_code(config):
     if CONF_MICRO_WAKE_WORD_ID in config:
         cg.add(
             var.set_micro_wake_word(await cg.get_variable(config[CONF_MICRO_WAKE_WORD_ID]))
+        )
+
+    if CONF_MEDIA_PLAYER_ID in config:
+        cg.add(
+            var.set_media_player(await cg.get_variable(config[CONF_MEDIA_PLAYER_ID]))
+        )
+
+    if CONF_SENDSPIN_MEDIA_PLAYER_ID in config:
+        cg.add(
+            var.set_sendspin_media_player(
+                await cg.get_variable(config[CONF_SENDSPIN_MEDIA_PLAYER_ID])
+            )
         )
 
     if CONF_ON_SELECTION_CHANGE in config:

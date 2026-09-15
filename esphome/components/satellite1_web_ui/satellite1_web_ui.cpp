@@ -60,6 +60,12 @@ void Satellite1WebUI::loop() {
   // rather than in the endpoint because enabling a model writes NVS and races the inference task.
   this->handler_.apply_wake_word_requests();
 #endif
+
+#ifdef USE_MEDIA_PLAYER
+  // Same shape as the wake words: the endpoint recorded the request, and make_call().perform()
+  // belongs on the main loop, where every other caller of these players already lives.
+  this->handler_.apply_media_requests();
+#endif
 }
 
 char *Satellite1WebUI::stage_ha_payload(size_t capacity) { return this->handler_.stage_ha_payload(capacity); }

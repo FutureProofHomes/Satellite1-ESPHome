@@ -21,6 +21,10 @@
 #include "esphome/components/voice_assistant/voice_assistant.h"
 #endif
 
+#ifdef USE_MEDIA_PLAYER
+#include "esphome/components/media_player/media_player.h"
+#endif
+
 #include "esphome/core/entity_base.h"
 #include "esphome/core/helpers.h"
 
@@ -62,6 +66,14 @@ struct SelectWrite {
 /// for a wake word may have to move that wake word into a slot and set the slot's pipeline, and doing
 /// that for both slots at once is four. A fifth is refused rather than dropped, so the app finds out.
 static constexpr size_t WU_SELECT_QUEUE = 4;
+
+#ifdef USE_MEDIA_PLAYER
+/// The transport commands POST /api/sat1/media/<cmd> accepts. Deliberately the card's four and no
+/// more: stop, mute and the rest exist on the players, but an endpoint nothing renders is surface
+/// to maintain and document for no caller. Volume is not here because it travels as a value rather
+/// than a verb - see media_pending_vol_.
+enum class MediaCmd : uint8_t { NONE = 0, PLAY, PAUSE, NEXT, PREVIOUS };
+#endif
 
 /// Longest option this will forward, and it is the transport's number rather than a guess.
 ///
@@ -229,6 +241,22 @@ class WebUIHandler : public AsyncWebHandler {
   /// Set from the component's setup(), before this handler is registered.
   void set_selection(Selection *selection) { this->selection_ = selection; }
 
+#ifdef USE_MEDIA_PLAYER
+  /// Both set from generated setup code, before the listener accepts anything.
+  ///
+  /// Media players are the other thing web_server cannot cover: it registers no media_player
+  /// handler at all, so they ride neither /events nor the entity REST API, and the two endpoints
+  /// here are the only way a browser sees or moves them. Two players rather than a list because
+  /// the preference between them is fixed and named - see active_media_.
+  void set_media_player(media_player::MediaPlayer *mp) { this->media_local_ = mp; }
+  void set_sendspin_media_player(media_player::MediaPlayer *mp) { this->media_sendspin_ = mp; }
+
+  /// Applies whatever a browser asked for since the last call. Must run on the main loop:
+  /// make_call().perform() starts pipeline work on components that assume it, exactly as the wake
+  /// word models do.
+  void apply_media_requests();
+#endif
+
 #ifdef USE_MICRO_WAKE_WORD
   /// Set from the component's setup(), before this handler is registered.
   ///
@@ -281,6 +309,10 @@ class WebUIHandler : public AsyncWebHandler {
     WAKE_WORDS,
     WAKE_WORDS_SET,
 #endif
+#ifdef USE_MEDIA_PLAYER
+    MEDIA,
+    MEDIA_SET,
+#endif
   };
 
   static Route match_route_(AsyncWebServerRequest *request);
@@ -312,6 +344,29 @@ class WebUIHandler : public AsyncWebHandler {
 #ifdef USE_MICRO_WAKE_WORD
   void handle_wake_words_(AsyncWebServerRequest *request);
   void handle_wake_words_set_(AsyncWebServerRequest *request);
+#endif
+#ifdef USE_MEDIA_PLAYER
+  void handle_media_(AsyncWebServerRequest *request);
+  void handle_media_set_(AsyncWebServerRequest *request);
+
+  /// Which player a command or the card is about, resolved fresh each time it is asked.
+  ///
+  /// The plan's rule is "prefer the Sendspin group while it is actively playing", and the ladder here
+  /// is that rule plus the two edges it leaves open. A *paused* Sendspin stream still owns the card -
+  /// otherwise pressing pause would flip the card to the idle local player and the play button that
+  /// promised to resume would start the wrong thing - but it loses to a local player that is actually
+  /// making sound, so a Home Assistant stream started over a paused group session is the one on
+  /// screen. Local ANNOUNCING counts as sound for the same reason.
+  ///
+  /// The paused rung is currently unreachable, and knowing why matters more than removing it: the
+  /// Sendspin protocol has no paused state, so a paused group arrives here as IDLE. The frontend
+  /// carries that gap - see the `src` parameter on POST - and the rung stays for the day upstream
+  /// learns to say PAUSED, at which point it starts working instead of starting to lie.
+  media_player::MediaPlayer *active_media_() const;
+
+  /// The player a request named, or the active one when it named none. Null when it named one this
+  /// build does not have, which the caller treats as a stale intention to drop.
+  media_player::MediaPlayer *resolve_media_(uint8_t src) const;
 #endif
 
   const uint8_t *index_gz_{nullptr};
@@ -405,6 +460,34 @@ class WebUIHandler : public AsyncWebHandler {
   std::function<int()> voice_phase_fn_{};
   std::vector<Utterance> transcript_;
   Mutex transcript_lock_;
+#endif
+
+#ifdef USE_MEDIA_PLAYER
+  media_player::MediaPlayer *media_local_{nullptr};
+  media_player::MediaPlayer *media_sendspin_{nullptr};
+
+  /// A media command is recorded here and applied from the main loop, never from the httpd task -
+  /// the same split as the wake words, for the same first reason: make_call().perform() starts
+  /// pipeline work on the target component, which nothing there expects from another task.
+  ///
+  /// Coalesced last-writer-wins rather than queued, and split in two because the two writes are
+  /// independent: a volume drag mid-pause should not cancel the pause, and the pause should not
+  /// discard the volume. Command 0 is none, otherwise MediaCmd; volume -1 is none, otherwise
+  /// 0..100. Two taps before the next loop iteration collapse to the last, which for transport
+  /// buttons is the correct answer.
+  std::atomic<uint8_t> media_pending_cmd_{0};
+  std::atomic<int16_t> media_pending_vol_{-1};
+
+  /// Which player each pending write is for: 0 resolve as active, 1 the Sendspin group, 2 local.
+  ///
+  /// Explicit targets exist because "active" and "what the card shows" can genuinely disagree, and
+  /// hardware found the case: the Sendspin protocol has no paused state - SendspinPlaybackState is
+  /// PLAYING or STOPPED, nothing else - so a paused group stream reports as an idle player and the
+  /// active resolution falls through to local. The card that did the pausing is the only witness
+  /// that the group is resumable, so it names its target and this code believes it. Written before
+  /// their command/volume partner, which is the flag apply reads.
+  std::atomic<uint8_t> media_pending_cmd_src_{0};
+  std::atomic<uint8_t> media_pending_vol_src_{0};
 #endif
 };
 

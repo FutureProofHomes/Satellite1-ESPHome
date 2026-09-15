@@ -50,6 +50,11 @@ class Satellite1WebUI : public Component {
   void set_micro_wake_word(micro_wake_word::MicroWakeWord *mww) { this->handler_.set_micro_wake_word(mww); }
 #endif
 
+#ifdef USE_MEDIA_PLAYER
+  void set_media_player(media_player::MediaPlayer *mp) { this->handler_.set_media_player(mp); }
+  void set_sendspin_media_player(media_player::MediaPlayer *mp) { this->handler_.set_sendspin_media_player(mp); }
+#endif
+
   /// All called from the rung lambdas in common/web_ui_ha.yaml.
   ///
   /// The payload arrives as a buffer rather than a string, in two steps: stage hands out PSRAM to write

@@ -533,6 +533,60 @@ export function useVoice(enabled) {
   return voice;
 }
 
+/**
+ * GET /api/sat1/media, polled only while Controls is on screen, at the voice endpoint's cadence and
+ * for its reasons: a second while something is playing so the state tracks the room, five when idle.
+ *
+ * A poll because there is nothing else: web_server has no media_player handler, so the players ride
+ * neither /events nor the entity REST API. The track title and artist do *not* come from here - they
+ * are Sendspin metadata text sensors riding the SSE stream - so this carries only what genuinely has
+ * no entity: which source is active, its state, and its volume.
+ *
+ * `mediaCmd` posts a transport command or a volume. Fire-and-forget on purpose: the device queues
+ * the command for its main loop, so the POST's answer never carries the state that resulted - the
+ * next poll does. A failed post already surfaces through the toast.
+ */
+export function useMedia(enabled) {
+  const [media, setMedia] = useState(null);
+  const busy = media ? media.state === 2 || media.state === 3 : false;
+
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    let timer = null;
+
+    const tick = async () => {
+      try {
+        const json = await requestJson("/api/sat1/media");
+        if (json && live) setMedia(json);
+      } catch {
+        // Same as the voice poll: the stream banner covers a device that has gone.
+      }
+      if (live) timer = setTimeout(tick, busy ? 1000 : 5000);
+    };
+
+    tick();
+    return () => {
+      live = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [enabled, busy]);
+
+  // `src` names the player the card is showing, so a command lands on it and not on whatever the
+  // device resolves as active in the moment the queue drains. Load-bearing for a paused group
+  // stream: the Sendspin protocol has no paused state, so the device sees an idle player there and
+  // would aim an unqualified play at the local one.
+  const mediaCmd = (cmd, v, src) => {
+    const q = new URLSearchParams();
+    if (v != null) q.set("v", v);
+    if (src) q.set("src", src);
+    const qs = q.toString();
+    return post(`/api/sat1/media/${cmd}${qs ? `?${qs}` : ""}`);
+  };
+
+  return { media, mediaCmd };
+}
+
 /* ------------------------------------------------------------------ */
 /* Wake words, which are not entities                                  */
 /* ------------------------------------------------------------------ */

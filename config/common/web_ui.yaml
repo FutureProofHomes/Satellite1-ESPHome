@@ -168,6 +168,12 @@ satellite1_web_ui:
   # arms it only while a timer is ringing, so a switch over it would be rewritten from under the reader.
   micro_wake_word_id: mww
 
+  # The local speaker player, for GET/POST /api/sat1/media - web_server has no media_player handler,
+  # so the endpoints are the only way the app sees or moves it. Its Sendspin counterpart is named in
+  # common/sendspin.yaml beside the player it points at; the endpoints prefer that one while it is
+  # playing.
+  media_player_id: external_media_player
+
   # Which entity backs which control in the app.
   #
   # web_server identifies entities by their display name in both directions - /events publishes

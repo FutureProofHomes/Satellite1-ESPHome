@@ -1,5 +1,6 @@
 #include "web_ui_handler.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -92,6 +93,12 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
     if (url == "/api/sat1/wakewords")
       return Route::WAKE_WORDS_SET;
 #endif
+#ifdef USE_MEDIA_PLAYER
+    // A prefix, not an equality: the command rides the path as /api/sat1/media/<cmd>, and the
+    // handler parses the tail. url_buf is NUL-terminated by url_to, so strncmp is safe here.
+    if (strncmp(url_buf, "/api/sat1/media/", 16) == 0)
+      return Route::MEDIA_SET;
+#endif
     return Route::NONE;
   }
 
@@ -113,6 +120,10 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
 #ifdef USE_VOICE_ASSISTANT
   if (url == "/api/sat1/voice")
     return Route::VOICE;
+#endif
+#ifdef USE_MEDIA_PLAYER
+  if (url == "/api/sat1/media")
+    return Route::MEDIA;
 #endif
 
   return Route::NONE;
@@ -141,6 +152,12 @@ bool WebUIHandler::route_streams_(Route route) {
     case Route::SEL_SET:
 #ifdef USE_MICRO_WAKE_WORD
     case Route::WAKE_WORDS_SET:
+#endif
+#ifdef USE_MEDIA_PLAYER
+    // MEDIA is here as well: its whole body fits a stack snprintf, so unlike the other GETs it
+    // needs no AsyncResponseStream and works when the heap could not provide one.
+    case Route::MEDIA:
+    case Route::MEDIA_SET:
 #endif
       // The bundle is sent from PROGMEM, the Home Assistant payload from PSRAM, and every write
       // answers with a string literal. None of them need heap to reply.
@@ -223,6 +240,14 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
     case Route::SEL_SET:
       this->handle_sel_set_(request);
       break;
+#ifdef USE_MEDIA_PLAYER
+    case Route::MEDIA:
+      this->handle_media_(request);
+      break;
+    case Route::MEDIA_SET:
+      this->handle_media_set_(request);
+      break;
+#endif
     case Route::NONE:
       break;
   }
@@ -516,6 +541,189 @@ void WebUIHandler::apply_wake_word_requests() {
       models[at]->disable();
     }
     ESP_LOGD(TAG_WU, "Wake word %s %s", models[at]->get_id().c_str(), on ? "enabled" : "disabled");
+  }
+}
+#endif
+
+#ifdef USE_MEDIA_PLAYER
+media_player::MediaPlayer *WebUIHandler::active_media_() const {
+  using media_player::MediaPlayerState;
+  const auto ss = this->media_sendspin_ != nullptr ? this->media_sendspin_->state : MediaPlayerState::MEDIA_PLAYER_STATE_NONE;
+  const auto lc = this->media_local_ != nullptr ? this->media_local_->state : MediaPlayerState::MEDIA_PLAYER_STATE_NONE;
+
+  // The ladder the header explains: a playing group stream wins, then a local player actually making
+  // sound, then a paused group stream (so its play button resumes it), then whatever local is.
+  if (ss == MediaPlayerState::MEDIA_PLAYER_STATE_PLAYING)
+    return this->media_sendspin_;
+  if (lc == MediaPlayerState::MEDIA_PLAYER_STATE_PLAYING || lc == MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING)
+    return this->media_local_;
+  if (ss == MediaPlayerState::MEDIA_PLAYER_STATE_PAUSED)
+    return this->media_sendspin_;
+  return this->media_local_ != nullptr ? this->media_local_ : this->media_sendspin_;
+}
+
+media_player::MediaPlayer *WebUIHandler::resolve_media_(uint8_t src) const {
+  if (src == 1)
+    return this->media_sendspin_;
+  if (src == 2)
+    return this->media_local_;
+  return this->active_media_();
+}
+
+void WebUIHandler::handle_media_(AsyncWebServerRequest *request) {
+  auto *active = this->active_media_();
+  if (active == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  // Read from the httpd task without a lock, deliberately. `state` is an aligned byte-wide enum and
+  // `volume` an aligned 32-bit float, neither of which the ESP32 can tear, and web_server's own
+  // entity REST handlers read entity state from this task the same way. The worst case is a value
+  // one main-loop iteration old, which the next poll corrects.
+  //
+  // A stack buffer rather than an AsyncResponseStream: the body is bounded at well under 144 bytes,
+  // so unlike the streamed GETs this endpoint keeps answering when the internal heap could not
+  // provide a stream - route_streams_ says false for it, and this is why.
+  char body[144];
+  const int state = static_cast<int>(active->state);
+  const int volume = static_cast<int>(std::roundf(active->volume * 100.0f));
+  int len = snprintf(body, sizeof(body), R"({"src":"%s","state":%d,"volume":%d,"muted":%d)",
+                     active == this->media_sendspin_ ? "sendspin" : "local", state, volume,
+                     active->is_muted() ? 1 : 0);
+
+  // The group player rides along whenever it exists, under its own keys. The card needs it to keep a
+  // paused group stream operable: the Sendspin protocol has no paused state, so a paused group is an
+  // idle player here and `src` above says "local" - and the volume the paused-group card shows has to
+  // come from somewhere other than the player the device thinks is active.
+  if (len > 0 && static_cast<size_t>(len) < sizeof(body) && this->media_sendspin_ != nullptr) {
+    len += snprintf(body + len, sizeof(body) - static_cast<size_t>(len), R"(,"ss_state":%d,"ss_volume":%d)",
+                    static_cast<int>(this->media_sendspin_->state),
+                    static_cast<int>(std::roundf(this->media_sendspin_->volume * 100.0f)));
+  }
+  if (len > 0 && static_cast<size_t>(len) + 1 < sizeof(body)) {
+    body[len++] = '}';
+    body[len] = '\0';
+  } else {
+    request->send(500, "application/json", "{\"ok\":0}");
+    return;
+  }
+  request->send(200, "application/json", body);
+}
+
+void WebUIHandler::handle_media_set_(AsyncWebServerRequest *request) {
+  if (this->media_local_ == nullptr && this->media_sendspin_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+  request->url_to(url_buf);
+  const char *cmd = url_buf + 16;  // Past "/api/sat1/media/", which match_route_ has already tested.
+
+  // An optional explicit target. The card sends the source it is showing, which protects every
+  // command from the race where the active player changes between the render and the tap - and is
+  // the only way to reach a paused group stream at all, since that reports as an idle player and
+  // the active resolution walks past it. No src keeps the resolve-at-apply behaviour.
+  uint8_t src = 0;
+  if (auto *sp = request->getParam("src"); sp != nullptr) {
+    if (sp->value() == "sendspin") {
+      src = 1;
+    } else if (sp->value() == "local") {
+      src = 2;
+    } else {
+      request->send(400, "application/json", "{\"ok\":0}");
+      return;
+    }
+  }
+
+  if (strcmp(cmd, "volume") == 0) {
+    auto *v = request->getParam("v");
+    if (v == nullptr) {
+      request->send(400, "application/json", "{\"ok\":0}");
+      return;
+    }
+    // strtoul for the same reason the wake word index uses it: a non-numeric value must be refused,
+    // not silently read as zero - which here would be a volume nobody chose.
+    const std::string &text = v->value();
+    char *end = nullptr;
+    const unsigned long parsed = strtoul(text.c_str(), &end, 10);
+    if (end == text.c_str() || *end != '\0' || parsed > 100) {
+      request->send(400, "application/json", "{\"ok\":0}");
+      return;
+    }
+    // Target first, then the value: the value is the flag apply reads, so it must never be seen
+    // with a stale target beside it - the same ordering the wake word mask uses.
+    this->media_pending_vol_src_.store(src, std::memory_order_relaxed);
+    this->media_pending_vol_.store(static_cast<int16_t>(parsed), std::memory_order_release);
+    request->send(200, "application/json", "{\"ok\":1}");
+    return;
+  }
+
+  MediaCmd wanted = MediaCmd::NONE;
+  if (strcmp(cmd, "play") == 0) {
+    wanted = MediaCmd::PLAY;
+  } else if (strcmp(cmd, "pause") == 0) {
+    wanted = MediaCmd::PAUSE;
+  } else if (strcmp(cmd, "next") == 0) {
+    wanted = MediaCmd::NEXT;
+  } else if (strcmp(cmd, "prev") == 0) {
+    wanted = MediaCmd::PREVIOUS;
+  }
+  if (wanted == MediaCmd::NONE) {
+    // 404 rather than 400: the path itself named something this device does not offer.
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  // Target first for the ordering reason the volume pair gives.
+  this->media_pending_cmd_src_.store(src, std::memory_order_relaxed);
+  this->media_pending_cmd_.store(static_cast<uint8_t>(wanted), std::memory_order_release);
+  // Queued, not done - the main loop applies it within an iteration, and the card's next poll is
+  // what reports the state that resulted.
+  request->send(200, "application/json", "{\"ok\":1}");
+}
+
+void WebUIHandler::apply_media_requests() {
+  const auto cmd = static_cast<MediaCmd>(this->media_pending_cmd_.exchange(0, std::memory_order_acquire));
+  const int16_t vol = this->media_pending_vol_.exchange(-1, std::memory_order_acquire);
+  if (cmd == MediaCmd::NONE && vol < 0)
+    return;
+
+  // Volume first and as its own call, so a pause arriving in the same iteration cannot make the
+  // volume ride a call whose command the player might refuse. Each write resolves its own target: a
+  // named player is taken at its word (see resolve_media_), and one this build lacks drops the write.
+  if (vol >= 0) {
+    auto *vt = this->resolve_media_(this->media_pending_vol_src_.load(std::memory_order_relaxed));
+    if (vt != nullptr)
+      vt->make_call().set_volume(static_cast<float>(vol) / 100.0f).perform();
+  }
+
+  auto *target = this->resolve_media_(this->media_pending_cmd_src_.load(std::memory_order_relaxed));
+  if (target == nullptr)
+    return;
+
+  switch (cmd) {
+    case MediaCmd::PLAY:
+      target->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_PLAY).perform();
+      break;
+    case MediaCmd::PAUSE:
+      target->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_PAUSE).perform();
+      break;
+    // Track skipping is the group stream's alone: the local speaker player has no queue to skip
+    // within, and would log an unsupported-command warning for a button the card never shows on it.
+    // Dropped rather than redirected, because a skip aimed at a player that has since stopped being
+    // active is a stale intention, not a command for whoever is active now.
+    case MediaCmd::NEXT:
+      if (target == this->media_sendspin_)
+        target->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_NEXT).perform();
+      break;
+    case MediaCmd::PREVIOUS:
+      if (target == this->media_sendspin_)
+        target->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_PREVIOUS).perform();
+      break;
+    case MediaCmd::NONE:
+      break;
   }
 }
 #endif
