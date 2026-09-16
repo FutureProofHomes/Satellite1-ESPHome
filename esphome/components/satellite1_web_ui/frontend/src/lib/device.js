@@ -38,6 +38,24 @@ function reportWriteError(path, why) {
 }
 
 /**
+ * Ask Home Assistant for a fresh area/player/pipeline list, once per page load, no matter which
+ * route asks first or how many do.
+ *
+ * Module scope, not component state, and deliberately not reset on unmount: GET /api/sat1/ha returns
+ * the device's cached copy, and the device only re-asks Home Assistant 5s after the native API
+ * connects or when something POSTs /api/sat1/ha/refresh - there is no interval. One sync per load is
+ * the contract, and reloading the page is the gesture that means "look again". This lived as a
+ * module global in the Config route until the wake words card moved to its own route and both needed
+ * the same guard.
+ */
+let haAskedThisLoad = false;
+export function haSyncOnce(haRefresh) {
+  if (haAskedThisLoad) return;
+  haAskedThisLoad = true;
+  haRefresh();
+}
+
+/**
  * Every request this app makes, one at a time.
  *
  * Reads are queued as well as writes, because each request the browser has in flight is a separate
@@ -524,7 +542,7 @@ export const PHASE = {
 };
 
 /**
- * GET /api/sat1/voice, polled only while Controls is on screen.
+ * GET /api/sat1/voice, polled only while the home page is on screen.
  *
  * A second while a timer is counting or the assistant is mid-exchange, five seconds otherwise. The
  * fast rate is there so a timer's remaining seconds move; polling that hard when nothing is
@@ -561,7 +579,7 @@ export function useVoice(enabled) {
 }
 
 /**
- * GET /api/sat1/media, polled only while Controls is on screen, at the voice endpoint's cadence and
+ * GET /api/sat1/media, polled only while the home page is on screen, at the voice endpoint's cadence and
  * for its reasons: a second while something is playing so the state tracks the room, five when idle.
  *
  * A poll because there is nothing else: web_server has no media_player handler, so the players ride
@@ -865,6 +883,12 @@ export function useEvents() {
   const logRef = useRef([]);
   const [logSeq, setLogSeq] = useState(0);
   const pausedRef = useRef(false);
+  // How many components are currently reading the log - in practice the Logs card, or nobody. The
+  // ring fills regardless (a push into a ref costs no render), but the seq bump below only fires
+  // while someone is looking. Without this, every log line re-rendered whatever route was open,
+  // around the clock: on a debug-level device that is tens of vdom diffs a second bought by a tab
+  // sitting on the home page, which is exactly the tab a wall-mounted tablet is.
+  const logWatchRef = useRef(0);
 
   useEffect(() => {
     const es = new EventSource("/events");
@@ -879,11 +903,17 @@ export function useEvents() {
       if (pausedRef.current) return;
       const text = e.data.replace(ANSI, "");
       const m = LEVEL.exec(text);
-      logRef.current.push({ lvl: m ? m[1] : "?", text });
+      // `at` is the browser's clock at arrival, because the line itself carries no wall time - the
+      // device's logger stamps uptime, not time of day, and the /events payload is just the text.
+      // Arrival is honest enough: the stream is live-only, so a line is read within milliseconds of
+      // being produced or not at all.
+      logRef.current.push({ lvl: m ? m[1] : "?", text, at: Date.now() });
       if (logRef.current.length > LOG_RING) logRef.current.splice(0, logRef.current.length - LOG_RING);
       // The ring is a ref and the counter is the state, so a burst of log lines costs one render
-      // rather than one render per line. A noisy boot is several hundred lines in a second.
-      setLogSeq((n) => n + 1);
+      // rather than one render per line (a noisy boot is several hundred lines in a second) - and
+      // no render at all while nothing displays the log. The card catches up on mount: it reads the
+      // ring directly, and mounting is itself the render.
+      if (logWatchRef.current > 0) setLogSeq((n) => n + 1);
     });
 
     return () => es.close();
@@ -896,7 +926,16 @@ export function useEvents() {
     setLogSeq((n) => n + 1);
   };
 
-  return { states, connected, log: logRef.current, logSeq, pausedRef, clearLog };
+  // Called from an effect by whatever shows the log; returns the cleanup that stops watching. A
+  // count rather than a flag, so a second reader some day cannot switch the first one off.
+  const logWatch = () => {
+    logWatchRef.current += 1;
+    return () => {
+      logWatchRef.current -= 1;
+    };
+  };
+
+  return { states, connected, log: logRef.current, logSeq, pausedRef, clearLog, logWatch };
 }
 
 /* ------------------------------------------------------------------ */

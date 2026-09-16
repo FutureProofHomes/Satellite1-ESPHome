@@ -13,24 +13,34 @@ import { Config } from "./routes/config.jsx";
 import { Controls } from "./routes/controls.jsx";
 import { Diagnostics } from "./routes/diagnostics.jsx";
 import { Presence } from "./routes/presence.jsx";
+import { WakeWords } from "./routes/wakewords.jsx";
 import { Chevron, Hint } from "./ui.jsx";
 
 /**
- * All four of the canvas's routes.
- *
- * Presence sits second, next to the sensor pills that link into it. It is the only route that keeps
- * polling while it is open, and the only one whose data does not come from entities at all - the radar
- * settings live in the module's own config, behind `satellite1_radar`'s /api/v1 endpoints.
+ * Five routes, in the order the owner set in the September 2026 information-architecture pass:
+ * Controls became Home (the page you land on and glance at), the wake words card became a route of
+ * its own, and Config became Audio (what remains there is the speaker, routing and ducking - all
+ * sound). Presence is the only route that keeps polling while it is open, and the only one whose
+ * data does not come from entities at all - the radar settings live in the module's own config,
+ * behind `satellite1_radar`'s /api/v1 endpoints.
  */
 const ROUTES = [
-  { id: "controls", label: "Controls", view: Controls },
+  { id: "home", label: "Home", view: Controls },
+  { id: "wake-word", label: "Wake Word", view: WakeWords },
+  { id: "audio", label: "Audio", view: Config },
   { id: "presence", label: "Presence", view: Presence },
-  { id: "config", label: "Config", view: Config },
   { id: "diagnostics", label: "Diagnostics", view: Diagnostics },
 ];
 
+/** The pre-rename hashes. Bookmarks survive firmware updates by design (the hash never reaches the
+ *  server), so the old names must keep landing somewhere better than the default. */
+const LEGACY_ROUTES = { controls: "home", config: "audio" };
+
 function useHashRoute() {
-  const read = () => (location.hash.replace(/^#\/?/, "").split("?")[0] || "controls").toLowerCase();
+  const read = () => {
+    const h = (location.hash.replace(/^#\/?/, "").split("?")[0] || "home").toLowerCase();
+    return LEGACY_ROUTES[h] || h;
+  };
   const [route, setRoute] = useState(read);
 
   useEffect(() => {
@@ -39,7 +49,7 @@ function useHashRoute() {
     return () => removeEventListener("hashchange", on);
   }, []);
 
-  return [ROUTES.some((r) => r.id === route) ? route : "controls", (id) => (location.hash = `#/${id}`)];
+  return [ROUTES.some((r) => r.id === route) ? route : "home", (id) => (location.hash = `#/${id}`)];
 }
 
 /* ------------------------------------------------------------------ */
@@ -107,6 +117,14 @@ function ThemeSwitch() {
  * above it, which is now only inches away since the drawer starts below the bar rather than over it.
  */
 function NavPane({ route, go, open, onClose }) {
+  // Escape closes it, listener held only while it is open so a shut drawer costs nothing on keydown.
+  useEffect(() => {
+    if (!open) return;
+    const esc = (e) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", esc);
+    return () => document.removeEventListener("keydown", esc);
+  }, [open, onClose]);
+
   return (
     <div class={`scrim navscrim${open ? " on" : ""}`} onClick={onClose} aria-hidden={!open}>
       <nav class="navpane" onClick={(e) => e.stopPropagation()}>
@@ -134,92 +152,124 @@ function NavPane({ route, go, open, onClose }) {
  */
 const peerHref = (base, route) => `${String(base).replace(/\/+$/, "")}/#/${route}`;
 
-/** "192.168.4.31" out of "http://192.168.4.31:80/", for the row's subtitle and for de-duplication. */
+/** "192.168.4.31" out of "http://192.168.4.31:80/", for the row's subtitle. */
 const hostOf = (u) => String(u || "").replace(/^https?:\/\//, "").replace(/[/:].*$/, "");
-
-/** A typed address may or may not carry a scheme; a link needs one. */
-const withScheme = (a) => (/^https?:\/\//.test(a) ? a : `http://${a}`);
-
-/**
- * The addresses someone typed in by hand - the fallback for everything the payload cannot list:
- * Home Assistant away, or a peer it has in no area. Guarded like the theme, because localStorage
- * throws rather than no-ops with site data blocked, and forgetting the list is survivable.
- */
-function readManualPeers() {
-  try {
-    const v = JSON.parse(localStorage.getItem("sat1.peers") || "[]");
-    return Array.isArray(v) ? v.filter((a) => typeof a === "string") : [];
-  } catch {
-    return [];
-  }
-}
-function writeManualPeers(list) {
-  try {
-    localStorage.setItem("sat1.peers", JSON.stringify(list));
-  } catch {
-    /* Not remembering it is survivable; the rows already on screen keep working. */
-  }
-}
 
 /**
  * The device switcher: this device on top, then every other Satellite1 the Home Assistant payload
- * lists, then whatever was added by address.
+ * lists as available, then the unavailable ones folded into a submenu at the bottom.
  *
  * The roster is the `dev` block that already rides GET /api/sat1/ha - no discovery happens here.
  * mDNS browsing from a browser is not a thing, and probing peers directly is not either: Digest
  * credentials are scoped per origin and a cross-origin probe dies on the preflight. So each row's
  * link is the peer's `configuration_url` - the same address behind Home Assistant's "Visit device" -
  * and each row's dot is Home Assistant's availability view, which is better data anyway: it knows a
- * device is off the moment it disconnects, where a probe would take a timeout to notice.
+ * device is off the moment it disconnects, where a probe would take a timeout to notice. The caveat
+ * that comes with it: the payload is the device's cache, refreshed once per page load, so a peer
+ * that was powered off since carries a stale green dot until the next sync.
+ *
+ * Offline peers sit behind an "Offline" disclosure, collapsed by default, per the owner: rows for
+ * powered-off devices are noise on the way to the one being looked for, but deleting them would
+ * read as devices that ceased to exist. Each keeps its link inside the fold, since Home Assistant's
+ * view can lag a reboot by a few seconds.
  *
  * Satellite1 models only. A Nexus is in `dev` too, and a row that jumps to a device with no page to
  * serve is a trap. This device is dropped by MAC rather than by name, because the name is exactly
  * the field owners change. A row with no URL renders unlinked rather than being hidden - a device
- * that exists but cannot be jumped to is still worth seeing. An unavailable peer dims but keeps its
- * link, since Home Assistant's view can lag a reboot by a few seconds.
+ * that exists but cannot be jumped to is still worth seeing.
+ *
+ * The add-by-address field and the manually-kept rows that used to end the sheet are gone at the
+ * owner's request ("I don't know what that is" is a fair review of a fallback that needed a
+ * paragraph to explain). The roster covers the case that matters; a peer Home Assistant cannot
+ * list is reachable the way it always was - by typing its address in the URL bar.
  */
-function SwitcherSheet({ device, label, area, route, ha, onClose }) {
+function SwitcherSheet({ device, label, area, route, ha, haRefresh, onClose }) {
   const haOn = !!device?.ha;
   const haText = haOn ? TEXT.ha_connected : TEXT.ha_disconnected;
   const mac = (device?.mac || "").toLowerCase();
+  const [showOff, setShowOff] = useState(false);
 
-  // Sorted by area then name, so a house full of these groups by room, matching the tree on Config.
+  // Re-sync the roster the moment the sheet opens. The dots ride the device's cached payload, and
+  // before this the cache was only rebuilt when the Audio or Wake Word route asked (once per page
+  // load) - so a sheet opened from Home showed availability from whenever that last was, and a peer
+  // powered off in between kept a green dot for days. One action call per open is cheap, haRefresh
+  // re-reads the payload after the round trip, and the rows correct themselves a second or two in.
+  useEffect(() => {
+    haRefresh();
+    // haRefresh is stable for the life of the app; this is per-open by design.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Escape closes the sheet, same as the nav drawer. Mounted only while open, so no gate needed.
+  useEffect(() => {
+    const esc = (e) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", esc);
+    return () => document.removeEventListener("keydown", esc);
+  }, [onClose]);
+
+  // Sorted by area then name, so a house full of these groups by room, matching the tree on Audio.
   const peers = (ha?.d?.dev || [])
     .filter((d) => /satellite1/i.test(d?.[0] || "") && (d?.[3] || "").toLowerCase() !== mac)
     .sort((x, y) => `${x[2]}\u0000${x[1]}`.localeCompare(`${y[2]}\u0000${y[1]}`));
 
-  const [manual, setManual] = useState(readManualPeers);
-  const [draft, setDraft] = useState("");
+  const isUp = (d) => d[6] === 1 || d[6] === "1";
+  const online = peers.filter(isUp);
+  const offline = peers.filter((d) => !isUp(d));
 
-  // A manual entry the roster also lists is hidden rather than deleted, so an address added while
-  // Home Assistant was away does not become a duplicate row when it comes back - and comes back as
-  // a row again if Home Assistant goes away again.
-  const rosterHosts = new Set(peers.map((d) => hostOf(d[5])).filter(Boolean));
-  const extras = manual.filter((a) => !rosterHosts.has(hostOf(withScheme(a))));
+  // Room and address, which are the two things that tell one Satellite1 from another. Room first
+  // and bold, per the owner: it is the half a person actually scans for - the address is what you
+  // fall back on when two devices share a room. The separator is dropped rather than left dangling
+  // when Home Assistant has not placed the device in an area.
+  const peerSub = (room, host) => (
+    <div class="peer-sub">
+      {room && <strong>{room}</strong>}
+      {room && host ? " \u2502 " : ""}
+      {host}
+    </div>
+  );
 
-  const add = () => {
-    const a = draft.trim();
-    if (!a) return;
-    const next = manual.includes(a) ? manual : [...manual, a];
-    setManual(next);
-    writeManualPeers(next);
-    setDraft("");
-  };
-  const drop = (a) => {
-    const next = manual.filter((x) => x !== a);
-    setManual(next);
-    writeManualPeers(next);
+  const peerRow = (d) => {
+    const url = d[5] ? String(d[5]) : "";
+    const up = isUp(d);
+    const dotText = up ? TEXT.peer_up : TEXT.peer_down;
+    const body = (
+      <>
+        <div class="row">
+          <span class={`dot${up ? " ok" : ""}`} title={dotText} aria-label={dotText} />
+          <span class="grow">{d[1]}</span>
+        </div>
+        {peerSub(d[2], hostOf(url))}
+      </>
+    );
+    return url ? (
+      <a key={d[3]} class={`peer go${up ? "" : " off"}`} href={peerHref(url, route)}>
+        {body}
+      </a>
+    ) : (
+      <div key={d[3]} class={`peer${up ? "" : " off"}`}>
+        {body}
+      </div>
+    );
   };
 
   return (
     <div class="scrim" onClick={onClose}>
       <div class="sheet" onClick={(e) => e.stopPropagation()}>
+        {/* Built to mirror the top bar it covers, per the owner: where the bar shows
+            "☰ <device name> ˅", this shows "✕ Device Switcher ˄" - same classes, so spacing and
+            type stay identical by construction rather than by imitation. The ✕ sits where the
+            burger does, the caret points up to say "collapses", and both the ✕ and the title close
+            the sheet, so the closing tap lands wherever the opening one did. The ⓘ stays its own
+            button at the edge, so reading the explanation cannot dismiss the thing it explains. */}
         <div class="sheet-head">
-          <span>Satellite1 Device Switcher</span>
-          <Hint text={HINTS.switcher} />
-          <button class="x" aria-label="Close" onClick={onClose}>
+          <button class="icon x" aria-label="Close" onClick={onClose}>
             &#10005;
           </button>
+          <button class="title" onClick={onClose}>
+            <span class="tname">Device Switcher</span>
+            <Chevron up cls="caret" />
+          </button>
+          <Hint text={HINTS.switcher} />
         </div>
         <div class="peer here">
           <div class="row">
@@ -230,62 +280,19 @@ function SwitcherSheet({ device, label, area, route, ha, onClose }) {
             <span class={`dot${haOn ? " ok" : ""}`} title={haText} aria-label={haText} />
             <span class="grow">{label || "This device"}</span>
           </div>
-          {/* Address and room, which are the two things that tell one Satellite1 from another now that
-              the sheet lists more than this one. The separator is dropped rather than left dangling when
-              Home Assistant has not placed the device in an area. */}
-          <div class="peer-sub">{[device?.ip, area].filter(Boolean).join(" \u2502 ")}</div>
+          {peerSub(area, device?.ip)}
         </div>
-        {peers.map((d) => {
-          const url = d[5] ? String(d[5]) : "";
-          const up = d[6] === 1 || d[6] === "1";
-          const dotText = up ? TEXT.peer_up : TEXT.peer_down;
-          const body = (
-            <>
-              <div class="row">
-                <span class={`dot${up ? " ok" : ""}`} title={dotText} aria-label={dotText} />
-                <span class="grow">{d[1]}</span>
-              </div>
-              <div class="peer-sub">{[hostOf(url), d[2]].filter(Boolean).join(" \u2502 ")}</div>
-            </>
-          );
-          return url ? (
-            <a key={d[3]} class={`peer go${up ? "" : " off"}`} href={peerHref(url, route)}>
-              {body}
-            </a>
-          ) : (
-            <div key={d[3]} class={`peer${up ? "" : " off"}`}>
-              {body}
-            </div>
-          );
-        })}
-        {extras.map((a) => (
-          <div key={a} class="peer">
-            <div class="row">
-              {/* Neutral on purpose: nothing here can check an address someone typed, and a green dot
-                  that means "assumed fine" beside one that means "Home Assistant saw it" is a lie. */}
-              <span class="dot" title={TEXT.peer_manual} aria-label={TEXT.peer_manual} />
-              <a class="grow peer-a" href={peerHref(withScheme(a), route)}>
-                {a}
-              </a>
-              <button class="x" aria-label={`Remove ${a}`} onClick={() => drop(a)}>
-                &#10005;
-              </button>
-            </div>
-          </div>
-        ))}
-        {peers.length + extras.length === 0 && <p class="sheet-foot">{TEXT.no_devices}</p>}
-        <div class="peer-add">
-          <input
-            class="inp sm grow"
-            placeholder={TEXT.peer_add_ph}
-            value={draft}
-            onInput={(e) => setDraft(e.currentTarget.value)}
-            onKeyDown={(e) => e.key === "Enter" && add()}
-          />
-          <button class="btn sm" onClick={add} disabled={!draft.trim()}>
-            {TEXT.peer_add}
-          </button>
-        </div>
+        {online.map(peerRow)}
+        {offline.length > 0 && (
+          <>
+            <button class="offhead" aria-expanded={showOff} onClick={() => setShowOff(!showOff)}>
+              <span class="grow">{`Offline (${offline.length})`}</span>
+              <Chevron down={showOff} cls="caret-s" />
+            </button>
+            {showOff && offline.map(peerRow)}
+          </>
+        )}
+        {peers.length === 0 && <p class="sheet-foot">{TEXT.no_devices}</p>}
       </div>
     </div>
   );
@@ -368,7 +375,9 @@ export function App() {
   return (
     <div class="app">
       <header class="topbar">
-        <button class="icon" aria-label="Menu" onClick={() => setNav(true)}>
+        {/* A toggle, not an opener: the drawer's scrim starts below this bar, so the burger stays
+            visible while the drawer is out and a second press should put things back. */}
+        <button class="icon" aria-label="Menu" aria-expanded={nav} onClick={() => setNav((v) => !v)}>
           <span class="burger" />
         </button>
         {/* The caret has to sit against the name for the two to read as one control. It used to be a
@@ -405,6 +414,7 @@ export function App() {
           area={area}
           route={route}
           ha={ha.ha}
+          haRefresh={ha.haRefresh}
           onClose={() => setSwitcher(false)}
         />
       )}

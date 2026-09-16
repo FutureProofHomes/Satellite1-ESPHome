@@ -700,7 +700,7 @@ function Ld2410Settings({ config, write, preview }) {
 
 /** Zone occupancy entities exist only for zones with three or more corners - the handler registers
  *  them per shape - so these keys are probed rather than assumed. Runtime names owned by C++ literals,
- *  like "Radar Target" on Controls. */
+ *  like "Radar Target" on the home page. */
 const ZONE_STATE_KEYS = ["text_sensor/Radar Zone 1", "text_sensor/Radar Zone 2", "text_sensor/Radar Zone 3"];
 
 /**

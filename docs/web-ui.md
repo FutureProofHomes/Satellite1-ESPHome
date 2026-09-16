@@ -13,14 +13,19 @@ A Preact single-page app, built with esbuild into one self-contained HTML docume
 JavaScript in one file — which is gzipped at compile time and embedded in the firmware as a
 `progmem_array`. There is no filesystem, no SPIFFS image and no second artifact to keep in step.
 
-Four routes, all on the hash:
+Five routes, all on the hash, in this nav order:
 
 | Route | What it does |
 |---|---|
-| `#/controls` | Sensor readings with tap-to-calibrate, voice, timers, transcript, speaker, LED ring |
+| `#/home` | Sensor readings with tap-to-calibrate, media, the Assistant card (phase, transcript, mute, assistant volume), timers, LED ring |
+| `#/wake-word` | Which wake words the device answers to, sensitivity, wake chime, and the stop word |
+| `#/audio` | TTS routing and area ducking as a tree over your Home Assistant areas, then the speaker's own wiring |
 | `#/presence` | Live radar plot or gate energies, and the radar's own settings |
-| `#/config` | TTS routing and area ducking, as a tree over your Home Assistant areas |
-| `#/diagnostics` | Memory, firmware, buttons, live log, and maintenance actions |
+| `#/diagnostics` | Memory, firmware, live logs, and maintenance actions |
+
+`#/home` and `#/audio` were `#/controls` and `#/config` until the September 2026 rename pass, which
+also gave the wake words card its own `#/wake-word` route; the old hashes still resolve to the new
+routes so bookmarks keep working.
 
 Routing is on the hash rather than on the path because ESPHome's HTTP server has a single wildcard
 handler per method and no notion of client-side routes. A path-based router would 404 on reload for
