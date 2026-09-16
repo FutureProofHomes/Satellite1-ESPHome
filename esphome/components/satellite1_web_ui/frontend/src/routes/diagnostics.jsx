@@ -8,9 +8,9 @@
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 
-import { HINTS, TEXT } from "../copy.js";
+import { CONFIRM, HINTS, TEXT } from "../copy.js";
 import { entity, pathFor, post } from "../lib/device.js";
-import { Btn, Card, Confirm, Fact, Missing, Row, Toggle } from "../ui.jsx";
+import { Card, Chevron, Confirm, Fact, Missing, Row, Toggle } from "../ui.jsx";
 
 const kb = (n) => `${Math.round(n / 1024)} KB`;
 const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
@@ -86,7 +86,7 @@ function Firmware({ ctx }) {
   const beta = entity(ctx, "beta_firmware");
   const xmos = entity(ctx, "xmos_firmware");
   const radarModule = entity(ctx, "radar_module");
-  // Component-owned name, like Radar Target on Controls - registered from a C++ literal, with no
+  // Component-owned name, like Radar Target on the home page - registered from a C++ literal, with no
   // config id to route through the entity map.
   const radarFw = ctx.states["text_sensor/Radar Firmware"];
   // ESPHome's update entity publishes one of "UNKNOWN", "NO UPDATE", "UPDATE AVAILABLE", "INSTALLING".
@@ -127,9 +127,15 @@ function Firmware({ ctx }) {
               </a>
             )}
           </div>
-          <Btn solid disabled={installing} onClick={() => post(pathFor(ctx, "firmware", "install"))}>
-            {installing ? "Do not cut power" : `Install ${upd.value}`}
-          </Btn>
+          <Confirm
+            solid
+            disabled={installing}
+            label={installing ? "Do not cut power" : `Install ${upd.value}`}
+            title={CONFIRM.update.t}
+            body={CONFIRM.update.b}
+            confirmLabel={`Install ${upd.value}`}
+            onConfirm={() => post(pathFor(ctx, "firmware", "install"))}
+          />
         </div>
       )}
       {beta && (
@@ -148,7 +154,17 @@ function Firmware({ ctx }) {
 /* Log                                                                */
 /* ------------------------------------------------------------------ */
 
-const LEVELS = { E: "err", C: "err", W: "warn", I: "info", D: "dim", V: "dim", VV: "dim" };
+/* Every level its own colour, matching the palette ESPHome's own console uses so nobody has to learn
+   a second scheme: red errors, orange warnings, green info, cyan-blue debug. Verbose alone stays grey -
+   it is the chatter you filter out, and colouring it would leave nothing dim to compare against. */
+const LEVELS = { E: "err", C: "err", W: "warn", I: "ok", D: "dbg", V: "dim", VV: "dim" };
+
+/** Wall-clock HH:MM:SS from the line's arrival time, padded so the column never wobbles. */
+const stamp = (at) => {
+  const d = new Date(at);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+};
 
 /** Splits a line around every case-insensitive occurrence of `term`, so matches can be wrapped in
  *  <mark> as real elements. Built this way rather than with innerHTML: log text is device output that
@@ -172,15 +188,90 @@ function highlight(text, term) {
   return out;
 }
 
+/** The level menu's text colours, same palette as the lines below so the menu doubles as the legend. */
+const LEVEL_COLOR = { VV: "var(--fg-4)", D: "var(--accent)", I: "var(--ok)", W: "var(--warn)", E: "var(--err)" };
+
+const LEVEL_OPTS = [
+  ["VV", "everything"],
+  ["D", "debug"],
+  ["I", "info"],
+  ["W", "warnings"],
+  ["E", "errors"],
+];
+
+/**
+ * The level filter, as its own little menu rather than a native <select>.
+ *
+ * It was a <select> with coloured options, and that lasted one review: Safari's native popup ignores
+ * option styling entirely, so on the owner's machine the "colour coded" menu was plain text. A drawn
+ * menu obeys its stylesheet everywhere, and it is also what lets the funnel sit inside the control -
+ * the owner's other ask - instead of orbiting it as a separate glyph.
+ */
+function LevelMenu({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (e) => {
+      if (!wrap.current?.contains(e.target)) setOpen(false);
+    };
+    const esc = (e) => e.key === "Escape" && setOpen(false);
+    // Capture, for the reason Hint does it: a tap that closes this should not also press whatever
+    // it landed on.
+    document.addEventListener("pointerdown", away, true);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", away, true);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+
+  return (
+    <span class="lvlmenu" ref={wrap}>
+      <button class="btn sm lvlbtn" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {/* The funnel says "what you are reading is filtered". Inside the control, per the owner. */}
+        <svg class="funnel" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true">
+          <path d="M1.2 1.8h9.6L7.4 6.4v3.4l-2.8 1V6.4L1.2 1.8z" />
+        </svg>
+        <span style={{ color: LEVEL_COLOR[value] }}>{LEVEL_OPTS.find(([v]) => v === value)[1]}</span>
+        <Chevron down={open} cls="caret-s" />
+      </button>
+      {open && (
+        <div class="lvlpop" role="menu">
+          {LEVEL_OPTS.map(([v, l]) => (
+            <button
+              key={v}
+              role="menuitemradio"
+              aria-checked={v === value}
+              class={`lvlopt${v === value ? " on" : ""}`}
+              style={{ color: LEVEL_COLOR[v] }}
+              onClick={() => {
+                onChange(v);
+                setOpen(false);
+              }}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
 function Log({ ctx }) {
-  const { log, logSeq, pausedRef, clearLog } = ctx;
+  const { log, logSeq, pausedRef, logWatch } = ctx;
   const [paused, setPaused] = useState(false);
+
+  // Register as the log's reader for exactly as long as this card is mounted. While no reader is
+  // registered the ring still fills - that is what lets this card show the recent past the moment
+  // someone navigates here - but arriving lines stop costing the rest of the app renders.
+  useEffect(() => logWatch(), []);
   const [minLevel, setMinLevel] = useState("D");
   const [filter, setFilter] = useState("");
-  // Hide rather than Show: the invert is the reason the filter is useful on a device that logs a lot,
-  // because the useful query is far more often "everything except the chatty component" than it is
-  // "only this component".
-  const [hide, setHide] = useState(false);
+  // The Show/Hide invert that lived beside the filter field is gone at the owner's request; the
+  // filter is match-only now.
   const [mark, setMark] = useState("");
   const box = useRef(null);
   const atBottom = useRef(true);
@@ -191,75 +282,26 @@ function Log({ ctx }) {
   const lines = log.filter((l) => {
     if (!(order.indexOf(l.lvl) >= floor || l.lvl === "C" || l.lvl === "?")) return false;
     if (!needle) return true;
-    return l.text.toLowerCase().includes(needle) !== hide;
+    return l.text.toLowerCase().includes(needle);
   });
 
   // Only when the view is already at the bottom. Scrolling to the newest line unconditionally means
   // that reading anything on a chatty device is impossible - you get yanked away mid-sentence.
   useEffect(() => {
     if (!paused && atBottom.current && box.current) box.current.scrollTop = box.current.scrollHeight;
-  }, [logSeq, paused, needle, hide, minLevel]);
+  }, [logSeq, paused, needle, minLevel]);
 
   useEffect(() => () => (pausedRef.current = false), [pausedRef]);
 
-  const text = () => lines.map((l) => l.text).join("\n");
+  // The timestamp goes into the dump too: a support request's "when did it happen" deserves the same
+  // answer the screen gives.
+  const text = () => lines.map((l) => `[${stamp(l.at)}] ${l.text}`).join("\n");
 
-  /**
-   * Copies what is on screen, filters and all, same as Save.
-   *
-   * The old body was `navigator.clipboard?.writeText(text())` and it copied nothing on any real device. The
-   * Clipboard API is gated behind a secure context, this app is served over plain HTTP, so
-   * navigator.clipboard is undefined and the ?. turned the whole thing into a no-op - no copy, no error,
-   * and no feedback to notice the difference. It works when developing only because 127.0.0.1 gets a
-   * secure-context exemption that 192.168.x.x does not.
-   *
-   * So: try the modern API for the day this is served over TLS, and fall back to execCommand, which is
-   * deprecated but is not restricted by origin and is the only thing that works here. Confirmation is not
-   * decoration - it is the thing that would have made the original failure visible.
-   */
-  const [copied, setCopied] = useState(false);
-
-  const legacyCopy = (s) => {
-    const ta = document.createElement("textarea");
-    ta.value = s;
-    ta.setAttribute("readonly", "");
-    // Off-screen rather than hidden: display:none and visibility:hidden are not selectable, and the
-    // selection is what execCommand copies. Fixed, so adding it cannot scroll the log.
-    ta.style.cssText = "position:fixed;top:-1000px;opacity:0";
-    document.body.appendChild(ta);
-    ta.select();
-    let ok = false;
-    try {
-      ok = document.execCommand("copy");
-    } catch {
-      ok = false;
-    }
-    ta.remove();
-    return ok;
-  };
-
-  const copy = async () => {
-    const s = text();
-    let ok = false;
-    try {
-      await navigator.clipboard.writeText(s);
-      ok = true;
-    } catch {
-      // Covers both the undefined navigator.clipboard on this origin and a permission refusal on a
-      // secure one.
-      ok = legacyCopy(s);
-    }
-    setCopied(ok);
-  };
-
-  // Back to "Copy" on its own. Also clears the timer if the card closes or the route changes while it is
-  // still counting, which would otherwise set state on something no longer mounted.
-  useEffect(() => {
-    if (!copied) return;
-    const t = setTimeout(() => setCopied(false), 1400);
-    return () => clearTimeout(t);
-  }, [copied]);
-
+  // The Copy button that lived down in the highlight bar is gone at the owner's request, and it is no
+  // loss: this page is served over plain HTTP, where navigator.clipboard does not exist, so the button
+  // only ever worked through a deprecated execCommand fallback. Export is the one way out now, and what
+  // it saves is also what copy produced - the lines on screen, filters and all.
+  //
   // Downloads what is on screen, filters and all, because that is the thing worth sending to someone
   // else. Object URL revoked immediately; the click is synchronous.
   const download = () => {
@@ -273,35 +315,25 @@ function Log({ ctx }) {
 
   return (
     <Card
-      title="Log"
+      title="Logs"
       collapsible
       name="log"
       defaultOpen
       hint={HINTS.log}
       right={
         <span class="row gap">
-          <select class="sel sm" value={minLevel} onChange={(e) => setMinLevel(e.currentTarget.value)}>
-            <option value="VV">everything</option>
-            <option value="D">debug</option>
-            <option value="I">info</option>
-            <option value="W">warnings</option>
-            <option value="E">errors</option>
-          </select>
-          <button
-            class="btn sm"
-            onClick={() => {
-              const next = !paused;
-              setPaused(next);
-              // Paused means stop accepting lines, not just stop scrolling: the ring is 1000 lines
-              // and a noisy boot would otherwise push the thing being read straight out of it.
-              pausedRef.current = next;
-            }}
-          >
-            {paused ? "Resume" : "Pause"}
+          <LevelMenu value={minLevel} onChange={setMinLevel} />
+          {/* Up here from the highlight bar below, per the owner. Still the filtered view. */}
+          <button class="btn sm" onClick={download}>
+            Export Logs
           </button>
         </span>
       }
     >
+      {/* Two bare fields now. The Show/Hide invert and the Clear button went at the owner's request -
+          both inputs are type="search", so their built-in ✕ empties them. Note what Clear actually did
+          before it went: it emptied the log buffer itself, not a field. There is no in-page way to do
+          that any more; a reload starts the ring fresh, which is the same gesture with one more step. */}
       <div class="log-bar">
         <input
           class="inp sm grow"
@@ -310,14 +342,6 @@ function Log({ ctx }) {
           value={filter}
           onInput={(e) => setFilter(e.currentTarget.value)}
         />
-        <button
-          class={`btn sm${hide ? " on" : ""}`}
-          disabled={!needle}
-          title={hide ? "Hiding matching lines" : "Showing only matching lines"}
-          onClick={() => setHide(!hide)}
-        >
-          {hide ? "Hide" : "Show"}
-        </button>
       </div>
 
       <div class="log-bar">
@@ -328,15 +352,6 @@ function Log({ ctx }) {
           value={mark}
           onInput={(e) => setMark(e.currentTarget.value)}
         />
-        <button class="btn sm" onClick={copy}>
-          {copied ? TEXT.copied : "Copy"}
-        </button>
-        <button class="btn sm" onClick={download}>
-          Save
-        </button>
-        <button class="btn sm" onClick={clearLog}>
-          Clear
-        </button>
       </div>
 
       <div
@@ -358,17 +373,40 @@ function Log({ ctx }) {
         )}
         {lines.map((l, i) => (
           <div key={i} class={`ln t-${LEVELS[l.lvl] || "dim"}`}>
+            {/* The time keeps its own muted colour on every level, so a wall of red errors still has a
+                readable clock running down its margin. */}
+            <span class="ln-t">{stamp(l.at)}</span>
             {highlight(l.text, mark.trim())}
           </div>
         ))}
       </div>
 
-      <p class="log-count dim xs">
-        {lines.length === log.length
-          ? `${log.length} lines`
-          : `${lines.length} of ${log.length} lines`}
-        {paused ? " \u00b7 paused" : ""}
-      </p>
+      {/* The line count and the stream toggle share the card's last row, per the owner. The toggle
+          reads as the state it is in rather than the action it offers - Live (accent) while lines
+          flow, Paused once they are held - because "is this thing streaming?" is the question it
+          answers at a glance. (The count used to append "· paused" too; with the button stating it
+          two words apart, that was the same fact twice.) Collapsing the card takes the button with
+          it, but the paused flag lives in this component, so the stream picks up exactly where the
+          toggle left it. */}
+      <div class="log-foot">
+        <p class="log-count dim xs">
+          {lines.length === log.length
+            ? `${log.length} lines`
+            : `${lines.length} of ${log.length} lines`}
+        </p>
+        <button
+          class={`btn sm${paused ? "" : " on"}`}
+          onClick={() => {
+            const next = !paused;
+            setPaused(next);
+            // Paused means stop accepting lines, not just stop scrolling: the ring is 1000 lines
+            // and a noisy boot would otherwise push the thing being read straight out of it.
+            pausedRef.current = next;
+          }}
+        >
+          {paused ? "Paused" : "Live"}
+        </button>
+      </div>
     </Card>
   );
 }
@@ -391,21 +429,33 @@ function Maintenance({ ctx }) {
 
   return (
     <>
-      {/* Named for the part rather than described, because the row below it talks about flashing firmware,
-          and at that point you need to know which chip you are aiming at. HINTS.xmos opens with "The audio
-          chip", so the ⓘ carries what the title used to say. */}
+      {/* Named for the part plus what the card does to it, matching Power & Recovery below - a bare
+          "XMOS" said which chip but not why you would open the card. HINTS.xmos still opens with "The
+          audio chip", so the ⓘ carries what the name alone does not. */}
       {(xmosReset || xmosFlash) && (
-        <Card title="XMOS" collapsible name="xmos" hint={HINTS.xmos}>
+        <Card title="XMOS Recovery" collapsible name="xmos" hint={HINTS.xmos}>
           {xmosReset && (
             <Row label="Restart XMOS">
-              <Btn onClick={() => post(xmosReset)}>Restart</Btn>
+              <Confirm
+                label="Restart"
+                title={CONFIRM.xmos_restart.t}
+                body={CONFIRM.xmos_restart.b}
+                confirmLabel="Restart XMOS"
+                onConfirm={() => post(xmosReset)}
+              />
             </Row>
           )}
           {/* The version is in the label rather than left to the Firmware card, because this is the one
               place where knowing what is on the chip decides whether to press the button. */}
           {xmosFlash && (
             <Row label={flashLabel} hint={HINTS.xmos_flash}>
-              <Confirm label="Reflash" confirmLabel="Reflash now" onConfirm={() => post(xmosFlash)} />
+              <Confirm
+                label="Reflash"
+                title={CONFIRM.xmos_flash.t}
+                body={CONFIRM.xmos_flash.b}
+                confirmLabel="Reflash now"
+                onConfirm={() => post(xmosFlash)}
+              />
             </Row>
           )}
           {/* "Erase its firmware" was here, wired to the erase_xmos_flash button. It is gone from the app
@@ -416,20 +466,44 @@ function Maintenance({ ctx }) {
         </Card>
       )}
 
-      <Card title="Sat1 Device" collapsible name="maint">
+      {/* "ESP32 Recovery", the owner's pick, and the one that finally pairs with XMOS Recovery above:
+          the two cards do the same job for the two chips. (Previously "Sat1 Device", which described
+          the whole page, then briefly "Maintenance" and "Power & Recovery".) Open by default, unlike
+          XMOS Recovery: Restart is the row people actually come here for. The stored collapse state
+          keeps the old "maint" key, so nobody's remembered preference resets over a rename. */}
+      <Card title="ESP32 Recovery" collapsible name="maint" defaultOpen hint={HINTS.maintenance}>
         {restart && (
           <Row label="Restart">
-            <Btn onClick={() => post(restart)}>Restart</Btn>
+            <Confirm
+              label="Restart"
+              title={CONFIRM.restart.t}
+              body={CONFIRM.restart.b}
+              confirmLabel="Restart"
+              onConfirm={() => post(restart)}
+            />
           </Row>
         )}
         {safe && (
           <Row label="Safe mode" hint={HINTS.safe_mode}>
-            <Confirm label="Safe mode" confirmLabel="Restart into safe mode" onConfirm={() => post(safe)} />
+            <Confirm
+              label="Safe mode"
+              title={CONFIRM.safe_mode.t}
+              body={CONFIRM.safe_mode.b}
+              confirmLabel="Restart into safe mode"
+              onConfirm={() => post(safe)}
+            />
           </Row>
         )}
         {factory && (
           <Row label="Factory reset" hint={HINTS.factory_reset}>
-            <Confirm label="Factory reset" confirmLabel="Erase everything" danger onConfirm={() => post(factory)} />
+            <Confirm
+              label="Factory reset"
+              title={CONFIRM.factory_reset.t}
+              body={CONFIRM.factory_reset.b}
+              confirmLabel="Erase everything"
+              danger
+              onConfirm={() => post(factory)}
+            />
           </Row>
         )}
         {!restart && !safe && !factory && <Missing what="Device maintenance" />}
