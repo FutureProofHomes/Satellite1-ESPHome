@@ -25,12 +25,60 @@ import { Chevron, Hint } from "./ui.jsx";
  * data does not come from entities at all - the radar settings live in the module's own config,
  * behind `satellite1_radar`'s /api/v1 endpoints.
  */
+/* The drawer glyphs, drawn like media.jsx's `mi` set: 16-box, stroked in currentColor so the row's
+   colour (dim at rest, accent when active) is the icon's colour too. One per route: a house, the
+   waveform a wake word is, a speaker for what remains on Audio, a radar sweep, and a pulse line for
+   Diagnostics - a wrench was considered and drew worse at 17px than the vitals it actually shows. */
+const ni = (children) => (
+  <svg
+    class="ni"
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    {children}
+  </svg>
+);
+const N_HOME = ni(
+  <>
+    <path d="M2.8 8.3 8 3.6l5.2 4.7" />
+    <path d="M4.4 7.6V13h7.2V7.6" />
+  </>,
+);
+const N_WAKE = ni(
+  <>
+    <path d="M2.8 6.8v2.4" />
+    <path d="M5.4 4.8v6.4" />
+    <path d="M8 3v10" />
+    <path d="M10.6 4.8v6.4" />
+    <path d="M13.2 6.8v2.4" />
+  </>,
+);
+const N_AUDIO = ni(
+  <>
+    <path d="M2.8 6.4h2.4L8.6 3.8v8.4L5.2 9.6H2.8z" />
+    <path d="M11.2 6a3.1 3.1 0 0 1 0 4" />
+  </>,
+);
+const N_PRES = ni(
+  <>
+    <path d="M13.2 8A5.2 5.2 0 1 1 8 2.8" />
+    <path d="M8 8l3.7-3.7" />
+    <circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
+  </>,
+);
+const N_DIAG = ni(<path d="M2 8.5h2.8L6.4 5l3.2 6.5 1.6-3H14" />);
+
 const ROUTES = [
-  { id: "home", label: "Home", view: Controls },
-  { id: "wake-word", label: "Wake Word", view: WakeWords },
-  { id: "audio", label: "Audio", view: Config },
-  { id: "presence", label: "Presence", view: Presence },
-  { id: "diagnostics", label: "Diagnostics", view: Diagnostics },
+  { id: "home", label: "Home", view: Controls, icon: N_HOME },
+  { id: "wake-word", label: "Wake Word", view: WakeWords, icon: N_WAKE },
+  { id: "audio", label: "Audio", view: Config, icon: N_AUDIO },
+  { id: "presence", label: "Presence", view: Presence, icon: N_PRES },
+  { id: "diagnostics", label: "Diagnostics", view: Diagnostics, icon: N_DIAG },
 ];
 
 /** The pre-rename hashes. Bookmarks survive firmware updates by design (the hash never reaches the
@@ -114,10 +162,12 @@ function ThemeSwitch() {
  * Hidden with visibility as well as opacity, so its buttons leave the tab order while it is shut. A menu
  * that cannot be seen but can still be tabbed into is a worse bug than no animation.
  *
- * It no longer carries a heading. It used to repeat the device name that is already in the bar directly
- * above it, which is now only inches away since the drawer starts below the bar rather than over it.
+ * It no longer carries a heading - the device name in the bar is only inches away - but it did grow
+ * a footer: the device's name and firmware version, pinned to the bottom the way most apps sign
+ * their drawer. That is identity, not navigation, and the one place it cannot be wrong to repeat it
+ * is the menu that lists everything this device can show.
  */
-function NavPane({ route, go, open, onClose }) {
+function NavPane({ route, go, open, onClose, label, fw }) {
   // Escape closes it, listener held only while it is open so a shut drawer costs nothing on keydown.
   useEffect(() => {
     if (!open) return;
@@ -138,9 +188,14 @@ function NavPane({ route, go, open, onClose }) {
               onClose();
             }}
           >
+            {r.icon}
             {r.label}
           </button>
         ))}
+        <div class="navpane-foot">
+          <div class="navpane-dev">{label || "Satellite1"}</div>
+          {fw && <div class="navpane-fw">Firmware {fw}</div>}
+        </div>
       </nav>
     </div>
   );
@@ -353,6 +408,11 @@ export function App() {
   const [nav, setNav] = useState(false);
   const [switcher, setSwitcher] = useState(false);
 
+  // The drawer's own items close it as they navigate; this covers the routes nobody tapped - the
+  // back button, a bookmark, a hash typed over the current one - so a navigation never leaves the
+  // menu standing over the page it just changed.
+  useEffect(() => setNav(false), [route]);
+
   // Diagnostics wants fresh heap and loop figures; everywhere else the only thing that goes stale is
   // the Home Assistant dot, which is worth one request every ten seconds so that it starts telling
   // the truth again on its own after the connection comes back.
@@ -412,7 +472,7 @@ export function App() {
       <ErrorToast />
 
       {/* Mounted whether or not it is open - see NavPane. */}
-      <NavPane route={route} go={go} open={nav} onClose={() => setNav(false)} />
+      <NavPane route={route} go={go} open={nav} onClose={() => setNav(false)} label={label} fw={device?.fw} />
       {switcher && (
         <SwitcherSheet
           device={device}

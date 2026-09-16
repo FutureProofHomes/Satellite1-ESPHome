@@ -95,18 +95,21 @@ device through Home Assistant, so it gives away nothing they did not have.
 
 ## The bundle
 
-Measured, from the build that produced this note (September 2026, with the media footer restyled
-after Music Assistant's own player and the mobile touch-target pass - hand-drawn range inputs,
-iOS-sized switches, enlarged glyphs and tree rows):
+Measured, from the build that produced this note (September 2026, after the visual-polish pass
+began: motion language, the redesigned nav drawer, and the media footer restyled after Music
+Assistant's own player with the mobile touch-target pass):
 
 | | Bytes |
 |---|---|
-| Raw HTML document | 122,385 |
-| Gzipped, as embedded | **40,895** |
-| Budget | 40,960 |
+| Raw HTML document | 124,724 |
+| Gzipped, as embedded | **41,457** |
+| Budget | 49,152 |
 
-That is 99.8% of the ceiling - the budget is spent; the next feature must earn its bytes back
-elsewhere first. The gzip figure is the one that matters, since that is what occupies flash
+That is 84% of the ceiling. The budget was 40,960 B until September 2026, when the media footer
+landed at 99.8% of it; the owner raised the line to 48KB for the visual-polish pass. The number is
+a self-imposed discipline rather than a hardware limit - flash sits under 43% used either way - so
+the raise cost about 8KB of flash headroom and nothing else, and the discipline continues against
+the new line. The gzip figure is the one that matters, since that is what occupies flash
 and what crosses the network. It is produced by `gzip.compress(html, compresslevel=9)` in the
 component's codegen, so the number reported at compile time is the number that ships.
 

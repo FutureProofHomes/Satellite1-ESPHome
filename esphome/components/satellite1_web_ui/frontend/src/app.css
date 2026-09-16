@@ -141,10 +141,11 @@
      A test asserts the drawer's top edge meets the bar's bottom edge, so a change to the bar fails there
      rather than drifting quietly. */
   --bar-h: 51px;
-  /* The media bar's height, shared by the bar itself and the bottom padding .wrap reserves for it. */
-  /* The floating media bar's full footprint: two rows plus its padding and the gap under it.
-     .wrap and the toast both reserve this. */
-  --mbar-h: 104px;
+  /* The floating media bar's full footprint: two rows plus its padding, border and the gap under it.
+     .wrap and the toast both reserve this. Measured: 9+38+2+30+9 of content, 2 of border, 12 of
+     bottom offset = 102, then a few px of slack so a line-height change cannot quietly put the last
+     card's button under the bar. */
+  --mbar-h: 110px;
 }
 
 * {
@@ -447,11 +448,14 @@ textarea {
     visibility 0s;
 }
 .navpane {
-  width: 172px;
+  display: flex;
+  flex-direction: column;
+  width: 196px;
   height: 100%;
+  padding-top: var(--s-1);
   background: var(--bg-elev);
   border-right: 1px solid var(--line-2);
-  /* No safe-area padding: the notch is above the top bar, which this now sits underneath. */
+  /* No safe-area padding on top: the notch is above the top bar, which this now sits underneath. */
   transform: translateX(-100%);
   transition: transform 0.16s ease;
 }
@@ -465,19 +469,63 @@ textarea {
     transition: none;
   }
 }
+/* A row is glyph + label, tall enough to be a thumb target, with the active route marked twice:
+   a fill behind the row and a short accent bar on the left edge. The bar is ::before rather than a
+   border so the label does not shift a pixel when the route changes. */
 .navpane-item {
-  display: block;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
   width: 100%;
   text-align: left;
-  padding: var(--s-2) var(--s-4);
+  padding: var(--s-3) var(--s-4);
   background: none;
   border: 0;
   color: var(--fg);
   font: var(--t-m) inherit;
   cursor: pointer;
 }
+.navpane-item .ni {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: var(--fg-3);
+}
 .navpane-item.on {
   background: var(--fill-2);
+  font-weight: 600;
+}
+.navpane-item.on .ni {
+  color: var(--accent);
+}
+.navpane-item.on::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+}
+/* The identity footer, pushed to the bottom by the auto margin so it stays put however short the
+   route list is. Reads as a signature, not a row: no hover, no cursor, quieter type. */
+.navpane-foot {
+  margin-top: auto;
+  padding: var(--s-3) var(--s-4) calc(var(--s-3) + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+}
+.navpane-dev {
+  font-size: var(--t-s);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.navpane-fw {
+  font-size: var(--t-xs);
+  color: var(--fg-3);
 }
 
 /* The theme toggle, in the top bar rather than behind the menu: one icon costs almost no room, and a
@@ -2175,4 +2223,78 @@ polyline.draft {
   color: var(--fg-3);
   width: 11px;
   height: 11px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Motion                                                              */
+/* ------------------------------------------------------------------ */
+
+/* One vocabulary for the whole app: surfaces rise a few pixels as they fade in, pressed things dip,
+   and the artwork tint crossfades rather than snaps. Everything here is decoration - the app is
+   fully usable with all of it off - which is why the animations live inside a no-preference block
+   and the reduce block below only has to silence what shipped earlier (the toast and the players
+   panel, written before this section existed). */
+@media (prefers-reduced-motion: no-preference) {
+  /* Route changes remount .wrap's children, so each card rises in once per navigation. Cards that
+     mount later - a timer appearing, a section unfolding - get the same entrance, which reads as
+     "new thing" rather than flicker. */
+  .wrap > * {
+    animation: rise 0.2s ease-out;
+  }
+  /* The expanded media view, entering the way the players panel always has. */
+  .msheet {
+    animation: rise 0.2s ease-out;
+  }
+  /* The device switcher hangs from the top bar, so it drops rather than rises. */
+  .sheet {
+    animation: drop 0.2s ease-out;
+  }
+  /* The artwork tint: a track change repaints the bar, sheet and panel in the new record's colour,
+     and a 400ms fade makes that a moment instead of a glitch. Colour only - layout never moves. */
+  .mbar,
+  .msheet,
+  .mpanel {
+    transition:
+      background-color 0.4s ease,
+      color 0.4s ease;
+  }
+  /* Press dip for the chrome-free buttons; .btn and .mplay carry their own pressed looks. */
+  .icon:active,
+  .mbtn:not(:disabled):active,
+  .mspk:active,
+  .mchip:active {
+    transform: scale(0.92);
+  }
+  .icon,
+  .mbtn,
+  .mspk,
+  .mchip {
+    transition: transform 0.1s ease;
+  }
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes drop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast,
+  .mpanel {
+    animation: none;
+  }
 }
