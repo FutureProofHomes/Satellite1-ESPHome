@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { HINTS, PRESENCE, TEXT } from "../copy.js";
 import { entity, pathFor, PHASE, post, useVoice } from "../lib/device.js";
-import { Arrow, Card, Chevron, Hint, Missing, Row, Slider, Toggle } from "../ui.jsx";
+import { Arrow, Card, Chevron, Empty, Hint, Missing, Row, Slider, Toggle } from "../ui.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Sensor pills, with calibration on the pill itself                   */
@@ -108,6 +108,20 @@ const SENSORS = [
 
 function SensorPills({ ctx }) {
   const [open, setOpen] = useState(null);
+
+  // The one paint before /api/sat1/state answers: pill-shaped shimmers hold the row's geometry so
+  // the readings land in place rather than snapping a card into existence. Gated on the device
+  // payload, not on the rows - a device with no sensors at all should show its truthful nothing,
+  // not shimmer forever.
+  if (!ctx.device) {
+    return (
+      <div class="pills">
+        {[0, 1, 2, 3].map((i) => (
+          <span key={i} class="pill skel" />
+        ))}
+      </div>
+    );
+  }
 
   const rows = SENSORS.map((s) => {
     const sensor = entity(ctx, s.key);
@@ -383,7 +397,14 @@ function VoiceStatus({ ctx, voice }) {
               </p>
             ))
         ) : (
-          <p class="dim sm">{TEXT.nothing_said}</p>
+          <Empty
+            icon={
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 3h10a1.5 1.5 0 0 1 1.5 1.5V9A1.5 1.5 0 0 1 13 10.5H8.2L5 13.2v-2.7H3A1.5 1.5 0 0 1 1.5 9V4.5 A1.5 1.5 0 0 1 3 3Z" />
+              </svg>
+            }
+            text={TEXT.nothing_said}
+          />
         )}
       </div>
 

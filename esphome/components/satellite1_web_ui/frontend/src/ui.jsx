@@ -415,3 +415,17 @@ export function Btn({ children, onClick, disabled, danger, solid }) {
 export function Missing({ what }) {
   return <p class="dim sm">{what} is not available on this firmware build.</p>;
 }
+
+/**
+ * An empty state: a small drawn glyph centred over one dim line. The glyph is passed in, drawn where
+ * the state lives, because each empty thing has its own shape - a speech bubble for the transcript,
+ * a dashed zone for the plot. Layout only; the words stay in copy.js like every other string.
+ */
+export function Empty({ icon, text }) {
+  return (
+    <div class="empty">
+      {icon}
+      <p class="dim sm">{text}</p>
+    </div>
+  );
+}

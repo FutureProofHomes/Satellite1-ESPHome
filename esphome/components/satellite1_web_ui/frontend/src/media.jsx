@@ -33,7 +33,7 @@
  * keeps its last track in the device's cache and showing it would caption silence. The held pause
  * keeps it: that track is exactly what resume will continue.
  */
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 
 import { HINTS, TEXT } from "./copy.js";
 import { useMaData, useMedia } from "./lib/device.js";
@@ -116,6 +116,8 @@ const I_SPK = mi(
     <circle cx="8" cy="4.9" r="0.4" />
   </>,
 );
+/** A plus, for the add-speaker rows that replaced the native select in the players panel. */
+const I_PLUS = mi(<path d="M8 3.5v9M3.5 8h9" />);
 
 /* ------------------------------------------------------------------ */
 /* The artwork's colour                                                */
@@ -197,6 +199,9 @@ function tintStyle(col) {
   const dark = l < 0.5;
   return (
     `--tint:hsl(${hs},${(l * 100) | 0}%);` +
+    // The same colour ~10 points darker, the bottom of the expanded view's gradient - depth the flat
+    // wash did not have, clamped so a near-black album cannot fall off the bottom.
+    `--tint2:hsl(${hs},${Math.max(8, ((l * 100) | 0) - 10)}%);` +
     `--tfg:${dark ? "#fff" : `hsl(${hs},13%)`};` +
     `--tdim:${dark ? "rgba(255,255,255,.72)" : `hsla(${hs},16%,.72)`};` +
     `--tbtn:hsl(${hs},${dark ? 85 : 16}%);` +
@@ -786,23 +791,19 @@ function PlayersPanel({ model, tiers, tint, haReady, onClose }) {
               </div>
             ))}
             {joining && <div class="dim sm">{TEXT.media_group_loading}</div>}
+            {/* One row per joinable speaker with a drawn +, replacing a native <select> - the select
+                rendered as a grey form control on the tinted panel, and it hid the list MA's own
+                sheet shows outright behind an extra tap. */}
             {(wsOn || live) && addables.length > 0 && (
-              <select
-                class="mgroup-add"
-                aria-label={TEXT.media_add_speaker}
-                value=""
-                onChange={(e) => {
-                  const m = e.currentTarget.value;
-                  if (m) gJoin(m);
-                }}
-              >
-                <option value="">{TEXT.media_add_speaker}</option>
+              <div class="mgroup-adds">
+                <div class="dim sm">{TEXT.media_add_speaker}</div>
                 {addables.map(([id, name]) => (
-                  <option key={id} value={id}>
-                    {name}
-                  </option>
+                  <button key={id} class="mgroup-addrow" onClick={() => gJoin(id)}>
+                    {I_PLUS}
+                    <span>{name}</span>
+                  </button>
                 ))}
-              </select>
+              </div>
             )}
           </div>
         )}
@@ -814,6 +815,26 @@ function PlayersPanel({ model, tiers, tint, haReady, onClose }) {
 /* ------------------------------------------------------------------ */
 /* The bar                                                            */
 /* ------------------------------------------------------------------ */
+
+/**
+ * The bar's title line, marqueeing when it overflows. CSS cannot know a line is clipped, so the
+ * overflow is measured after paint and the slide distance handed back as a custom property; a title
+ * that fits stays a plain ellipsis-less line and costs nothing. Re-measured per title, not per
+ * resize - the next track corrects a rotated phone, which is the cheap kind of eventually-right.
+ */
+function BarTitle({ text }) {
+  const ref = useRef(null);
+  const [mq, setMq] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    setMq(el && el.scrollWidth > el.clientWidth ? el.clientWidth - el.scrollWidth : 0);
+  }, [text]);
+  return (
+    <div class={`mbar-t${mq ? " scroll" : ""}`} ref={ref}>
+      <span style={mq ? `--mq:${mq}px` : null}>{text}</span>
+    </div>
+  );
+}
 
 export function MediaFooter({ ha, mac }) {
   const model = useMediaModel();
@@ -840,7 +861,7 @@ export function MediaFooter({ ha, mac }) {
         <div class="mbar-row">
           <Artwork art={model.art} />
           <button class="mbar-meta" aria-label="Open media view" aria-expanded={open}>
-            <div class="mbar-t">{barTitle}</div>
+            <BarTitle text={barTitle} />
             {barSub && <div class="mbar-s dim">{barSub}</div>}
           </button>
           <button

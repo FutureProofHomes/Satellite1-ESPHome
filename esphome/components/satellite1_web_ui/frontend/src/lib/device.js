@@ -69,6 +69,8 @@ export function haSyncOnce(haRefresh) {
  *
  * What it does not serialise is time: callers waiting on Home Assistant sleep between requests
  * rather than inside one, so a resync never holds a slider's writes behind a slow round trip.
+ * And every request carries a deadline (below), because a serialised queue is only as alive as its
+ * slowest member.
  */
 export function request(path, init) {
   // `quiet` is this file's, not fetch's: a write whose failure is already surfaced by its own
@@ -76,7 +78,13 @@ export function request(path, init) {
   const { quiet, ...opts } = init || {};
   const run = async () => {
     try {
-      const r = await fetch(path, opts);
+      // The queue's own deadline. A fetch that never settles - a connection half-opened against a
+      // rebooting device is enough - would otherwise hold the chain for the life of the tab, with
+      // every later read queued behind it forever (found live: Presence stuck on "Looking for a
+      // radar module" and the media bar absent, while the same endpoints answered a bare fetch
+      // instantly). Twenty seconds is several times anything the device legitimately takes; a
+      // caller's own signal in `init` still wins the spread.
+      const r = await fetch(path, { signal: AbortSignal.timeout(20000), ...opts });
       const out = { ok: r.ok, status: r.status, text: await r.text() };
       if (!out.ok && opts.method === "POST" && !quiet) reportWriteError(path, `HTTP ${out.status}`);
       return out;

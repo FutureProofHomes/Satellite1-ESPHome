@@ -95,17 +95,20 @@ device through Home Assistant, so it gives away nothing they did not have.
 
 ## The bundle
 
-Measured, from the build that produced this note (September 2026, after the visual-polish pass
-began: motion language, the redesigned nav drawer, and the media footer restyled after Music
-Assistant's own player with the mobile touch-target pass):
+Measured, from the build that produced this note (September 2026, after the full visual-polish
+pass: motion language, the redesigned nav drawer, the radar hero treatment, media finishing, the
+type ramp, empty states, the brand gradient (drawer indicator and slider fills only - never on
+buttons, by the owner's call), header blur, tree chips, first-load shimmers and the
+desktop two-column layout - all eleven rounds plus the request-queue deadline, for 1,880 B over the
+pre-polish bundle):
 
 | | Bytes |
 |---|---|
-| Raw HTML document | 124,724 |
-| Gzipped, as embedded | **41,457** |
+| Raw HTML document | 129,095 |
+| Gzipped, as embedded | **42,775** |
 | Budget | 49,152 |
 
-That is 84% of the ceiling. The budget was 40,960 B until September 2026, when the media footer
+That is 87% of the ceiling. The budget was 40,960 B until September 2026, when the media footer
 landed at 99.8% of it; the owner raised the line to 48KB for the visual-polish pass. The number is
 a self-imposed discipline rather than a hardware limit - flash sits under 43% used either way - so
 the raise cost about 8KB of flash headroom and nothing else, and the discipline continues against

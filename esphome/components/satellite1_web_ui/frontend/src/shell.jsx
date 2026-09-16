@@ -445,16 +445,21 @@ export function App() {
             .grow span here, which pushed the caret to the far edge of the bar next to the status dot,
             where it looked like a stray mark rather than "there is a menu on this". */}
         <button class="title" onClick={() => setSwitcher(true)}>
+          {/* The Home Assistant dot, back beside the name it describes (September 2026 polish plan).
+              It left once so the bar would not grow a dot per peer; this is one dot about one device -
+              the one serving the page - and the switcher it opens still carries the per-device story.
+              Same class and meaning as the switcher's own, so the two can never disagree. */}
+          <span
+            class={`dot${device?.ha ? " ok" : ""}`}
+            title={device?.ha ? TEXT.ha_connected : TEXT.ha_disconnected}
+            aria-label={device?.ha ? TEXT.ha_connected : TEXT.ha_disconnected}
+          />
           {/* A placeholder for the one paint before /api/sat1/state answers, not a prefix - the name is
               whatever deviceLabel returns, on its own, so nothing here can double it up. */}
           <span class="tname">{label || "Satellite1"}</span>
           {/* Always down: this opens a sheet, and a dropdown that points sideways reads as a link. */}
           <Chevron down cls="caret" />
         </button>
-        {/* The Home Assistant dot used to sit here. It has moved into the switcher sheet, onto the row for
-            the device it describes, which is where it can say the same thing about a peer later without
-            the bar growing a dot per device. Diagnostics still carries the sentence explaining what a
-            missing connection costs. */}
         <ThemeSwitch />
       </header>
 

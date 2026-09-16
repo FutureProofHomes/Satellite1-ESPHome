@@ -30,7 +30,7 @@ import { useRef, useState } from "preact/hooks";
 
 import { HINTS, PRESENCE, TEXT } from "../copy.js";
 import { RADAR_LIVE_MS, useRadar } from "../lib/device.js";
-import { Btn, Card, Hint, Missing, Row, Slider, Toggle } from "../ui.jsx";
+import { Btn, Card, Empty, Hint, Missing, Row, Slider, Toggle } from "../ui.jsx";
 
 /* ------------------------------------------------------------------ */
 /* The LD2450 plot                                                     */
@@ -102,8 +102,15 @@ function inPolygon(p, pts) {
  * over it. A press on a corner that never travels is a tap, and a tap selects the corner, which is
  * what arms the Remove corner button on the card below.
  */
+/** The wedge's corners: the LD2450 fans ±60° from straight ahead, so at the 600cm ceiling its edges
+ *  pass through (±600·sin60°, 600·cos60°). Wider than the viewBox on purpose - the SVG clips the
+ *  wings, and narrowing the angle to fit would draw a field the module does not have. */
+const FOV_X = Math.round(PLOT_DEPTH * Math.sin(Math.PI / 3));
+const FOV_Y = PLOT_DEPTH / 2;
+
 function Plot({ live, config, edit, onEdit, onSelect, onOpen, onHist }) {
   const svgRef = useRef(null);
+  const trailRef = useRef({}); // per target slot, its last few positions - the comet tail
   const dragRef = useRef(null); // index of the held corner, "all" for the whole shape, null when idle
   const movedRef = useRef(false); // travelled past the tap threshold, so release must not select
   const addedRef = useRef(false); // this press created the corner, so release must not select either
@@ -116,6 +123,23 @@ function Plot({ live, config, edit, onEdit, onSelect, onOpen, onHist }) {
   const zones = (config && config.zones) || [];
   const exclusion = (config && config.exclusion) || [];
   const range = config && config.detection_range ? config.detection_range : 0;
+
+  // The trail bookkeeping. A ref, not state: it is derived from the poll that already re-rendered
+  // this component, so recording it must not schedule another render. Guarded on "did it move",
+  // which also makes the mutation safe to run twice in one render. Slots the module stopped
+  // reporting lose their history, so a tail never outlives its person.
+  const trails = trailRef.current;
+  const seen = new Set();
+  for (const t of targets) {
+    seen.add(t.i);
+    const a = trails[t.i] || (trails[t.i] = []);
+    const last = a[a.length - 1];
+    if (!last || last.x !== t.x || last.y !== t.y) {
+      a.push({ x: t.x, y: t.y });
+      if (a.length > 4) a.shift();
+    }
+  }
+  for (const k of Object.keys(trails)) if (!seen.has(Number(k))) delete trails[k];
 
   const toPoint = (e) => {
     const r = svgRef.current.getBoundingClientRect();
@@ -238,7 +262,24 @@ function Plot({ live, config, edit, onEdit, onSelect, onOpen, onHist }) {
         onPointerUp={up}
         onPointerCancel={up}
       >
+        <defs>
+          {/* userSpaceOnUse so the gradient is centimetres from the sensor, not a fraction of the
+              wedge's own box - the glow must sit at the device however the wedge is clipped. */}
+          <radialGradient id="fovg" gradientUnits="userSpaceOnUse" cx="0" cy="0" r={PLOT_DEPTH}>
+            <stop offset="0" class="fov-in" />
+            <stop offset="1" class="fov-out" />
+          </radialGradient>
+          {/* The target's glow. The filter box is grown because blur samples outside the circle's
+              own bounds, and the default region clips the halo into a square. */}
+          <filter id="glowf" x="-150%" y="-150%" width="400%" height="400%">
+            <feGaussianBlur stdDeviation="12" />
+          </filter>
+        </defs>
         <g>
+          {/* The field of view: what the module actually watches, washed with a gradient that is
+              brightest at the sensor and gone by the far edge. Also the answer to why a corner of
+              the plot never shows anyone - it is outside this wedge. */}
+          <path class="plot-fov" d={`M0 0 L${-FOV_X} ${FOV_Y} A${PLOT_DEPTH} ${PLOT_DEPTH} 0 0 0 ${FOV_X} ${FOV_Y} Z`} />
           {/* Distance rings every 2m, which is how people describe a room. */}
           {[200, 400, 600].map((r) => (
             <circle key={r} class="plot-ring" cx="0" cy="0" r={r} />
@@ -291,9 +332,27 @@ function Plot({ live, config, edit, onEdit, onSelect, onOpen, onHist }) {
 
           {/* Drawn at the origin and placed by a CSS transform, because transforms transition and
               geometry attributes do not everywhere: the dot glides between 250ms polls instead of
-              teleporting, and a walking person reads as walking. */}
+              teleporting, and a walking person reads as walking. The dot is a blurred halo behind a
+              solid core, and behind both, the last few polled positions as fading echoes - keyed by
+              age, so when the history shifts each echo glides to the next position and the tail
+              follows the person like a comet's. */}
           {targets.map((t) => (
-            <circle key={t.i} class="plot-target" cx="0" cy="0" r="16" style={`transform:translate(${t.x}px,${t.y}px)`} />
+            <g key={t.i}>
+              {(trails[t.i] || []).slice(0, -1).map((p, j) => (
+                <circle
+                  key={`e${j}`}
+                  class="plot-trail"
+                  cx="0"
+                  cy="0"
+                  r={8 + 3 * j}
+                  style={`transform:translate(${p.x}px,${p.y}px);opacity:${0.1 + 0.09 * j}`}
+                />
+              ))}
+              <g class="plot-tgt" style={`transform:translate(${t.x}px,${t.y}px)`}>
+                <circle class="plot-halo" cx="0" cy="0" r="34" />
+                <circle class="plot-target" cx="0" cy="0" r="16" />
+              </g>
+            </g>
           ))}
         </g>
 
@@ -396,7 +455,20 @@ function Zones({ config, write, busy, edit, setEdit, open }) {
 
   return (
     <>
-      <p class="dim sm">{instruction}</p>
+      {/* The first-run case gets the drawn empty state; every other state of the shared instruction
+          line stays a plain sentence, because mid-edit guidance changing shape per tap would strobe. */}
+      {!edit && !defined.length && !hasExcl ? (
+        <Empty
+          icon={
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3.2 4.6 12.6 3l.4 8.4-9.6 1.6z" stroke-dasharray="2.8 2.2" />
+            </svg>
+          }
+          text={TEXT.zones_none}
+        />
+      ) : (
+        <p class="dim sm">{instruction}</p>
+      )}
       {edit ? (
         <div class="editor">
           <div class="row">

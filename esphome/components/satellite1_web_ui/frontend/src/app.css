@@ -43,6 +43,11 @@
   /* Light Blue 800 rather than 700. 700 is the nicer blue and fails at 3.86:1 both as a link on white
      and under white text on a solid button, which is most of what the accent is for. */
   --accent: #0277bd;
+  /* The brand gradient, accent into teal, used in exactly two places - the drawer's active bar and
+     slider fills - so it reads as a signature rather than a paint spill. Never on buttons: they wore
+     it for one build and the owner vetoed it (see .btn.solid). Teal 600 keeps the far end AA-safe
+     against both themes' text. */
+  --grad: linear-gradient(135deg, #0277bd, #00897b);
   --ok: #2e7d32;
   --warn: #b26a00;
   --err: #c62828;
@@ -90,6 +95,9 @@
   --fg-4: #626c7a;
 
   --accent: #03a9f4;
+  /* Cyan 400 at the far end: dark's brighter accent needs a brighter partner, and --on-accent's
+     near-black stays past 7:1 on both ends. */
+  --grad: linear-gradient(135deg, #03a9f4, #26c6da);
   --ok: #4caf50;
   --warn: #ffa726;
   --err: #ef5350;
@@ -245,6 +253,20 @@ textarea {
   padding-top: calc(var(--s-2) + env(safe-area-inset-top));
   background: var(--bg-elev);
   box-shadow: 0 1px 3px var(--shadow);
+}
+/* Translucent over a blur, so scrolled content ghosts through the bar the way every phone's own
+   chrome does - but only where the blur exists, because translucency without it is just a bar the
+   page shows through. The alphas restate the two --bg-elev values; they live here rather than in a
+   token because this is the app's only translucent surface. */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .topbar {
+    background: rgba(255, 255, 255, 0.8);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+  }
+  [data-theme="dark"] .topbar {
+    background: rgba(28, 32, 38, 0.8);
+  }
 }
 
 /* s-2 rather than s-1 of padding: with the glyph sizes below, that puts every icon button at or
@@ -415,6 +437,39 @@ textarea {
      last card on any route scrolls clear of the fixed bar. */
   padding: var(--s-3) var(--s-3) calc(var(--s-5) + var(--mbar-h) + env(safe-area-inset-bottom));
 }
+/* Two columns on a desktop, where one 720px column left half the window blank. CSS columns rather
+   than grid: the cards differ wildly in height (the log panel against a three-row card), and columns
+   pack them without the row-alignment holes a grid leaves. Wider max-width only here - the single
+   column keeps its measure on everything narrower. */
+@media (min-width: 900px) {
+  .wrap {
+    max-width: 960px;
+    columns: 2;
+    column-gap: var(--s-4);
+  }
+  .wrap > * {
+    break-inside: avoid;
+  }
+}
+
+/* First-load shimmer: the sheen sweeping a --fill block, on anything shaped like the content it
+   stands in for (the sensor chips give .pill.skel its size). Static fill under reduced motion -
+   the placeholder works without the sweep. */
+.skel {
+  min-height: 58px;
+  min-width: 64px;
+  background: linear-gradient(100deg, var(--fill) 40%, var(--fill-2) 50%, var(--fill) 60%) 0 0 / 200% 100%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .skel {
+    animation: skel 1.4s linear infinite;
+  }
+}
+@keyframes skel {
+  to {
+    background-position: -200% 0;
+  }
+}
 
 /* ---------------------------------------------------------------- */
 /* Overlays                                                         */
@@ -507,7 +562,7 @@ textarea {
   bottom: 8px;
   width: 3px;
   border-radius: 0 2px 2px 0;
-  background: var(--accent);
+  background: var(--grad);
 }
 /* The identity footer, pushed to the bottom by the auto margin so it stays put however short the
    route list is. Reads as a signature, not a row: no hover, no cursor, quieter type. */
@@ -633,19 +688,21 @@ a.peer.go:hover {
   background: var(--bg-elev);
   border-radius: var(--r-3);
   padding: var(--s-4);
-  margin-bottom: var(--s-3);
+  /* s-4, up from s-3: the extra 4px of air between cards is most of what "spacing rhythm" cost. */
+  margin-bottom: var(--s-4);
   box-shadow: 0 1px 2px var(--shadow), 0 6px 16px -8px var(--shadow);
 }
+/* Sentence case at t-l, replacing 12px uppercase-and-tracked. The small caps read as an engineering
+   tool's section labels; a title the same case as the prose under it reads as a name. One step
+   lighter than body text so the values stay the loudest thing on the card. */
 .card > h2 {
   display: flex;
   align-items: center;
   gap: var(--s-1);
   margin: 0 0 var(--s-2);
-  font-size: var(--t-s);
+  font-size: var(--t-l);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--fg-3);
+  color: var(--fg-2);
 }
 .card > h2 > span:first-child {
   flex: none;
@@ -698,6 +755,27 @@ a.peer.go:hover {
   flex: none;
 }
 
+/* Empty states (ui.jsx's Empty): the glyph dim and centred over the line, with enough padding that
+   the emptiness reads as intentional rather than as a card that failed to load its row. */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-1);
+  padding: var(--s-3) var(--s-2);
+  text-align: center;
+}
+.empty svg {
+  width: 26px;
+  height: 26px;
+  color: var(--fg-4);
+  flex: none;
+}
+.empty p {
+  margin: 0;
+  max-width: 36ch;
+}
+
 .facts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -711,7 +789,9 @@ a.peer.go:hover {
   color: var(--fg-3);
 }
 .fact-value {
-  font-size: var(--t-xl);
+  /* The same display step the sensor chips took (.pill-v): a fact grid is a wall of readings, and
+     the readings should out-shout their labels. */
+  font-size: var(--t-2xl);
   font-weight: 600;
 }
 .fact-unit {
@@ -851,7 +931,20 @@ input[type="range"] {
   margin: 0;
   padding: 0;
   background: none;
-  --track: linear-gradient(90deg, var(--sl, var(--accent)) var(--p, 0%), var(--line-2) 0);
+  /* Two layers: the top one is transparent to the fill point and rail-grey after it, and what shows
+     through the window is the fill layer - the brand gradient by default, or whatever --sl-fill a
+     tinted or disabled context put there. The gradient spans the whole track, so the fill reveals
+     more of it as it grows rather than compressing it. */
+  --track:
+    linear-gradient(90deg, transparent var(--p, 0%), var(--line-2) 0),
+    var(--sl-fill, var(--grad));
+}
+/* The tinted media surfaces already choose a fill colour (--sl); their sliders use it rather than
+   the brand gradient, which would fight the album's colour. */
+.mbar-vol input[type="range"],
+.msheet input[type="range"],
+.mpanel input[type="range"] {
+  --sl-fill: linear-gradient(var(--sl), var(--sl));
 }
 input[type="range"]::-webkit-slider-runnable-track {
   height: 6px;
@@ -882,6 +975,7 @@ input[type="range"]::-moz-range-thumb {
 }
 input[type="range"]:disabled {
   --sl: var(--fg-4);
+  --sl-fill: linear-gradient(var(--fg-4), var(--fg-4));
 }
 
 .slider {
@@ -951,6 +1045,9 @@ input[type="range"]:disabled {
   color: var(--err-fg);
   border-color: var(--err-line);
 }
+/* Flat accent, no gradient - buttons briefly wore the brand gradient during the September 2026
+   polish pass and the owner vetoed it on sight (the Presence route's Add zone was the tell). The
+   gradient stays a background texture (drawer indicator, slider fills), never a control's face. */
 .btn.solid {
   background: var(--accent);
   border-color: var(--accent);
@@ -1066,7 +1163,9 @@ input[type="range"]:disabled {
 }
 .pill-v {
   display: block;
-  font-size: var(--t-xl);
+  /* t-2xl: the reading is the chip's whole reason to exist, so it gets display size - the label
+     beneath stays xs and the pair reads as instrument-and-caption. */
+  font-size: var(--t-2xl);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1306,7 +1405,11 @@ input[type="range"]:disabled {
 }
 .tree-ps {
   border-top: 1px solid var(--line);
-  background: var(--bg);
+  /* The indent guide: one hairline dropping from under the area's checkbox (which starts at 30px,
+     per the indent maths above - the line sits at its midpoint), so an expanded room's players
+     visibly hang off their heading instead of floating in a paler box. A painted gradient, because
+     a border would shift the rows' 52px indent and a shadow cannot be placed 40px in. */
+  background: linear-gradient(var(--line-2), var(--line-2)) 40px 0 / 1px 100% no-repeat var(--bg);
 }
 .tree-x {
   background: none;
@@ -1317,10 +1420,15 @@ input[type="range"]:disabled {
   line-height: 0;
   cursor: pointer;
 }
+/* The area's tally as a chip rather than bare "0/12" text: rounded and filled, it reads as a count
+   at a glance where the raw fraction read as part of the room's name. */
 .tree-n {
-  font-size: var(--t-s);
-  color: var(--fg-4);
+  font-size: var(--t-xs);
+  color: var(--fg-3);
   white-space: nowrap;
+  padding: 1px var(--s-1);
+  background: var(--fill);
+  border-radius: var(--r-pill);
 }
 /* A player that cannot answer this tree's call. Present so the list matches what Home Assistant
    shows, greyed so it cannot be picked, with the reason on the row itself - a player silently
@@ -1330,7 +1438,7 @@ input[type="range"]:disabled {
 }
 .tree-why {
   font-size: var(--t-s);
-  color: var(--fg-4);
+  color: var(--fg-3);
   white-space: nowrap;
   font-style: italic;
 }
@@ -1467,12 +1575,48 @@ input[type="range"]:disabled {
   stroke-width: 3;
   stroke-dasharray: 12 10;
 }
+/* The field-of-view wash: accent at the sensor, nothing by the far edge. The stops are classes
+   because SVG gradients cannot read custom properties from attributes, but stop-color set in CSS
+   can - so the wedge follows the theme like everything else. */
+.plot-fov {
+  fill: url(#fovg);
+}
+.fov-in {
+  stop-color: var(--accent);
+  stop-opacity: 0.14;
+}
+.fov-out {
+  stop-color: var(--accent);
+  stop-opacity: 0.02;
+}
+/* The target: a solid core over a blurred halo, both riding the group's transform. The transition is
+   what turns the 250ms poll steps into a glide - the browser interpolates between positions instead
+   of teleporting the dot. Linear, because easing would make constant walking speed read as lurching.
+   The trail echoes get the same glide, so the whole tail flows rather than flickers. */
+.plot-tgt,
+.plot-trail {
+  transition: transform 0.25s linear;
+}
 .plot-target {
   fill: var(--accent);
-  /* Placed by transform (see the plot), and the transition is what turns the 250ms poll steps into a
-     glide - the browser interpolates between positions instead of teleporting the dot. Linear, because
-     easing would make constant walking speed read as lurching. */
-  transition: transform 0.25s linear;
+}
+.plot-trail {
+  fill: var(--accent);
+}
+.plot-halo {
+  fill: var(--accent);
+  opacity: 0.3;
+  filter: url(#glowf);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .plot-halo {
+    animation: plot-pulse 2.4s ease-in-out infinite;
+  }
+}
+@keyframes plot-pulse {
+  50% {
+    opacity: 0.5;
+  }
 }
 /* Every shape's name, at its middle. Sized in plot centimetres like the ticks, for the same reason. */
 .plot-name {
@@ -1528,10 +1672,12 @@ polyline.draft {
 }
 /* Sized in centimetres like everything else in the viewBox, so it scales with the plot rather than
    staying a fixed pixel size and swamping the rings on a narrow screen. Not on the type scale for
-   that reason: it is not a font size in CSS pixels. */
+   that reason: it is not a font size in CSS pixels. Weighted up a step from the fg-4 it wore, so the
+   scale reads as part of the instrument rather than dust on it. */
 .plot-tick {
-  fill: var(--fg-4);
+  fill: var(--fg-3);
   font-size: 30px;
+  font-weight: 600;
   font-family: inherit;
 }
 
@@ -1550,7 +1696,7 @@ polyline.draft {
 .gate-n {
   width: 62px;
   text-align: left;
-  color: var(--fg-4);
+  color: var(--fg-3);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -1735,6 +1881,11 @@ polyline.draft {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* While the marquee owns the overflow the ellipsis comes off, or the sliding text would drag three
+   dots along its clipped edge. */
+.mbar-t.scroll {
+  text-overflow: clip;
+}
 .mbar-s {
   font-size: var(--t-xs);
   white-space: nowrap;
@@ -1777,7 +1928,11 @@ polyline.draft {
   z-index: 40;
   display: flex;
   flex-direction: column;
-  background: var(--tint, var(--bg));
+  /* A vertical fall into the same colour ~10 points darker (--tint2, from tintStyle), which is what
+     separates "washed in the album's colour" from "flat rectangle of it". Gradients are images, not
+     colours, so this surface sits out the 400ms tint crossfade the bar and panel get - a hard swap
+     here reads fine because the track change repaints the artwork at the same instant. */
+  background: linear-gradient(var(--tint, var(--bg)), var(--tint2, var(--bg-sunk)));
   color: var(--tfg, var(--fg));
   --sl: var(--tfg, var(--accent));
   padding-top: env(safe-area-inset-top);
@@ -1838,7 +1993,9 @@ polyline.draft {
   align-items: center;
   gap: var(--s-2);
   width: 100%;
-  font-size: var(--t-xs);
+  /* t-s, up from t-xs: these two numbers are read at counter distance while cooking, and they were
+     the smallest text on the whole screen. */
+  font-size: var(--t-s);
   color: var(--tdim, var(--fg-3));
 }
 .mseek input {
@@ -1990,14 +2147,40 @@ polyline.draft {
   font-size: 18px;
   line-height: 1;
 }
-.mgroup-add {
-  width: 100%;
+/* The add-speaker list: a quiet heading and one drawn-+ row per joinable player, replacing the
+   native select (see PlayersPanel). Rows are full-width thumb targets; the + rides in a hairline
+   circle so the row reads as an action, not a label. */
+.mgroup-adds {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--tdim, var(--line));
+  padding-top: var(--s-2);
   margin-top: var(--s-1);
-  background: var(--fill);
-  color: var(--fg);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-2);
-  padding: var(--s-1);
+}
+.mgroup-addrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  padding: var(--s-2) 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: var(--t-m) inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.mgroup-addrow .mi {
+  width: 15px;
+  height: 15px;
+  padding: 4px;
+  flex: none;
+  /* The generic .mi centres itself with auto margins for the transport buttons it was drawn for;
+     in this flex row those margins absorb the free space and fling the + to the middle, so they
+     come off here and the gap property spaces the row instead. */
+  margin: 0;
+  border: 1px solid var(--tdim, var(--line-2));
+  border-radius: var(--r-pill);
 }
 
 /* The players chip at the foot of the expanded view: who is playing, opening the players panel -
@@ -2064,15 +2247,6 @@ polyline.draft {
 .mpanel .mgroup-x {
   color: inherit;
 }
-.mpanel .mgroup-add {
-  background: none;
-  color: inherit;
-  border-color: var(--tdim, var(--line-2));
-}
-.mpanel .mgroup-add option {
-  color: var(--fg);
-  background: var(--bg-elev);
-}
 /* The grab handle, which is also the close button. */
 .mpanel-handle {
   width: 42px;
@@ -2108,6 +2282,18 @@ polyline.draft {
 .mapanel-row {
   display: flex;
   gap: var(--s-2);
+}
+/* The fold's fields and buttons, dressed for the tinted surface they sit on: the theme's --fill and
+   --line read as grey patches over an album colour, so both go translucent-on-inherit, falling back
+   to the theme untinted. */
+.mapanel .in,
+.mapanel .btn {
+  background: none;
+  color: inherit;
+  border-color: var(--tdim, var(--line-2));
+}
+.mapanel .in::placeholder {
+  color: var(--tdim, var(--fg-4));
 }
 
 /* ------------------------------------------------------------------ */
@@ -2258,6 +2444,18 @@ polyline.draft {
       background-color 0.4s ease,
       color 0.4s ease;
   }
+  /* An expanding area's players rise in like everything else; collapse stays instant, because the
+     list unmounts and a mount-only animation is the whole trick (see NavPane on unmount animation). */
+  .tree-ps {
+    animation: rise 0.18s ease-out;
+  }
+  /* The bar title's marquee, armed by BarTitle only when the text measures wider than the line.
+     Alternate, with long holds at both ends baked into the keyframes: read, slide, read the end,
+     slide back - never the endless conveyor belt. Reduced-motion gets the plain clipped line. */
+  .mbar-t.scroll span {
+    display: inline-block;
+    animation: mq 10s linear 3s infinite alternate;
+  }
   /* Press dip for the chrome-free buttons; .btn and .mplay carry their own pressed looks. */
   .icon:active,
   .mbtn:not(:disabled):active,
@@ -2290,6 +2488,16 @@ polyline.draft {
   to {
     opacity: 1;
     transform: none;
+  }
+}
+@keyframes mq {
+  0%,
+  20% {
+    transform: none;
+  }
+  80%,
+  100% {
+    transform: translateX(var(--mq));
   }
 }
 @media (prefers-reduced-motion: reduce) {
