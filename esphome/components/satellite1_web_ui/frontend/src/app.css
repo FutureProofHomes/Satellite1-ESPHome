@@ -67,6 +67,12 @@
   --shadow: rgba(16, 24, 40, 0.1);
   --scrim: rgba(0, 0, 0, 0.3);
 
+  /* Pressed-button tint, laid over whatever the button's own background is (see .btn:active). A
+     translucent overlay rather than a swapped background colour because the buttons come in five
+     backgrounds - fill, none, accent, error, latched accent - and one darkening layer serves them
+     all. Dark ink here; the dark theme lightens instead, where darkening is nearly invisible. */
+  --press: rgba(15, 23, 32, 0.12);
+
   color-scheme: light;
 }
 
@@ -101,6 +107,9 @@
   --knob: #ffffff;
   --shadow: rgba(0, 0, 0, 0.55);
   --scrim: rgba(0, 0, 0, 0.5);
+
+  /* Lighten on press: these surfaces are dark enough that a dark tint would not read. */
+  --press: rgba(255, 255, 255, 0.14);
 
   color-scheme: dark;
 }
@@ -164,12 +173,6 @@ textarea {
   font: inherit;
 }
 
-hr {
-  border: 0;
-  border-top: 1px solid var(--line);
-  margin: var(--s-2) 0 var(--s-1);
-}
-
 /* Was a monospace family two steps down in size, applied to a slider's readout, a countdown, an IP and a
    MAC. The reason was digit stability - a percentage that changes width makes the row twitch - but a
    different typeface is a heavy price for it, and it made a handful of values look like terminal output
@@ -204,8 +207,14 @@ hr {
 .t-warn {
   color: var(--warn);
 }
-.t-info {
-  color: var(--fg-2);
+/* Log levels, on ESPHome's own console palette: green info and cyan-blue debug (the accent is the
+   closest token to its cyan and reads as one). Replaced .t-info, which coloured info lines the same
+   as body text and debug the same as verbose - "colour coded" in name only. */
+.t-ok {
+  color: var(--ok);
+}
+.t-dbg {
+  color: var(--accent);
 }
 .t-dim {
   color: var(--fg-4);
@@ -478,28 +487,25 @@ hr {
   border-bottom: 1px solid var(--line-2);
   padding-top: env(safe-area-inset-top);
 }
+/* The top bar's twin: the sheet covers the bar, and this header stands in for the button that opened
+   it, so the tap that closes it lands where the opening one did. Same height, and the same gap and
+   side padding as .topbar, because the ✕, title and caret inside reuse the bar's own .icon, .title
+   and .caret - the match the owner asked for is structural, not approximated. */
 .sheet-head {
   display: flex;
   align-items: center;
-  padding: var(--s-2) var(--s-4);
-  font-weight: 600;
-  font-size: var(--t-m);
+  gap: var(--s-1);
+  height: var(--bar-h);
+  padding: 0 var(--s-3);
   border-bottom: 1px solid var(--line);
 }
-/* The title does not grow, and the close button is pushed over instead. It used to be `.sheet-head span
-   { flex: 1 }`, which was fine while the title was the only thing beside the X - but it puts anything
-   added after the title hard against the X at the far edge, which is exactly how the top bar's caret
-   ended up looking like a speck of dirt. The ⓘ has to sit against the words it belongs to. */
-.sheet-head .hint-btn {
-  margin-left: var(--s-1);
-}
+/* The ✕, sized to put about as much ink down as the burger it mirrors. .icon supplies the chrome-free
+   button; line-height comes back because unlike the burger this is a text glyph, and .icon's
+   line-height: 0 would crop it. */
 .x {
-  margin-left: auto;
-  background: none;
-  border: 0;
-  color: var(--fg-3);
-  cursor: pointer;
+  color: var(--fg-2);
   font-size: var(--t-l);
+  line-height: 1;
 }
 .peer {
   padding: var(--s-2) var(--s-4);
@@ -523,21 +529,35 @@ a.peer.go:hover {
 .peer.off {
   opacity: 0.45;
 }
-/* The manual rows keep the anchor on the name alone, because the ✕ beside it is a button and a
-   button inside a link answers both on one tap. */
-.peer-a {
-  color: inherit;
-  text-decoration: none;
-}
-.peer-add {
+/* .peer-a and .peer-add went with the manual add-by-address feature, removed at the owner's request. */
+
+/* The disclosure over the powered-off peers: a full-width row like the peers it hides, muted like
+   the devices it stands for, with the shared caret saying which way it is. */
+.offhead {
   display: flex;
+  align-items: center;
   gap: var(--s-1);
+  width: 100%;
   padding: var(--s-2) var(--s-4);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--fg-3);
+  font: var(--t-s) inherit;
+  text-align: left;
+  cursor: pointer;
 }
 .peer-sub {
-  margin-left: 13px;
+  /* Flush with the device name above it, which starts after the 8px dot, the dot's own --s-1
+     margin, and the row's --s-1 gap. The old 13px predated the gap and sat visibly short of it. */
+  margin-left: calc(8px + 2 * var(--s-1));
   font-size: var(--t-xs);
   color: var(--fg-3);
+}
+/* The room, bold per the owner - it is the half of the line a person scans for. Weight alone: it
+   stays the sub-line's muted colour, so the emphasis does not fight the device name above. */
+.peer-sub strong {
+  font-weight: 600;
 }
 .sheet-foot {
   margin: 0;
@@ -669,7 +689,9 @@ a.peer.go:hover {
   margin-bottom: var(--s-2);
 }
 /* Full width, because it is the only action in the panel and a button that spans it cannot be missed. */
-.updbox .btn {
+/* Direct child only: the Install button spans the panel, but Confirm's modal now renders inside this
+   box too, and its Cancel/proceed pair must not inherit the full-width treatment. */
+.updbox > .btn {
   width: 100%;
 }
 
@@ -764,7 +786,11 @@ a.peer.go:hover {
   accent-color: var(--accent);
 }
 .slider-val {
-  width: 62px;
+  /* A minimum, not a width: 62px keeps the percentage readouts from shifting the track as their
+     digit count changes, while the worded zero states - "follow media", "follow device" - get to be
+     wider than that instead of wrapping onto two lines. */
+  min-width: 62px;
+  white-space: nowrap;
   text-align: right;
   /* Its own, rather than borrowed from the monospace helper this used to carry. */
   font-size: var(--t-s);
@@ -834,13 +860,54 @@ a.peer.go:hover {
   border-color: var(--accent);
   color: var(--on-accent);
 }
+/* The down state, which every .btn was missing - a press gave no feedback at all on touch, where
+   there is no hover to stand in for it. The gradient is how a translucent layer goes ON TOP of the
+   button's own background-color (ghost included: a gradient renders over background: none too), so
+   the one rule covers plain, solid, danger and latched buttons without restating their colours.
+   The 1px sink is the physical half of the cue. Nothing here runs on :disabled, whose taps are not
+   presses. */
+.btn:not(:disabled):active {
+  background-image: linear-gradient(var(--press), var(--press));
+  transform: translateY(1px);
+}
 .btn:disabled {
   opacity: 0.4;
   cursor: default;
 }
-.confirm {
+/* The "Are you sure?" dialog behind ui.jsx's Confirm. Centred by the scrim itself: .scrim is already
+   the full-viewport veil, so a flex modifier on it is the whole layout. */
+.scrim.center {
   display: flex;
-  gap: var(--s-1);
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-4);
+}
+.modal {
+  width: 100%;
+  max-width: 360px;
+  padding: var(--s-4);
+  background: var(--bg-elev);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-3);
+  box-shadow: 0 12px 40px -8px var(--shadow);
+}
+.modal-t {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-l);
+  font-weight: 600;
+}
+.modal-b {
+  margin: 0 0 var(--s-4);
+  color: var(--fg-2);
+  font-size: var(--t-m);
+  line-height: 1.5;
+}
+/* Cancel first, proceed last: tab order reaches the safe exit before the consequence, and the
+   proceed button sits in the corner where every dialog people already know puts it. */
+.modal-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-2);
 }
 .link {
   background: none;
@@ -1001,6 +1068,12 @@ a.peer.go:hover {
   border-color: var(--accent);
   color: var(--on-accent);
 }
+/* The mute chip. Red rather than the accent, per the owner: an active mute is the answer to "why is
+   it not listening?", and the colour should say so from across the card. */
+.bstate.warn.on {
+  background: var(--err);
+  border-color: var(--err);
+}
 
 /* ---------------------------------------------------------------- */
 /* Timers and transcript                                            */
@@ -1009,6 +1082,22 @@ a.peer.go:hover {
 .lg {
   font-size: var(--t-2xl);
   font-weight: 600;
+}
+
+/* The transcript's subcard: the calibration editor's box (.editor above) with a neutral border,
+   because that box's accent border means "editing in progress" and the transcript is read-only. */
+.transcript {
+  margin-bottom: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-2);
+  border: 1px solid var(--line-2);
+  background: var(--fill);
+}
+.transcript > :first-child {
+  margin-top: 0;
+}
+.transcript > :last-child {
+  margin-bottom: 0;
 }
 
 .utt {
@@ -1021,7 +1110,9 @@ a.peer.go:hover {
 }
 .utt-who {
   display: inline-block;
-  min-width: 38px;
+  /* Wide enough for "ASSIST:", the longer of the two labels, so both utterances start their text at
+     the same x - the labels differ in length and would otherwise stagger the column. */
+  min-width: 52px;
   margin-right: var(--s-1);
   font-size: var(--t-xs);
   text-transform: uppercase;
@@ -1044,6 +1135,32 @@ a.peer.go:hover {
 .ln {
   white-space: pre-wrap;
 }
+/* The arrival clock on every line. Its own muted colour regardless of the line's level, so it stays a
+   readable margin column through a run of red; tabular digits so seconds tick without wobbling; bold
+   so the muted colour still registers as a column and not as faded text. */
+.ln-t {
+  margin-right: var(--s-1);
+  color: var(--fg-4);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The filter funnel beside the Logs card's level dropdown, on the Chevron's 12px grid. */
+.funnel {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--fg-3);
+}
+
+/* The sentence under Remote routing's and Area ducking's titles, saying what ticking a player does.
+   Tight to the title above (the negative margin eats most of the h2's gap, so it reads as the title's
+   subtitle) and padded below, so the sentence belongs to the heading rather than to the tree. */
+.tree-title {
+  margin: -4px 0 var(--s-2);
+  font-size: var(--t-m);
+  color: var(--fg-2);
+}
 
 /* The area/player tree, shared by Remote routing and Area ducking.
    Scrolls at a fixed height rather than growing: 22 areas is a plausible house, and a card that
@@ -1054,6 +1171,11 @@ a.peer.go:hover {
   background: var(--bg-sunk);
   border: 1px solid var(--line);
   border-radius: var(--r-2);
+}
+/* Air between the tree and the first control under it - the volume sliders sat straight against the
+   box's bottom edge, per the owner too close to read as separate things. */
+.tree + .ctl {
+  margin-top: var(--s-3);
 }
 .tree-a + .tree-a {
   border-top: 1px solid var(--line);
@@ -1468,9 +1590,53 @@ polyline.draft {
   align-items: center;
   margin-bottom: var(--s-1);
 }
+/* The card's last row: count on the left, the Live/Pause toggle on the right, per the owner. */
+.log-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  margin-top: var(--s-1);
+}
 .log-count {
-  margin: var(--s-1) 0 0;
+  flex: 1;
+  margin: 0;
   text-align: right;
+}
+
+/* The level filter as a drawn menu (see LevelMenu in diagnostics.jsx for why a <select> lost the
+   job). The popup borrows the hint bubble's elevation so the two read as the same kind of surface. */
+.lvlmenu {
+  position: relative;
+  display: inline-flex;
+}
+.lvlbtn {
+  gap: 5px;
+}
+.lvlpop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  min-width: 118px;
+  padding: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  box-shadow: 0 6px 20px -6px var(--shadow);
+}
+.lvlopt {
+  display: block;
+  width: 100%;
+  padding: 5px var(--s-2);
+  background: none;
+  border: 0;
+  border-radius: var(--r-1);
+  font: var(--t-s) inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lvlopt.on {
+  background: var(--fill);
 }
 .log mark {
   background: var(--accent);
@@ -1491,6 +1657,11 @@ polyline.draft {
   margin: 0;
   font: inherit;
   color: inherit;
+  /* The UA stylesheet sets text-transform: none on <button>, which quietly exempted the three
+     collapsible titles from the h2's uppercase - the mismatch the owner kept seeing. `font: inherit`
+     above cannot fix it because text-transform and letter-spacing are not part of the font shorthand. */
+  text-transform: inherit;
+  letter-spacing: inherit;
   cursor: pointer;
   text-align: left;
 }

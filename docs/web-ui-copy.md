@@ -23,17 +23,24 @@ mute is in silicon rather than software, PSRAM's total is smaller than the chip.
 
 Attached to the small **i** beside a label. One is open at a time.
 
-### Controls
+### Home
+
+The route was called Controls until the September 2026 rename pass; the page is the one you land on,
+so it is named for that. Two hints moved here with their rows in the same pass: `mute` and
+`voice_override`, both now in the Assistant card (the renamed Voice card, whose transcript rows are
+labelled User and Assist rather than heard and said).
 
 | Key | Where | Text |
 | --- | --- | --- |
+| `mute` | Assistant card, Mute microphones | Cuts the microphones in hardware, not software - wake word detection stops with them. The mute button on the device does the same thing. |
+| `voice_override` | Assistant card, Assistant volume | How loud this device speaks when the assistant replies, separate from media volume. Zero follows the media volume instead. Speakers you route answers to have their own level - Remote TTS volume, on the Audio page. |
 | `temp` | Calibration editor, title row | Reads high by design - the sensor sits inside a warm enclosure, next to the board. Calibrate against a thermometer in the same room. |
 | `humidity` | Calibration editor, title row | Measured at the board, so it drifts with the enclosure temperature. Calibrate against a hygrometer in the same room. |
 | `lux` | Calibration editor, title row | Ambient light at the front face. Useful for dimming the LED ring automatically from Home Assistant, or for a light-level trigger. |
-| `calibrate` | Calibration editor, offset row | Enter what a trusted instrument in the same room reads. The difference is saved as an offset and survives a restart. It does not change the raw reading, only what the device reports. |
+| `calibrate` | Calibration editor, offset row | Adjust until the reading matches a trusted instrument in the same room. The correction is stored on the device and survives restarts. |
 | `led_ring` | LED ring | The ring the assistant animates. Colour and brightness set here are the resting state - the device still overrides both while it is listening, thinking or reporting an error. |
-| `timers` | Timers card | Timers set by voice, held on the device. They keep counting and still ring if Home Assistant goes away. |
-| `media` | Media card | Whatever this device is playing right now, from either source: a group stream, or media sent to it by Home Assistant. Track skipping belongs to group streams - media from Home Assistant is a single stream with no queue to skip within. The volume here is the media volume; what the assistant says has its own level, on Config. |
+| `timers` | Timers card | Timers set by voice, held on the device - they keep counting and still ring if Home Assistant goes away. Voice is also how they are managed: name one when you set it ("set a pizza timer for ten minutes"), pause or cancel it the same way. |
+| `media` | Media card | What this device is playing, from either source: a group stream, or media sent to it by Home Assistant. Track skipping works only on group streams. This slider is the media volume; the assistant's voice has its own level, in the Assistant card below. |
 
 The first four sit on the ⓘ inside the calibration editor, which opens by tapping a sensor chip — not on
 the chips themselves. A chip is 50–80px wide, and a finger-sized ⓘ inside one is indistinguishable from a
@@ -81,8 +88,8 @@ display map rather than a hint: the key is what the radar reports and the value 
 
 | Key | Where | Text |
 | --- | --- | --- |
-| `Approaching` | Presence pill on Controls | Closer |
-| `Moving Away` | Presence pill on Controls | Away |
+| `Approaching` | Presence pill on the home page | Closer |
+| `Moving Away` | Presence pill on the home page | Away |
 
 Only these two are listed because only these two are too long. The firmware also reports `Still` and
 `Clear` on an LD2450, and `Clear`, `Moving` and `Still` on an LD2410, and anything absent from the table
@@ -100,17 +107,18 @@ looking at a third of them was the more expensive problem.
 
 | Key | Where | Text |
 | --- | --- | --- |
-| `heap` | Internal RAM free | Internal RAM still available. This is the number that matters: it is what audio buffers and the network stack allocate from, and it is far scarcer than PSRAM. |
-| `psram` | PSRAM free | External RAM, used for the large buffers. Installed is the size of the chip; the free and total figures cover the region handed to the allocator, which is smaller because the cache and early allocations sit outside it. |
-| `loop` | Longest loop | Longest single pass through the main loop since this panel last read the value. Tens of milliseconds is normal. Sustained hundreds means something is blocking, and audio will stutter before anything else does. |
-| `esp_temp` | ESP32 Temp | Temperature of the ESP32 itself, not the room. It reads well above ambient because it sits inside a sealed case next to an amplifier, so a warm number here is normal; sustained readings above 80 °C are worth investigating. The temperature on the Controls page is the one that measures the room. |
+| `heap` | Internal RAM free | Internal RAM still available. Audio buffers and the network stack allocate from it, and it runs out long before PSRAM does. |
+| `psram` | PSRAM free | External RAM, used for the large buffers. Free and total cover the region the firmware can allocate from, which is smaller than the chip installed. |
+| `loop` | Longest loop | The longest single pass through the main loop since the last reading. Tens of milliseconds is normal; sustained hundreds means something is blocking, and audio will stutter first. |
+| `esp_temp` | ESP32 Temp | The ESP32 chip's own temperature, not the room's. It reads well above ambient inside the sealed case, so warm is normal; sustained readings above 80 °C are worth investigating. The room's temperature is on the home page. |
 | `reset` | Last restart | Why the device last restarted. 'USB peripheral' means it was flashed. 'Power glitch' or 'Brownout' points at the power supply rather than at the firmware. |
-| `xmos` | XMOS firmware, and the XMOS card title | The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's. |
+| `xmos` | XMOS firmware, and the XMOS Recovery card title | The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's. |
 | `xmos_flash` | Reflash XMOS vX.X.X | Rewrites the audio chip's firmware from the image embedded in this build. The device is deaf and mute until it finishes, which takes about a minute. Do not cut power. |
-| `safe_mode` | Safe mode | Restarts with everything but wifi and the updater switched off. Use it when the device is crash-looping and will not stay up long enough to accept an update. |
-| `factory_reset` | Factory reset | Erases every setting stored on the ESP32, including the wifi credentials, and restarts. You will have to set the device up again from scratch. The audio chip's firmware is not touched. |
+| `maintenance` | ESP32 Recovery card title | Ways to restart or reset this device. None of them are part of everyday use. Restart is always safe - your settings survive it. Factory reset is the only row here that erases anything. |
+| `safe_mode` | Safe mode | Restarts with everything but Wi-Fi and the updater switched off. Use it when the device is crash-looping too fast to accept an update. |
+| `factory_reset` | Factory reset | Erases every setting stored on the ESP32, including the Wi-Fi credentials, and restarts. You will have to set the device up again from scratch. The audio chip's firmware is not touched. |
 | `beta` | Beta updates | Offers pre-release firmware to the updater. Useful for testing a fix; not what you want on a device you rely on. |
-| `log` | Log | The device's own log, live. This is the first place to look when something misbehaves, and the most useful thing to attach to a support request. |
+| `log` | Logs card title | The device's own log, live. This is the first place to look when something misbehaves, and the most useful thing to attach to a support request. |
 
 `xmos_erase` was deleted along with the row it explained. Erasing the audio chip leaves it blank — no
 microphones, no speaker, no wake word — and the only way back is the Reflash row directly above it, which
@@ -122,36 +130,30 @@ at all rather than merely not showing it; the ESPHome button still exists for a 
 returns `v1.2.3` when the chip is talking and `XMOS not responding` or `Flashing Mode` when it is not, so
 the label falls back to a bare "Reflash XMOS" rather than printing a status where a version should be.
 
-The Buttons card is no longer on this route. It moved to the foot of Controls: it answers "does this button
+Two cards were renamed in the September 2026 pass: **Log** became **Logs**, and **Sat1 Device** became
+**ESP32 Recovery** (briefly "Maintenance", then "Power & Recovery") — the final name pairs it with
+**XMOS Recovery** above it: the two cards do the same job for the two chips. ESP32 Recovery is expanded
+by default (Restart is the row people come for); XMOS Recovery stays collapsed. All three collapsible
+cards now put the caret after the title instead of before it, so their titles line up with every other
+card's.
+
+The Buttons card is no longer on this route. It moved to the foot of the home page: it answers "does this button
 work", which is a question about the object in your hand rather than about its internals, and it sits beside
 the volume and mute it duplicates in hardware.
 
-### Config
+### Wake Word
 
-Two controls here still write to entities in `config/common/tts_routing.yaml` and
-`config/common/area_ducking.yaml`, so their wording has to agree with what Home Assistant shows. The
-two trees do not: they write the device's own selection at `/api/sat1/sel`, and they are the only face
-that selection has.
+Its own route since the September 2026 pass: these rows are the first thing a new owner goes looking
+for, and they were the third card down a route named Audio. One card, in the owner's row order - the
+wake word dropdowns, then **Wake words sensitivity** (plural, renamed from "Wake word sensitivity":
+it is one sensitivity shared by every word above), Wake chime, and Say "stop" to interrupt last.
 
 | Key | Where | Text |
 | --- | --- | --- |
-| `mute` | Voice Input, Mute microphones | Cuts the microphones in hardware, on the XMOS chip, not in software. Wake word detection stops with them. The mute button on the device does the same thing. |
-| `wake_words` | Voice Input, first wake word row | Which wake words this device answers to, and which assistant answers each one. Off stops it responding to that word and leaves more of the processor for the ones you do use. The assistants are the voice pipelines you have set up in Home Assistant, and Preferred follows whichever one is marked preferred there. Home Assistant keeps this pairing rather than the device, which is why it needs to be reachable to change one, and why there is room for two wake words at a time - these are the Assistant and Assistant 2 settings on this device's Home Assistant page. |
-| `stop_word` | Voice Input, Say "stop" to interrupt | While an answer is playing - this device’s own, or one another Satellite1 routed here - the device listens for the single word "stop" and cuts it off everywhere it is playing. A ringing timer can always be silenced by saying stop, whichever way this is set. |
-| `wake_sensitivity` | Voice Input, Wake word sensitivity | How readily the wake word fires. Raise it if the device misses you from across the room; lower it if the television sets it off. |
-| `wake_sound` | Voice Input, Wake chime | Plays a short chime on the speaker the moment the wake word is detected. |
-| `voice_override` | Audio Output, Assistant volume | How loud this device's own speaker is when the assistant replies, independent of media volume. Set to zero to follow the media volume instead. For the speakers you route answers to, see Remote TTS volume in Remote routing below. |
-| `speaker_channel` | Audio Output, Channel | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
-| `remote_routing` | Remote routing card title | Plays the assistant's spoken answer on other speakers as well as this one. Tick a room to include every player in it, or open the room and pick players individually. Local Speaker is this device's own speaker - untick it and the answer is heard only where you have chosen. |
-| `area_ducking` | Area ducking card title | Turns other speakers down while the assistant is busy, then puts them back where they were. It runs from the wake word to the end of the answer, so the room is quiet while it listens to you as well as while it answers. Tick a room to cover every player in it. |
-| `remote_tts_volume` | Remote TTS volume | How loud the answer is on the remote speakers. It does not touch this device's own level - that is Assistant volume, in Audio Output above. Sonos reads the level off the announcement; another Satellite1 has its Voice Override set and put back; anything else has its media volume set and restored. |
-| `remote_wake_chime` | Remote wake chime | Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to. |
-| `duck_volume` | Duck volume | The level they drop to. Players already quieter than this are left alone, so a whole-house group does not get turned up. |
-
-The first six rows were on Controls, in cards called Voice and Speaker. They are settings rather than
-readings — you change them once and leave them — so they moved to this route as **Voice Input** and
-**Audio Output**, named for the two directions sound travels through the device so that neither card has
-to explain which it is. Controls keeps the live voice phase and the transcript.
+| `wake_words` | first wake word row | Which wake words this device answers, and which assistant answers each one. Off stops it responding to that word and frees processing for the ones you use. The assistants are your Home Assistant voice pipelines - Preferred follows whichever is marked preferred there. Home Assistant stores the pairing, so it must be reachable to change one. |
+| `wake_sensitivity` | Wake words sensitivity | How readily the wake word fires. Raise it if the device misses you from across the room; lower it if the television sets it off. |
+| `wake_sound` | Wake chime | Plays a short chime on the speaker the moment the wake word is detected. |
+| `stop_word` | Say "stop" to interrupt | While an answer is playing - this device’s own, or one another Satellite1 routed here - saying "stop" cuts it off everywhere it is playing. A ringing timer can always be silenced this way, whichever way this is set. |
 
 `wake_words` is one hint for the whole group, on the first row, rather than the same sentence repeated with
 a different wake word in it. The switches it describes are the only control in the app with no entity
@@ -179,12 +181,34 @@ reads like another one of them.
 
 With Home Assistant unreachable the row falls back to a plain on/off toggle, because there are no assistants
 to list and a dropdown holding one real option would be a worse lie than a switch. `assistant_needs_ha`
-below says what that costs.
+says what that costs.
 
-`voice_override` and `remote_tts_volume` are the pair most easily confused, and the plan asked that they
-never share a screen. They now sit two cards apart on this route, so each names the speakers it moves and
-points at the other by its on-screen label. That is the stronger protection of the two: a reader with both
-in front of them can compare, where a reader relying on memory of the other route cannot.
+### Audio
+
+The route was called Config until the September 2026 rename pass. Mute microphones and Assistant
+volume left for the home page, and the wake words card became the Wake Word route above, so what
+remains is where sound goes: the two trees first, and Audio Output last - channel and line-out are
+wiring you set once at install, where the trees are revisited whenever the household's speakers
+change.
+
+Two controls here still write to entities in `config/common/tts_routing.yaml` and
+`config/common/area_ducking.yaml`, so their wording has to agree with what Home Assistant shows. The
+two trees do not: they write the device's own selection at `/api/sat1/sel`, and they are the only face
+that selection has.
+
+| Key | Where | Text |
+| --- | --- | --- |
+| `speaker_channel` | Audio Output, Channel | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
+| `remote_routing` | Remote routing card title | Plays the assistant's spoken answers on other speakers as well as this one. Tick a room to include every player in it, or open the room and pick players. Local Speaker is this device's own speaker - untick it and answers play only where you have chosen. |
+| `area_ducking` | Area ducking card title | Turns other speakers down while the assistant listens and answers, then puts them back where they were. Tick a room to cover every player in it. |
+| `remote_tts_volume` | Remote TTS volume | How loud answers are on the remote speakers. This device's own level is Assistant volume, on the home page. Sonos reads the level from the announcement itself; anything else has its volume set for the answer and put back afterwards. |
+| `remote_wake_chime` | Remote wake chime | Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to. |
+| `duck_volume` | Duck volume | The level they drop to. Players already quieter than this are left alone, so a whole-house group does not get turned up. |
+
+`voice_override` and `remote_tts_volume` are the pair most easily confused, and with Assistant volume
+back on the home page they are on separate routes again. Each hint therefore names the speakers it
+moves and points at the other by its on-screen label and page, because the hints are now the only
+thing keeping the pair apart.
 
 Six hints were deleted rather than reworded, and the reason is worth recording: they explained
 switches that no longer exist (`tts_routing`, `tts_local_speaker`, `duck_area`, `duck_tts_targets`) or
@@ -204,7 +228,7 @@ above it, and stating the window in both made the two bubbles read as descriptio
 
 | Key | Where | Text |
 | --- | --- | --- |
-| `switcher` | Device switcher sheet title | Each Satellite1 serves its own copy of this page, so everything you change here applies to the device named above. This is where you move to a different one without typing in its address, and it keeps you on the page you were already on. |
+| `switcher` | Device switcher sheet title | Each Satellite1 serves its own copy of this page, so everything you change applies to the device named above. Use this list to move to another device without typing its address - you stay on the page you are on. |
 
 This one answers a question the app's shape provokes rather than one the hardware does. Every Satellite1
 serves its own copy of the page, so "which device am I changing?" has a real answer that nothing else on
@@ -226,12 +250,19 @@ back, which on its own looks like a page that ignores clicks.
 | `ha_disconnected` | Not connected to Home Assistant |
 | `ha_disconnected_detail` | Everything on this page still works - it talks to the device directly. Media and anything that needs your smart home will be unavailable until the connection returns. |
 | `stream_lost` | Lost the connection to the device. Retrying. |
-| `no_devices` | Only this device. Other Satellite1s appear here once Home Assistant lists them - or add one below by its address. |
+| `no_devices` | Only this device. Other Satellite1s appear here once Home Assistant lists them. |
 | `peer_up` | Available, according to Home Assistant |
 | `peer_down` | Unavailable, according to Home Assistant |
-| `peer_manual` | Added by address. The page cannot check whether it is reachable. |
-| `peer_add_ph` | IP address or hostname |
-| `peer_add` | Add |
+
+`peer_manual`, `peer_add_ph` and `peer_add` were deleted with the switcher's add-by-address feature
+(owner's call: a fallback that needs a paragraph to explain is not pulling its weight). The sheet also
+changed shape in the same pass: its header is the top bar's twin — where the bar shows
+"☰ &lt;device name&gt; ˅", the sheet shows "✕ Device Switcher ˄", built from the same pieces so spacing
+and type match exactly. Both the ✕ and the title close the sheet (Escape works too, on the sheet and
+on the nav drawer), and peers Home Assistant reports unavailable are folded into a collapsed
+"Offline (n)" disclosure at the bottom instead of sitting dimmed in the main list. Opening the sheet
+triggers a Home Assistant re-sync, so the availability dots correct themselves within a second or two
+rather than showing the cache from the last sync.
 | `write_failed` | A change didn't reach the device, so it hasn't been applied. |
 | `write_failed_go` | Tap for the device log. |
 | `nothing_said` | Nothing said yet. What you say and what it replies will appear here. |
@@ -263,7 +294,6 @@ the last because `zi_more` already says a zone needs three corners.
 | `assistant_slots_full` | Home Assistant can pair only two wake words with an assistant of their own. The rest are answered by the first one's assistant, which is what their dropdowns show. |
 | `confirm` | Confirm |
 | `cancel` | Cancel |
-| `copied` | Copied |
 | `theme_to_dark` | Switch to dark theme |
 | `theme_to_light` | Switch to light theme |
 | `ha_pending` | Asking Home Assistant which speakers you have. |
@@ -274,13 +304,18 @@ the last because `zi_more` already says a zone needs three corners.
 | `ha_truncated` | Too many areas to send in one go, so the list is cut short. Players already chosen are still used, whether or not they appear below. |
 | `sel_failed` | That change was not saved. The device rejected it, or the connection dropped. |
 
-`copied` replaces the Log card's Copy button for 1.4 seconds after a successful copy, and it exists for a
-better reason than politeness. The button used to be `navigator.clipboard?.writeText(...)`, which copied
-nothing on any real device: the Clipboard API needs a secure context, this app is served over plain HTTP,
-so `navigator.clipboard` was undefined and the `?.` made the whole thing a silent no-op. It appeared to
-work in development only because `127.0.0.1` gets a secure-context exemption that `192.168.x.x` does not.
-There is now an `execCommand` fallback, which is deprecated but is not restricted by origin, and this
-string is what would make the same failure visible next time.
+`copied` was deleted along with the Logs card's Copy button. The button never worked honestly on this
+origin - the Clipboard API needs a secure context, this app is served over plain HTTP, so it ran on a
+deprecated `execCommand` fallback - and the owner cut it in favour of **Export** (briefly "Dump"),
+which downloads the same thing copy produced: the lines on screen, filters and all, each line stamped
+with its arrival time. Export Logs sits in the card header beside the level menu. The stream toggle
+lives at the card's foot, to the right of the line count; it shows the state it is in - **Live**,
+accent-blue, while lines flow; **Paused** once they are held - rather than the action it offers. The
+level filter is a drawn menu rather than a native select (Safari's native popup ignores option
+styling): the funnel icon sits inside the control, and the current level and every option wear the
+same colours as the lines they admit.
+The Show/Hide invert and the Clear button are gone too - the search fields' own ✕ clears them, and
+Clear's real job (emptying the log buffer) is a page reload now.
 
 `pipeline_off` and `pipeline_preferred` are labels rather than names, and both sit above the pipeline list in
 every wake word's dropdown. Home Assistant stores `no_wake_word` for a slot holding nothing and `preferred`
@@ -307,7 +342,25 @@ header. The button itself is only an icon, so this text is the whole of its name
 `ha_refresh` and `ha_refreshing` are gone with the button they labelled. The device's cached list is now
 synced once per load of the app, when the Config route first appears, rather than on demand — so the
 gesture that fetches a newly added speaker is reloading the page. There is no interval behind it: the
-device otherwise only re-asks Home Assistant five seconds after the native API connects.
+device otherwise only re-asks Home Assistant five seconds after the native API connects. The device
+switcher also asks for a sync each time it opens, so its availability dots are at most a couple of
+seconds old.
+
+## Confirmation modals (`CONFIRM`)
+
+Every Diagnostics action that interrupts or erases asks first, in a modal: the title restates the
+action as a question, the body says what happens next — how long, what stops working, what survives —
+and the proceed button names the outcome rather than saying "OK". Cancel, the scrim, and Escape all
+back out.
+
+| Key | Title | Body |
+| --- | --- | --- |
+| `update` | Install this update? | The device downloads the new firmware and restarts itself when it finishes. The assistant and any audio stop until it is back - a few minutes. Keep it powered the whole time. |
+| `xmos_restart` | Restart the audio chip? | The microphones and speaker drop out for a few seconds while it comes back. Nothing is erased and no settings change. |
+| `xmos_flash` | Reflash the audio chip? | Rewrites the audio chip's firmware from a known-good copy. It takes about a minute, the microphones and speaker are silent throughout, and the device must stay powered. |
+| `restart` | Restart this device? | It reboots right away and is back in under a minute. All of your settings survive a restart. |
+| `safe_mode` | Restart into safe mode? | The device comes back with only its network connection and update tools running - no assistant, no audio - so a bad update can be recovered. Restarting again returns it to normal. |
+| `factory_reset` | Erase everything? | Every setting stored on this device is wiped, including its Wi-Fi credentials, and it restarts as if new from the box. You will have to set it up again. |
 
 ## Strings that are not in `copy.js`
 
@@ -315,12 +368,15 @@ A few short labels sit inline in the components because they are part of the lay
 explanations, and lifting them out would make the markup harder to read than it makes them easier to
 edit:
 
-- The calibration editor's three row labels — `sensor reads`, `offset`, `shows`. It has no confirm button:
-  every press is already written to the device, so it closes when you look away from it.
-- `Press a button on the device; it lights up here.` under the Buttons card, now at the foot of Controls.
+- The calibration editor's two row labels — `sensor reads` and `offset`. It has no confirm button:
+  every press is already written to the device, so it closes when you look away from it. (A third row,
+  `shows`, restated the corrected value; it went because the pill above the editor is that number,
+  live, as the offset moves.)
+- `Press a button on the device; it lights up here.` under the Buttons card, now at the foot of the home page.
 - `Waiting for the device to say something.` in an empty log.
-- The confirm-button verbs: `Reflash now`, `Restart into safe mode`, `Erase everything`. `Erase it` went
-  with the XMOS erase row.
+- The confirm-modal proceed verbs: `Install <version>`, `Restart XMOS`, `Reflash now`, `Restart`,
+  `Restart into safe mode`, `Erase everything`. They live at the call sites so they can carry the
+  version number. `Erase it` went with the XMOS erase row.
 - `Update available`, `Install <version>` and `Release notes` in the firmware update panel, plus `Up to
   date` under the Sat1 firmware version. The panel appears only when there is an update; the version is on
   the button rather than described beside one, because pressing it is the whole point of the panel.
@@ -331,10 +387,15 @@ edit:
   ⓘ. The second was `Quieten while talking`, which was inaccurate: the duck also covers the listening half
   of the interaction. It wraps to two lines at every phone width, which is deliberate — the alternative was
   a heading that stopped short of naming the trigger.
-- The four route names in the nav drawer — `Controls`, `Presence`, `Config`, `Diagnostics` — which are the
-  same strings as the routes themselves. The drawer has no heading; the device name is in the bar above it.
-- `Connected` and `Nothing plugged in` on Audio Output's Line out row, and `follow media` where Assistant
-  volume reads zero. Both are readouts of a value rather than descriptions of a control.
+- The five route names in the nav drawer — `Home`, `Wake Word`, `Audio`, `Presence`, `Diagnostics`, in
+  that order — which are the same strings as the routes themselves. The drawer has no heading; the
+  device name is in the bar above it.
+- `Connected` and `Nothing plugged in` on Audio Output's Line out row, and the three volume sliders'
+  zero readouts: `follow media` on Assistant volume, `follow device` on Remote TTS volume (zero means
+  "leave every target's volume alone", per tts_routing.yaml), and `mute` on Duck volume — deliberately
+  not "follow device", because area_ducking.yaml is explicit that zero is literal there: ducked players
+  are set to 0% for the length of the interaction. All are readouts of a value rather than descriptions
+  of a control.
 
 The wake word switch labels are not copy at all: they are the wake words themselves, read from the device
 at `GET /api/sat1/wakewords`, which reports each model's friendly name from the manifest it was built from.
@@ -343,5 +404,6 @@ So the rows on a device with a custom model are named by that model, and nothing
 The voice assistant phase names — Idle, Waiting for a command, Listening, Thinking, Replying, Not
 ready, Error — are in `frontend/src/lib/device.js`, keyed by the `voice_assist_*_phase_id`
 substitutions in `config/common/voice_assistant.yaml`. They have to stay aligned with those numbers.
-They now sit in the header of the Voice card on Controls, above the transcript rather than above a set of
-settings: the settings moved to Config, and the phase and the words it produced belong together.
+They sit in the header of the Assistant card on the home page, above the transcript: the phase and the
+words it produced belong together. The transcript rows are labelled `User` and `Assist` — the two
+parties — rather than the earlier `heard` and `said`, which read as verbs about the device.

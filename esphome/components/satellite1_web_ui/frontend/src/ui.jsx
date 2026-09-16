@@ -180,17 +180,21 @@ export function Card({ title, hint, right, children, collapsible, name, defaultO
     <section class={`card${collapsible ? " card-c" : ""}`} {...rest}>
       {title && (
         <h2>
+          {/* Title first, caret after. The caret used to lead, which indented a collapsible title by
+              its width and made these headers visibly different from every other card's - the owner
+              asked for them to match. The whole header is still one button, so the hit target did not
+              shrink to the caret. */}
           {collapsible ? (
             <button class="card-t" aria-expanded={open} onClick={toggle}>
-              <Chevron down={open} cls="caret-s" />
               <span>{title}</span>
+              <Chevron down={open} cls="caret-s" />
             </button>
           ) : (
             <span>{title}</span>
           )}
           {hint && <Hint text={hint} />}
-          {/* Kept mounted while collapsed: on the Log card this is the level filter and Pause, and
-              Pause is a flag on the shared stream that must stay reachable. */}
+          {/* Kept mounted while collapsed: on the Logs card this is the level menu and Export, which
+              would otherwise pop in and out of the header as the card opens and shuts. */}
           {right && <span class="card-right">{right}</span>}
         </h2>
       )}
@@ -314,43 +318,59 @@ export function Select({ value, options, disabled, onChange }) {
 }
 
 /**
- * A button that will not fire on the first press.
+ * A button that asks first, as a modal.
  *
- * Used for everything unrecoverable - factory reset, erasing the audio chip's firmware. The second
- * press has to be a deliberate second decision, so the confirm state times out rather than sitting
- * armed indefinitely, and the label says what will happen rather than "Are you sure?".
+ * Used for everything that interrupts or erases - restarts, reflashes, the factory reset, installing
+ * an update. It began as an inline two-press arm (press once, the button becomes its consequence for
+ * five seconds), which made the second press deliberate but never said what the action would actually
+ * do - and these are exactly the buttons whose consequences a person cannot be expected to know. The
+ * modal carries a sentence or two of what happens next (copy in CONFIRM in copy.js), and the
+ * proceed button still names the outcome rather than saying "OK".
+ *
+ * The scrim tap and Escape both cancel, because backing out must always be the easy gesture.
  */
-export function Confirm({ label, confirmLabel, danger, disabled, onConfirm }) {
-  const [armed, setArmed] = useState(false);
+export function Confirm({ label, title, body, confirmLabel, danger, solid, disabled, onConfirm }) {
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (!armed) return;
-    const t = setTimeout(() => setArmed(false), 5000);
-    return () => clearTimeout(t);
-  }, [armed]);
+    if (!open) return;
+    const esc = (e) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("keydown", esc);
+    return () => document.removeEventListener("keydown", esc);
+  }, [open]);
 
-  if (!armed) {
-    return (
-      <button class={`btn${danger ? " danger" : ""}`} disabled={disabled} onClick={() => setArmed(true)}>
+  return (
+    <>
+      <button
+        class={`btn${danger ? " danger" : ""}${solid ? " solid" : ""}`}
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+      >
         {label}
       </button>
-    );
-  }
-  return (
-    <span class="confirm">
-      <button
-        class={`btn${danger ? " danger" : ""} solid`}
-        onClick={() => {
-          setArmed(false);
-          onConfirm();
-        }}
-      >
-        {confirmLabel || TEXT.confirm}
-      </button>
-      <button class="btn ghost" onClick={() => setArmed(false)}>
-        {TEXT.cancel}
-      </button>
-    </span>
+      {open && (
+        <div class="scrim center" onClick={() => setOpen(false)}>
+          <div class="modal" role="alertdialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
+            <h3 class="modal-t">{title || TEXT.confirm_title}</h3>
+            <p class="modal-b">{body}</p>
+            <div class="modal-btns">
+              <button class="btn ghost" onClick={() => setOpen(false)}>
+                {TEXT.cancel}
+              </button>
+              <button
+                class={`btn solid${danger ? " danger" : ""}`}
+                onClick={() => {
+                  setOpen(false);
+                  onConfirm();
+                }}
+              >
+                {confirmLabel || TEXT.confirm}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

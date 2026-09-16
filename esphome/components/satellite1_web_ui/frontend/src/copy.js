@@ -20,21 +20,21 @@ export const HINTS = {
      the one someone who has just changed a setting on the wrong device wishes they had been told. Does not
      repeat why the list has one entry in it; that sentence is already at the foot of the same sheet. */
   switcher:
-    "Each Satellite1 serves its own copy of this page, so everything you change here applies to the device named above. This is where you move to a different one without typing in its address, and it keeps you on the page you were already on.",
+    "Each Satellite1 serves its own copy of this page, so everything you change applies to the device named above. Use this list to move to another device without typing its address - you stay on the page you are on.",
 
   /* On the card title rather than a row, because what needs explaining is the tree, and the tree has no
      row of its own to hang an ⓘ off. This is also the only place Local Speaker is explained: it is the
      one tick in there whose effect is not obvious from its name, since it silences this device rather
      than adding a target. */
   remote_routing:
-    "Plays the assistant's spoken answer on other speakers as well as this one. Tick a room to include every player in it, or open the room and pick players individually. Local Speaker is this device's own speaker - untick it and the answer is heard only where you have chosen.",
+    "Plays the assistant's spoken answers on other speakers as well as this one. Tick a room to include every player in it, or open the room and pick players. Local Speaker is this device's own speaker - untick it and answers play only where you have chosen.",
 
   /* The last sentence used to be three sentences of its own paragraph under the slider. It is here
      because it explains the control rather than the page, and a permanent paragraph for something you
      need to read once is what a tooltip is for. Kept because one slider with three behaviours behind it
      is the kind of thing that gets reported as a bug. */
   remote_tts_volume:
-    "How loud the answer is on the remote speakers. It does not touch this device's own level - that is Assistant volume, in Audio Output above. Sonos reads the level off the announcement; another Satellite1 has its Voice Override set and put back; anything else has its media volume set and restored.",
+    "How loud answers are on the remote speakers. This device's own level is Assistant volume, on the home page. Sonos reads the level from the announcement itself; anything else has its volume set for the answer and put back afterwards.",
 
   remote_wake_chime:
     "Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to.",
@@ -47,7 +47,7 @@ export const HINTS = {
      quiet while it listens to you, not only while it answers. The old label said "while talking", which
      described half of it. */
   area_ducking:
-    "Turns other speakers down while the assistant is busy, then puts them back where they were. It runs from the wake word to the end of the answer, so the room is quiet while it listens to you as well as while it answers. Tick a room to cover every player in it.",
+    "Turns other speakers down while the assistant listens and answers, then puts them back where they were. Tick a room to cover every player in it.",
 
   /* Deliberately does not repeat when the ducking happens - that is on the card above this row, and
      saying it twice made the two bubbles look like they were describing different things. What is left is
@@ -83,10 +83,12 @@ export const HINTS = {
   zone_excl:
     "Makes this shape an ignore area instead of a zone: anything inside it never counts as presence. Useful for fans, curtains and pets. There is one ignore area - saving a new one replaces it.",
 
+  // "Enter what a trusted instrument reads" was wrong twice over: the control is a ± stepper, not a
+  // field, and what you adjust is the correction, not the instrument's number.
   calibrate:
-    "Enter what a trusted instrument in the same room reads. The difference is saved as an offset and survives a restart. It does not change the raw reading, only what the device reports.",
+    "Adjust until the reading matches a trusted instrument in the same room. The correction is stored on the device and survives restarts.",
 
-  mute: "Cuts the microphones in hardware, on the XMOS chip, not in software. Wake word detection stops with them. The mute button on the device does the same thing.",
+  mute: "Cuts the microphones in hardware, not software - wake word detection stops with them. The mute button on the device does the same thing.",
 
   wake_sound: "Plays a short chime on the speaker the moment the wake word is detected.",
 
@@ -99,23 +101,23 @@ export const HINTS = {
   // misleading about everything else: Home Assistant answers any change to a pairing by pushing the whole
   // active set back to the device, so switching a wake word off does cost something.
   wake_words:
-    "Which wake words this device answers to, and which assistant answers each one. Off stops it responding to that word and leaves more of the processor for the ones you do use. The assistants are the voice pipelines you have set up in Home Assistant, and Preferred follows whichever one is marked preferred there. Home Assistant keeps this pairing rather than the device, which is why it needs to be reachable to change one, and why there is room for two wake words at a time - these are the Assistant and Assistant 2 settings on this device's Home Assistant page.",
+    "Which wake words this device answers, and which assistant answers each one. Off stops it responding to that word and frees processing for the ones you use. The assistants are your Home Assistant voice pipelines - Preferred follows whichever is marked preferred there. Home Assistant stores the pairing, so it must be reachable to change one.",
 
   // Names the two directions it reaches - answers this device sends elsewhere and answers other
   // devices send here - because the remote half is the invisible one, and names the timer case
   // because it works whichever way this is set and a reader who just turned this off should not
   // think they lost it.
   stop_word:
-    'While an answer is playing - this device\u2019s own, or one another Satellite1 routed here - the device listens for the single word "stop" and cuts it off everywhere it is playing. A ringing timer can always be silenced by saying stop, whichever way this is set.',
+    'While an answer is playing - this device\u2019s own, or one another Satellite1 routed here - saying "stop" cuts it off everywhere it is playing. A ringing timer can always be silenced this way, whichever way this is set.',
 
   wake_sensitivity:
     "How readily the wake word fires. Raise it if the device misses you from across the room; lower it if the television sets it off.",
 
-  // Names the speaker it moves, and names the other slider, because the two now sit two cards apart on
-  // one route instead of on separate ones. Whichever of the pair you are reading, it points at the
-  // other by its on-screen label rather than by the entity name Home Assistant uses.
+  // Names the speaker it moves, and names the other slider by its on-screen label and page, because
+  // the pair live on different routes again (this one in the home page's Assistant card, the other in
+  // Remote routing on Audio) and the hints are the only thing keeping them apart.
   voice_override:
-    "How loud this device's own speaker is when the assistant replies, independent of media volume. Set to zero to follow the media volume instead. For the speakers you route answers to, see Remote TTS volume in Remote routing below.",
+    "How loud this device speaks when the assistant replies, separate from media volume. Zero follows the media volume instead. Speakers you route answers to have their own level - Remote TTS volume, on the Audio page.",
 
   speaker_channel:
     "Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want.",
@@ -124,20 +126,20 @@ export const HINTS = {
     "The ring the assistant animates. Colour and brightness set here are the resting state - the device still overrides both while it is listening, thinking or reporting an error.",
 
   timers:
-    "Timers set by voice, held on the device. They keep counting and still ring if Home Assistant goes away.",
+    'Timers set by voice, held on the device - they keep counting and still ring if Home Assistant goes away. Voice is also how they are managed: name one when you set it ("set a pizza timer for ten minutes"), pause or cancel it the same way.',
 
   media:
-    "Whatever this device is playing right now, from either source: a group stream, or media sent to it by Home Assistant. Track skipping belongs to group streams - media from Home Assistant is a single stream with no queue to skip within. The volume here is the media volume; what the assistant says has its own level, on Config.",
+    "What this device is playing, from either source: a group stream, or media sent to it by Home Assistant. Track skipping works only on group streams. This slider is the media volume; the assistant's voice has its own level, in the Assistant card below.",
 
-  heap: "Internal RAM still available. This is the number that matters: it is what audio buffers and the network stack allocate from, and it is far scarcer than PSRAM.",
+  heap: "Internal RAM still available. Audio buffers and the network stack allocate from it, and it runs out long before PSRAM does.",
 
   psram:
-    "External RAM, used for the large buffers. Installed is the size of the chip; the free and total figures cover the region handed to the allocator, which is smaller because the cache and early allocations sit outside it.",
+    "External RAM, used for the large buffers. Free and total cover the region the firmware can allocate from, which is smaller than the chip installed.",
 
-  loop: "Longest single pass through the main loop since this panel last read the value. Tens of milliseconds is normal. Sustained hundreds means something is blocking, and audio will stutter before anything else does.",
+  loop: "The longest single pass through the main loop since the last reading. Tens of milliseconds is normal; sustained hundreds means something is blocking, and audio will stutter first.",
 
   esp_temp:
-    "Temperature of the ESP32 itself, not the room. It reads well above ambient because it sits inside a sealed case next to an amplifier, so a warm number here is normal; sustained readings above 80 \u00b0C are worth investigating. The temperature on the Controls page is the one that measures the room.",
+    "The ESP32 chip's own temperature, not the room's. It reads well above ambient inside the sealed case, so warm is normal; sustained readings above 80 \u00b0C are worth investigating. The room's temperature is on the home page.",
   reset: "Why the device last restarted. 'USB peripheral' means it was flashed. 'Power glitch' or 'Brownout' points at the power supply rather than at the firmware.",
 
   xmos: "The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's.",
@@ -149,11 +151,16 @@ export const HINTS = {
   // which takes the microphones, the speaker and the wake word with it, and the only way back is the
   // Reflash row - which needs the chip it just erased to be talking. Reflash overwrites anyway.
 
+  // On the ESP32 Recovery card's title. The card was "Sat1 Device", which described the page rather
+  // than the card; the ⓘ says what actually unites the rows, and calms the two scary ones.
+  maintenance:
+    "Ways to restart or reset this device. None of them are part of everyday use. Restart is always safe - your settings survive it. Factory reset is the only row here that erases anything.",
+
   safe_mode:
-    "Restarts with everything but wifi and the updater switched off. Use it when the device is crash-looping and will not stay up long enough to accept an update.",
+    "Restarts with everything but Wi-Fi and the updater switched off. Use it when the device is crash-looping too fast to accept an update.",
 
   factory_reset:
-    "Erases every setting stored on the ESP32, including the wifi credentials, and restarts. You will have to set the device up again from scratch. The audio chip's firmware is not touched.",
+    "Erases every setting stored on the ESP32, including the Wi-Fi credentials, and restarts. You will have to set the device up again from scratch. The audio chip's firmware is not touched.",
 
   beta: "Offers pre-release firmware to the updater. Useful for testing a fix; not what you want on a device you rely on.",
 
@@ -168,20 +175,16 @@ export const TEXT = {
 
   stream_lost: "Lost the connection to the device. Retrying.",
 
-  // Only when the sheet has no peer rows at all: Home Assistant listed none and nothing was added by
-  // hand. Names both ways a row can appear, because they are different fixes - one is Home Assistant's
-  // to make and one is the field directly below the sentence.
-  no_devices:
-    "Only this device. Other Satellite1s appear here once Home Assistant lists them - or add one below by its address.",
+  // Only when the sheet has no peer rows at all. It used to also name the add-by-address field that
+  // ended the sheet; the field is gone (owner's call), so Home Assistant's roster is the one way a
+  // row appears and the sentence says only that.
+  no_devices: "Only this device. Other Satellite1s appear here once Home Assistant lists them.",
 
   // Titles on the peer dots. Attributed to Home Assistant rather than stated as fact, because that is
   // the only witness: the page cannot probe a peer itself, and its view can lag a reboot by seconds.
+  // peer_manual, peer_add_ph and peer_add went with the manual add-by-address feature.
   peer_up: "Available, according to Home Assistant",
   peer_down: "Unavailable, according to Home Assistant",
-  peer_manual: "Added by address. The page cannot check whether it is reachable.",
-
-  peer_add_ph: "IP address or hostname",
-  peer_add: "Add",
 
   // The failed-write toast, shown on any route. First line is the one fact every failure shares;
   // the control involved has already put its old value back, which is why "hasn't been applied"
@@ -250,9 +253,8 @@ export const TEXT = {
     "Home Assistant can pair only two wake words with an assistant of their own. The rest are answered by the first one's assistant, which is what their dropdowns show.",
 
   confirm: "Confirm",
+  confirm_title: "Are you sure?",
   cancel: "Cancel",
-
-  copied: "Copied",
 
   /* The Home Assistant data layer. Each of these is a different reason the area and player lists are
      not here, and each has a different fix - which is the whole point of not collapsing them into one
@@ -287,7 +289,43 @@ export const TEXT = {
 };
 
 /**
- * Short forms of the radar's target state, for the sensor pill on Controls.
+ * The "Are you sure?" modals on Diagnostics, one per action that interrupts or erases.
+ *
+ * `t` is the modal's question, `b` the sentence or two under it. The question restates the action so
+ * a mis-tap is caught by reading either line; the body says what actually happens next - how long,
+ * what stops working, what survives - because these six buttons are exactly the ones whose
+ * consequences a person cannot be expected to know. The proceed button's label lives at the call
+ * site, where it can carry the version number ("Reflash XMOS v1.2.3").
+ */
+export const CONFIRM = {
+  update: {
+    t: "Install this update?",
+    b: "The device downloads the new firmware and restarts itself when it finishes. The assistant and any audio stop until it is back - a few minutes. Keep it powered the whole time.",
+  },
+  xmos_restart: {
+    t: "Restart the audio chip?",
+    b: "The microphones and speaker drop out for a few seconds while it comes back. Nothing is erased and no settings change.",
+  },
+  xmos_flash: {
+    t: "Reflash the audio chip?",
+    b: "Rewrites the audio chip's firmware from a known-good copy. It takes about a minute, the microphones and speaker are silent throughout, and the device must stay powered.",
+  },
+  restart: {
+    t: "Restart this device?",
+    b: "It reboots right away and is back in under a minute. All of your settings survive a restart.",
+  },
+  safe_mode: {
+    t: "Restart into safe mode?",
+    b: "The device comes back with only its network connection and update tools running - no assistant, no audio - so a bad update can be recovered. Restarting again returns it to normal.",
+  },
+  factory_reset: {
+    t: "Erase everything?",
+    b: "Every setting stored on this device is wiped, including its Wi-Fi credentials, and it restarts as if new from the box. You will have to set it up again.",
+  },
+};
+
+/**
+ * Short forms of the radar's target state, for the sensor pill on the home page.
  *
  * The firmware's own words are Approaching, Moving Away, Still and Clear on an LD2450, and Clear, Moving
  * and Still on an LD2410. Those are the right words for Home Assistant, where a row is as wide as the
