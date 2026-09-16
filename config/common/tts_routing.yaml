@@ -32,6 +32,17 @@ substitutions:
   # Leaves the answer in `targets_list` rather than emitting it, so the wake chime walk below can
   # iterate it instead of re-splitting a raw string - which it can no longer do, since an area entry
   # is not an entity id and device_id() returns nothing for one.
+  #
+  # The final pass drops players whose supported_features lacks PLAY_MEDIA (512), and it is load-
+  # bearing rather than cosmetic. This walk hands play_media an *explicit* entity list, and Home
+  # Assistant raises ServiceNotSupported for an explicitly listed entity missing a service's required
+  # feature before calling anything (helpers/service.py) - so one incompatible player in a wholesale-
+  # selected area would silence the announcement for every speaker in the call. Only area_id targets
+  # get the lenient skip, and this is not one. A player whose supported_features cannot be read
+  # (unavailable, attributes gone) is kept: Home Assistant drops unavailable entities from calls
+  # safely on its own, and dropping it here would un-target a speaker that is merely rebooting. The
+  # same two feature bits drive the app's greyed-out rows (web_ui_ha.yaml), so what the tree shows
+  # as untickable and what this walk removes agree by construction.
   tts_targets_resolve: >-
     {% set ma = integration_entities('music_assistant') %}
     {% set cut = sel_cut.split(',') | map('trim') | reject('eq', '')
@@ -43,7 +54,14 @@ substitutions:
     {% endfor %}
     {% set res.t = res.t
                    + (sel_extra.split(',') | map('trim') | map('lower') | reject('eq', '') | list) %}
-    {% set targets_list = res.t | unique | reject('in', cut) | reject('in', mine) | list %}
+    {% set cap = namespace(t=[]) %}
+    {% for t in res.t | unique | reject('in', cut) | reject('in', mine) %}
+      {% set f = state_attr(t, 'supported_features') %}
+      {% if f is none or f | int | bitwise_and(512) %}
+        {% set cap.t = cap.t + [t] %}
+      {% endif %}
+    {% endfor %}
+    {% set targets_list = cap.t %}
 
   # The same thing as a value, for the calls that just want an entity_id.
   tts_targets_jinja: >-

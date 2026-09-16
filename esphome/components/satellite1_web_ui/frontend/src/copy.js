@@ -273,6 +273,13 @@ export const TEXT = {
   ha_no_players:
     "Home Assistant has no media players at all, so there is nothing to choose between.",
 
+  /* Why a greyed player row in a target tree cannot be ticked - it lacks the capability the tree's
+     call needs (media_player.play_media for routing, media_player.volume_set for ducking). One
+     short reason per tree, not per integration: the row has no room for a diagnosis, and "what this
+     speaker cannot do" is the part its owner can act on. */
+  cap_no_media: "Can't play media",
+  cap_no_volume: "No volume control",
+
   ha_truncated:
     "Too many areas to send in one go, so the list is cut short. Players already chosen are still used, whether or not they appear below.",
 

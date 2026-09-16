@@ -190,6 +190,21 @@ each, and which of them are Satellite1s. It is refreshed on triggers rather than
 describes a house, which changes rarely. The payload is capped and the app is told when it was
 truncated, so a very large installation degrades visibly rather than silently.
 
+Each player row carries a capability int alongside its id and name — bit 1 says the player answers
+`media_player.play_media`, bit 2 `media_player.volume_set` — read from Home Assistant's
+`supported_features` when the payload is rendered. The routing tree greys out rows without bit 1 and
+the ducking tree rows without bit 2, each with a one-line reason, rather than omitting them: a player
+silently missing from the list reads as a bug. Selecting a whole area shows a full tick on the area
+and on its eligible players, while the greyed rows stay unticked — the call skips them, so showing
+them selected would misstate what plays — and the stored selection still says "whole area", which is
+what keeps the Route TTS To All Area Players switch in Home Assistant flipping with it. A greyed row
+explicitly picked before this existed still shows its tick and can always be *un*ticked — only adding
+is blocked. The call-time walks in `tts_routing.yaml` and `area_ducking.yaml` apply the same two bits
+when expanding the selection, which matters more than the cosmetics: Home Assistant rejects an
+explicit entity list wholesale if one listed entity lacks the service's required feature, so one
+incompatible player in a selected area used to be able to silence an announcement for every speaker
+in the call.
+
 The consequence worth knowing is that when Home Assistant is unreachable, the app keeps working for
 everything local — sensors, LEDs, the radar, the log, maintenance — and greys out only what genuinely
 depends on Home Assistant, with a one-line explanation of the problem and the fix.

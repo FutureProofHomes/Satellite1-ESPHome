@@ -1214,6 +1214,18 @@ a.peer.go:hover {
   color: var(--fg-4);
   white-space: nowrap;
 }
+/* A player that cannot answer this tree's call. Present so the list matches what Home Assistant
+   shows, greyed so it cannot be picked, with the reason on the row itself - a player silently
+   missing from the list reads as a bug. The checkbox greys itself via its disabled state. */
+.tree-off > .grow {
+  color: var(--fg-4);
+}
+.tree-why {
+  font-size: var(--t-s);
+  color: var(--fg-4);
+  white-space: nowrap;
+  font-style: italic;
+}
 /* The Local Speaker row. Sits at the top of the tree as a peer of the rooms rather than as a player under
    one, because it is a member of none of them - and it is the default, so it should not look like an
    afterthought below them.

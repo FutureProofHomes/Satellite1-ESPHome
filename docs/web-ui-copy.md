@@ -302,6 +302,8 @@ the last because `zi_more` already says a zone needs three corners.
 | `ha_no_area` | This device is not in a Home Assistant area, so “Route TTS To All Area Players” and “Duck All Area Players” have no room to refer to. You can still pick any room below. Assign it to an area in Home Assistant and refresh. |
 | `ha_no_players` | Home Assistant has no media players at all, so there is nothing to choose between. |
 | `ha_truncated` | Too many areas to send in one go, so the list is cut short. Players already chosen are still used, whether or not they appear below. |
+| `cap_no_media` | Can't play media |
+| `cap_no_volume` | No volume control |
 | `sel_failed` | That change was not saved. The device rejected it, or the connection dropped. |
 
 `copied` was deleted along with the Logs card's Copy button. The button never worked honestly on this

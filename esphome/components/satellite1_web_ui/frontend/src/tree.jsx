@@ -23,6 +23,7 @@
  */
 import { useState } from "preact/hooks";
 import { Chevron } from "./ui.jsx";
+import { TEXT } from "./copy.js";
 
 /**
  * A tri-state box, still a button rather than an input: an indeterminate checkbox needs a ref to set the
@@ -83,17 +84,26 @@ function Group({ label, count, state, expanded, onExpand, onBulk, disabled, chil
 }
 
 /**
- * @param payload  the `/api/sat1/ha` body: {areas: [{i, n, p: [[id, name], ...]}], loose: [[id, name]]}
+ * @param payload  the `/api/sat1/ha` body: {areas: [{i, n, p: [[id, name, caps], ...]}], loose: [[id, name, caps]]}
  * @param sel      {areas, extra, excluded} as Sets
  * @param onSel    receives the next {areas, extra, excluded}
  * @param local    when not null, a "Local Speaker" row is shown first, holding this boolean
  * @param onLocal  receives the next boolean
+ * @param need     which capability bit this tree's call requires of a player - 1 play_media
+ *                 (routing), 2 volume_set (ducking). Rows without it render greyed and uncheckable
+ *                 with a one-line reason, rather than being omitted: a player silently missing from
+ *                 the list reads as "the app is broken", a greyed row explains itself.
  */
-export function TargetTree({ payload, sel, onSel, local, onLocal, disabled }) {
+export function TargetTree({ payload, sel, onSel, local, onLocal, disabled, need = 3 }) {
   const [open, setOpen] = useState({});
 
   const areas = (payload && payload.areas) || [];
   const loose = (payload && payload.loose) || [];
+
+  /** Whether a player can answer the call this tree configures. `?? 3` keeps rows from a payload the
+   *  device cached before the caps field existed live in both trees rather than greying everything. */
+  const capOk = (row) => ((row[2] ?? 3) & need) !== 0;
+  const reason = need === 2 ? TEXT.cap_no_volume : TEXT.cap_no_media;
 
   const edit = (fn) => {
     const next = {
@@ -134,8 +144,11 @@ export function TargetTree({ payload, sel, onSel, local, onLocal, disabled }) {
     });
   };
 
+  // The area-level maths run over eligible rows only. With ineligible rows counted, an area whose
+  // eligible players are all ticked would read "mixed" forever and "select whole area" would look
+  // broken - the greyed rows are visible but they are not part of what the box is deciding.
   const areaState = (area) => {
-    const ids = area.p.map(([id]) => id);
+    const ids = area.p.filter(capOk).map(([id]) => id);
     if (sel.areas.has(area.i)) {
       // Whole, unless something has been carved out of it - which is exactly what the two derived
       // switches in the firmware report, so the box here and the switch in Home Assistant agree.
@@ -163,23 +176,29 @@ export function TargetTree({ payload, sel, onSel, local, onLocal, disabled }) {
   };
 
   const looseState = () => {
-    const on = loose.filter(([id]) => sel.extra.has(id)).length;
-    return on === 0 ? "off" : on === loose.length ? "on" : "mixed";
+    const rows = loose.filter(capOk);
+    const on = rows.filter(([id]) => sel.extra.has(id)).length;
+    return on === 0 ? "off" : on === rows.length ? "on" : "mixed";
   };
 
   const clickLoose = () => {
     const state = looseState();
     edit((next) => {
-      loose.forEach(([id]) => (state === "on" ? next.extra.delete(id) : next.extra.add(id)));
+      // Bulk-ticking adds eligible players only; bulk-unticking is likewise scoped, so a stale
+      // ineligible extra is removed by its own row (always allowed) rather than as a side effect.
+      loose
+        .filter(capOk)
+        .forEach(([id]) => (state === "on" ? next.extra.delete(id) : next.extra.add(id)));
     });
   };
 
   const areaCount = (area) => {
+    const rows = area.p.filter(capOk);
     if (sel.areas.has(area.i)) {
-      const cut = area.p.filter(([id]) => sel.excluded.has(`${area.i}:${id}`)).length;
-      return cut === 0 ? "whole area" : `${area.p.length - cut}/${area.p.length}`;
+      const cut = rows.filter(([id]) => sel.excluded.has(`${area.i}:${id}`)).length;
+      return cut === 0 ? "whole area" : `${rows.length - cut}/${rows.length}`;
     }
-    return `${area.p.filter(([id]) => sel.extra.has(id)).length}/${area.p.length}`;
+    return `${rows.filter(([id]) => sel.extra.has(id)).length}/${rows.length}`;
   };
 
   return (
@@ -199,30 +218,48 @@ export function TargetTree({ payload, sel, onSel, local, onLocal, disabled }) {
         </div>
       )}
 
-      {areas.map((area) => (
-        <Group
-          key={area.i}
-          label={area.n}
-          count={areaCount(area)}
-          state={areaState(area)}
-          expanded={open[area.i]}
-          onExpand={() => setOpen({ ...open, [area.i]: !open[area.i] })}
-          onBulk={() => clickArea(area)}
-          disabled={disabled}
-        >
-          {area.p.map(([id, name]) => (
-            <div class="tree-p" key={id}>
-              <Check
-                state={isOn(area.i, id) ? "on" : "off"}
-                disabled={disabled}
-                onClick={() => clickPlayer(area.i, id)}
-                label={name}
-              />
-              <span class="grow">{name}</span>
-            </div>
-          ))}
-        </Group>
-      ))}
+      {areas.map((area) => {
+        const state = areaState(area);
+        return (
+          <Group
+            key={area.i}
+            label={area.n}
+            count={areaCount(area)}
+            state={state}
+            expanded={open[area.i]}
+            onExpand={() => setOpen({ ...open, [area.i]: !open[area.i] })}
+            onBulk={() => clickArea(area)}
+            // An area with nothing eligible in it has nothing for the bulk box to add - unless a
+            // stale selection still covers it, in which case unticking must stay possible.
+            disabled={disabled || (state === "off" && !area.p.some(capOk))}
+          >
+            {area.p.map((row) => {
+              const [id, name] = row;
+              const ok = capOk(row);
+              // An ineligible row never reads as ticked off the back of a wholesale area: the
+              // call-time walks skip it, so showing it selected would be a lie about what plays.
+              // The area's own box still shows a full tick, and the stored selection still says
+              // "whole area" - which is what keeps the Route TTS To All Area Players switch in
+              // Home Assistant flipping. Only an explicit pick (sel.extra, from before the caps
+              // field existed) still shows, and stays clickable so it can be removed - removing a
+              // selection is always safe, only adding an ineligible player is blocked.
+              const on = ok ? isOn(area.i, id) : sel.extra.has(id);
+              return (
+                <div class={`tree-p${ok ? "" : " tree-off"}`} key={id}>
+                  <Check
+                    state={on ? "on" : "off"}
+                    disabled={disabled || (!ok && !on)}
+                    onClick={() => clickPlayer(area.i, id)}
+                    label={name}
+                  />
+                  <span class="grow">{name}</span>
+                  {!ok && <span class="tree-why">{reason}</span>}
+                </div>
+              );
+            })}
+          </Group>
+        );
+      })}
 
       {loose.length > 0 && (
         // Not an edge case, and not a fallback: on the test installation 40 of the 104 media players
@@ -231,24 +268,30 @@ export function TargetTree({ payload, sel, onSel, local, onLocal, disabled }) {
         // which asked someone to know an id the page could simply have shown them.
         <Group
           label="No Area Assigned"
-          count={`${loose.filter(([id]) => sel.extra.has(id)).length}/${loose.length}`}
+          count={`${loose.filter(capOk).filter(([id]) => sel.extra.has(id)).length}/${loose.filter(capOk).length}`}
           state={looseState()}
           expanded={open.__loose}
           onExpand={() => setOpen({ ...open, __loose: !open.__loose })}
           onBulk={clickLoose}
-          disabled={disabled}
+          disabled={disabled || (looseState() === "off" && !loose.some(capOk))}
         >
-          {loose.map(([id, name]) => (
-            <div class="tree-p" key={id}>
-              <Check
-                state={sel.extra.has(id) ? "on" : "off"}
-                disabled={disabled}
-                onClick={() => clickPlayer(null, id)}
-                label={name}
-              />
-              <span class="grow">{name}</span>
-            </div>
-          ))}
+          {loose.map((row) => {
+            const [id, name] = row;
+            const on = sel.extra.has(id);
+            const ok = capOk(row);
+            return (
+              <div class={`tree-p${ok ? "" : " tree-off"}`} key={id}>
+                <Check
+                  state={on ? "on" : "off"}
+                  disabled={disabled || (!ok && !on)}
+                  onClick={() => clickPlayer(null, id)}
+                  label={name}
+                />
+                <span class="grow">{name}</span>
+                {!ok && <span class="tree-why">{reason}</span>}
+              </div>
+            );
+          })}
         </Group>
       )}
     </div>

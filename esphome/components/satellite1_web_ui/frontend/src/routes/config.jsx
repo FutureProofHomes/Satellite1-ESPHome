@@ -168,12 +168,15 @@ function RemoteRouting({ ctx, ha, sel, write }) {
           tight above, padded below, so it explains the card rather than captioning the tree. */}
       <p class="tree-title">Play assistant responses on selected players</p>
       <HaState problem={problem} ha={ha} />
+      {/* need=1: routing's call is media_player.play_media, so players without PLAY_MEDIA render
+          greyed with a reason rather than being offered. */}
       <TargetTree
         payload={problem ? null : ha?.d}
         sel={sel.routing}
         onSel={(next) => write({ ...sel, routing: next })}
         local={sel.local}
         onLocal={(v) => write({ ...sel, local: v })}
+        need={1}
       />
 
       {vol.exists && (
@@ -225,11 +228,14 @@ function AreaDucking({ ctx, ha, sel, write }) {
           lives on the home page, and its own player is filtered out of the payload anyway. Every area in
           the house is offered, not just this device's own - ducking a room this device is not in is a
           deliberate capability of the redesign rather than a side effect. */}
+      {/* need=2: ducking's call is media_player.volume_set, a different capability than routing's,
+          which is why the same tree greys different rows here. */}
       <TargetTree
         payload={problem ? null : ha?.d}
         sel={sel.duck}
         onSel={(next) => write({ ...sel, duck: next })}
         local={null}
+        need={2}
       />
 
       {vol.exists && (

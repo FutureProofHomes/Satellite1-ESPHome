@@ -49,6 +49,14 @@ substitutions:
   # audible ones selected, because an amplifier never reports `playing` while it is the loudest thing
   # in the room, and Music Assistant entities are still rejected outright so a speaker with two entity
   # ids cannot be ducked twice - now doubly necessary, since expanding a whole area returns them.
+  #
+  # `pick` also drops players whose supported_features lacks VOLUME_SET (4), for the reason
+  # tts_targets_resolve documents at length: these end up as explicit entity lists on
+  # media_player.volume_set, where one entity missing the required feature makes Home Assistant
+  # reject the whole call before setting anything - nobody's music would duck. Filtering at `pick`
+  # keeps the duck and its restore consistent, since both derive from it. A player with unreadable
+  # supported_features (unavailable) is kept; the `room` walk already rejects silent and unavailable
+  # states on its own. The same bit drives the greyed-out rows in the app's ducking tree.
   duck_players_jinja: >-
     ${self_area_jinja}
     ${tts_targets_resolve}
@@ -61,7 +69,14 @@ substitutions:
     {% endfor %}
     {% set chosen.e = chosen.e
                       + (duck_extra.split(',') | map('trim') | map('lower') | reject('eq', '') | list) %}
-    {% set pick = chosen.e | unique | reject('in', dcut) | list %}
+    {% set dcap = namespace(p=[]) %}
+    {% for t in chosen.e | unique | reject('in', dcut) %}
+      {% set f = state_attr(t, 'supported_features') %}
+      {% if f is none or f | int | bitwise_and(4) %}
+        {% set dcap.p = dcap.p + [t] %}
+      {% endif %}
+    {% endfor %}
+    {% set pick = dcap.p %}
     {% set room = states.media_player
          | rejectattr('state', 'in', ['off', 'idle', 'paused', 'standby', 'unavailable', 'unknown'])
          | selectattr('attributes.volume_level', 'defined')
@@ -81,15 +96,20 @@ substitutions:
   # Satellite1 whose own Voice Override is above 0 - but not one at 0, where "no override" means
   # speech follows the media volume and setting that volume is exactly the right lever. Targets with
   # no volume_level are dropped: nothing to snapshot, so nothing this firmware could hand back.
+  # Players without VOLUME_SET (bit 4) are dropped for the reason duck_players_jinja explains -
+  # `targets_list` is filtered for play_media, not for this, and one such player in an explicit
+  # volume_set list fails the call for all of them.
   tts_volume_targets_jinja: >-
     {% set vns = namespace(v=[]) %}
     {% for t in targets_list %}
       {% set d = device_id(t) %}
+      {% set vf = state_attr(t, 'supported_features') %}
       {% set vo = (device_entities(d) | select('search', 'voice_override') | list)
                   if d and device_attr(d, 'manufacturer') == 'FutureProofHomes' else [] %}
       {% if t not in integration_entities('sonos')
             and not (vo | count > 0 and states(vo | first) | float(0) > 0)
-            and state_attr(t, 'volume_level') is not none %}
+            and state_attr(t, 'volume_level') is not none
+            and (vf is none or vf | int | bitwise_and(4)) %}
         {% set vns.v = vns.v + [t] %}
       {% endif %}
     {% endfor %}
