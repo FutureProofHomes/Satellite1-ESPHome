@@ -1,5 +1,6 @@
 /**
- * Controls: the things a person adjusts, all of which work with Home Assistant switched off.
+ * The home page (route id "home"; this file keeps its historical name): the things a person glances
+ * at and adjusts daily, all of which work with Home Assistant switched off.
  *
  * Media is absent rather than greyed out. It needs the Home Assistant data layer, and a permanently
  * disabled card teaches people the app is broken.
@@ -16,9 +17,9 @@ import { Arrow, Card, Chevron, Hint, Missing, Row, Slider, Toggle } from "../ui.
 
 /**
  * The offset entity publishes the correction, and the sensor publishes the already-corrected value,
- * because the offset is a filter on the sensor. So the raw reading is a subtraction, and the editor
- * can show all three figures - what the hardware reads, the correction, what the device reports -
- * which is the only presentation in which "shows" being wrong is obviously the offset's fault.
+ * because the offset is a filter on the sensor. So the raw reading the editor shows is a subtraction.
+ * (The editor used to also show the corrected result on a "shows" row of its own; it went, per the
+ * owner, because the pill right above the editor is that number, live, as the offset moves.)
  */
 function Pill({ id, open, setOpen, label, value }) {
   const on = open === id;
@@ -94,14 +95,6 @@ function Editor({ title, hint, raw, unit, digits, step, offset, offsetPath, onCl
         <button class="btn sq" onClick={() => bump(step)}>
           +
         </button>
-      </div>
-      <hr />
-      <div class="row">
-        <span class="grow dim sm">shows</span>
-        <span class="accent strong">
-          {(raw + offset).toFixed(digits)}
-          {unit}
-        </span>
       </div>
     </div>
   );
@@ -295,6 +288,17 @@ function Leds({ ctx }) {
 
 const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
+/** "10 min timer", "1 h 30 min timer" - the fallback label for a timer nobody named. */
+const durLabel = (s) => {
+  const h = Math.floor(s / 3600);
+  const m = Math.round((s % 3600) / 60);
+  const parts = [];
+  if (h) parts.push(`${h} h`);
+  if (m) parts.push(`${m} min`);
+  if (!parts.length) parts.push(`${s} s`);
+  return `${parts.join(" ")} timer`;
+};
+
 /**
  * Timers live on the device, not in Home Assistant: they keep counting and still ring with the
  * connection gone, which is the whole reason they are worth showing on a page that works offline.
@@ -302,6 +306,15 @@ const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
  * The card is absent when there are none rather than showing an empty state, because there is no way
  * to set one from here - they are created by voice - so an empty card would be an invitation to
  * press something that does not exist.
+ *
+ * Read-only by architecture, not by choice. The owner asked for a cancel button, and there is
+ * nowhere to wire one: Home Assistant owns Assist timers, the native API only pushes their events
+ * device-ward, and HA offers no action that cancels one (conversation.process carries no device id,
+ * and timer intents are device-scoped). Voice is the interface - "cancel the timer" - which is what
+ * HINTS.timers now says. If the protocol ever grows a cancel message, this card is where it lands.
+ *
+ * A timer named by voice shows its name; an unnamed one shows its set duration ("10 min timer")
+ * rather than the word "Timer" directly under a card title that already says it.
  */
 function Timers({ voice }) {
   const timers = voice?.timers || [];
@@ -312,7 +325,7 @@ function Timers({ voice }) {
       {timers.map((t) => (
         <div key={t.id} class="ctl">
           <div class="ctl-label">
-            <span>{t.name || "Timer"}</span>
+            <span>{t.name || durLabel(t.total)}</span>
             {!t.active && <span class="ctl-sub">paused</span>}
           </div>
           <div class="ctl-body">
@@ -325,42 +338,76 @@ function Timers({ voice }) {
 }
 
 /**
- * What the assistant is doing, and the last few exchanges so a misheard command is visible without
- * opening the log.
+ * What the assistant is doing, the last few exchanges so a misheard command is visible without
+ * opening the log, and the two controls the owner brought back to it in the September 2026 rename
+ * pass: Mute microphones (from the old Voice Input card) and Assistant volume (from Audio Output).
+ * Both are assistant-shaped decisions - whether it can hear you, how loud it answers - and they see
+ * daily use, which is what this page is for.
  *
- * One card rather than two. It used to be a "Voice" card of settings with the phase in its header and
- * a separate "Recently" card of lines; the settings have gone to Config, and putting the phase over
- * the transcript is what the mockup drew in the first place - the label and the words it produced
- * belong together.
+ * "Assistant", not "Voice". The card's subject is the thing you talk to, and its rows now say so:
+ * User for what was heard, Assist for what it answered (the labels were "heard"/"said", which read
+ * as verbs about the device rather than as the two parties).
  *
  * The phase is the same global the LED ring animates from, so what this says and what the ring is
  * doing cannot disagree. "Not ready" is the honest reading with Home Assistant gone: the microphones
  * work, but there is nothing on the other end to answer.
  *
- * Present as soon as the device answers, unlike the old transcript card, which hid itself when there
- * was nothing to list. A phase is always something, so the card is never empty - and on a device that
- * has not been spoken to since boot, one grey line is a better answer than no card at all, which
- * reads as the page having failed to load a section.
+ * Present as soon as the device answers. A phase is always something, so the card is never empty -
+ * and on a device that has not been spoken to since boot, one grey line is a better answer than no
+ * card at all, which reads as the page having failed to load a section.
  */
-function VoiceStatus({ voice }) {
+function VoiceStatus({ ctx, voice }) {
   const phase = voice ? PHASE[voice.phase] : null;
   const lines = voice?.transcript || [];
-  if (!phase && !lines.length) return null;
+  const mute = entity(ctx, "mute_mics");
+  const vol = entity(ctx, "voice_override");
+  if (!phase && !lines.length && !mute && !vol) return null;
 
   return (
-    <Card title="Voice" right={phase && <span class={`dim xs${voice.running ? " accent" : ""}`}>{phase}</span>}>
-      {lines.length ? (
-        lines
-          .slice()
-          .reverse()
-          .map((l, i) => (
-            <p key={i} class={`utt${l.heard ? " heard" : ""}`}>
-              <span class="utt-who">{l.heard ? "heard" : "said"}</span>
-              {l.text}
-            </p>
-          ))
-      ) : (
-        <p class="dim sm">{TEXT.nothing_said}</p>
+    <Card title="Assistant" right={phase && <span class={`dim xs${voice?.running ? " accent" : ""}`}>{phase}</span>}>
+      {/* The transcript in a subcard of its own, per the owner - the same box the calibration editor
+          draws, minus its accent border, which on that editor means "editing in progress" and here
+          would promise an interaction the transcript does not have. The empty state sits inside the
+          same box, so the card does not change shape the first time something is said. */}
+      <div class="transcript">
+        {lines.length ? (
+          lines
+            .slice()
+            .reverse()
+            .map((l, i) => (
+              <p key={i} class={`utt${l.heard ? " heard" : ""}`}>
+                <span class="utt-who">{l.heard ? "User:" : "Assist:"}</span>
+                {l.text}
+              </p>
+            ))
+        ) : (
+          <p class="dim sm">{TEXT.nothing_said}</p>
+        )}
+      </div>
+
+      {mute && (
+        <Row label="Mute microphones" hint={HINTS.mute}>
+          <Toggle
+            checked={mute.value === true || mute.state === "ON"}
+            onChange={(v) => post(pathFor(ctx, "mute_mics", v ? "turn_on" : "turn_off"))}
+          />
+        </Row>
+      )}
+
+      {/* Last in the card per the owner: the transcript is what you read, this is what you set. Keeps
+          its name and hint - the hint is what tells it apart from Remote routing's "Remote TTS volume"
+          now that the two no longer sit one card apart. */}
+      {vol && (
+        <Row label="Assistant volume" hint={HINTS.voice_override}>
+          <Slider
+            value={Number(vol.value)}
+            min={Number(vol.min_value ?? 0)}
+            max={Number(vol.max_value ?? 100)}
+            step={Number(vol.step ?? 1)}
+            format={(v) => (v === 0 ? "follow media" : `${v}%`)}
+            onCommit={(v) => post(`${pathFor(ctx, "voice_override", "set")}?value=${v}`)}
+          />
+        </Row>
       )}
     </Card>
   );
@@ -489,10 +536,12 @@ function Media({ ctx, media, mediaCmd }) {
 /* Physical buttons                                                    */
 /* ------------------------------------------------------------------ */
 
+// The third field marks the chip that lights red instead of accent-blue: mute is the one button
+// whose being active is a warning ("why is it not listening?") rather than a confirmation.
 const BUTTONS = [
   ["btn_up", "Volume up"],
   ["btn_down", "Volume down"],
-  ["btn_mute", "Mute"],
+  ["btn_mute", "Mute", "warn"],
   ["btn_action", "Action"],
 ];
 
@@ -516,14 +565,14 @@ function Buttons({ ctx }) {
     if (ev?.event_type) setLastPress(ev.event_type.replace(/_/g, " "));
   }, [ev?.event_type]);
 
-  const rows = BUTTONS.map(([key, label]) => [label, entity(ctx, key)]).filter(([, e]) => e);
+  const rows = BUTTONS.map(([key, label, tone]) => [label, entity(ctx, key), tone]).filter(([, e]) => e);
   if (!rows.length) return null;
 
   return (
     <Card title="Buttons" right={lastPress && <span class="dim xs">last: {lastPress}</span>}>
       <div class="btnstates">
-        {rows.map(([label, e]) => (
-          <span key={label} class={`bstate${e.value ? " on" : ""}`}>
+        {rows.map(([label, e, tone]) => (
+          <span key={label} class={`bstate${tone ? ` ${tone}` : ""}${e.value ? " on" : ""}`}>
             {label}
           </span>
         ))}
@@ -551,7 +600,7 @@ export function Controls({ ctx }) {
           ordering. The transport controls are what a hand reaches for; the voice transcript is what
           an eye glances at. */}
       <Media ctx={ctx} media={media} mediaCmd={mediaCmd} />
-      <VoiceStatus voice={voice} />
+      <VoiceStatus ctx={ctx} voice={voice} />
       <Timers voice={voice} />
       <Leds ctx={ctx} />
       <Buttons ctx={ctx} />
