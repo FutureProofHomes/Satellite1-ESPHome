@@ -87,6 +87,12 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
       return Route::HA_REFRESH;
     if (url == "/api/sat1/ha/select")
       return Route::HA_SELECT;
+    if (url == "/api/sat1/ma/refresh")
+      return Route::MA_REFRESH;
+    // A prefix like the media commands: the verb rides the path as /api/sat1/ma/<cmd>. Tested after
+    // the refresh above, which would otherwise match the prefix too.
+    if (strncmp(url_buf, "/api/sat1/ma/", 13) == 0)
+      return Route::MA_SET;
     if (url == "/api/sat1/sel")
       return Route::SEL_SET;
 #ifdef USE_MICRO_WAKE_WORD
@@ -113,6 +119,8 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
     return Route::STATE;
   if (url == "/api/sat1/ha")
     return Route::HA;
+  if (url == "/api/sat1/ma")
+    return Route::MA;
   if (url == "/api/sat1/sel")
     return Route::SEL;
 #ifdef USE_MICRO_WAKE_WORD
@@ -153,6 +161,11 @@ bool WebUIHandler::route_streams_(Route route) {
     case Route::HA:
     case Route::HA_REFRESH:
     case Route::HA_SELECT:
+    // The MA payload is served from PSRAM in chunks exactly as HA's is, and the writes answer with
+    // string literals - none of the three needs internal heap.
+    case Route::MA:
+    case Route::MA_REFRESH:
+    case Route::MA_SET:
     case Route::SEL_SET:
 #ifdef USE_MICRO_WAKE_WORD
     case Route::WAKE_WORDS_SET:
@@ -240,6 +253,15 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
       break;
     case Route::HA_SELECT:
       this->handle_ha_select_(request);
+      break;
+    case Route::MA:
+      this->handle_ma_(request);
+      break;
+    case Route::MA_REFRESH:
+      this->handle_ma_refresh_(request);
+      break;
+    case Route::MA_SET:
+      this->handle_ma_set_(request);
       break;
     case Route::SEL:
       this->handle_sel_(request);
@@ -608,13 +630,75 @@ void WebUIHandler::handle_media_(AsyncWebServerRequest *request) {
                     static_cast<int>(this->media_sendspin_->state),
                     static_cast<int>(std::roundf(this->media_sendspin_->volume * 100.0f)));
   }
-  if (len > 0 && static_cast<size_t>(len) + 1 < sizeof(body)) {
-    body[len++] = '}';
-    body[len] = '\0';
-  } else {
+  if (len <= 0 || static_cast<size_t>(len) + 1 >= sizeof(body)) {
     request->send(500, "application/json", "{\"ok\":0}");
     return;
   }
+
+#ifdef USE_SAT1_WEB_UI_SENDSPIN
+  // The Sendspin extras: track timing, controller state and the pre-escaped metadata fragment. The
+  // numbers fit beside the core on the stack; the fragment does not - a title, artist, album and
+  // artwork URL can run several hundred bytes - so the full body is assembled in a persistent PSRAM
+  // buffer instead. Failing to grow that buffer degrades to the core body rather than to an error,
+  // because transport and volume working without metadata beats neither working.
+  char extras[128];
+  int elen = 0;
+  const uint32_t dur = this->media_dur_ms_.load(std::memory_order_relaxed);
+  if (dur > 0) {
+    elen += snprintf(extras + elen, sizeof(extras) - static_cast<size_t>(elen), R"(,"pos":%u,"dur":%u)",
+                     static_cast<unsigned>(this->media_pos_ms_.load(std::memory_order_relaxed)),
+                     static_cast<unsigned>(dur));
+  }
+  if (this->media_ctrl_ok_.load(std::memory_order_acquire) != 0 && elen >= 0 &&
+      static_cast<size_t>(elen) < sizeof(extras)) {
+    elen += snprintf(extras + elen, sizeof(extras) - static_cast<size_t>(elen),
+                     R"(,"shuffle":%d,"repeat":%d,"sup":%u,"seek_max":%u)",
+                     this->media_shuffle_.load(std::memory_order_relaxed) ? 1 : 0,
+                     static_cast<int>(this->media_repeat_.load(std::memory_order_relaxed)),
+                     static_cast<unsigned>(this->media_sup_.load(std::memory_order_relaxed)),
+                     static_cast<unsigned>(this->media_seek_max_.load(std::memory_order_relaxed)));
+  }
+  if (elen < 0 || static_cast<size_t>(elen) >= sizeof(extras))
+    elen = 0;
+
+  // The fragment is copied into its final position under the lock, and the send happens outside it:
+  // the writer is the main loop, and making a metadata update wait on a socket write would be a
+  // priority inversion against exactly the loop the ground rules protect.
+  size_t flen = 0;
+  {
+    LockGuard guard(this->media_meta_lock_);
+    flen = this->media_meta_json_.size();
+    if (elen > 0 || flen > 0) {
+      const size_t need = static_cast<size_t>(len) + static_cast<size_t>(elen) + flen + 2;
+      if (need > this->media_body_cap_) {
+        char *grown = this->media_body_ == nullptr ? this->ha_alloc_.allocate(need)
+                                                   : this->ha_alloc_.reallocate(this->media_body_, need);
+        if (grown != nullptr) {
+          this->media_body_ = grown;
+          this->media_body_cap_ = need;
+        }
+      }
+      if (this->media_body_ != nullptr && this->media_body_cap_ >= need) {
+        memcpy(this->media_body_ + len + elen, this->media_meta_json_.data(), flen);
+      } else {
+        flen = 0;
+        elen = 0;  // No buffer to carry the extras either; the stack core below still answers.
+      }
+    }
+  }
+  if (elen > 0 || flen > 0) {
+    memcpy(this->media_body_, body, static_cast<size_t>(len));
+    memcpy(this->media_body_ + len, extras, static_cast<size_t>(elen));
+    char *at = this->media_body_ + len + elen + flen;
+    *at++ = '}';
+    *at = '\0';
+    request->send(200, "application/json", this->media_body_);
+    return;
+  }
+#endif
+
+  body[len++] = '}';
+  body[len] = '\0';
   request->send(200, "application/json", body);
 }
 
@@ -676,6 +760,33 @@ void WebUIHandler::handle_media_set_(AsyncWebServerRequest *request) {
     wanted = MediaCmd::NEXT;
   } else if (strcmp(cmd, "prev") == 0) {
     wanted = MediaCmd::PREVIOUS;
+  } else if (strcmp(cmd, "shuffle") == 0) {
+    // The value travels as v=0|1 rather than as two verbs, so the footer's toggle posts what it
+    // wants to be true and never has to know what the state was a network round trip ago.
+    auto *v = request->getParam("v");
+    if (v == nullptr || (v->value() != "0" && v->value() != "1")) {
+      request->send(400, "application/json", "{\"ok\":0}");
+      return;
+    }
+    wanted = v->value() == "1" ? MediaCmd::SHUFFLE_ON : MediaCmd::SHUFFLE_OFF;
+    src = 1;  // Queue semantics are the group stream's alone; see apply_media_requests.
+  } else if (strcmp(cmd, "repeat") == 0) {
+    auto *m = request->getParam("m");
+    if (m == nullptr) {
+      request->send(400, "application/json", "{\"ok\":0}");
+      return;
+    }
+    if (m->value() == "off") {
+      wanted = MediaCmd::REPEAT_OFF;
+    } else if (m->value() == "one") {
+      wanted = MediaCmd::REPEAT_ONE;
+    } else if (m->value() == "all") {
+      wanted = MediaCmd::REPEAT_ALL;
+    } else {
+      request->send(400, "application/json", "{\"ok\":0}");
+      return;
+    }
+    src = 1;
   }
   if (wanted == MediaCmd::NONE) {
     // 404 rather than 400: the path itself named something this device does not offer.
@@ -729,11 +840,110 @@ void WebUIHandler::apply_media_requests() {
       if (target == this->media_sendspin_)
         target->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_PREVIOUS).perform();
       break;
+    // Shuffle and repeat are the group stream's alone, for the same reason the skips are: the local
+    // player has no queue for either to describe. The endpoint already forces src=sendspin for
+    // them, so this gate only fires if a build without the group player somehow queued one.
+    case MediaCmd::SHUFFLE_ON:
+      if (target == this->media_sendspin_)
+        target->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_SHUFFLE).perform();
+      break;
+    case MediaCmd::SHUFFLE_OFF:
+      if (target == this->media_sendspin_)
+        target->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_UNSHUFFLE).perform();
+      break;
+    case MediaCmd::REPEAT_OFF:
+      if (target == this->media_sendspin_)
+        target->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_REPEAT_OFF).perform();
+      break;
+    case MediaCmd::REPEAT_ONE:
+      if (target == this->media_sendspin_)
+        target->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_REPEAT_ONE).perform();
+      break;
+    case MediaCmd::REPEAT_ALL:
+      if (target == this->media_sendspin_)
+        target->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_REPEAT_ALL).perform();
+      break;
     case MediaCmd::NONE:
       break;
   }
 }
-#endif
+
+#ifdef USE_SAT1_WEB_UI_SENDSPIN
+/// Appends `value` to `out` as JSON string content, escaping the two characters that can break the
+/// document (quote and backslash) and the control range, and capping the contribution at `max`
+/// bytes. The cap backs off UTF-8 continuation bytes so a truncated title ends on a whole character
+/// rather than half of one. Metadata is the server's text, so the cap is politeness, not security -
+/// the escape is what carries the correctness.
+static void append_json_escaped_(std::basic_string<char, std::char_traits<char>, RAMAllocator<char>> &out,
+                                 const char *value, size_t max) {
+  size_t len = strlen(value);
+  if (len > max) {
+    len = max;
+    while (len > 0 && (static_cast<uint8_t>(value[len]) & 0xC0) == 0x80)
+      len--;
+  }
+  for (size_t i = 0; i < len; i++) {
+    const char c = value[i];
+    if (c == '"' || c == '\\') {
+      out.push_back('\\');
+      out.push_back(c);
+    } else if (static_cast<uint8_t>(c) < 0x20) {
+      // Control characters are illegal raw inside a JSON string. Newlines and tabs have no business
+      // in a track title, so a space keeps the document valid without a six-byte \u escape.
+      out.push_back(' ');
+    } else {
+      out.push_back(c);
+    }
+  }
+}
+
+void WebUIHandler::media_set_meta(const char *title, const char *artist, const char *album, const char *art,
+                                  uint32_t dur_ms) {
+  // Built into a fresh string and swapped under the lock, so a poll on the httpd task never reads a
+  // fragment mid-assembly. The allocator matches the member's, which is what makes swap legal.
+  std::basic_string<char, std::char_traits<char>, RAMAllocator<char>> next;
+
+  struct Field {
+    const char *key;
+    const char *value;
+    size_t max;
+  };
+  // The URL's cap is the generous one: MA's image proxy URLs run ~120 bytes, but a CDN URL for a
+  // streaming provider can be longer, and a truncated URL is worthless where a truncated title is
+  // merely short.
+  const Field fields[] = {
+      {"\"title\":\"", title, 160}, {"\"artist\":\"", artist, 160}, {"\"album\":\"", album, 160},
+      {"\"art\":\"", art, 320},
+  };
+  for (const auto &f : fields) {
+    if (f.value == nullptr || f.value[0] == '\0')
+      continue;
+    next.push_back(',');
+    next.append(f.key);
+    append_json_escaped_(next, f.value, f.max);
+    next.push_back('"');
+  }
+
+  this->media_dur_ms_.store(dur_ms, std::memory_order_relaxed);
+  LockGuard guard(this->media_meta_lock_);
+  this->media_meta_json_.swap(next);
+}
+
+void WebUIHandler::media_set_ctrl(bool shuffle, uint8_t repeat, uint16_t supported, uint32_t seek_max_ms) {
+  this->media_shuffle_.store(shuffle ? 1 : 0, std::memory_order_relaxed);
+  this->media_repeat_.store(repeat, std::memory_order_relaxed);
+  this->media_sup_.store(supported, std::memory_order_relaxed);
+  this->media_seek_max_.store(seek_max_ms, std::memory_order_relaxed);
+  // Last, so a poll that sees the flag sees the fields behind it.
+  this->media_ctrl_ok_.store(1, std::memory_order_release);
+}
+
+void WebUIHandler::media_clear_ctrl() {
+  this->media_ctrl_ok_.store(0, std::memory_order_relaxed);
+  this->media_pos_ms_.store(0, std::memory_order_relaxed);
+}
+#endif  // USE_SAT1_WEB_UI_SENDSPIN
+#endif  // USE_MEDIA_PLAYER
 
 char *WebUIHandler::ha_stage_grow_(size_t capacity) {
   // No lock: the staging buffer is only ever touched from the main loop, where the API callback that
@@ -971,6 +1181,242 @@ bool WebUIHandler::take_select_write(SelectWrite &out) {
   this->select_queue_.erase(this->select_queue_.begin());
   if (this->select_queue_.empty())
     this->select_pending_.store(false, std::memory_order_relaxed);
+  return true;
+}
+
+/* --- The Music Assistant relay ------------------------------------------------------------------
+ *
+ * The footer's tier-1 surface: what must round-trip through Home Assistant because neither the
+ * device nor the browser can do it alone. The payload (GET /api/sat1/ma) is this device's MA
+ * player's group members with their volumes plus shuffle/repeat as Home Assistant sees them; the
+ * discovery facts that change rarely - which entity is this device's MA twin, its favorite button,
+ * and the groupable candidates - ride the big Home Assistant payload instead, where the paging and
+ * size-cap machinery already live. Commands (POST /api/sat1/ma/<cmd>) queue here and leave as
+ * homeassistant.action calls from the main loop, exactly like the select writes.
+ */
+
+char *WebUIHandler::stage_ma_payload(size_t capacity) {
+  // Main loop only, like the HA stage; what requests read is ma_buf_, and the two only meet in the
+  // commit below.
+  if (capacity > this->ma_stage_cap_) {
+    char *grown = this->ma_stage_ == nullptr ? this->ha_alloc_.allocate(capacity)
+                                             : this->ha_alloc_.reallocate(this->ma_stage_, capacity);
+    if (grown == nullptr) {
+      ESP_LOGW(TAG_WU, "No room to stage a %u byte Music Assistant payload; keeping the previous one",
+               static_cast<unsigned>(capacity));
+      return nullptr;
+    }
+    this->ma_stage_ = grown;
+    this->ma_stage_cap_ = capacity;
+  }
+  return this->ma_stage_;
+}
+
+void WebUIHandler::commit_ma_payload(size_t len) {
+  if (this->ma_stage_ == nullptr || len + 1 > this->ma_stage_cap_)
+    return;
+  this->ma_stage_[len] = '\0';
+
+  LockGuard guard{this->ma_lock_};
+  char *served = this->ma_buf_;
+  const size_t served_cap = this->ma_cap_;
+  this->ma_buf_ = this->ma_stage_;
+  this->ma_len_ = len;
+  this->ma_cap_ = this->ma_stage_cap_;
+  this->ma_stage_ = served;
+  this->ma_stage_cap_ = served_cap;
+  this->ma_at_ = static_cast<uint32_t>(millis_64() / 1000);
+}
+
+void WebUIHandler::handle_ma_(AsyncWebServerRequest *request) {
+  // Held across the send for the reason handle_ha_ gives; this payload is far smaller.
+  LockGuard guard{this->ma_lock_};
+
+  if (this->ma_at_ == 0) {
+    request->send(200, "application/json", R"({"age":-1,"d":null})");
+    return;
+  }
+
+  httpd_resp_set_type(*request, "application/json");
+  httpd_resp_set_hdr(*request, "Cache-Control", CACHE_REVALIDATE);
+
+  char head[32];
+  const int head_len = snprintf(head, sizeof(head), R"({"age":%u,"d":)",
+                                static_cast<unsigned int>(static_cast<uint32_t>(millis_64() / 1000) - this->ma_at_));
+  httpd_resp_send_chunk(*request, head, head_len);
+  httpd_resp_send_chunk(*request, this->ma_buf_, static_cast<ssize_t>(this->ma_len_));
+  httpd_resp_send_chunk(*request, "}", 1);
+  httpd_resp_send_chunk(*request, nullptr, 0);
+}
+
+void WebUIHandler::handle_ma_refresh_(AsyncWebServerRequest *request) {
+  // Only a request, like the HA refresh: the sync is an action call and belongs on the main loop.
+  this->ma_refresh_requested_.store(true);
+  request->send(200, "application/json", "{\"queued\":1}");
+}
+
+bool WebUIHandler::ma_payload_names_(const std::string &entity) {
+  const std::string quoted = "\"" + entity + "\"";
+
+  LockGuard guard{this->ma_lock_};
+  if (this->ma_buf_ == nullptr || this->ma_len_ == 0)
+    return false;
+  return strstr(this->ma_buf_, quoted.c_str()) != nullptr;
+}
+
+/// True when `value` is shaped like an entity id in `domain` - "media_player.kitchen" - with nothing
+/// in it that has any business in one. The character walk matters less as validation (Home Assistant
+/// would refuse a malformed id anyway) than as the same bug-containment the select endpoint's checks
+/// buy: what leaves here goes into an action call as a template variable.
+static bool ma_entity_ok_(const std::string &value, const char *domain) {
+  if (value.size() > 120 || value.rfind(domain, 0) != 0)
+    return false;
+  for (const char c : value) {
+    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.'))
+      return false;
+  }
+  return true;
+}
+
+/// Queues one relayed Music Assistant command.
+///
+/// The same two guards as the select endpoint, for the same reason: the domain each verb needs is
+/// enforced, and the entity must appear in a payload this device itself rendered - the big Home
+/// Assistant one (which carries the MA twin, the favorite button and every groupable candidate) or
+/// the members one above. This is not the security boundary (the caller is already authenticated);
+/// it is what keeps a bug in the app from aiming action calls at arbitrary entities.
+void WebUIHandler::handle_ma_set_(AsyncWebServerRequest *request) {
+  char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+  request->url_to(url_buf);
+  const char *cmd = url_buf + 13;  // Past "/api/sat1/ma/", which match_route_ has already tested.
+
+  auto *entity_param = request->getParam("e");
+  if (entity_param == nullptr) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+  const std::string &entity = entity_param->value();
+
+  MaCmd kind = MaCmd::NONE;
+  std::string arg;
+
+  if (strcmp(cmd, "like") == 0) {
+    // The favorite is a button entity the MA integration creates beside the player - pressing it is
+    // how "like this track" works, and the only way: there is no action that takes a media item.
+    if (!ma_entity_ok_(entity, "button.")) {
+      request->send(400, "application/json", "{\"ok\":0}");
+      return;
+    }
+    kind = MaCmd::LIKE;
+  } else if (strcmp(cmd, "join") == 0 || strcmp(cmd, "unjoin") == 0 || strcmp(cmd, "vol") == 0 ||
+             strcmp(cmd, "seek") == 0) {
+    if (!ma_entity_ok_(entity, "media_player.")) {
+      request->send(400, "application/json", "{\"ok\":0}");
+      return;
+    }
+    if (strcmp(cmd, "join") == 0) {
+      // One member per request - the sheet adds speakers one tap at a time - so `m` is a single
+      // entity id held to the same shape as `e`, not a list to parse.
+      auto *member = request->getParam("m");
+      if (member == nullptr || !ma_entity_ok_(member->value(), "media_player.") ||
+          !this->ha_payload_names_(member->value())) {
+        request->send(400, "application/json", "{\"ok\":0}");
+        return;
+      }
+      kind = MaCmd::JOIN;
+      arg = member->value();
+    } else if (strcmp(cmd, "unjoin") == 0) {
+      kind = MaCmd::UNJOIN;
+    } else if (strcmp(cmd, "vol") == 0) {
+      auto *v = request->getParam("v");
+      if (v == nullptr) {
+        request->send(400, "application/json", "{\"ok\":0}");
+        return;
+      }
+      const std::string &text = v->value();
+      char *end = nullptr;
+      const unsigned long parsed = strtoul(text.c_str(), &end, 10);
+      if (end == text.c_str() || *end != '\0' || parsed > 100) {
+        request->send(400, "application/json", "{\"ok\":0}");
+        return;
+      }
+      kind = MaCmd::VOL;
+      arg = text;
+    } else {
+      // Seek, in whole seconds. The scrubber's step is a second, and sub-second precision over a
+      // relay with this much latency would be theatre.
+      auto *t = request->getParam("t");
+      if (t == nullptr) {
+        request->send(400, "application/json", "{\"ok\":0}");
+        return;
+      }
+      const std::string &text = t->value();
+      char *end = nullptr;
+      const unsigned long parsed = strtoul(text.c_str(), &end, 10);
+      if (end == text.c_str() || *end != '\0' || parsed > 24UL * 3600UL) {
+        request->send(400, "application/json", "{\"ok\":0}");
+        return;
+      }
+      kind = MaCmd::SEEK;
+      arg = text;
+    }
+  }
+
+  if (kind == MaCmd::NONE) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  if (!this->ha_payload_names_(entity) && !this->ma_payload_names_(entity)) {
+    // 404 for the reason the select endpoint gives: well formed, but naming something this device
+    // has not been told about, which a stale browser does after a rename. Refetching is the answer.
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  {
+    LockGuard guard{this->ma_queue_lock_};
+
+    bool queued = false;
+    for (auto &pending : this->ma_queue_) {
+      if (pending.kind == static_cast<uint8_t>(kind) && pending.entity == entity) {
+        // Last write wins per kind and entity: a member-volume drag or a scrub ends as one call.
+        pending.arg = arg;
+        queued = true;
+        break;
+      }
+    }
+
+    if (!queued) {
+      if (this->ma_queue_.size() >= WU_MA_QUEUE) {
+        request->send(409, "application/json", "{\"ok\":0}");
+        return;
+      }
+      this->ma_queue_.push_back({static_cast<uint8_t>(kind), entity, arg});
+    }
+
+    this->ma_pending_.store(true, std::memory_order_release);
+  }
+
+  // Queued, not done. The app resyncs after the round trip and believes what comes back - none of
+  // these calls captures a response, so there is nothing else to believe.
+  request->send(200, "application/json", "{\"queued\":1}");
+}
+
+bool WebUIHandler::take_ma_write(MaWrite &out) {
+  if (!this->ma_pending_.load(std::memory_order_acquire))
+    return false;
+
+  LockGuard guard{this->ma_queue_lock_};
+  if (this->ma_queue_.empty()) {
+    this->ma_pending_.store(false, std::memory_order_relaxed);
+    return false;
+  }
+
+  out = this->ma_queue_.front();
+  this->ma_queue_.erase(this->ma_queue_.begin());
+  if (this->ma_queue_.empty())
+    this->ma_pending_.store(false, std::memory_order_relaxed);
   return true;
 }
 

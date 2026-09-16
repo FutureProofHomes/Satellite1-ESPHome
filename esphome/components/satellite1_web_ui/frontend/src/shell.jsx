@@ -9,6 +9,7 @@ import { useEffect, useState } from "preact/hooks";
 
 import { HINTS, TEXT } from "./copy.js";
 import { deviceIdentity, onWriteError, useDeviceState, useEvents, useHaData, useSelection } from "./lib/device.js";
+import { MediaFooter } from "./media.jsx";
 import { Config } from "./routes/config.jsx";
 import { Controls } from "./routes/controls.jsx";
 import { Diagnostics } from "./routes/diagnostics.jsx";
@@ -402,6 +403,11 @@ export function App() {
       <main class="wrap">
         <View ctx={ctx} />
       </main>
+
+      {/* On every route, below the content - .wrap carries bottom padding so nothing hides under it.
+          The footer owns the media poll now that it is the one media surface (the card it replaced
+          lived on home and polled only there). */}
+      <MediaFooter ha={ha.ha} mac={device?.mac} />
 
       <ErrorToast />
 

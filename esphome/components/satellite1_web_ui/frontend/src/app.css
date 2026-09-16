@@ -141,6 +141,10 @@
      A test asserts the drawer's top edge meets the bar's bottom edge, so a change to the bar fails there
      rather than drifting quietly. */
   --bar-h: 51px;
+  /* The media bar's height, shared by the bar itself and the bottom padding .wrap reserves for it. */
+  /* The floating media bar's full footprint: two rows plus its padding and the gap under it.
+     .wrap and the toast both reserve this. */
+  --mbar-h: 104px;
 }
 
 * {
@@ -242,10 +246,12 @@ textarea {
   box-shadow: 0 1px 3px var(--shadow);
 }
 
+/* s-2 rather than s-1 of padding: with the glyph sizes below, that puts every icon button at or
+   near the 40px touch target (Safari-on-phone feedback, September 2026). */
 .icon {
   background: none;
   border: 0;
-  padding: var(--s-1);
+  padding: var(--s-2);
   cursor: pointer;
   line-height: 0;
 }
@@ -255,8 +261,8 @@ textarea {
 .burger::before,
 .burger::after {
   display: block;
-  width: 17px;
-  height: 2px;
+  width: 21px;
+  height: 2.5px;
   background: var(--fg-2);
   border-radius: var(--r-1);
 }
@@ -266,10 +272,10 @@ textarea {
   position: relative;
 }
 .burger::before {
-  top: -5px;
+  top: -6.5px;
 }
 .burger::after {
-  top: 3px;
+  top: 4px;
 }
 
 .title {
@@ -307,8 +313,9 @@ textarea {
   /* block, so it does not sit on a text baseline and drag a descender's worth of space around with it. */
   display: block;
   flex: none;
-  width: 12px;
-  height: 12px;
+  /* 15px, up from 12 - at 12 the mark was legible but not obviously a control on a phone. */
+  width: 15px;
+  height: 15px;
   transition: transform 0.12s;
 }
 .chev.down {
@@ -363,7 +370,9 @@ textarea {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: calc(var(--s-4) + env(safe-area-inset-bottom));
+  /* Above the media bar, which owns the bottom edge now - a toast behind the bar is a toast nobody
+     saw, same reasoning as its z-index. */
+  bottom: calc(var(--mbar-h) + var(--s-4) + env(safe-area-inset-bottom));
   z-index: 50;
   display: flex;
   flex-direction: column;
@@ -401,7 +410,9 @@ textarea {
 .wrap {
   max-width: 720px;
   margin: 0 auto;
-  padding: var(--s-3) var(--s-3) calc(var(--s-5) + env(safe-area-inset-bottom));
+  /* The bottom padding reserves the media bar's height on top of what it always reserved, so the
+     last card on any route scrolls clear of the fixed bar. */
+  padding: var(--s-3) var(--s-3) calc(var(--s-5) + var(--mbar-h) + env(safe-area-inset-bottom));
 }
 
 /* ---------------------------------------------------------------- */
@@ -504,7 +515,7 @@ textarea {
    line-height: 0 would crop it. */
 .x {
   color: var(--fg-2);
-  font-size: var(--t-l);
+  font-size: 20px;
   line-height: 1;
 }
 .peer {
@@ -701,13 +712,13 @@ a.peer.go:hover {
 
 .hint-btn {
   flex: none;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   border-radius: var(--r-pill);
   border: 1px solid var(--line-2);
   background: var(--fill);
   color: var(--fg-3);
-  font: italic 600 9px/1 serif;
+  font: italic 600 11px/1 serif;
   cursor: pointer;
   padding: 0;
 }
@@ -741,10 +752,12 @@ a.peer.go:hover {
 /* Inputs                                                           */
 /* ---------------------------------------------------------------- */
 
+/* Sized to iOS's own switch (51x31) rather than the 42x24 it launched at, which on a phone was a
+   target smaller than a fingertip (Safari-on-phone feedback, September 2026). */
 .sw {
   position: relative;
-  width: 42px;
-  height: 24px;
+  width: 51px;
+  height: 31px;
   border-radius: var(--r-pill);
   border: 1px solid var(--line-2);
   background: var(--fill);
@@ -765,15 +778,62 @@ a.peer.go:hover {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 18px;
-  height: 18px;
+  width: 25px;
+  height: 25px;
   border-radius: var(--r-pill);
   background: var(--knob);
   transition: transform 0.12s;
 }
 .sw.on .sw-knob {
-  transform: translateX(18px);
+  transform: translateX(20px);
   background: var(--on-accent);
+}
+
+/* Every range input, restyled by hand for thumbs rather than mice (Safari-on-phone feedback,
+   September 2026): the native control's thumb is ~16px and its hit area barely more, which on glass
+   is a control that has to be aimed at. appearance: none costs the native filled track, so the fill
+   comes back as a gradient driven by --p, which every slider component sets inline (ui.jsx's
+   rangeFill). --sl is the fill-and-thumb colour: the accent by default, overridden to the artwork's
+   text colour inside the tinted media surfaces. The input is 30px tall - all of it hit area - with
+   the drawn track centred in it. */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 30px;
+  margin: 0;
+  padding: 0;
+  background: none;
+  --track: linear-gradient(90deg, var(--sl, var(--accent)) var(--p, 0%), var(--line-2) 0);
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--track);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -8px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--sl, var(--accent));
+  box-shadow: 0 1px 4px var(--shadow);
+}
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--track);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--sl, var(--accent));
+}
+input[type="range"]:disabled {
+  --sl: var(--fg-4);
 }
 
 .slider {
@@ -783,7 +843,6 @@ a.peer.go:hover {
 }
 .slider input {
   width: 116px;
-  accent-color: var(--accent);
 }
 .slider-val {
   /* A minimum, not a width: 62px keeps the percentage readouts from shifting the track as their
@@ -1017,10 +1076,6 @@ a.peer.go:hover {
   justify-content: center;
   margin: var(--s-3) 0 var(--s-1);
 }
-.wheel-wrap.off {
-  opacity: 0.3;
-  pointer-events: none;
-}
 /* The six hue stops and the white centre are deliberately absolute and deliberately not tokens. They
    are the colour the customer is picking, so they must read the same in both themes - a hue wheel that
    changed with the theme would be lying about what the LEDs will do. */
@@ -1166,7 +1221,9 @@ a.peer.go:hover {
    Scrolls at a fixed height rather than growing: 22 areas is a plausible house, and a card that
    pushes everything below it off screen is worse than one that scrolls. */
 .tree {
-  max-height: 210px;
+  /* Taller than the 210px it launched at: the rows grew for touch (below), and the box should
+     still show a usable handful of areas before it scrolls. */
+  max-height: 280px;
   overflow: auto;
   background: var(--bg-sunk);
   border: 1px solid var(--line);
@@ -1185,16 +1242,18 @@ a.peer.go:hover {
   display: flex;
   align-items: center;
   gap: var(--s-1);
-  padding: var(--s-1) var(--s-2);
+  /* s-2 of vertical padding: with the 22px checkbox that puts a row at ~40px, a touch target
+     rather than a list line (Safari-on-phone feedback, September 2026). */
+  padding: var(--s-2) var(--s-2);
   font-size: var(--t-m);
 }
 /* Indented past the area's checkbox, not merely past its chevron.
-   An area heading spends 9px of row padding, then 16px on the chevron and 6px of gap before its own
-   checkbox, so its box starts at 31px and its label at 54px. This was 26px, which put a player's
-   checkbox 5px to the LEFT of its own area's - the children were literally out-dented from their parent,
-   which is why the group read as a flat list. 47px is one 16px step beyond the parent's box. */
+   An area heading spends 9px of row padding, then 15px on the chevron and 6px of gap before its own
+   checkbox, so its box starts at 30px. A player's box sits one 22px checkbox-step beyond the
+   parent's, at 52px. (The earlier 47px derived from the old 16px chevron and 17px box; the
+   principle - children indented one box past their parent - is unchanged.) */
 .tree-p {
-  padding-left: 47px;
+  padding-left: 52px;
   color: var(--fg-2);
 }
 .tree-ps {
@@ -1204,7 +1263,8 @@ a.peer.go:hover {
 .tree-x {
   background: none;
   border: 0;
-  padding: 0 2px;
+  padding: 4px;
+  margin: -4px 0;
   color: var(--fg-3);
   line-height: 0;
   cursor: pointer;
@@ -1229,10 +1289,10 @@ a.peer.go:hover {
 /* The Local Speaker row. Sits at the top of the tree as a peer of the rooms rather than as a player under
    one, because it is a member of none of them - and it is the default, so it should not look like an
    afterthought below them.
-   31px, not 9px: it has no chevron of its own, so matching an area heading means aligning with where that
+   30px, not 9px: it has no chevron of its own, so matching an area heading means aligning with where that
    heading's checkbox lands rather than where its row begins. */
 .tree-self {
-  padding-left: 31px;
+  padding-left: 30px;
   color: var(--fg);
   border-bottom: 1px solid var(--line);
 }
@@ -1252,8 +1312,8 @@ a.peer.go:hover {
 }
 .cb-i {
   display: block;
-  width: 17px;
-  height: 17px;
+  width: 22px;
+  height: 22px;
 }
 .cb-box {
   fill: none;
@@ -1540,32 +1600,466 @@ polyline.draft {
 }
 
 /* ------------------------------------------------------------------ */
-/* Media card                                                          */
+/* Media footer (the card's successor - see media.jsx)                 */
 /* ------------------------------------------------------------------ */
 
-.media-meta {
-  margin-bottom: var(--s-2);
+/* The bar: a floating card in the artwork's colour, after MA's own (owner's screenshot 1,
+   September 2026). Fixed under every route; .wrap's bottom padding reserves its height so content
+   never hides behind it. Below the scrims (z 30) so the nav drawer and sheets cover it, below the
+   toast always. The whole bar opens the expanded view - the cursor says so - with the speaker,
+   play and volume controls opting out via stopPropagation.
+
+   The tint arrives as inline custom properties (--tint and friends, from media.jsx) and every use
+   falls back to a theme colour, so artwork whose host refuses pixel reads leaves a normal
+   theme-coloured card. */
+.mbar {
+  position: fixed;
+  left: var(--s-3);
+  right: var(--s-3);
+  bottom: calc(var(--s-3) + env(safe-area-inset-bottom));
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 690px;
+  margin: 0 auto;
+  padding: var(--s-2) var(--s-3);
+  background: var(--tint, var(--bg-elev));
+  color: var(--tfg, var(--fg));
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-3);
+  box-shadow: 0 6px 20px var(--shadow);
+  cursor: pointer;
 }
-.media-title {
+.mbar[style] {
+  border-color: transparent;
+}
+.mbar .dim {
+  color: var(--tdim, var(--fg-3));
+}
+.mbar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.mbar-meta {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+/* The bar's own volume row, sliding the same command the expanded view's does. */
+.mbar-vol {
+  display: flex;
+  cursor: default;
+  --sl: var(--tfg, var(--accent));
+}
+/* The speaker button, its badge carrying the group's size - members including this device. */
+.mspk {
+  width: 36px;
+  height: 36px;
+  color: inherit;
+}
+.mbdg {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--tbtn, var(--fg));
+  color: var(--tbfg, var(--bg-elev));
+  font-size: 9px;
+  line-height: 15px;
+  text-align: center;
+  box-sizing: border-box;
+}
+.mbar-t {
   font-weight: 600;
+  font-size: var(--t-s);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mbar-s {
+  font-size: var(--t-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The thumbnail, and the note glyph standing in for one. The image always fills the box; the note
+   sits small and dim in the same footprint so idle and playing keep the bar's geometry. */
+.mbar-art,
+.mart {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  background: var(--fill);
+  border-radius: var(--r-2);
+  overflow: hidden;
+  color: var(--fg-3);
+}
+.mbar-art {
+  width: 38px;
+  height: 38px;
+}
+.mbar-art img,
+.mart img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.mbar-art .mi {
+  width: 18px;
+  height: 18px;
+}
+/* The expanded view: a full-screen sheet over everything but the toast, washed in the artwork's
+   colour when there is one (owner's screenshot 4). One column, centred, sized for thumbs - this is
+   the screen someone props on the counter while cooking. The tint fallbacks mirror the bar's. */
+.msheet {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: var(--tint, var(--bg));
+  color: var(--tfg, var(--fg));
+  --sl: var(--tfg, var(--accent));
+  padding-top: env(safe-area-inset-top);
+}
+.msheet .sheet-head {
+  background: none;
+  flex: none;
+  color: inherit;
+}
+.msheet .dim {
+  color: var(--tdim, var(--fg-3));
+}
+.msheet .icon,
+.msheet .title {
+  color: inherit;
+}
+.msheet-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-4) var(--s-4) calc(var(--s-5) + env(safe-area-inset-bottom));
+  max-width: 480px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+.mart {
+  width: min(62vw, 260px);
+  aspect-ratio: 1;
+}
+.mart .mi {
+  width: 30%;
+  height: 30%;
+}
+.mmeta {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 100%;
+}
+.mmeta-t {
+  font-weight: 600;
+  font-size: var(--t-l);
+}
+.mmeta-a {
   font-size: var(--t-m);
 }
-.media-artist {
+.mmeta-al {
   font-size: var(--t-s);
 }
-/* Centred rather than left-aligned like every row above: transport buttons are thumb targets, and
-   the middle of the card is where both thumbs can reach them. Larger than .btn.sq's 28px for the
-   same reason. */
-.media-controls {
+
+.mseek {
   display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  font-size: var(--t-xs);
+  color: var(--tdim, var(--fg-3));
+}
+.mseek input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The control row, styled after Music Assistant's own player bar (owner's reference screenshot,
+   September 2026): every control a bare glyph on one centred row, no boxes, with the play/pause
+   alone carrying a filled circle. Toggles that are on show it by colour, not by a pressed box. */
+.mrow {
+  display: flex;
+  align-items: center;
   justify-content: center;
   gap: var(--s-3);
-  margin: var(--s-2) 0;
+  width: 100%;
 }
-.media-controls .btn.sq {
-  width: 44px;
-  padding: var(--s-2) 0;
-  font-size: var(--t-l);
+.mbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--tdim, var(--fg-3));
+  cursor: pointer;
+  position: relative;
+}
+.mbtn:hover {
+  color: var(--tfg, var(--fg));
+}
+.mbtn.on {
+  color: var(--tfg, var(--accent));
+}
+.mbtn .mi {
+  width: 21px;
+  height: 21px;
+}
+.mplay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--tbtn, var(--fg));
+  color: var(--tbfg, var(--bg-elev));
+  cursor: pointer;
+  flex: none;
+}
+.mplay .mi {
+  width: 22px;
+  height: 22px;
+}
+.mplay:active {
+  transform: scale(0.96);
+}
+/* The bar's copy of the same button, sized to fit a 56px strip. */
+.mplay.sm {
+  width: 36px;
+  height: 36px;
+}
+.mplay.sm .mi {
+  width: 16px;
+  height: 16px;
+}
+.mi {
+  display: block;
+  width: 18px;
+  height: 18px;
+  margin: 0 auto;
+}
+/* The "1" riding the repeat loop's corner when repeat-one is on. */
+.mrpt1 {
+  position: absolute;
+  top: 5px;
+  right: 8px;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.mvol-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.mvol {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+}
+.mvol input {
+  flex: 1;
+  min-width: 0;
+}
+.mvol-val {
+  min-width: 40px;
+  text-align: right;
+  font-size: var(--t-xs);
+  /* Tint-aware, because this readout appears on the bar, the expanded view and the players panel,
+     all of which may be wearing the artwork's colour. */
+  color: var(--tdim, var(--fg-3));
+}
+
+/* The grouped-speakers section of the expanded sheet: one row per member - name above, volume and
+   the remove control beside each other - and the join picker as the closing row. Bordered off from
+   the player controls above it, because it is the one part of the sheet about other devices. */
+.mgroup {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  border-top: 1px solid var(--line);
+  padding-top: var(--s-3);
+  margin-top: var(--s-2);
+}
+.mgroup-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+.mgroup-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--s-1) var(--s-2);
+}
+.mgroup-name {
+  font-size: var(--t-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mgroup-row .mvol {
+  grid-column: 1;
+}
+.mgroup-x {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  color: var(--fg-3);
+  /* A text ✕ under .icon's line-height: 0; both come back so it has thumb-sized ink. */
+  font-size: 18px;
+  line-height: 1;
+}
+.mgroup-add {
+  width: 100%;
+  margin-top: var(--s-1);
+  background: var(--fill);
+  color: var(--fg);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  padding: var(--s-1);
+}
+
+/* The players chip at the foot of the expanded view: who is playing, opening the players panel -
+   MA's own furniture (owner's screenshot 4). */
+.mchip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: var(--s-1) var(--s-3);
+  border: 1px solid var(--tdim, var(--line-2));
+  border-radius: 999px;
+  background: none;
+  color: inherit;
+  font-size: var(--t-s);
+  cursor: pointer;
+}
+.mchip .mi {
+  width: 15px;
+  height: 15px;
+}
+
+/* The players panel: the slide-up behind the bar's speaker button (owner's screenshots 2 and 3).
+   Partial-height over its own scrim, above the expanded view (z 40) since the chip opens it from
+   there, below the toast (z 50) as everything is. */
+.mpanel-scrim {
+  z-index: 44;
+}
+.mpanel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  max-width: 480px;
+  max-height: 75vh;
+  margin: 0 auto;
+  padding: var(--s-2) var(--s-4) calc(var(--s-4) + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  background: var(--tint, var(--bg-elev));
+  color: var(--tfg, var(--fg));
+  border-radius: var(--r-3) var(--r-3) 0 0;
+  box-shadow: 0 -6px 24px var(--shadow);
+  animation: panel-up 180ms ease-out;
+}
+@keyframes panel-up {
+  from {
+    transform: translateY(40px);
+    opacity: 0.6;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.mpanel .dim {
+  color: var(--tdim, var(--fg-3));
+}
+.mpanel {
+  --sl: var(--tfg, var(--accent));
+}
+.mpanel .mgroup-x {
+  color: inherit;
+}
+.mpanel .mgroup-add {
+  background: none;
+  color: inherit;
+  border-color: var(--tdim, var(--line-2));
+}
+.mpanel .mgroup-add option {
+  color: var(--fg);
+  background: var(--bg-elev);
+}
+/* The grab handle, which is also the close button. */
+.mpanel-handle {
+  width: 42px;
+  height: 5px;
+  flex: none;
+  margin: 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: var(--tdim, var(--line-2));
+  cursor: pointer;
+}
+
+/* The Music Assistant connection panel at the foot of the sheet, reusing the switcher's fold
+   header. Deliberately quiet: it is setup for one optional tier, not part of playing music. */
+.mapanel {
+  width: 100%;
+  margin-top: var(--s-2);
+}
+.mapanel .offhead {
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
+}
+.mapanel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-2) var(--s-2);
+}
+.mapanel-body p {
+  margin: 0;
+}
+.mapanel-row {
+  display: flex;
+  gap: var(--s-2);
 }
 
 /* ------------------------------------------------------------------ */

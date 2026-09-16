@@ -39,8 +39,16 @@ text_sensor:
 # Merged into the block in common/web_ui.yaml, exactly as satellite1.yaml merges its own keys in.
 # The group player reference and the metadata entities live here, beside the things they name, so a
 # config built without this file loses the Sendspin half of the card and nothing else.
+#
+# The hub reference is what feeds the media footer's richer fields - album, artwork URL, position,
+# duration, shuffle and repeat state, and the server's supported-command list - all through hub
+# callbacks and GET /api/sat1/media rather than through entities, so they cost no /events traffic
+# and nothing new appears anywhere near Home Assistant. The title/artist text sensors above predate
+# that path and stay: they are entities other configs may read, and deleting entities is against
+# the ground rules.
 satellite1_web_ui:
   sendspin_media_player_id: sendspin_group_media_player
+  sendspin_hub_id: sendspin_hub
   entities:
     text_sensors:
       media_title: sendspin_title_text

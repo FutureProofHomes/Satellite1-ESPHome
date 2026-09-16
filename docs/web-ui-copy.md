@@ -40,7 +40,9 @@ labelled User and Assist rather than heard and said).
 | `calibrate` | Calibration editor, offset row | Adjust until the reading matches a trusted instrument in the same room. The correction is stored on the device and survives restarts. |
 | `led_ring` | LED ring | The ring the assistant animates. Colour and brightness set here are the resting state - the device still overrides both while it is listening, thinking or reporting an error. |
 | `timers` | Timers card | Timers set by voice, held on the device - they keep counting and still ring if Home Assistant goes away. Voice is also how they are managed: name one when you set it ("set a pizza timer for ten minutes"), pause or cancel it the same way. |
-| `media` | Media card | What this device is playing, from either source: a group stream, or media sent to it by Home Assistant. Track skipping works only on group streams. This slider is the media volume; the assistant's voice has its own level, in the Assistant card below. |
+| `media` | Media footer, expanded view | What this device is playing, from either source: a group stream, or media sent to it by Home Assistant. Track skipping, shuffle, repeat and the progress bar work on group streams - media sent directly to this speaker is one URL with none of that. The volume here is the media volume; the assistant's voice has its own level, in the Assistant card on the home page. |
+| `media_group` | Media footer, Grouped speakers | Speakers playing this stream together, with each one's own volume. Adding a speaker asks Music Assistant to bring it into the group; removing one lets it fall silent. The big slider above moves the whole group. |
+| `ma_connect` | Media footer, Music Assistant panel | Connecting this page straight to your Music Assistant server makes the controls instant and unlocks anything Home Assistant cannot relay. Create a long-lived token in Music Assistant under Settings, then your profile, and paste it here with the server's address. Both stay in this browser only - the device never sees them. |
 
 The first four sit on the ⓘ inside the calibration editor, which opens by tapping a sensor chip — not on
 the chips themselves. A chip is 50–80px wide, and a finger-sized ⓘ inside one is indistinguishable from a
@@ -265,10 +267,24 @@ triggers a Home Assistant re-sync, so the availability dots correct themselves w
 rather than showing the cache from the last sync.
 | `write_failed` | A change didn't reach the device, so it hasn't been applied. |
 | `write_failed_go` | Tap for the device log. |
-| `nothing_said` | Nothing said yet. What you say and what it replies will appear here. |
+| `nothing_said` | A transcription of your voice interactions are displayed here. |
 | `media_idle` | Nothing playing. Group streams and media sent from Home Assistant show up here. |
+| `media_idle_bar` | Nothing playing |
 | `media_src_group` | group stream |
 | `media_src_local` | this speaker |
+| `media_players_title` | Players |
+| `media_add_speaker` | Add a speaker |
+| `media_group_loading` | Asking Music Assistant… |
+| `media_no_tiers` | Grouping, favorites and seeking need Home Assistant with Music Assistant - or connect this page to your Music Assistant server from the expanded media view. |
+| `media_like` | Add to favorites |
+| `media_liked` | Added to favorites |
+| `ma_title` | Music Assistant |
+| `ma_url_ph` | http://music-assistant.local:8095 |
+| `ma_token_ph` | Long-lived token |
+| `ma_connect_btn` | Connect |
+| `ma_disconnect_btn` | Disconnect |
+| `ma_connected` | Connected to Music Assistant |
+| `ma_error` | Could not connect. Check the address and token, and that this browser can reach the server. |
 | `zi_first` | Tap the map to place the first corner. |
 | `zi_more` | Keep tapping. A zone needs at least 3 corners. |
 | `zi_adjust` | Drag a corner to reshape. Drag the middle to move the shape. Tap a corner to select it. |

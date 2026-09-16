@@ -67,12 +67,44 @@ struct SelectWrite {
 /// that for both slots at once is four. A fifth is refused rather than dropped, so the app finds out.
 static constexpr size_t WU_SELECT_QUEUE = 4;
 
+/// One queued Music Assistant command, waiting for the main loop to fire the trigger that turns it
+/// into a Home Assistant action call - the same deferral as SelectWrite, for the same reason. `arg`
+/// is the command's second value where it has one: the entity being joined, a volume, a position.
+struct MaWrite {
+  uint8_t kind;
+  std::string entity;
+  std::string arg;
+};
+
+/// The relayed commands POST /api/sat1/ma/<cmd> accepts - exactly the footer's set. Everything the
+/// device can do itself (transport, its own volume, shuffle, repeat) stays on /api/sat1/media; these
+/// are only what must round-trip through Home Assistant: the favorite button, group membership,
+/// another member's volume, and seek, which the Sendspin hub offers no send for.
+enum class MaCmd : uint8_t { NONE = 0, LIKE, JOIN, UNJOIN, VOL, SEEK };
+
+/// Bound on the queue. Commands are taps, not drags - volume writes coalesce by entity below - so
+/// six outstanding means a browser is misbehaving, and refusal tells it so.
+static constexpr size_t WU_MA_QUEUE = 6;
+
 #ifdef USE_MEDIA_PLAYER
-/// The transport commands POST /api/sat1/media/<cmd> accepts. Deliberately the card's four and no
-/// more: stop, mute and the rest exist on the players, but an endpoint nothing renders is surface
-/// to maintain and document for no caller. Volume is not here because it travels as a value rather
-/// than a verb - see media_pending_vol_.
-enum class MediaCmd : uint8_t { NONE = 0, PLAY, PAUSE, NEXT, PREVIOUS };
+/// The transport commands POST /api/sat1/media/<cmd> accepts. The footer's set and no more: stop,
+/// mute and the rest exist on the players, but an endpoint nothing renders is surface to maintain
+/// and document for no caller. Volume is not here because it travels as a value rather than a verb -
+/// see media_pending_vol_. The shuffle and repeat verbs land as media_player commands on the
+/// Sendspin group player only, which forwards them over the protocol - the local speaker player has
+/// no queue for either to mean anything.
+enum class MediaCmd : uint8_t {
+  NONE = 0,
+  PLAY,
+  PAUSE,
+  NEXT,
+  PREVIOUS,
+  SHUFFLE_ON,
+  SHUFFLE_OFF,
+  REPEAT_OFF,
+  REPEAT_ONE,
+  REPEAT_ALL,
+};
 #endif
 
 /// Longest option this will forward, and it is the transport's number rather than a guess.
@@ -235,6 +267,20 @@ class WebUIHandler : public AsyncWebHandler {
   /// the same split satellite1_radar's engineering-mode gating uses.
   bool take_ha_refresh_request() { return this->ha_refresh_requested_.exchange(false); }
 
+  /// The Music Assistant payload's staging pair, mirroring the Home Assistant one above but
+  /// single-shot: the payload is group members and live state, bounded well under one page, so it
+  /// arrives as one action reply and needs no page loop. Same PSRAM-only discipline, same
+  /// stage-then-swap so a request in flight never reads a half-written payload. Main loop only.
+  char *stage_ma_payload(size_t capacity);
+  void commit_ma_payload(size_t len);
+
+  /// A browser asked for an MA resync (footer expanded, or after a relayed command).
+  bool take_ma_refresh_request() { return this->ma_refresh_requested_.exchange(false); }
+
+  /// Hands back the oldest queued Music Assistant command, if any - the select queue's shape, one
+  /// per main-loop iteration so the trigger behind it is never re-entered.
+  bool take_ma_write(MaWrite &out);
+
   /// Hands back the oldest queued select write, if there is one. Runs on the main loop.
   ///
   /// One at a time rather than the whole queue, so the component fires its trigger at most once per
@@ -264,6 +310,30 @@ class WebUIHandler : public AsyncWebHandler {
   /// make_call().perform() starts pipeline work on components that assume it, exactly as the wake
   /// word models do.
   void apply_media_requests();
+
+#ifdef USE_SAT1_WEB_UI_SENDSPIN
+  /// The Sendspin extras GET /api/sat1/media carries when the hub is configured. All four setters
+  /// run on the main loop - the component translates the hub's callbacks, so this file never sees a
+  /// sendspin type - and the endpoint reads them from the httpd task, which is why the strings go
+  /// through a lock and the numbers through atomics.
+
+  /// Replaces the cached track metadata. Null pointers mean the field is absent, matching the
+  /// protocol's own semantics: every metadata message replaces the whole state, so a lost
+  /// connection arrives here as four nulls and a zero duration, and the fragment empties.
+  void media_set_meta(const char *title, const char *artist, const char *album, const char *art, uint32_t dur_ms);
+
+  /// Replaces the cached controller state: shuffle on/off, repeat 0 off / 1 one / 2 all, the
+  /// server's supported-command bitmask (bit n = sendspin command enumerator n), and how far a seek
+  /// may target - zero meaning the server offers no seek or the stream's length is unknown.
+  void media_set_ctrl(bool shuffle, uint8_t repeat, uint16_t supported, uint32_t seek_max_ms);
+
+  /// The connection dropped and the cached controller state with it.
+  void media_clear_ctrl();
+
+  /// The hub's interpolated track position, refreshed by the component once per loop iteration so
+  /// the endpoint never calls into the hub from the httpd task.
+  void media_set_pos(uint32_t ms) { this->media_pos_ms_.store(ms, std::memory_order_relaxed); }
+#endif
 #endif
 
 #ifdef USE_MICRO_WAKE_WORD
@@ -313,6 +383,9 @@ class WebUIHandler : public AsyncWebHandler {
     HA,
     HA_REFRESH,
     HA_SELECT,
+    MA,
+    MA_REFRESH,
+    MA_SET,
     SEL,
     SEL_SET,
 #ifdef USE_MICRO_WAKE_WORD
@@ -350,6 +423,13 @@ class WebUIHandler : public AsyncWebHandler {
   /// prefix one - without them "select.x_assistant" would be found inside "select.x_assistant_2".
   /// A find rather than a parse, for the reason the payload buffer's own comment gives.
   bool ha_payload_names_(const std::string &entity);
+  void handle_ma_(AsyncWebServerRequest *request);
+  void handle_ma_refresh_(AsyncWebServerRequest *request);
+  void handle_ma_set_(AsyncWebServerRequest *request);
+
+  /// The MA twin of ha_payload_names_, over the members payload, for entities the big payload does
+  /// not carry. Same find-with-quotes, same reasons.
+  bool ma_payload_names_(const std::string &entity);
   void handle_sel_(AsyncWebServerRequest *request);
   void handle_sel_set_(AsyncWebServerRequest *request);
 #ifdef USE_MICRO_WAKE_WORD
@@ -436,6 +516,24 @@ class WebUIHandler : public AsyncWebHandler {
   /// empty. Only ever set true under the lock, and cleared under it when the last entry leaves.
   std::atomic<bool> select_pending_{false};
 
+  /// The Music Assistant payload and its stage, PSRAM like the Home Assistant pair and swapped the
+  /// same way. Small (group members and live state), but the discipline is not about size alone:
+  /// the internal heap is the one audio competes for, and this arrives while audio plays.
+  char *ma_buf_{nullptr};
+  size_t ma_len_{0};
+  size_t ma_cap_{0};
+  char *ma_stage_{nullptr};
+  size_t ma_stage_cap_{0};
+  uint32_t ma_at_{0};
+  Mutex ma_lock_;
+  std::atomic<bool> ma_refresh_requested_{false};
+
+  /// Music Assistant commands queued by a browser, waiting for the main loop - the select queue's
+  /// twin. Volume and seek writes coalesce by kind and entity, so a drag ends as one action call.
+  std::vector<MaWrite> ma_queue_;
+  Mutex ma_queue_lock_;
+  std::atomic<bool> ma_pending_{false};
+
   Selection *selection_{nullptr};
 
   /// Ceiling on a posted selection, comfortably above what the store itself accepts, so an oversized
@@ -501,6 +599,34 @@ class WebUIHandler : public AsyncWebHandler {
   /// their command/volume partner, which is the flag apply reads.
   std::atomic<uint8_t> media_pending_cmd_src_{0};
   std::atomic<uint8_t> media_pending_vol_src_{0};
+
+#ifdef USE_SAT1_WEB_UI_SENDSPIN
+  /// The metadata fragment GET /api/sat1/media appends: pre-escaped `,"title":"..."` pairs, built
+  /// once per metadata message on the main loop and copied out under the lock at request time.
+  /// Pre-built because titles need JSON escaping and the request path should pay a memcpy, not an
+  /// escape walk. PSRAM-backed so a long title never sits on the internal heap for the life of a
+  /// track.
+  std::basic_string<char, std::char_traits<char>, RAMAllocator<char>> media_meta_json_;
+  Mutex media_meta_lock_;
+
+  /// The response body the endpoint assembles: core + numbers + fragment. PSRAM and persistent for
+  /// the same reason the HA payload's buffers are - httpd_resp_send copies synchronously, the
+  /// httpd task is single, and growing once beats allocating per poll. Touched only from the httpd
+  /// task.
+  char *media_body_{nullptr};
+  size_t media_body_cap_{0};
+
+  /// Controller state and track timing, written on the main loop and read raw from the httpd task -
+  /// each is independently atomic, and a poll that catches a half-applied update is corrected one
+  /// second later by the next poll.
+  std::atomic<uint32_t> media_pos_ms_{0};
+  std::atomic<uint32_t> media_dur_ms_{0};
+  std::atomic<uint32_t> media_seek_max_{0};
+  std::atomic<uint16_t> media_sup_{0};
+  std::atomic<uint8_t> media_shuffle_{0};
+  std::atomic<uint8_t> media_repeat_{0};
+  std::atomic<uint8_t> media_ctrl_ok_{0};
+#endif
 #endif
 };
 

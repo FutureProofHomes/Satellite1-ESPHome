@@ -95,15 +95,18 @@ device through Home Assistant, so it gives away nothing they did not have.
 
 ## The bundle
 
-Measured, from the build that produced this note:
+Measured, from the build that produced this note (September 2026, with the media footer restyled
+after Music Assistant's own player and the mobile touch-target pass - hand-drawn range inputs,
+iOS-sized switches, enlarged glyphs and tree rows):
 
 | | Bytes |
 |---|---|
-| Raw HTML document | 67,615 |
-| Gzipped, as embedded | **23,231** |
+| Raw HTML document | 122,385 |
+| Gzipped, as embedded | **40,895** |
 | Budget | 40,960 |
 
-That is 57% of the ceiling. The gzip figure is the one that matters, since that is what occupies flash
+That is 99.8% of the ceiling - the budget is spent; the next feature must earn its bytes back
+elsewhere first. The gzip figure is the one that matters, since that is what occupies flash
 and what crosses the network. It is produced by `gzip.compress(html, compresslevel=9)` in the
 component's codegen, so the number reported at compile time is the number that ships.
 
@@ -162,6 +165,16 @@ Largest free internal block was 131,072 bytes and the longest single loop pass 2
 the number that matters, because it is what audio buffers and the network stack allocate from; PSRAM is
 plentiful by comparison, and cached Home Assistant payloads are deliberately put there.
 
+The media footer work (September 2026) was measured on a WiFi dev unit rather than the ethernet
+device above, so the numbers read against the WiFi paragraph below rather than the table: with the
+firmware playing a group stream, serving the app, and the Music Assistant relay having synced, free
+internal heap settled at 52,336 with a 30,720 largest block and PSRAM 3,438,748 free — no worse than
+the same device before the feature (48,752 free measured minutes earlier on the previous firmware),
+and stable through a hammer of the new endpoints.
+Static RAM moved from 42.9% to 42.9% (+8 bytes) across the whole feature, because every buffer it
+adds — the metadata fragment, the members payload, its staging twin — is PSRAM, allocated on first
+use.
+
 A WiFi build of the same tree has far less of it — tens of KB free rather than 148 KB, and a smaller total
 — and the difference is not this component. ESPHome's `wifi` component applies a high-performance profile
 whenever any component asks for one, and both `speaker.media_player` and `sendspin` do: the build gets
@@ -208,6 +221,50 @@ in the call.
 The consequence worth knowing is that when Home Assistant is unreachable, the app keeps working for
 everything local — sensors, LEDs, the radar, the log, maintenance — and greys out only what genuinely
 depends on Home Assistant, with a one-line explanation of the problem and the fix.
+
+## The media footer and its three tiers
+
+The media surface is a floating bar under every route, styled after Music Assistant's own mobile
+player (September 2026; it replaced the Media card on the home page). The bar wears the album's
+colour - the artwork averaged through a tiny canvas, which works because MA's `/imageproxy` sends
+CORS headers; a host that refuses pixel reads leaves a theme-coloured bar via CSS `var()` fallbacks.
+Artwork and title open the full-screen view, the speaker button (with the group's size as a badge)
+slides up a players panel where members are added, removed and mixed, and the bar carries its own
+volume row. What the surfaces can do is layered by what can answer, each tier only ever adding to
+the one below, and each falling back to it without a seam:
+
+**Tier 0 — the device alone.** The Sendspin hub already receives track metadata and controller state
+for the group stream it plays, so `satellite1_web_ui` subscribes (`sendspin_hub_id` in
+`common/sendspin.yaml`) and `GET /api/sat1/media` carries title, artist, album, artwork URL,
+position, duration, shuffle, repeat and the server's supported-command bitmask alongside the
+transport state it always had. Artwork is a URL into Music Assistant's unauthenticated `/imageproxy`,
+fetched by the browser — no image bytes ever touch the device. The metadata fragment is pre-escaped
+JSON in a mutex-guarded PSRAM string, rebuilt only when the hub reports a change; the numeric state
+rides atomics, so the httpd task never blocks the audio path. Shuffle and repeat are commands on
+`POST /api/sat1/media` dispatched to the Sendspin player. Seek is the one thing this tier cannot do:
+the hub exposes no seek passthrough, so the scrubber is read-only until a higher tier answers.
+
+**Tier 1 — relayed through Home Assistant.** What must round-trip (the favorite button, group
+membership, another member's volume, seek) goes through the same machinery as the big Home Assistant
+payload: `homeassistant.action` with `capture_response`, riding whichever rung the ladder proved out.
+Discovery — which Music Assistant entity is this device, its favorite button, the join candidates —
+rides the big payload's `ma` block in `common/web_ui_ha.yaml`, matched by MAC where MA's player id
+still embeds one and by name where it does not (MA's universal-player layer mints random ids, so the
+name both sides carry is the only surviving key; a device renamed differently on the two sides
+discovers nothing and says so). The fast-moving view — group members with volumes — is a separate
+small template in `common/web_ui_media.yaml`, synced on demand at `GET /api/sat1/ma` while the
+expanded view or the players panel is open (plus one unsynced read at page load, for the bar's
+badge), floored at one action call per two seconds however many tabs ask. Commands queue at
+`POST /api/sat1/ma/<cmd>` and leave from the main loop, one per iteration; the entity named must
+appear in a payload the device itself rendered, which keeps a bug in the app from aiming action
+calls at arbitrary entities.
+
+**Tier 2 — the browser talking to Music Assistant directly.** A hand-rolled WebSocket client
+(`frontend/src/lib/ma.js`, no npm package) authenticates with a long-lived token against MA's API
+and gets real-time player and queue events, true per-member volumes, instant grouping and seek. The
+server address and token live in `localStorage` and nowhere else — this tier costs the firmware zero
+bytes, and while the socket is up the tier-1 polling stops entirely. The connection panel is folded
+shut at the bottom of the sheet; the footer is complete without it.
 
 ## The routing and ducking selection
 

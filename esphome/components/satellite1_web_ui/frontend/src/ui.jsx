@@ -255,6 +255,32 @@ export function Toggle({ checked, disabled, onChange }) {
 }
 
 /**
+ * Holds a just-committed slider value over the stale reads that follow it.
+ *
+ * Every slider commits on release and then keeps rendering from the entity or poll behind it, which
+ * does not know about the write for up to a poll interval - so the thumb snapped back to the old
+ * value and jumped forward again when the echo landed (reported from Safari on the phone, September
+ * 2026, but present everywhere). The committed value wins until the incoming one reaches it (within
+ * `tol`, which absorbs rounding on values that round-trip through 0-255 or seconds) or until five
+ * seconds pass - the escape for a write the device refused, where the stale value is the truth.
+ */
+export function useHeld(value, tol) {
+  const h = useRef(null);
+  if (h.current !== null && (Math.abs(value - h.current.v) <= tol || Date.now() - h.current.at > 5000)) {
+    h.current = null;
+  }
+  return [
+    h.current !== null ? h.current.v : value,
+    (v) => {
+      h.current = { v, at: Date.now() };
+    },
+  ];
+}
+
+/** The track's filled portion as a custom property; the CSS gradient can't know the value itself. */
+export const rangeFill = (shown, min, max) => `--p:${(((shown - min) / (max - min || 1)) * 100).toFixed(1)}%`;
+
+/**
  * A slider that reports continuously while dragging but only writes on release.
  *
  * A number entity write is a round trip to the device, and dragging fires an input event per pixel.
@@ -266,7 +292,8 @@ export function Toggle({ checked, disabled, onChange }) {
  */
 export function Slider({ value, min, max, step, disabled, format, onCommit, onPreview }) {
   const [local, setLocal] = useState(null);
-  const shown = local ?? value;
+  const [base, hold] = useHeld(value, step || 1);
+  const shown = local ?? base;
 
   return (
     <div class="slider">
@@ -277,6 +304,7 @@ export function Slider({ value, min, max, step, disabled, format, onCommit, onPr
         step={step}
         value={shown}
         disabled={disabled}
+        style={rangeFill(shown, min, max)}
         onInput={(e) => {
           const v = Number(e.currentTarget.value);
           setLocal(v);
@@ -284,6 +312,7 @@ export function Slider({ value, min, max, step, disabled, format, onCommit, onPr
         }}
         onChange={(e) => {
           const v = Number(e.currentTarget.value);
+          hold(v);
           setLocal(null);
           onCommit(v);
         }}

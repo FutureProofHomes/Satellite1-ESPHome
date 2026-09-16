@@ -21,6 +21,11 @@ from esphome.components import (
 )
 from esphome.components.light.types import LightState
 from esphome.components.micro_wake_word import MicroWakeWord
+from esphome.components.sendspin import (
+    SendspinHub,
+    request_controller_support,
+    request_metadata_support,
+)
 from esphome.components.voice_assistant import VoiceAssistant
 from esphome.const import CONF_ID, Framework
 from esphome.core import HexInt
@@ -50,8 +55,15 @@ CONF_VOICE_ASSISTANT_ID = "voice_assistant_id"
 CONF_VOICE_PHASE = "voice_phase"
 CONF_MEDIA_PLAYER_ID = "media_player_id"
 CONF_SENDSPIN_MEDIA_PLAYER_ID = "sendspin_media_player_id"
+CONF_SENDSPIN_HUB_ID = "sendspin_hub_id"
 CONF_ON_HA_REFRESH = "on_ha_refresh"
 CONF_ON_HA_SELECT = "on_ha_select"
+CONF_ON_MA_REFRESH = "on_ma_refresh"
+CONF_ON_MA_LIKE = "on_ma_like"
+CONF_ON_MA_JOIN = "on_ma_join"
+CONF_ON_MA_UNJOIN = "on_ma_unjoin"
+CONF_ON_MA_VOLUME = "on_ma_volume"
+CONF_ON_MA_SEEK = "on_ma_seek"
 CONF_ON_SELECTION_CHANGE = "on_selection_change"
 
 satellite1_web_ui_ns = cg.esphome_ns.namespace("satellite1_web_ui")
@@ -96,6 +108,20 @@ _ENTITIES_SCHEMA = cv.Schema(
     }
 )
 
+def _request_sendspin_roles(config):
+    # Runs at validation time, which is when sendspin's own platforms request their roles - the
+    # flags live in CORE.data and sendspin's to_code reads them, so a request made from our own
+    # to_code could land after sendspin has already generated its role config. The metadata and
+    # controller roles are what the hub callbacks below ride, and neither is guaranteed on by
+    # anything else: metadata happens to be requested by the title/artist text sensors and the
+    # controller by the media_player platform, but this component must not depend on which other
+    # platforms a config declares. Requesting them is idempotent.
+    if CONF_SENDSPIN_HUB_ID in config:
+        request_metadata_support()
+        request_controller_support()
+    return config
+
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
@@ -120,6 +146,13 @@ CONFIG_SCHEMA = cv.All(
             # compiles; the endpoints answer 404 without them.
             cv.Optional(CONF_MEDIA_PLAYER_ID): cv.use_id(media_player.MediaPlayer),
             cv.Optional(CONF_SENDSPIN_MEDIA_PLAYER_ID): cv.use_id(media_player.MediaPlayer),
+            # The Sendspin hub itself, beyond the media_player entity above. The protocol carries
+            # far more than the entity model can express - track metadata with an artwork URL,
+            # controller state with shuffle/repeat and the server's supported-command list, and an
+            # interpolated track position - and the hub exposes each through public callbacks or
+            # getters. With this set, GET /api/sat1/media grows those fields; without it the
+            # endpoint serves exactly what it always did. The media footer is the only consumer.
+            cv.Optional(CONF_SENDSPIN_HUB_ID): cv.use_id(SendspinHub),
             # Fired when a browser posts to /api/sat1/ha/refresh. The work is a Home Assistant action
             # call, which belongs in YAML next to the rest of the ladder, so the component only says
             # that someone asked. Optional: without common/web_ui_ha.yaml the endpoint accepts the
@@ -131,10 +164,22 @@ CONFIG_SCHEMA = cv.All(
             # other control in the app there is no local state to write - only an action to call, and
             # calling it belongs in YAML beside the ladder.
             cv.Optional(CONF_ON_HA_SELECT): automation.validate_automation(single=True),
+            # The Music Assistant relay: fired from loop() for POST /api/sat1/ma/refresh and
+            # /api/sat1/ma/<cmd>, each implemented in common/web_ui_media.yaml as one
+            # homeassistant.action call - the same split as the two above, for the same reason. All
+            # optional: without that file the endpoints queue into silence, which is the honest
+            # behaviour for a build with no Music Assistant half.
+            cv.Optional(CONF_ON_MA_REFRESH): automation.validate_automation(single=True),
+            cv.Optional(CONF_ON_MA_LIKE): automation.validate_automation(single=True),
+            cv.Optional(CONF_ON_MA_JOIN): automation.validate_automation(single=True),
+            cv.Optional(CONF_ON_MA_UNJOIN): automation.validate_automation(single=True),
+            cv.Optional(CONF_ON_MA_VOLUME): automation.validate_automation(single=True),
+            cv.Optional(CONF_ON_MA_SEEK): automation.validate_automation(single=True),
             cv.Optional(CONF_ON_SELECTION_CHANGE): automation.validate_automation(single=True),
         }
     ).extend(cv.COMPONENT_SCHEMA),
     cv.only_with_framework(Framework.ESP_IDF),
+    _request_sendspin_roles,
 )
 
 _DIST = Path(__file__).parent / "dist" / "index.html"
@@ -211,6 +256,13 @@ async def to_code(config):
             )
         )
 
+    if CONF_SENDSPIN_HUB_ID in config:
+        # A define rather than an unconditional include, so a config without sendspin never pulls
+        # the hub header (whose own includes only exist once the sendspin IDF component is added).
+        # The matching role requests happen in _request_sendspin_roles at validation time.
+        cg.add_define("USE_SAT1_WEB_UI_SENDSPIN", True)
+        cg.add(var.set_sendspin_hub(await cg.get_variable(config[CONF_SENDSPIN_HUB_ID])))
+
     if CONF_ON_SELECTION_CHANGE in config:
         await automation.build_automation(
             var.get_selection_change_trigger(), [], config[CONF_ON_SELECTION_CHANGE]
@@ -226,6 +278,42 @@ async def to_code(config):
             var.get_ha_select_trigger(),
             [(cg.std_string, "entity"), (cg.std_string, "option")],
             config[CONF_ON_HA_SELECT],
+        )
+
+    if CONF_ON_MA_REFRESH in config:
+        await automation.build_automation(
+            var.get_ma_refresh_trigger(), [], config[CONF_ON_MA_REFRESH]
+        )
+
+    if CONF_ON_MA_LIKE in config:
+        await automation.build_automation(
+            var.get_ma_like_trigger(), [(cg.std_string, "entity")], config[CONF_ON_MA_LIKE]
+        )
+
+    if CONF_ON_MA_JOIN in config:
+        await automation.build_automation(
+            var.get_ma_join_trigger(),
+            [(cg.std_string, "entity"), (cg.std_string, "member")],
+            config[CONF_ON_MA_JOIN],
+        )
+
+    if CONF_ON_MA_UNJOIN in config:
+        await automation.build_automation(
+            var.get_ma_unjoin_trigger(), [(cg.std_string, "entity")], config[CONF_ON_MA_UNJOIN]
+        )
+
+    if CONF_ON_MA_VOLUME in config:
+        await automation.build_automation(
+            var.get_ma_volume_trigger(),
+            [(cg.std_string, "entity"), (cg.float_, "level")],
+            config[CONF_ON_MA_VOLUME],
+        )
+
+    if CONF_ON_MA_SEEK in config:
+        await automation.build_automation(
+            var.get_ma_seek_trigger(),
+            [(cg.std_string, "entity"), (cg.float_, "position")],
+            config[CONF_ON_MA_SEEK],
         )
 
     if not _DIST.is_file():

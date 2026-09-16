@@ -579,17 +579,21 @@ export function useVoice(enabled) {
 }
 
 /**
- * GET /api/sat1/media, polled only while the home page is on screen, at the voice endpoint's cadence and
- * for its reasons: a second while something is playing so the state tracks the room, five when idle.
+ * GET /api/sat1/media, polled on every route now that the footer lives in the shell, at the voice
+ * endpoint's cadence and for its reasons: a second while something is playing so the state tracks
+ * the room, five when idle.
  *
  * A poll because there is nothing else: web_server has no media_player handler, so the players ride
- * neither /events nor the entity REST API. The track title and artist do *not* come from here - they
- * are Sendspin metadata text sensors riding the SSE stream - so this carries only what genuinely has
- * no entity: which source is active, its state, and its volume.
+ * neither /events nor the entity REST API. The track metadata rides this poll too - title, artist,
+ * album and artwork URL from the device's Sendspin hub cache, plus position, duration, shuffle and
+ * repeat state and the server's supported-command bitmask, none of which have an entity anywhere.
  *
- * `mediaCmd` posts a transport command or a volume. Fire-and-forget on purpose: the device queues
- * the command for its main loop, so the POST's answer never carries the state that resulted - the
- * next poll does. A failed post already surfaces through the toast.
+ * `mediaCmd` posts a command with its query parameters as given - `v` for a volume or a shuffle
+ * flag, `m` for a repeat mode, `src` to name the player the footer is showing, so a command lands
+ * on it and not on whatever the device resolves as active when its queue drains (load-bearing for
+ * a paused group stream, which the device sees as an idle player). Fire-and-forget on purpose: the
+ * device queues the command for its main loop, so the POST's answer never carries the state that
+ * resulted - the next poll does. A failed post already surfaces through the toast.
  */
 export function useMedia(enabled) {
   const [media, setMedia] = useState(null);
@@ -617,19 +621,79 @@ export function useMedia(enabled) {
     };
   }, [enabled, busy]);
 
-  // `src` names the player the card is showing, so a command lands on it and not on whatever the
-  // device resolves as active in the moment the queue drains. Load-bearing for a paused group
-  // stream: the Sendspin protocol has no paused state, so the device sees an idle player there and
-  // would aim an unqualified play at the local one.
-  const mediaCmd = (cmd, v, src) => {
+  const mediaCmd = (cmd, params = {}) => {
     const q = new URLSearchParams();
-    if (v != null) q.set("v", v);
-    if (src) q.set("src", src);
+    for (const [k, v] of Object.entries(params)) if (v != null) q.set(k, v);
     const qs = q.toString();
     return post(`/api/sat1/media/${cmd}${qs ? `?${qs}` : ""}`);
   };
 
   return { media, mediaCmd };
+}
+
+/**
+ * GET /api/sat1/ma: the live Music Assistant view Home Assistant relays - who is grouped with this
+ * device's player and at what volume, plus shuffle and repeat as Home Assistant sees them.
+ *
+ * Enabled only while the expanded view or the players panel is open, which is where it renders live
+ * - plus a single read on mount, because the bar's group-count badge needs whatever the device
+ * already holds even before anything opens. Each enabled cycle asks the device to sync (`/refresh`
+ * records the request; the action call runs from its main loop, floored there at one per two
+ * seconds however many tabs ask) and reads the payload back after the round trip has had time to
+ * land. The first read skips the ask, so the cached payload paints immediately with its honest age.
+ *
+ * `maCmd` posts one relayed command - like, join, unjoin, vol, seek - and is fire-and-forget for
+ * the reason mediaCmd is: the device queues it, the action call captures no response, and the
+ * resync it schedules is the only confirmation that exists. `maRead` is the early re-read a group
+ * edit schedules so the change shows before the next full cycle.
+ */
+export function useMaData(enabled) {
+  const [ma, setMa] = useState(null);
+
+  const read = async () => {
+    const json = await requestJson("/api/sat1/ma").catch(() => null);
+    if (json) setMa(json);
+  };
+
+  // The one badge read. Deliberately outside the enabled cycle: no refresh request, no polling,
+  // just the payload the device last landed.
+  useEffect(() => {
+    read();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let live = true;
+    let timer = null;
+
+    const cycle = async () => {
+      await post("/api/sat1/ma/refresh").catch(() => {});
+      // The sync is an action call from the device's main loop; ~1.4s covers the round trip that
+      // took about a second on a live installation, without stretching the first paint.
+      await new Promise((r) => setTimeout(r, 1400));
+      if (!live) return;
+      await read();
+      if (live) timer = setTimeout(cycle, 4600);
+    };
+
+    read();
+    cycle();
+    return () => {
+      live = false;
+      if (timer) clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled]);
+
+  const maCmd = (cmd, params = {}) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v != null) q.set(k, v);
+    const qs = q.toString();
+    return post(`/api/sat1/ma/${cmd}${qs ? `?${qs}` : ""}`);
+  };
+
+  return { ma, maCmd, maRead: read };
 }
 
 /* ------------------------------------------------------------------ */

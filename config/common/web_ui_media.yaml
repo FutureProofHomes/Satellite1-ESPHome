@@ -1,0 +1,255 @@
+# The media footer's Home Assistant half: the live view of this device's Music Assistant player
+# that the Sendspin connection cannot provide - who is grouped with it and at what volume - plus the
+# relay for the commands only Home Assistant can carry (favorite, join, unjoin, a member's volume,
+# seek). The web server half is the MA routes in satellite1_web_ui's web_ui_handler; this file is the
+# Jinja and the action calls, split from common/web_ui_ha.yaml because that file is the big
+# once-per-connect payload and this one syncs on demand while the footer's expanded view is open.
+#
+# Discovery is not repeated here. Which entity is this device's MA player, its favorite button and
+# the join candidates all ride the big payload (the `ma` block in web_ui_ha.yaml), because they
+# change about as often as the area tree does. This template re-derives only the player entity - it
+# must, since a response_template renders with nothing but the response in scope, so the entity id
+# cannot be passed in as a variable - and then reads the fast-moving state off it.
+#
+# Everything here rides the same machinery as the big payload, on the same reasoning: an action call
+# with capture_response and a response_template, rendered on whichever rung the ladder in
+# web_ui_ha.yaml proved out, landed in PSRAM, served byte for byte. This payload is group members
+# and three scalars - bounded by how many speakers one home can group, not by how many entities it
+# has - so it arrives in one call with no page loop.
+
+substitutions:
+  # Expects `mac`, prepended by the boot lambda below exactly as web_ui_ha_template's builder does
+  # and for the same reason. Rendered with strict=True like everything on this path.
+  #
+  # `g` is one row per group member: entity id, display name, volume as 0-100 or -1 for a player
+  # that reports none. group_members on an ungrouped player is empty or absent, so `or [f.e]` makes
+  # the degenerate group of one explicit rather than special-cased in the app. `sh` and `rp` are
+  # shuffle and repeat as Home Assistant sees them - the Sendspin controller state usually agrees,
+  # but when only one side is available the app should not have to guess which.
+  web_ui_media_jinja: >-
+    {% set my = mac | lower | replace(':', '') %}
+    {% set sn = namespace(n='') %}
+    {% for a in areas() %}
+      {% for d in area_devices(a) %}
+        {% if not sn.n and device_attr(d, 'manufacturer') == 'FutureProofHomes'
+           and my in (device_attr(d, 'connections') | selectattr(0, 'eq', 'mac')
+                      | map(attribute=1) | map('lower') | map('replace', ':', '') | list) %}
+          {% set sn.n = ((device_attr(d, 'name_by_user') or device_attr(d, 'name')) or '')
+                        | lower | trim %}
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+    {% set f = namespace(e='', byname='') %}
+    {% for e in integration_entities('music_assistant')
+                | select('match', 'media_player\.') %}
+      {% if not f.e %}
+        {% set d = device_id(e) %}
+        {% if d and (
+              (device_attr(d, 'identifiers') | map(attribute=1) | map('string') | map('lower')
+               | map('replace', ':', '') | map('replace', '-', '')
+               | select('search', my) | list | count > 0)
+              or (device_attr(d, 'connections') | map(attribute=1) | map('string') | map('lower')
+                  | map('replace', ':', '') | map('replace', '-', '')
+                  | select('search', my) | list | count > 0)) %}
+          {% set f.e = e %}
+        {% elif not f.byname and sn.n
+                and ((state_attr(e, 'friendly_name') or '') | lower | trim) == sn.n %}
+          {% set f.byname = e %}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+    {% set f.e = f.e or f.byname %}
+    {% set out = namespace(g=[]) %}
+    {% if f.e %}
+      {% for m in state_attr(f.e, 'group_members') or [f.e] %}
+        {% set v = state_attr(m, 'volume_level') %}
+        {% set out.g = out.g + [[m,
+                                 state_attr(m, 'friendly_name') or m,
+                                 ((v * 100) | round | int) if v is not none else -1]] %}
+      {% endfor %}
+    {% endif %}
+    {{ {'d': ({'e': f.e,
+               'sh': 1 if state_attr(f.e, 'shuffle') else 0,
+               'rp': state_attr(f.e, 'repeat') or 'off',
+               'g': out.g} if f.e else {'e': ''}) | to_json} | to_json }}
+
+  # Stages the one-shot reply into the handler's PSRAM pair. The shape is web_ui_ha_page_lambda's
+  # minus the paging: no `m` flag to read, commit immediately, and a failed stage keeps the previous
+  # payload with its honest age.
+  web_ui_media_land_lambda: >-
+    auto captured = response["response"];
+    auto ma_frag = captured["d"];
+    const char *ma_src = ma_frag.is<const char *>() ? ma_frag.as<const char *>() : nullptr;
+    if (ma_src == nullptr) {
+      ESP_LOGW("web_ui", "Music Assistant sync carried no fragment; keeping the previous payload");
+    } else {
+      size_t ma_len = strlen(ma_src);
+      char *ma_dst = id(web_ui_app)->stage_ma_payload(ma_len + 1);
+      if (ma_dst != nullptr) {
+        memcpy(ma_dst, ma_src, ma_len);
+        id(web_ui_app)->commit_ma_payload(ma_len);
+      }
+    }
+
+globals:
+  # The template with this device's MAC already in the text, built once at boot - the small sibling
+  # of web_ui_ha_template, PSRAM-backed for the same reason.
+  - id: web_ui_media_template
+    type: std::basic_string<char, std::char_traits<char>, esphome::RAMAllocator<char>>
+    restore_value: no
+
+esphome:
+  on_boot:
+    - priority: 600.0
+      then:
+        - lambda: |-
+            // Same raw-literal construction as web_ui_ha_template's builder, same reasons.
+            auto &tpl = id(web_ui_media_template);
+            static const char JINJA_TAIL[] = R"JINJA(' %}${web_ui_media_jinja})JINJA";
+            tpl.reserve(strlen("{% set mac = '") + 17 + sizeof(JINJA_TAIL));
+            tpl.assign("{% set mac = '");
+            tpl.append(esphome::get_mac_address_pretty().c_str());
+            tpl.append(JINJA_TAIL);
+
+script:
+  # The sync. Restart mode and the same two guards as web_ui_ha_sync; a call before Home Assistant
+  # can answer is dropped, and the app's -1 age tells it so.
+  #
+  # No ladder of its own: web_ui_ha_rung records which rung the big sync proved out, and this rides
+  # it. Rung 2 when the ladder landed there, rung 1 otherwise - including the 0 and -1 cases, where
+  # rung 1's own on_error falls through to rung 2, so a media sync racing the first big sync still
+  # finds its footing rather than waiting for it.
+  - id: web_ui_media_sync
+    mode: restart
+    then:
+      - if:
+          condition:
+            and:
+              - api.connected:
+              - lambda: 'return id(ha_supports_action_replies);'
+          then:
+            - if:
+                condition:
+                  lambda: 'return id(web_ui_ha_rung) == 2;'
+                then:
+                  - script.execute: web_ui_media_rung_2
+                else:
+                  - script.execute: web_ui_media_rung_1
+
+  # A resync a moment from now, for after a relayed command. The delay lives in this restart-mode
+  # script rather than in a trigger automation, where re-entry during the delay would be the queue
+  # corruption the component's one-write-per-iteration rule exists to prevent; here a burst of
+  # commands collapses into one sync after the last. 900ms is time for Music Assistant to apply a
+  # join and Home Assistant to see the new group_members, without the footer feeling stuck.
+  - id: web_ui_media_resync_soon
+    mode: restart
+    then:
+      - delay: 900ms
+      - script.execute: web_ui_media_sync
+
+  # The rungs, verbatim from web_ui_ha.yaml's pair apart from the template and the landing. See the
+  # comments there for why these two calls, in this order, and why the probe data is free.
+  - id: web_ui_media_rung_1
+    then:
+      - homeassistant.action:
+          action: recorder.get_statistics
+          capture_response: true
+          data:
+            start_time: "1970-01-01 00:00:00"
+            statistic_ids: "sensor.satellite1_web_ui_probe"
+            period: day
+            types: mean
+          response_template: !lambda |-
+            return std::string(id(web_ui_media_template).c_str(), id(web_ui_media_template).size());
+          on_success:
+            - lambda: |-
+                ${web_ui_media_land_lambda}
+          on_error:
+            - script.execute: web_ui_media_rung_2
+
+  - id: web_ui_media_rung_2
+    then:
+      - homeassistant.action:
+          action: conversation.process
+          capture_response: true
+          data:
+            agent_id: conversation.home_assistant
+            text: "satellite1 web ui data layer probe"
+          response_template: !lambda |-
+            return std::string(id(web_ui_media_template).c_str(), id(web_ui_media_template).size());
+          on_success:
+            - lambda: |-
+                ${web_ui_media_land_lambda}
+          on_error:
+            - lambda: |-
+                ESP_LOGW("web_ui", "Music Assistant sync got no answer from Home Assistant; "
+                                   "the footer's group view will show its last payload, aged.");
+
+# Merged into the block in common/web_ui.yaml like web_ui_ha.yaml's keys. Each trigger is one action
+# call; the endpoint has already validated the entity against the device's own payloads and clamped
+# the numbers, and the component fires one of these per loop iteration, so none of them re-enters.
+#
+# No capture_response anywhere here, so the device never learns whether the call was accepted -
+# which is why join, unjoin, volume and seek all schedule the resync above, and the app believes
+# what comes back rather than what it asked for. The favorite press schedules none: nothing in the
+# payload changes when a track is favorited, so there is nothing to read back.
+#
+# entity_id through data_template with variables, as on_ha_select does: `{{ ent }}` renders a
+# variable rather than interpolating text into a template.
+satellite1_web_ui:
+  on_ma_refresh:
+    - script.execute: web_ui_media_sync
+
+  on_ma_like:
+    - homeassistant.action:
+        action: button.press
+        data_template:
+          entity_id: "{{ ent }}"
+        variables:
+          ent: !lambda 'return entity;'
+
+  on_ma_join:
+    # group_members is schema'd through ensure_list on the Home Assistant side, so the single
+    # member renders as a string and arrives as a list of one. The sheet adds speakers one at a
+    # time, which is also how Music Assistant applies them.
+    - homeassistant.action:
+        action: media_player.join
+        data_template:
+          entity_id: "{{ ent }}"
+          group_members: "{{ mem }}"
+        variables:
+          ent: !lambda 'return entity;'
+          mem: !lambda 'return member;'
+    - script.execute: web_ui_media_resync_soon
+
+  on_ma_unjoin:
+    - homeassistant.action:
+        action: media_player.unjoin
+        data_template:
+          entity_id: "{{ ent }}"
+        variables:
+          ent: !lambda 'return entity;'
+    - script.execute: web_ui_media_resync_soon
+
+  on_ma_volume:
+    # The 0-100 the endpoint clamped, already scaled to volume_set's 0.0-1.0 by the component.
+    - homeassistant.action:
+        action: media_player.volume_set
+        data_template:
+          entity_id: "{{ ent }}"
+          volume_level: "{{ lvl }}"
+        variables:
+          ent: !lambda 'return entity;'
+          lvl: !lambda 'return level;'
+    - script.execute: web_ui_media_resync_soon
+
+  on_ma_seek:
+    - homeassistant.action:
+        action: media_player.media_seek
+        data_template:
+          entity_id: "{{ ent }}"
+          seek_position: "{{ pos }}"
+        variables:
+          ent: !lambda 'return entity;'
+          pos: !lambda 'return position;'
+    - script.execute: web_ui_media_resync_soon

@@ -3,8 +3,13 @@
 #include <atomic>
 
 #include "esphome/core/component.h"
+#include "esphome/core/defines.h"
 
 #include "web_ui_handler.h"
+
+#ifdef USE_SAT1_WEB_UI_SENDSPIN
+#include "esphome/components/sendspin/sendspin_hub.h"
+#endif
 
 namespace esphome {
 namespace satellite1_web_ui {
@@ -56,6 +61,15 @@ class Satellite1WebUI : public Component {
   void set_sendspin_media_player(media_player::MediaPlayer *mp) { this->handler_.set_sendspin_media_player(mp); }
 #endif
 
+#ifdef USE_SAT1_WEB_UI_SENDSPIN
+  /// The hub itself, beyond the media_player entity above, for what the entity model cannot say:
+  /// track metadata with an artwork URL, controller state with shuffle/repeat and the server's
+  /// supported-command list, and the interpolated track position. setup() subscribes to the hub's
+  /// callbacks - all of which fire on the main loop - and translates them into the handler's plain
+  /// setters, so the handler never includes a sendspin header.
+  void set_sendspin_hub(sendspin_::SendspinHub *hub) { this->sendspin_hub_ = hub; }
+#endif
+
   /// All called from the rung lambdas in common/web_ui_ha.yaml.
   ///
   /// The payload arrives as a buffer rather than a string, in two steps: stage hands out PSRAM to write
@@ -93,6 +107,22 @@ class Satellite1WebUI : public Component {
   /// `delay:` in it would still be a mistake - it would stall the queue rather than corrupt it.
   Trigger<std::string, std::string> *get_ha_select_trigger() { return &this->ha_select_trigger_; }
 
+  /// The Music Assistant relay's triggers, all fired from loop() and all implemented in
+  /// common/web_ui_media.yaml, one homeassistant.action each - the same split as the pair above.
+  /// The refresh is the sync script; the rest carry the entity a browser named (validated against
+  /// the device's own payloads in the endpoint) and the command's one value where it has one.
+  Trigger<> *get_ma_refresh_trigger() { return &this->ma_refresh_trigger_; }
+  Trigger<std::string> *get_ma_like_trigger() { return &this->ma_like_trigger_; }
+  Trigger<std::string, std::string> *get_ma_join_trigger() { return &this->ma_join_trigger_; }
+  Trigger<std::string> *get_ma_unjoin_trigger() { return &this->ma_unjoin_trigger_; }
+  Trigger<std::string, float> *get_ma_volume_trigger() { return &this->ma_volume_trigger_; }
+  Trigger<std::string, float> *get_ma_seek_trigger() { return &this->ma_seek_trigger_; }
+
+  /// The Music Assistant payload's staging pair, called from the sync script's lambda in
+  /// common/web_ui_media.yaml - the single-shot form of the HA pair above, same PSRAM discipline.
+  char *stage_ma_payload(size_t capacity) { return this->handler_.stage_ma_payload(capacity); }
+  void commit_ma_payload(size_t len) { this->handler_.commit_ma_payload(len); }
+
   /// Fired from loop() after the app has written a new selection. tts_routing.yaml hangs its re-check
   /// scripts here, in place of the `on_value` the deleted Remote TTS Targets text entity carried.
   ///
@@ -111,10 +141,24 @@ class Satellite1WebUI : public Component {
 
   WebUIHandler handler_;
   Selection selection_;
+#ifdef USE_SAT1_WEB_UI_SENDSPIN
+  sendspin_::SendspinHub *sendspin_hub_{nullptr};
+#endif
   Trigger<> ha_refresh_trigger_;
   Trigger<std::string, std::string> ha_select_trigger_;
+  Trigger<> ma_refresh_trigger_;
+  Trigger<std::string> ma_like_trigger_;
+  Trigger<std::string, std::string> ma_join_trigger_;
+  Trigger<std::string> ma_unjoin_trigger_;
+  Trigger<std::string, float> ma_volume_trigger_;
+  Trigger<std::string, float> ma_seek_trigger_;
   Trigger<> selection_change_trigger_;
   std::atomic<bool> selection_changed_{false};
+
+  /// The last time the MA refresh trigger fired, for the floor loop() applies: browsers refresh on a
+  /// cadence of their own while the footer is expanded, several tabs can do it at once, and each sync
+  /// is an action call - so requests inside the window ride the sync already in flight.
+  uint32_t ma_refresh_at_{0};
 
   /// Our loop() runs once per main-loop iteration, so the gap between two calls is the main loop
   /// period. That makes the loop-time readout free, where the debug: component would cost a sensor

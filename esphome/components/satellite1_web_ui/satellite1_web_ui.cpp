@@ -26,6 +26,36 @@ void Satellite1WebUI::setup() {
   // Factory Reset and XMOS Erase Chip included.
   web_server_base::global_web_server_base->add_handler(&this->handler_);
 
+#ifdef USE_SAT1_WEB_UI_SENDSPIN
+  if (this->sendspin_hub_ != nullptr) {
+    // Every callback below fires on the main loop (the hub's own thread-context comments say so),
+    // so the translation costs no locking here; the handler's setters own the httpd-side safety.
+    //
+    // Metadata replaces the whole state per message, absent field meaning cleared - and the hub
+    // fans out a lost connection as an all-empty object, so one path covers updates and the clear.
+    this->sendspin_hub_->add_metadata_update_callback([this](const sendspin::ServerMetadataStateObject &md) {
+      this->handler_.media_set_meta(
+          md.title.has_value() ? md.title->c_str() : nullptr, md.artist.has_value() ? md.artist->c_str() : nullptr,
+          md.album.has_value() ? md.album->c_str() : nullptr,
+          md.artwork_url.has_value() ? md.artwork_url->c_str() : nullptr,
+          md.progress.has_value() ? md.progress->track_duration : 0);
+    });
+    this->sendspin_hub_->add_controller_state_callback([this](const sendspin::ServerStateControllerObject &st) {
+      // The supported-command list becomes a bitmask, bit n = sendspin command enumerator n, so the
+      // footer can offer exactly what the server offers - skip buttons on a queue, seek on a
+      // seekable stream - without a second vocabulary on either end.
+      uint16_t sup = 0;
+      for (const auto cmd : st.supported_commands) {
+        const auto bit = static_cast<unsigned>(cmd);
+        if (bit < 16)
+          sup |= static_cast<uint16_t>(1u << bit);
+      }
+      this->handler_.media_set_ctrl(st.shuffle, static_cast<uint8_t>(st.repeat), sup, st.seek_max_ms.value_or(0));
+    });
+    this->sendspin_hub_->add_controller_state_clear_callback([this]() { this->handler_.media_clear_ctrl(); });
+  }
+#endif
+
   this->last_loop_ms_ = millis();
 }
 
@@ -55,6 +85,43 @@ void Satellite1WebUI::loop() {
   if (this->handler_.take_select_write(pending))
     this->ha_select_trigger_.trigger(pending.entity, pending.option);
 
+  // The Music Assistant refresh, collapsed like the HA one and floored at two seconds besides:
+  // browsers poll this on their own cadence while the footer's expanded view is open, several tabs
+  // can, and each sync is an action call - one every couple of seconds is all the data can move.
+  if (this->handler_.take_ma_refresh_request()) {
+    if (now - this->ma_refresh_at_ >= 2000 || this->ma_refresh_at_ == 0) {
+      this->ma_refresh_at_ = now;
+      this->ma_refresh_trigger_.trigger();
+    }
+  }
+
+  // One relayed Music Assistant command per iteration, for the select queue's reason. The volume and
+  // seek values ride the queue as the strings the endpoint validated; they become numbers here, where
+  // failure is impossible by construction rather than merely unhandled.
+  MaWrite ma;
+  if (this->handler_.take_ma_write(ma)) {
+    switch (static_cast<MaCmd>(ma.kind)) {
+      case MaCmd::LIKE:
+        this->ma_like_trigger_.trigger(ma.entity);
+        break;
+      case MaCmd::JOIN:
+        this->ma_join_trigger_.trigger(ma.entity, ma.arg);
+        break;
+      case MaCmd::UNJOIN:
+        this->ma_unjoin_trigger_.trigger(ma.entity);
+        break;
+      case MaCmd::VOL:
+        // 0-100 from the endpoint to media_player.volume_set's 0.0-1.0.
+        this->ma_volume_trigger_.trigger(ma.entity, static_cast<float>(strtoul(ma.arg.c_str(), nullptr, 10)) / 100.0f);
+        break;
+      case MaCmd::SEEK:
+        this->ma_seek_trigger_.trigger(ma.entity, static_cast<float>(strtoul(ma.arg.c_str(), nullptr, 10)));
+        break;
+      case MaCmd::NONE:
+        break;
+    }
+  }
+
 #ifdef USE_MICRO_WAKE_WORD
   // Not a trigger, because nothing in YAML has to happen - this is the whole of the work. It runs here
   // rather than in the endpoint because enabling a model writes NVS and races the inference task.
@@ -65,6 +132,13 @@ void Satellite1WebUI::loop() {
   // Same shape as the wake words: the endpoint recorded the request, and make_call().perform()
   // belongs on the main loop, where every other caller of these players already lives.
   this->handler_.apply_media_requests();
+#endif
+
+#ifdef USE_SAT1_WEB_UI_SENDSPIN
+  // Refreshed here rather than read in the endpoint, so the httpd task never calls into the hub -
+  // the interpolation reads state the hub writes on this loop. One atomic store per iteration.
+  if (this->sendspin_hub_ != nullptr)
+    this->handler_.media_set_pos(this->sendspin_hub_->get_track_progress_ms());
 #endif
 }
 

@@ -194,10 +194,49 @@ substitutions:
   # on `true` or `null` and hands back the raw string instead. Keeping booleans out makes which of
   # those two happens a property of this template rather than of a customer's speaker names. The
   # device accepts either form anyway.
+  # The `ma` block is the media footer's discovery: `e` this device's own Music Assistant player,
+  # `f` the favorite button the MA integration creates beside it (pressing that button is how "like
+  # this track" works), `c` every *other* MA player that supports grouping, as join candidates with
+  # display names. It rides this payload rather than the frequent members sync in
+  # common/web_ui_media.yaml because all three change about as often as the area tree does, and the
+  # paging and size-cap machinery here already exist.
+  #
+  # The key is two-stage, and both stages were verified against source and a live installation
+  # rather than guessed. The MA player_id for a Sendspin player *is* the client id, and the ESPHome
+  # hub sets that to this device's MAC (sendspin_hub.cpp, get_client_id_into_buffer) - but what Home
+  # Assistant's MA integration puts in the device identifier is MA's *user-facing* player id, and on
+  # installations with MA's universal-player layer that is "up" plus eight random hex digits
+  # (mint_player_id in universal_player/provider.py), with the MAC nowhere in it. Older ids do embed
+  # the MAC ("upe4b0639109d8"), so stage one tests containment - case folded, separators stripped,
+  # on both identifiers and connections - and catches those installs exactly.
+  #
+  # Stage two, after the device walk below has run, is the name: a Sendspin player enters MA named
+  # by its hello, which is this device's friendly name, and both renames (HA's name_by_user, MA's
+  # player name) are the same person naming the same speaker. Verified on the live install, where
+  # "Dev12 Satellite1" appears on both sides while the identifier is random. A device whose two
+  # names have drifted apart discovers nothing and the payload says so with an empty `e` - the app
+  # then offers these features through the direct MA connection instead.
   web_ui_ha_jinja: >-
     ${self_area_jinja}
     {% set ma = integration_entities('music_assistant') %}
-    {% set out = namespace(areas=[], rows=[], dev=[], loose=[]) %}
+    {% set my = mac | lower | replace(':', '') %}
+    {% set out = namespace(areas=[], rows=[], dev=[], loose=[], me='', fav='', cand=[]) %}
+    {% for e in ma | select('match', 'media_player\.') %}
+      {% set d = device_id(e) %}
+      {% if not out.me and d and (
+            (device_attr(d, 'identifiers') | map(attribute=1) | map('string') | map('lower')
+             | map('replace', ':', '') | map('replace', '-', '')
+             | select('search', my) | list | count > 0)
+            or (device_attr(d, 'connections') | map(attribute=1) | map('string') | map('lower')
+                | map('replace', ':', '') | map('replace', '-', '')
+                | select('search', my) | list | count > 0)) %}
+        {% set out.me = e %}
+        {% set out.fav = device_entities(d) | select('match', 'button\.') | first | default('') %}
+      {% elif state_attr(e, 'supported_features') is not none
+              and state_attr(e, 'supported_features') | int | bitwise_and(524288) %}
+        {% set out.cand = out.cand + [[e, state_attr(e, 'friendly_name') or e]] %}
+      {% endif %}
+    {% endfor %}
     {% for a in areas() %}
       {% set out.rows = [] %}
       {% for e in area_entities(a) | select('match', 'media_player\.')
@@ -240,6 +279,30 @@ substitutions:
         {% endif %}
       {% endfor %}
     {% endfor %}
+    {% if not out.me %}
+      {% set sn = namespace(n='') %}
+      {% for r in out.dev %}
+        {% if not sn.n and (r[3] or '') == mac | lower %}
+          {% set sn.n = (r[1] or '') | lower | trim %}
+        {% endif %}
+      {% endfor %}
+      {% if sn.n %}
+        {% for c in out.cand %}
+          {% if not out.me and (c[1] | lower | trim) == sn.n %}
+            {% set out.me = c[0] %}
+            {% set fd = device_id(c[0]) %}
+            {% set out.fav = (device_entities(fd) | select('match', 'button\.') | first | default('')) if fd else '' %}
+          {% endif %}
+        {% endfor %}
+        {% if out.me %}
+          {% set keepc = namespace(c=[]) %}
+          {% for c in out.cand %}
+            {% if c[0] != out.me %}{% set keepc.c = keepc.c + [c] %}{% endif %}
+          {% endfor %}
+          {% set out.cand = keepc.c %}
+        {% endif %}
+      {% endif %}
+    {% endif %}
     {% set sl = namespace(p=[], w=[]) %}
     {% for e in mine | select('match', 'select\.') %}
       {% set o = state_attr(e, 'options') or [] %}
@@ -257,7 +320,7 @@ substitutions:
                   if p1 | count == 1 and p2 | count == 1 and w1 | count == 1 and w2 | count == 1
                   else {} %}
     {% set lim = 24000 - (out.dev | to_json | length) - (out.loose | to_json | length)
-                       - (asst | to_json | length) %}
+                       - (asst | to_json | length) - (out.cand | to_json | length) %}
     {% set keep = namespace(a=[], n=0) %}
     {% for ar in out.areas %}
       {% set sz = (ar | to_json | length) + 1 %}
@@ -274,7 +337,12 @@ substitutions:
     {% for d in out.dev %}
       {% set P.l = P.l + [(d | to_json) ~ ('' if loop.last else ',')] %}
     {% endfor %}
-    {% set P.l = P.l + ['],"loose":['] %}
+    {% set P.l = P.l + ['],"ma":{"e":' ~ (out.me | to_json) ~ ',"f":' ~ (out.fav | to_json)
+                        ~ ',"c":['] %}
+    {% for e in out.cand %}
+      {% set P.l = P.l + [(e | to_json) ~ ('' if loop.last else ',')] %}
+    {% endfor %}
+    {% set P.l = P.l + [']},"loose":['] %}
     {% for e in out.loose %}
       {% set P.l = P.l + [(e | to_json) ~ ('' if loop.last else ',')] %}
     {% endfor %}

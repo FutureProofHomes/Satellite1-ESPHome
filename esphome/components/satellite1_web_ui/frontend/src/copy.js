@@ -129,7 +129,18 @@ export const HINTS = {
     'Timers set by voice, held on the device - they keep counting and still ring if Home Assistant goes away. Voice is also how they are managed: name one when you set it ("set a pizza timer for ten minutes"), pause or cancel it the same way.',
 
   media:
-    "What this device is playing, from either source: a group stream, or media sent to it by Home Assistant. Track skipping works only on group streams. This slider is the media volume; the assistant's voice has its own level, in the Assistant card below.",
+    "What this device is playing, from either source: a group stream, or media sent to it by Home Assistant. Track skipping, shuffle, repeat and the progress bar work on group streams - media sent directly to this speaker is one URL with none of that. The volume here is the media volume; the assistant's voice has its own level, in the Assistant card on the home page.",
+
+  // The grouped-speakers section of the expanded media view. Speaks in Music Assistant's terms
+  // because grouping is its feature - the device only relays the request.
+  media_group:
+    "Speakers playing this stream together, with each one's own volume. Adding a speaker asks Music Assistant to bring it into the group; removing one lets it fall silent. The big slider above moves the whole group.",
+
+  // The Music Assistant connection panel. What the token is, where it comes from, and where it goes -
+  // which is only this browser, a fact worth stating because pasting tokens into web pages should
+  // make people ask.
+  ma_connect:
+    "Connecting this page straight to your Music Assistant server makes the controls instant and unlocks anything Home Assistant cannot relay. Create a long-lived token in Music Assistant under Settings, then your profile, and paste it here with the server's address. Both stay in this browser only - the device never sees them.",
 
   heap: "Internal RAM still available. Audio buffers and the network stack allocate from it, and it runs out long before PSRAM does.",
 
@@ -195,12 +206,41 @@ export const TEXT = {
 
   // Shown in place of the transcript, not instead of the card. The card carries the assistant's phase in
   // its header, so it has something to say from the moment the device answers; this only fills the space
-  // where the lines will go.
-  nothing_said: "Nothing said yet. What you say and what it replies will appear here.",
+  // where the lines will go. Reworded to the owner's text, September 2026.
+  nothing_said: "A transcription of your voice interactions are displayed here.",
 
-  // The Media card's idle line. The card stays on the page - the volume slider still sets the level
-  // whatever plays next arrives at - so this fills the space the transport controls will use.
+  // The media footer's idle line. The footer stays on every page - the volume inside still sets the
+  // level whatever plays next arrives at - so this fills the space the track title will use.
   media_idle: "Nothing playing. Group streams and media sent from Home Assistant show up here.",
+  // The collapsed bar's version, short enough to share a 56px bar with the play button.
+  media_idle_bar: "Nothing playing",
+
+  /* The expanded media view. */
+  // The slide-up the bar's speaker button opens, named what Music Assistant names its own
+  // (owner's reference screenshots, September 2026). Replaced media_group_title ("Grouped
+  // speakers") when the group section moved out of the expanded view and into this panel.
+  media_players_title: "Players",
+  media_add_speaker: "Add a speaker",
+  // While the tier that serves the member list has not answered yet.
+  media_group_loading: "Asking Music Assistant\u2026",
+  // When no tier can answer at all: Home Assistant never delivered a Music Assistant player for
+  // this device (not connected, actions off, or no MA install) and no direct connection is set up.
+  // Names the way out - the connection fold at the bottom of the expanded view, since this line
+  // renders in the players panel where "below" would point at nothing.
+  media_no_tiers:
+    "Grouping, favorites and seeking need Home Assistant with Music Assistant - or connect this page to your Music Assistant server from the expanded media view.",
+  // The like button's two accessible names. "Favorite" is Music Assistant's own word for it.
+  media_like: "Add to favorites",
+  media_liked: "Added to favorites",
+
+  /* The Music Assistant connection panel. */
+  ma_title: "Music Assistant",
+  ma_url_ph: "http://music-assistant.local:8095",
+  ma_token_ph: "Long-lived token",
+  ma_connect_btn: "Connect",
+  ma_disconnect_btn: "Disconnect",
+  ma_connected: "Connected to Music Assistant",
+  ma_error: "Could not connect. Check the address and token, and that this browser can reach the server.",
 
   /* The Presence route: zone editing, gate thresholds, and the no-sensor card. The zi_* strings are
      the one instruction line under the plot, swapped by what the person is doing right now - one short
