@@ -304,6 +304,11 @@ textarea {
 .title {
   display: flex;
   align-items: center;
+  /* Centred in the bar rather than hugging the burger (owner's request, September 2026). Flow
+     centring, not absolute: the burger and theme buttons flanking it are within a couple of pixels
+     of the same width, so the visual error is imperceptible and a long name can never slide under
+     a neighbour the way an absolutely-centred one could. */
+  justify-content: center;
   gap: var(--s-1);
   flex: 1;
   min-width: 0;
@@ -311,7 +316,6 @@ textarea {
   border: 0;
   color: var(--fg);
   font: 600 var(--t-l) / 1.2 inherit;
-  text-align: left;
   cursor: pointer;
   padding: var(--s-1) 2px;
 }
@@ -480,6 +484,18 @@ textarea {
   inset: 0;
   z-index: 30;
   background: var(--scrim);
+  /* A drag across the scrim is nothing: not a page scroll, not a rubber-band. Part of the same fix
+     as html.held below - iOS Safari was sliding the whole document behind an open drawer. */
+  touch-action: none;
+}
+
+/* The page, frozen while any drawer stands (ui.jsx's useDrawer counts them in and out). On both
+   roots because iOS needs the document itself pinned, and overscroll-behavior besides, or the
+   rubber-band fires where overflow: hidden alone would have held. */
+html.held,
+html.held body {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 /* The nav drawer's own scrim, which starts below the top bar rather than over it, so the bar stays legible
@@ -596,48 +612,46 @@ textarea {
   height: 18px;
 }
 
-/* The switcher, dressed as the top-hung twin of the bottom drawers (owner's request, September
-   2026): rounded lower shoulders, a shadow instead of the old hairline, the same grab handle at
-   the edge it dismisses toward, and the players panel's width cap so it does not span a desktop. */
+/* The switcher, dressed as the top-hung twin of the players panel (owner's request, September
+   2026): rounded lower shoulders, a shadow instead of the old hairline, the panel's side padding
+   and width cap, and the grab handle at the edge it dismisses toward. Capped in height and
+   scrolling its own overflow (contained, so a long roster cannot hand its scroll to the page). */
 .sheet {
   max-width: 480px;
+  max-height: 82vh;
   margin: 0 auto;
+  padding: calc(var(--s-1) + env(safe-area-inset-top)) var(--s-4) 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--bg-elev);
   border-radius: 0 0 var(--r-3) var(--r-3);
   box-shadow: 0 6px 24px var(--shadow);
-  padding-top: env(safe-area-inset-top);
 }
-/* The handle is a flex child in the media drawers; here the sheet is a block, so it centres itself. */
+/* Sticky at the sheet's bottom edge, so however long the roster is - and however far it is
+   scrolled - the way out is always under the thumb. Opaque and full-width, so rows slide under it
+   rather than through it. */
 .sheet .mpanel-handle {
-  display: block;
-  margin: var(--s-2) auto;
+  position: sticky;
+  bottom: 0;
+  width: 100%;
+  background: var(--bg-elev);
 }
-/* The top bar's twin: the sheet covers the bar, and this header stands in for the button that opened
-   it, so the tap that closes it lands where the opening one did. Same height, and the same gap and
-   side padding as .topbar, because the ✕, title and caret inside reuse the bar's own .icon, .title
-   and .caret - the match the owner asked for is structural, not approximated. */
-.sheet-head {
-  display: flex;
-  align-items: center;
-  gap: var(--s-1);
-  height: var(--bar-h);
-  padding: 0 var(--s-3);
-  border-bottom: 1px solid var(--line);
+.sheet .mgroup-head {
+  padding: var(--s-1) 0 var(--s-2);
 }
-/* The ✕, sized to put about as much ink down as the burger it mirrors. .icon supplies the chrome-free
-   button; line-height comes back because unlike the burger this is a text glyph, and .icon's
-   line-height: 0 would crop it. */
-.x {
-  color: var(--fg-2);
-  font-size: 20px;
-  line-height: 1;
-}
+/* .sheet-head and .x went with the mirrored ✕/title/caret headers, September 2026 - both drawers
+   wear the players panel's handle-plus-label top now. */
+/* Peer rows, restyled to read like the players panel's speaker list (owner's request, September
+   2026): open rows on the sheet's own padding instead of edge-to-edge boxes with hairlines. Only
+   this device keeps a rule - below it, separating "here" from "everywhere else" the way the panel
+   separates the group from the joinable speakers. */
 .peer {
-  padding: var(--s-2) var(--s-4);
-  border-bottom: 1px solid var(--line);
+  padding: var(--s-2) 0;
 }
 .peer.here {
-  background: var(--fill);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: var(--s-3);
+  margin-bottom: var(--s-1);
 }
 /* A peer row that can be jumped to is a whole-row <a>, which needs the anchor defaults undone or the
    device names come out accent-coloured and underlined like prose links. */
@@ -645,9 +659,6 @@ textarea {
   display: block;
   color: inherit;
   text-decoration: none;
-}
-a.peer.go:hover {
-  background: var(--fill);
 }
 /* Home Assistant reports it unavailable. Dimmed, not removed, and still a link - that view can lag a
    reboot by a few seconds, and a row that vanished would read as a device that was deleted. */
@@ -663,10 +674,10 @@ a.peer.go:hover {
   align-items: center;
   gap: var(--s-1);
   width: 100%;
-  padding: var(--s-2) var(--s-4);
+  padding: var(--s-2) 0;
   background: none;
   border: 0;
-  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
   color: var(--fg-3);
   font: var(--t-s) inherit;
   text-align: left;
@@ -686,7 +697,7 @@ a.peer.go:hover {
 }
 .sheet-foot {
   margin: 0;
-  padding: var(--s-2) var(--s-4);
+  padding: var(--s-2) 0;
   font-size: var(--t-xs);
   color: var(--fg-3);
 }
@@ -1960,23 +1971,21 @@ polyline.draft {
   animation: panel-up 200ms ease-out;
 }
 .msheet .mpanel-handle {
-  margin-top: var(--s-2);
+  margin-top: 2px;
 }
-.msheet .sheet-head {
-  background: none;
-  flex: none;
-  color: inherit;
+/* The label row under the handle - the players panel's mgroup-head, with the side padding the
+   panel's own container would have provided. */
+.msheet-head {
+  padding: 0 var(--s-4) var(--s-1);
+  color: var(--tdim, var(--fg-3));
 }
 .msheet .dim {
   color: var(--tdim, var(--fg-3));
 }
-.msheet .icon,
-.msheet .title {
-  color: inherit;
-}
 .msheet-body {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2249,8 +2258,9 @@ polyline.draft {
   max-width: 480px;
   max-height: 75vh;
   margin: 0 auto;
-  padding: var(--s-2) var(--s-4) calc(var(--s-4) + env(safe-area-inset-bottom));
+  padding: var(--s-1) var(--s-4) calc(var(--s-4) + env(safe-area-inset-bottom));
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--tint, var(--bg-elev));
   color: var(--tfg, var(--fg));
   border-radius: var(--r-3) var(--r-3) 0 0;
@@ -2276,17 +2286,29 @@ polyline.draft {
 .mpanel .mgroup-x {
   color: inherit;
 }
-/* The grab handle, which is also the close button. */
+/* The grab handle, which is also the close button. The pill people see is 42x5; the button they
+   actually have to hit is 148x32 around it (a real fix, not polish: at 42x5 the grab missed often
+   enough on a phone that the swipe landed on the page instead - owner's screenshots, September
+   2026). Drawn with ::before so the ink and the hit area can differ. */
 .mpanel-handle {
-  width: 42px;
-  height: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 148px;
+  height: 32px;
   flex: none;
   margin: 0 auto;
   padding: 0;
   border: 0;
+  background: none;
+  cursor: grab;
+}
+.mpanel-handle::before {
+  content: "";
+  width: 42px;
+  height: 5px;
   border-radius: 3px;
   background: var(--tdim, var(--line-2));
-  cursor: pointer;
 }
 /* The swipe zones (see ui.jsx's useSheetDrag): the browser must not claim a vertical gesture that
    starts here for scrolling, or the drawer would never receive the drag it is following. */

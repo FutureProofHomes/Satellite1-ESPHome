@@ -430,15 +430,26 @@ export function Missing({ what }) {
  * announcement fires only on the open transition, so re-renders of an open drawer never re-close
  * a sibling that opened after it.
  */
+/* How many drawers are open right now - normally 0 or 1, but the exclusion handoff holds two for a
+   frame (the new one mounts, then the old one hears the event and closes), so the page lock below
+   counts rather than toggles or the handoff would unlock a page with a drawer still standing. */
+let drawersOpen = 0;
+
 export function useDrawer(id, open, onClose) {
   useEffect(() => {
     if (!open) return undefined;
+    // Freeze the page while any drawer stands. Found on iOS Safari: a swipe that missed the
+    // players panel's handle scrolled and rubber-banded the whole document behind the scrim
+    // (owner's screenshot, September 2026). The class lands on <html> so both it and <body>
+    // can pin their overflow in CSS.
+    if (++drawersOpen === 1) document.documentElement.classList.add("held");
     window.dispatchEvent(new CustomEvent("drawer", { detail: id }));
     const other = (e) => e.detail !== id && onClose();
     const esc = (e) => e.key === "Escape" && onClose();
     window.addEventListener("drawer", other);
     document.addEventListener("keydown", esc);
     return () => {
+      if (--drawersOpen === 0) document.documentElement.classList.remove("held");
       window.removeEventListener("drawer", other);
       document.removeEventListener("keydown", esc);
     };

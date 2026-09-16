@@ -568,18 +568,13 @@ function MediaSheet({ model, tiers, tint, onClose, onPlayers }) {
           contract as the players panel's. */}
       <div class="scrim msheet-scrim" onClick={onClose} />
       <div class="msheet" style={(tint || "") + dragStyle} {...drag}>
-        {/* The grab handle, and under it the switcher sheet's header, mirrored: ✕ where the burger
-            sits, the title and a caret that points at where the sheet will go, all three closing
-            it. Handle and header are both swipe zones. */}
+        {/* The players panel's own top, verbatim (owner's request, September 2026): handle, then a
+            small dim label with the ⓘ. The ✕/title/caret header this replaced was the full-screen
+            era's furniture - a drawer with a handle, a scrim and a swipe does not also need three
+            close buttons in a row under a rule. Handle and label row are both swipe zones. */}
         <button class="mpanel-handle" data-grab aria-label="Close" onClick={onClose} />
-        <div class="sheet-head" data-grab>
-          <button class="icon x" aria-label="Close" onClick={onClose}>
-            &#10005;
-          </button>
-          <button class="title" onClick={onClose}>
-            <span class="tname">Media</span>
-            <Chevron down cls="caret" />
-          </button>
+        <div class="mgroup-head msheet-head dim sm" data-grab>
+          Media
           <Hint text={HINTS.media} />
         </div>
 

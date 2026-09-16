@@ -305,21 +305,12 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, onClose }) {
   return (
     <div class="scrim" onClick={onClose}>
       <div class="sheet" style={dragStyle || undefined} {...drag} onClick={(e) => e.stopPropagation()}>
-        {/* Built to mirror the top bar it covers, per the owner: where the bar shows
-            "☰ <device name> ˅", this shows "✕ Device Switcher ˄" - same classes, so spacing and
-            type stay identical by construction rather than by imitation. The ✕ sits where the
-            burger does, the caret points up to say "collapses", and both the ✕ and the title close
-            the sheet, so the closing tap lands wherever the opening one did. The ⓘ stays its own
-            button at the edge, so reading the explanation cannot dismiss the thing it explains.
-            The header is also the swipe zone - this drawer dismisses upward. */}
-        <div class="sheet-head" data-grab>
-          <button class="icon x" aria-label="Close" onClick={onClose}>
-            &#10005;
-          </button>
-          <button class="title" onClick={onClose}>
-            <span class="tname">Device Switcher</span>
-            <Chevron up cls="caret" />
-          </button>
+        {/* The players panel's top, borrowed wholesale (owner's request, September 2026 - it
+            replaced a ✕/title/caret header that mirrored the top bar and read as clutter): a small
+            dim label with the ⓘ, doubling as the swipe zone. The handle sits at the bottom edge,
+            because that is the edge this drawer dismisses toward. */}
+        <div class="mgroup-head dim sm" data-grab>
+          Device Switcher
           <Hint text={HINTS.switcher} />
         </div>
         <div class="peer here">

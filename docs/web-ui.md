@@ -105,8 +105,8 @@ expanded media view dressed as drawers):
 
 | | Bytes |
 |---|---|
-| Raw HTML document | 130,299 |
-| Gzipped, as embedded | **43,264** |
+| Raw HTML document | 130,252 |
+| Gzipped, as embedded | **43,286** |
 | Budget | 49,152 |
 
 That is 88% of the ceiling. The budget was 40,960 B until September 2026, when the media footer
@@ -239,9 +239,12 @@ Artwork and title open the expanded view, the speaker button (with the group's s
 slides up a players panel where members are added, removed and mixed, and the bar carries its own
 volume row. Both surfaces - and the device switcher in the header - are drawers cut from the same
 pattern (September 2026): rounded shoulders, a grab handle, a scrim with the page showing through,
-a swipe on the handle or header that follows the finger and dismisses past a threshold
+a swipe on the handle or label row that follows the finger and dismisses past a threshold
 (`useSheetDrag` in `ui.jsx`), and an app-wide one-drawer-at-a-time rule - opening any drawer,
-the nav pane included, closes whichever other one is standing (`useDrawer`, same file). What the surfaces can do is layered by what can answer, each tier only ever adding to
+the nav pane included, closes whichever other one is standing (`useDrawer`, same file). The
+handle's visible pill is 42x5 but its hit area is 148x32 (sticky and full-width at the switcher's
+bottom edge), and while any drawer stands the page behind is frozen (`html.held`) - both fixes for
+iOS Safari swipes that missed the old 5px handle and scrolled the document instead. What the surfaces can do is layered by what can answer, each tier only ever adding to
 the one below, and each falling back to it without a seam:
 
 **Tier 0 — the device alone.** The Sendspin hub already receives track metadata and controller state
