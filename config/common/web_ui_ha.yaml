@@ -107,10 +107,22 @@ substitutions:
   # is not routable. On a peer running older firmware it points at whatever that firmware served
   # (the radar tuner, or nothing), which is exactly what "Visit device" would do; sending it anyway
   # keeps the choice of what to render in the frontend. The availability flag is Home Assistant's
-  # own view - a device counts as up while any of its entities reads something other than
-  # `unavailable` - and it is here because the browser cannot probe a peer itself: Basic/Digest
-  # credentials are scoped per origin and a cross-origin probe dies on the preflight. An int, never
-  # a boolean, for the literal_eval reason above.
+  # own view - a device counts as up while any of its device-backed entities holds a real state - and
+  # it is here because the browser cannot probe a peer itself: Basic/Digest credentials are scoped per
+  # origin and a cross-origin probe dies on the preflight.
+  #
+  # "Device-backed" is a whitelist of domains, and it exists because the naive test - any entity not
+  # `unavailable` - kept a powered-off Satellite1 wearing a green dot indefinitely. A device's entity
+  # list is not all backed by the device: the update entity is answered by the ESPHome dashboard, and
+  # the Assistant/Wake word selects live in Home Assistant's own pipeline store, so both hold state
+  # while the device is off the network (excluding just those two was tried and still read a dead
+  # device as up). The whitelisted domains all derive from the integration's device-bound entity,
+  # which goes `unavailable` the moment the API connection drops - and every Satellite1 has several
+  # of them holding real states while online. `unknown` is rejected along with `unavailable` so a
+  # sensor that has not reported yet cannot vouch for anything. The flag can misread a non-Satellite1
+  # FutureProofHomes device (a Nexus is conversation/ai_task entities, none whitelisted), which is
+  # acceptable: the switcher only renders Satellite1 models. An int, never a boolean, for the
+  # literal_eval reason above.
   #
   # `asst` is which assistant answers which wake word, and it is the one part of this payload that
   # describes settings Home Assistant owns rather than facts it happens to know.
@@ -194,15 +206,18 @@ substitutions:
         {% if device_attr(d, 'manufacturer') == 'FutureProofHomes' %}
           {% set macs = device_attr(d, 'connections')
                         | selectattr(0, 'eq', 'mac') | map(attribute=1) | list %}
+          {% set live = expand(device_entities(d)
+                        | select('match', '(sensor|binary_sensor|switch|number|light|media_player|assist_satellite|event)\.')
+                        | list)
+                        | map(attribute='state')
+                        | reject('in', ['unavailable', 'unknown']) | list %}
           {% set out.dev = out.dev + [[device_attr(d, 'model'),
                                        device_attr(d, 'name_by_user') or device_attr(d, 'name'),
                                        area_name(a),
                                        macs | first if macs else '',
                                        device_attr(d, 'sw_version') or '',
                                        device_attr(d, 'configuration_url') or '',
-                                       1 if expand(device_entities(d)) | map(attribute='state')
-                                            | reject('eq', 'unavailable') | list | count > 0
-                                       else 0]] %}
+                                       1 if live | count > 0 else 0]] %}
         {% endif %}
       {% endfor %}
     {% endfor %}
