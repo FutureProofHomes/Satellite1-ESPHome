@@ -596,10 +596,21 @@ textarea {
   height: 18px;
 }
 
+/* The switcher, dressed as the top-hung twin of the bottom drawers (owner's request, September
+   2026): rounded lower shoulders, a shadow instead of the old hairline, the same grab handle at
+   the edge it dismisses toward, and the players panel's width cap so it does not span a desktop. */
 .sheet {
+  max-width: 480px;
+  margin: 0 auto;
   background: var(--bg-elev);
-  border-bottom: 1px solid var(--line-2);
+  border-radius: 0 0 var(--r-3) var(--r-3);
+  box-shadow: 0 6px 24px var(--shadow);
   padding-top: env(safe-area-inset-top);
+}
+/* The handle is a flex child in the media drawers; here the sheet is a block, so it centres itself. */
+.sheet .mpanel-handle {
+  display: block;
+  margin: var(--s-2) auto;
 }
 /* The top bar's twin: the sheet covers the bar, and this header stands in for the button that opened
    it, so the tap that closes it lands where the opening one did. Same height, and the same gap and
@@ -1922,9 +1933,18 @@ polyline.draft {
 /* The expanded view: a full-screen sheet over everything but the toast, washed in the artwork's
    colour when there is one (owner's screenshot 4). One column, centred, sized for thumbs - this is
    the screen someone props on the counter while cooking. The tint fallbacks mirror the bar's. */
+/* A drawer now, not a full takeover (owner's request, September 2026): it stops shy of the top so
+   a sliver of the page shows through the scrim behind it, wears the bottom drawers' rounded
+   shoulders and handle, and slides up the way the players panel does. */
+.msheet-scrim {
+  z-index: 39;
+}
 .msheet {
   position: fixed;
-  inset: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: calc(env(safe-area-inset-top) + 16px);
   z-index: 40;
   display: flex;
   flex-direction: column;
@@ -1935,7 +1955,12 @@ polyline.draft {
   background: linear-gradient(var(--tint, var(--bg)), var(--tint2, var(--bg-sunk)));
   color: var(--tfg, var(--fg));
   --sl: var(--tfg, var(--accent));
-  padding-top: env(safe-area-inset-top);
+  border-radius: var(--r-3) var(--r-3) 0 0;
+  box-shadow: 0 -6px 24px var(--shadow);
+  animation: panel-up 200ms ease-out;
+}
+.msheet .mpanel-handle {
+  margin-top: var(--s-2);
 }
 .msheet .sheet-head {
   background: none;
@@ -2142,9 +2167,13 @@ polyline.draft {
 .mgroup-x {
   grid-row: 1 / span 2;
   grid-column: 2;
+  /* Centred against the whole name-plus-slider pair, stated outright - the row's own align-items
+     was leaving it optically high (owner's phone screenshot, September 2026). */
+  align-self: center;
   color: var(--fg-3);
-  /* A text ✕ under .icon's line-height: 0; both come back so it has thumb-sized ink. */
-  font-size: 18px;
+  /* A text ✕ under .icon's line-height: 0; both come back so it has thumb-sized ink. 22px, up from
+     18: with .icon's padding that is a ~40px target, and the glyph finally reads at arm's length. */
+  font-size: 22px;
   line-height: 1;
 }
 /* The add-speaker list: a quiet heading and one drawn-+ row per joinable player, replacing the
@@ -2258,6 +2287,11 @@ polyline.draft {
   border-radius: 3px;
   background: var(--tdim, var(--line-2));
   cursor: pointer;
+}
+/* The swipe zones (see ui.jsx's useSheetDrag): the browser must not claim a vertical gesture that
+   starts here for scrolling, or the drawer would never receive the drag it is following. */
+[data-grab] {
+  touch-action: none;
 }
 
 /* The Music Assistant connection panel at the foot of the sheet, reusing the switcher's fold
@@ -2427,22 +2461,24 @@ polyline.draft {
   .wrap > * {
     animation: rise 0.2s ease-out;
   }
-  /* The expanded media view, entering the way the players panel always has. */
-  .msheet {
-    animation: rise 0.2s ease-out;
-  }
-  /* The device switcher hangs from the top bar, so it drops rather than rises. */
+  /* The device switcher hangs from the top bar, so it drops rather than rises. (The expanded media
+     view's entrance moved to the base panel-up animation it now shares with the players panel.) */
   .sheet {
     animation: drop 0.2s ease-out;
+    /* The spring-back after a swipe released short of the threshold: the inline transform comes
+       off and this glides the drawer home. Also what the media drawers get below. */
+    transition: transform 0.18s ease;
   }
   /* The artwork tint: a track change repaints the bar, sheet and panel in the new record's colour,
-     and a 400ms fade makes that a moment instead of a glitch. Colour only - layout never moves. */
+     and a 400ms fade makes that a moment instead of a glitch. Colour only - layout never moves,
+     except the drawers' transform, which is the swipe spring-back. */
   .mbar,
   .msheet,
   .mpanel {
     transition:
       background-color 0.4s ease,
-      color 0.4s ease;
+      color 0.4s ease,
+      transform 0.18s ease;
   }
   /* An expanding area's players rise in like everything else; collapse stays instant, because the
      list unmounts and a mount-only animation is the whole trick (see NavPane on unmount animation). */
@@ -2502,7 +2538,8 @@ polyline.draft {
 }
 @media (prefers-reduced-motion: reduce) {
   .toast,
-  .mpanel {
+  .mpanel,
+  .msheet {
     animation: none;
   }
 }

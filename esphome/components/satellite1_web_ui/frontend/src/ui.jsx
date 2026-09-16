@@ -417,6 +417,97 @@ export function Missing({ what }) {
 }
 
 /**
+ * Drawer citizenship, shared by everything that slides over the page: the nav pane, the device
+ * switcher, the expanded media view and the players panel. Two duties. Escape closes it - the same
+ * listener each drawer used to carry alone. And only one drawer stands at a time, app-wide (the
+ * owner's rule, September 2026): opening announces itself on a window event, every other open
+ * drawer hears a name that is not its own and closes under the new one. An event rather than
+ * shared state because the drawers live in different components with no common owner - the
+ * switcher is shell.jsx's, the players panel is media.jsx's - and threading a context through
+ * both for four booleans would cost more than a whisper on the window.
+ *
+ * `open` gates everything: a shut drawer holds no listeners and cannot be closed twice. The
+ * announcement fires only on the open transition, so re-renders of an open drawer never re-close
+ * a sibling that opened after it.
+ */
+export function useDrawer(id, open, onClose) {
+  useEffect(() => {
+    if (!open) return undefined;
+    window.dispatchEvent(new CustomEvent("drawer", { detail: id }));
+    const other = (e) => e.detail !== id && onClose();
+    const esc = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("drawer", other);
+    document.addEventListener("keydown", esc);
+    return () => {
+      window.removeEventListener("drawer", other);
+      document.removeEventListener("keydown", esc);
+    };
+    // onClose is a setState arrow, new each render; re-running on it would re-announce the open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, open]);
+}
+
+/**
+ * Swipe-to-dismiss for the sliding drawers, following the finger. `dir` is which way dismissal
+ * moves: 1 for the bottom drawers (down), -1 for the top one (up).
+ *
+ * The handlers go on the drawer itself but a drag only starts inside a `data-grab` zone - the
+ * handle and the header row - because the drawer bodies scroll and carry sliders, and a drag that
+ * started anywhere would fight both. Grab zones set touch-action: none in CSS, so the browser
+ * never claims the gesture for scrolling. While held, the drawer rides the finger through an
+ * inline transform (dismissal direction only - a drawer cannot be pushed further open); release
+ * past 80px, or a quick flick past 24px, closes it, and anything less springs back through the
+ * drawer's own transform transition.
+ */
+export function useSheetDrag(onClose, dir = 1) {
+  const [dy, setDy] = useState(0);
+  const st = useRef(null);
+  return [
+    // A leading semicolon so it can be appended blindly to whatever inline style the drawer
+    // already carries (the media surfaces carry the artwork tint).
+    dy ? `;transform:translateY(${dy * dir}px);transition:none` : "",
+    {
+      onPointerDown: (e) => {
+        if (!e.target.closest("[data-grab]")) return;
+        st.current = { y: e.clientY, t: Date.now(), id: e.pointerId, held: false };
+      },
+      onPointerMove: (e) => {
+        const s = st.current;
+        if (!s) return;
+        // The pointer is not captured until the finger has clearly moved, because capture retargets
+        // the eventual click to the drawer root - which would eat every plain tap on the ✕, the
+        // title and the handle. Inside the slop it is a tap and stays the browser's; past it the
+        // gesture is ours and the capture keeps it through descendants and out of them.
+        if (!s.held) {
+          if (Math.abs(e.clientY - s.y) < 7) return;
+          s.held = true;
+          // Guarded: capture throws for a pointer that stopped existing between events (a finger
+          // that lifted mid-gesture), and losing the capture is survivable where a throw is not.
+          try {
+            e.currentTarget.setPointerCapture(s.id);
+          } catch {
+            /* keep following the bubbled events instead */
+          }
+        }
+        setDy(Math.max(0, (e.clientY - s.y) * dir));
+      },
+      onPointerUp: () => {
+        const s = st.current;
+        st.current = null;
+        if (!s || !s.held) return;
+        const flick = dy > 24 && Date.now() - s.t < 250;
+        setDy(0);
+        if (dy > 80 || flick) onClose();
+      },
+      onPointerCancel: () => {
+        st.current = null;
+        setDy(0);
+      },
+    },
+  ];
+}
+
+/**
  * An empty state: a small drawn glyph centred over one dim line. The glyph is passed in, drawn where
  * the state lives, because each empty thing has its own shape - a speech bubble for the transcript,
  * a dashed zone for the plot. Layout only; the words stay in copy.js like every other string.

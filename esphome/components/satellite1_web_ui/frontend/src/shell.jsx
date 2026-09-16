@@ -15,7 +15,7 @@ import { Controls } from "./routes/controls.jsx";
 import { Diagnostics } from "./routes/diagnostics.jsx";
 import { Presence } from "./routes/presence.jsx";
 import { WakeWords } from "./routes/wakewords.jsx";
-import { Chevron, Hint } from "./ui.jsx";
+import { Chevron, Hint, useDrawer, useSheetDrag } from "./ui.jsx";
 
 /**
  * Five routes, in the order the owner set in the September 2026 information-architecture pass:
@@ -168,13 +168,9 @@ function ThemeSwitch() {
  * is the menu that lists everything this device can show.
  */
 function NavPane({ route, go, open, onClose, label, fw }) {
-  // Escape closes it, listener held only while it is open so a shut drawer costs nothing on keydown.
-  useEffect(() => {
-    if (!open) return;
-    const esc = (e) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", esc);
-    return () => document.removeEventListener("keydown", esc);
-  }, [open, onClose]);
+  // Escape and the one-drawer rule: opening the menu closes whatever sheet is standing, and any
+  // sheet opening closes the menu. Gated on `open` because this component stays mounted shut.
+  useDrawer("nav", open, onClose);
 
   return (
     <div class={`scrim navscrim${open ? " on" : ""}`} onClick={onClose} aria-hidden={!open}>
@@ -256,12 +252,10 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Escape closes the sheet, same as the nav drawer. Mounted only while open, so no gate needed.
-  useEffect(() => {
-    const esc = (e) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", esc);
-    return () => document.removeEventListener("keydown", esc);
-  }, [onClose]);
+  // A drawer like the media surfaces (owner's request, September 2026): Escape and the one-drawer
+  // rule via useDrawer, and a finger-following swipe - upward, because this one hangs from the top.
+  useDrawer("switcher", true, onClose);
+  const [dragStyle, drag] = useSheetDrag(onClose, -1);
 
   // Sorted by area then name, so a house full of these groups by room, matching the tree on Audio.
   const peers = (ha?.d?.dev || [])
@@ -310,14 +304,15 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, onClose }) {
 
   return (
     <div class="scrim" onClick={onClose}>
-      <div class="sheet" onClick={(e) => e.stopPropagation()}>
+      <div class="sheet" style={dragStyle || undefined} {...drag} onClick={(e) => e.stopPropagation()}>
         {/* Built to mirror the top bar it covers, per the owner: where the bar shows
             "☰ <device name> ˅", this shows "✕ Device Switcher ˄" - same classes, so spacing and
             type stay identical by construction rather than by imitation. The ✕ sits where the
             burger does, the caret points up to say "collapses", and both the ✕ and the title close
             the sheet, so the closing tap lands wherever the opening one did. The ⓘ stays its own
-            button at the edge, so reading the explanation cannot dismiss the thing it explains. */}
-        <div class="sheet-head">
+            button at the edge, so reading the explanation cannot dismiss the thing it explains.
+            The header is also the swipe zone - this drawer dismisses upward. */}
+        <div class="sheet-head" data-grab>
           <button class="icon x" aria-label="Close" onClick={onClose}>
             &#10005;
           </button>
@@ -349,6 +344,9 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, onClose }) {
           </>
         )}
         {peers.length === 0 && <p class="sheet-foot">{TEXT.no_devices}</p>}
+        {/* The grab handle, at the bottom edge because that is the edge this drawer hangs toward -
+            the mirror of the bottom drawers' top handle. */}
+        <button class="mpanel-handle" data-grab aria-label="Close" onClick={onClose} />
       </div>
     </div>
   );

@@ -99,16 +99,17 @@ Measured, from the build that produced this note (September 2026, after the full
 pass: motion language, the redesigned nav drawer, the radar hero treatment, media finishing, the
 type ramp, empty states, the brand gradient (drawer indicator and slider fills only - never on
 buttons, by the owner's call), header blur, tree chips, first-load shimmers and the
-desktop two-column layout - all eleven rounds plus the request-queue deadline, for 1,880 B over the
-pre-polish bundle):
+desktop two-column layout - all eleven rounds plus the request-queue deadline, plus the unified
+drawer pattern that followed: swipe-to-dismiss, one-drawer-at-a-time, and the switcher and
+expanded media view dressed as drawers):
 
 | | Bytes |
 |---|---|
-| Raw HTML document | 129,095 |
-| Gzipped, as embedded | **42,775** |
+| Raw HTML document | 130,299 |
+| Gzipped, as embedded | **43,264** |
 | Budget | 49,152 |
 
-That is 87% of the ceiling. The budget was 40,960 B until September 2026, when the media footer
+That is 88% of the ceiling. The budget was 40,960 B until September 2026, when the media footer
 landed at 99.8% of it; the owner raised the line to 48KB for the visual-polish pass. The number is
 a self-imposed discipline rather than a hardware limit - flash sits under 43% used either way - so
 the raise cost about 8KB of flash headroom and nothing else, and the discipline continues against
@@ -234,9 +235,13 @@ The media surface is a floating bar under every route, styled after Music Assist
 player (September 2026; it replaced the Media card on the home page). The bar wears the album's
 colour - the artwork averaged through a tiny canvas, which works because MA's `/imageproxy` sends
 CORS headers; a host that refuses pixel reads leaves a theme-coloured bar via CSS `var()` fallbacks.
-Artwork and title open the full-screen view, the speaker button (with the group's size as a badge)
+Artwork and title open the expanded view, the speaker button (with the group's size as a badge)
 slides up a players panel where members are added, removed and mixed, and the bar carries its own
-volume row. What the surfaces can do is layered by what can answer, each tier only ever adding to
+volume row. Both surfaces - and the device switcher in the header - are drawers cut from the same
+pattern (September 2026): rounded shoulders, a grab handle, a scrim with the page showing through,
+a swipe on the handle or header that follows the finger and dismisses past a threshold
+(`useSheetDrag` in `ui.jsx`), and an app-wide one-drawer-at-a-time rule - opening any drawer,
+the nav pane included, closes whichever other one is standing (`useDrawer`, same file). What the surfaces can do is layered by what can answer, each tier only ever adding to
 the one below, and each falling back to it without a seam:
 
 **Tier 0 — the device alone.** The Sendspin hub already receives track metadata and controller state

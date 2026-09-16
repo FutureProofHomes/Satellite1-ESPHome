@@ -38,7 +38,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { HINTS, TEXT } from "./copy.js";
 import { useMaData, useMedia } from "./lib/device.js";
 import { maSettings, useMaSocket } from "./lib/ma.js";
-import { Chevron, Hint, rangeFill, useHeld } from "./ui.jsx";
+import { Chevron, Hint, rangeFill, useDrawer, useHeld, useSheetDrag } from "./ui.jsx";
 
 const MEDIA_STATE = { 2: "Playing", 3: "Paused", 4: "Announcing" };
 
@@ -506,12 +506,10 @@ function MediaSheet({ model, tiers, tint, onClose, onPlayers }) {
   const { media, mediaCmd, sendspin, playing, active, announcing, srcParam } = model;
   const { ws, wsOn, me, maCmd, maCfg, setMaCfg, members, canLike, liked, like } = tiers;
 
-  // Escape closes it, like every sheet. Mounted only while open, so no gate needed.
-  useEffect(() => {
-    const esc = (e) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", esc);
-    return () => document.removeEventListener("keydown", esc);
-  }, [onClose]);
+  // A drawer like the players panel now (owner's request, September 2026): Escape and the
+  // one-drawer rule via useDrawer, the finger-following swipe-down via useSheetDrag.
+  useDrawer("media", true, onClose);
+  const [dragStyle, drag] = useSheetDrag(onClose, 1);
 
   const { pos, dur } = usePlayhead(media, playing, true);
 
@@ -564,19 +562,26 @@ function MediaSheet({ model, tiers, tint, onClose, onPlayers }) {
   const chip = members.length ? members[0][1] + (members.length > 1 ? ` +${members.length - 1}` : "") : TEXT.media_players_title;
 
   return (
-    <div class="msheet" style={tint}>
-      {/* The switcher sheet's header, mirrored: ✕ where the burger sits, the title and a caret that
-          points at where the sheet will go, all three closing it. */}
-      <div class="sheet-head">
-        <button class="icon x" aria-label="Close" onClick={onClose}>
-          &#10005;
-        </button>
-        <button class="title" onClick={onClose}>
-          <span class="tname">Media</span>
-          <Chevron down cls="caret" />
-        </button>
-        <Hint text={HINTS.media} />
-      </div>
+    <>
+      {/* Its own scrim now that the sheet no longer reaches the top of the screen: the sliver of
+          page above the drawer dims rather than staying live, and tapping it closes - the same
+          contract as the players panel's. */}
+      <div class="scrim msheet-scrim" onClick={onClose} />
+      <div class="msheet" style={(tint || "") + dragStyle} {...drag}>
+        {/* The grab handle, and under it the switcher sheet's header, mirrored: ✕ where the burger
+            sits, the title and a caret that points at where the sheet will go, all three closing
+            it. Handle and header are both swipe zones. */}
+        <button class="mpanel-handle" data-grab aria-label="Close" onClick={onClose} />
+        <div class="sheet-head" data-grab>
+          <button class="icon x" aria-label="Close" onClick={onClose}>
+            &#10005;
+          </button>
+          <button class="title" onClick={onClose}>
+            <span class="tname">Media</span>
+            <Chevron down cls="caret" />
+          </button>
+          <Hint text={HINTS.media} />
+        </div>
 
       <div class="msheet-body">
         <Artwork art={model.art} big />
@@ -653,8 +658,9 @@ function MediaSheet({ model, tiers, tint, onClose, onPlayers }) {
         </button>
 
         <MaPanel cfg={maCfg} setCfg={setMaCfg} status={maCfg.url && maCfg.token ? ws.status : "off"} />
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -743,19 +749,18 @@ function PlayersPanel({ model, tiers, tint, haReady, onClose }) {
   const { media, mediaCmd, srcParam, groupHeld } = model;
   const { wsOn, me, live, members, addables, optVol, joining, gVol, gUnjoin, gJoin } = tiers;
 
-  useEffect(() => {
-    const esc = (e) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", esc);
-    return () => document.removeEventListener("keydown", esc);
-  }, [onClose]);
+  // Escape and the one-drawer rule, plus the finger-following swipe-down. Opening this panel is
+  // what closes the expanded view under it - the chip in that view opens this one.
+  useDrawer("players", true, onClose);
+  const [dragStyle, drag] = useSheetDrag(onClose, 1);
 
   const any = wsOn || me;
   return (
     <>
       <div class="scrim mpanel-scrim" onClick={onClose} />
-      <div class="mpanel" style={tint} role="dialog" aria-label={TEXT.media_players_title}>
-        <button class="mpanel-handle" aria-label="Close" onClick={onClose} />
-        <div class="mgroup-head dim sm">
+      <div class="mpanel" style={(tint || "") + dragStyle} {...drag} role="dialog" aria-label={TEXT.media_players_title}>
+        <button class="mpanel-handle" data-grab aria-label="Close" onClick={onClose} />
+        <div class="mgroup-head dim sm" data-grab>
           {TEXT.media_players_title}
           <Hint text={HINTS.media_group} />
         </div>
