@@ -33,7 +33,7 @@ bool MemoryFlasher::http_get_md5_() {
     return false;
   }
   if (length < MD5_SIZE) {
-    ESP_LOGE(TAG, "MD5 file must be %u bytes; %u bytes reported by HTTP server. Aborting", MD5_SIZE, length);
+    ESP_LOGE(TAG, "MD5 file must be %hhu bytes; %zu bytes reported by HTTP server. Aborting", MD5_SIZE, length);
     container->end();
     return false;
   }
@@ -47,7 +47,7 @@ bool MemoryFlasher::http_get_md5_() {
   }
   container->end();
 
-  ESP_LOGV(TAG, "Read len: %u, MD5 expected: %u", read_len, MD5_SIZE);
+  ESP_LOGV(TAG, "Read len: %d, MD5 expected: %hhu", read_len, MD5_SIZE);
   return read_len == MD5_SIZE;
 }
 
@@ -98,7 +98,7 @@ bool HttpImageReader::deinit_reader() {
 
 int HttpImageReader::read_image_block(uint8_t *buffer, size_t block_size) {
   int bytes_read = this->container_->read(buffer, block_size);
-  ESP_LOGVV(TAG, "bytes_read_ = %u, body_length_ = %u, bufsize = %i", this->container_->get_bytes_read(),
+  ESP_LOGVV(TAG, "bytes_read_ = %zu, body_length_ = %zu, bufsize = %d", this->container_->get_bytes_read(),
             this->container_->content_length, bytes_read);
   return bytes_read;
 }

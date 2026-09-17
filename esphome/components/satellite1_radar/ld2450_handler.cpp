@@ -486,12 +486,15 @@ void LD2450Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
   mark_tx_ack_(cmd_word, status);
 
   if (status != 0) {
-    ESP_LOGW(TAG_LD2450, "Command 0x%04X failed (status=%u)", cmd_word, status);
+    ESP_LOGW(TAG_LD2450, "Command 0x%04X failed (status=%u)", static_cast<unsigned int>(cmd_word),
+             static_cast<unsigned int>(status));
   }
 
   if (cmd_word == 0x01A0 && status == 0 && len >= 20) {
     char ver[32];
-    snprintf(ver, sizeof(ver), "V%u.%02X.%02X%02X%02X%02X", buf[13], buf[12], buf[17], buf[16], buf[15], buf[14]);
+    snprintf(ver, sizeof(ver), "V%u.%02X.%02X%02X%02X%02X", static_cast<unsigned int>(buf[13]),
+             static_cast<unsigned int>(buf[12]), static_cast<unsigned int>(buf[17]), static_cast<unsigned int>(buf[16]),
+             static_cast<unsigned int>(buf[15]), static_cast<unsigned int>(buf[14]));
     if (version_text_sensor != nullptr)
       version_text_sensor->publish_state(ver);
     fw_version_received_ = true;
@@ -501,7 +504,9 @@ void LD2450Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
 
   if (cmd_word == 0x01A5 && status == 0 && len >= 16) {
     char mac[20];
-    snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", buf[10], buf[11], buf[12], buf[13], buf[14], buf[15]);
+    snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", static_cast<unsigned int>(buf[10]),
+             static_cast<unsigned int>(buf[11]), static_cast<unsigned int>(buf[12]), static_cast<unsigned int>(buf[13]),
+             static_cast<unsigned int>(buf[14]), static_cast<unsigned int>(buf[15]));
     ESP_LOGI(TAG_LD2450, "BT MAC: %s", mac);
   }
 
@@ -577,7 +582,8 @@ bool LD2450Handler::consume_tx_ack_(uint16_t expected_cmd, uint8_t &status_out) 
   tx_ack_pending_ = false;
 
   if (ack_cmd != expected_cmd) {
-    ESP_LOGD(TAG_LD2450, "Ignoring ACK for 0x%04X while waiting for 0x%04X", ack_cmd, expected_cmd);
+    ESP_LOGD(TAG_LD2450, "Ignoring ACK for 0x%04X while waiting for 0x%04X", static_cast<unsigned int>(ack_cmd),
+             static_cast<unsigned int>(expected_cmd));
     return false;
   }
 
@@ -588,7 +594,7 @@ bool LD2450Handler::consume_tx_ack_(uint16_t expected_cmd, uint8_t &status_out) 
 void LD2450Handler::mark_command_failed_(uint16_t cmd_word, const char *reason) {
   last_failed_cmd_ = cmd_word;
   ack_failure_count_++;
-  ESP_LOGW(TAG_LD2450, "Command 0x%04X failed (%s)", cmd_word, reason);
+  ESP_LOGW(TAG_LD2450, "Command 0x%04X failed (%s)", static_cast<unsigned int>(cmd_word), reason);
 }
 
 uint16_t LD2450Handler::command_word_(const QueuedCommand &queued) const {
@@ -691,8 +697,9 @@ void LD2450Handler::step_command_tx_() {
         }
         if (tx_retry_count_ < COMMAND_MAX_RETRIES) {
           tx_retry_count_++;
-          ESP_LOGW(TAG_LD2450, "Enable config ACK failed (status=%u), retry %u/%u", ack_status, tx_retry_count_,
-                   COMMAND_MAX_RETRIES);
+          ESP_LOGW(TAG_LD2450, "Enable config ACK failed (status=%u), retry %u/%u",
+                   static_cast<unsigned int>(ack_status), static_cast<unsigned int>(tx_retry_count_),
+                   static_cast<unsigned int>(COMMAND_MAX_RETRIES));
           send_enable_config_();
           return;
         }
@@ -708,7 +715,8 @@ void LD2450Handler::step_command_tx_() {
         ack_timeout_count_++;
         if (tx_retry_count_ < COMMAND_MAX_RETRIES) {
           tx_retry_count_++;
-          ESP_LOGW(TAG_LD2450, "Enable config ACK timeout, retry %u/%u", tx_retry_count_, COMMAND_MAX_RETRIES);
+          ESP_LOGW(TAG_LD2450, "Enable config ACK timeout, retry %u/%u", static_cast<unsigned int>(tx_retry_count_),
+                   static_cast<unsigned int>(COMMAND_MAX_RETRIES));
           send_enable_config_();
           return;
         }
@@ -729,8 +737,9 @@ void LD2450Handler::step_command_tx_() {
         }
         if (tx_retry_count_ < COMMAND_MAX_RETRIES) {
           tx_retry_count_++;
-          ESP_LOGW(TAG_LD2450, "Command ACK failed (cmd=0x%04X status=%u), retry %u/%u", tx_expected_ack_cmd_,
-                   ack_status, tx_retry_count_, COMMAND_MAX_RETRIES);
+          ESP_LOGW(TAG_LD2450, "Command ACK failed (cmd=0x%04X status=%u), retry %u/%u",
+                   static_cast<unsigned int>(tx_expected_ack_cmd_), static_cast<unsigned int>(ack_status),
+                   static_cast<unsigned int>(tx_retry_count_), static_cast<unsigned int>(COMMAND_MAX_RETRIES));
           send_enable_config_();
           return;
         }
@@ -746,8 +755,9 @@ void LD2450Handler::step_command_tx_() {
         ack_timeout_count_++;
         if (tx_retry_count_ < COMMAND_MAX_RETRIES) {
           tx_retry_count_++;
-          ESP_LOGW(TAG_LD2450, "Command ACK timeout (cmd=0x%04X), retry %u/%u", tx_expected_ack_cmd_, tx_retry_count_,
-                   COMMAND_MAX_RETRIES);
+          ESP_LOGW(TAG_LD2450, "Command ACK timeout (cmd=0x%04X), retry %u/%u",
+                   static_cast<unsigned int>(tx_expected_ack_cmd_), static_cast<unsigned int>(tx_retry_count_),
+                   static_cast<unsigned int>(COMMAND_MAX_RETRIES));
           send_enable_config_();
           return;
         }
@@ -763,7 +773,7 @@ void LD2450Handler::step_command_tx_() {
     case TxState::WAIT_DISABLE_ACK:
       if (consume_tx_ack_(tx_expected_ack_cmd_, ack_status)) {
         if (ack_status != 0)
-          ESP_LOGW(TAG_LD2450, "Disable config ACK failed (status=%u)", ack_status);
+          ESP_LOGW(TAG_LD2450, "Disable config ACK failed (status=%u)", static_cast<unsigned int>(ack_status));
         config_session_open_ = false;
         if (drop_active_after_disable_) {
           drop_active_command_("command ack retries exhausted");
