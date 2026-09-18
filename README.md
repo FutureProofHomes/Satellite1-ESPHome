@@ -142,21 +142,29 @@ decisions behind the implementation and troubleshooting.
 
 ### Configuring the device from your browser
 
-Every Satellite1 serves its own configuration app. Open `http://<device address>/` — or click **Visit
-device** on the ESPHome integration page in Home Assistant — and sign in with the username `satellite1`
-and the password shown by the device's **Web UI Password** sensor.
+Every Satellite1 serves its own configuration app. Open `http://<device address>/` — or click
+**Visit device** on the ESPHome integration page in Home Assistant, which fills in the address for you.
+
+Sign in once and the browser stays signed in for 90 days. Most sign-ins never type anything: tap **Sign
+in on this device** and approve it at the device itself — a press of the action button, or, for a
+ceiling-mounted device you cannot reach, by repeating a code or wake-word challenge it speaks aloud. The
+password (the username is `satellite1`, the password is shown by the device's **Web UI Password**
+sensor) is always there as a fallback, and Diagnostics offers a sign-in link and QR code for putting the
+app one tap away on a phone's home screen or a Home Assistant dashboard button.
 
 It works without an internet connection and without a cloud service, because the whole app is embedded
 in the firmware. It also keeps working when Home Assistant is unreachable: sensor calibration, the LED
 ring, the radar, the live log and the maintenance actions are all local, and only the parts that
 genuinely need Home Assistant grey out.
 
-Four pages: **Controls** for readings and everyday adjustments, **Presence** for the mmWave radar,
-**Config** for TTS routing and room ducking, and **Diagnostics** for memory, firmware, the live log and
-recovery actions.
+Five pages: **Home** for readings and everyday adjustments, **Wake Word** for the wake words and
+sensitivity, **Audio** for TTS routing and room ducking, **Presence** for the mmWave radar, and
+**Diagnostics** for memory, firmware, the live log and recovery actions.
 
-See [docs/web-ui.md](docs/web-ui.md) for how it is built, what it costs in flash and memory, and how to
-rebuild the bundle.
+The app is plain HTTP on your LAN. The password is never sent over the wire, but if you want fully
+encrypted browser access, put a reverse proxy (the Nginx Proxy Manager or Caddy add-on) or a Tailscale
+node in front of the device — no firmware change needed. See [docs/web-ui.md](docs/web-ui.md) for that,
+for how the app is built, what it costs in flash and memory, and how to rebuild the bundle.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

@@ -40,8 +40,8 @@ labelled User and Assist rather than heard and said).
 | `calibrate` | Calibration editor, offset row | Adjust until the reading matches a trusted instrument in the same room. The correction is stored on the device and survives restarts. |
 | `led_ring` | LED ring | The ring the assistant animates. Colour and brightness set here are the resting state - the device still overrides both while it is listening, thinking or reporting an error. |
 | `timers` | Timers card | Timers set by voice, held on the device - they keep counting and still ring if Home Assistant goes away. Voice is also how they are managed: name one when you set it ("set a pizza timer for ten minutes"), pause or cancel it the same way. |
-| `media` | Media footer, expanded view | What this device is playing, from either source: a group stream, or media sent to it by Home Assistant. Track skipping, shuffle, repeat and the progress bar work on group streams - media sent directly to this speaker is one URL with none of that. The volume here is the media volume; the assistant's voice has its own level, in the Assistant card on the home page. |
-| `media_group` | Media footer, Grouped speakers | Speakers playing this stream together, with each one's own volume. Adding a speaker asks Music Assistant to bring it into the group; removing one lets it fall silent. The big slider above moves the whole group. |
+| `media` | Media footer, expanded view | What this device is playing, from either source: a group stream, or media sent to it by Home Assistant. Track skipping, shuffle, repeat and the progress bar work on group streams - media sent directly to this speaker is one URL with none of that. The slider on the media bar is the media volume; the assistant's voice has its own level, in the Assistant card on the home page. |
+| `media_group` | Media footer, Grouped speakers | Speakers playing this stream together, with each one's own volume. Adding a speaker asks Music Assistant to bring it into the group; removing one lets it fall silent. With two or more grouped, the Group volume slider moves them all together. |
 | `ma_connect` | Media footer, Music Assistant panel | Connecting this page straight to your Music Assistant server makes the controls instant and unlocks anything Home Assistant cannot relay. Create a long-lived token in Music Assistant under Settings, then your profile, and paste it here with the server's address. Both stay in this browser only - the device never sees them. |
 
 The first four sit on the ⓘ inside the calibration editor, which opens by tapping a sensor chip — not on
@@ -114,6 +114,7 @@ looking at a third of them was the more expensive problem.
 | `loop` | Longest loop | The longest single pass through the main loop since the last reading. Tens of milliseconds is normal; sustained hundreds means something is blocking, and audio will stutter first. |
 | `esp_temp` | ESP32 Temp | The ESP32 chip's own temperature, not the room's. It reads well above ambient inside the sealed case, so warm is normal; sustained readings above 80 °C are worth investigating. The room's temperature is on the home page. |
 | `reset` | Last restart | Why the device last restarted. 'USB peripheral' means it was flashed. 'Power glitch' or 'Brownout' points at the power supply rather than at the firmware. |
+| `launch` | Launch card title | Scan the code with a phone, or paste the link into a Home Assistant dashboard button, and that browser lands here already signed in - no password, no button press. The code carries the device's current network address, so any phone on your network can scan it; the link carries the device's permanent name, the right form to paste somewhere that keeps it. Anyone who has either can sign in with it, so treat them like the password. Sign out everywhere revokes them and every session, then issues a new one. |
 | `xmos` | XMOS firmware, and the XMOS Recovery card title | The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's. |
 | `xmos_flash` | Reflash XMOS vX.X.X | Rewrites the audio chip's firmware from the image embedded in this build. The device is deaf and mute until it finishes, which takes about a minute. Do not cut power. |
 | `maintenance` | ESP32 Recovery card title | Ways to restart or reset this device. None of them are part of everyday use. Restart is always safe - your settings survive it. Factory reset is the only row here that erases anything. |
@@ -121,6 +122,12 @@ looking at a third of them was the more expensive problem.
 | `factory_reset` | Factory reset | Erases every setting stored on the ESP32, including the Wi-Fi credentials, and restarts. You will have to set the device up again from scratch. The audio chip's firmware is not touched. |
 | `beta` | Beta updates | Offers pre-release firmware to the updater. Useful for testing a fix; not what you want on a device you rely on. |
 | `log` | Logs card title | The device's own log, live. This is the first place to look when something misbehaves, and the most useful thing to attach to a support request. |
+
+`launch`'s QR and copyable link deliberately differ: the QR is minted on the device's current IP —
+scanned live off the screen, so the address is fresh by construction, and an IP works on phones that
+cannot resolve `.local` names — while the link keeps the permanent `.local` form for anything
+long-lived, like a dashboard button. The hint is the only place this is explained; on the card the
+two simply work.
 
 `xmos_erase` was deleted along with the row it explained. Erasing the audio chip leaves it blank — no
 microphones, no speaker, no wake word — and the only way back is the Reflash row directly above it, which
@@ -275,9 +282,8 @@ rather than showing the cache from the last sync.
 | `media_players_title` | Players |
 | `media_add_speaker` | Add a speaker |
 | `media_group_loading` | Asking Music Assistant… |
-| `media_no_tiers` | Grouping, favorites and seeking need Home Assistant with Music Assistant - or connect this page to your Music Assistant server from the expanded media view. |
-| `media_like` | Add to favorites |
-| `media_liked` | Added to favorites |
+| `media_no_tiers` | Grouping and seeking need Home Assistant with Music Assistant - or connect this page to your Music Assistant server from the expanded media view. |
+| `media_group_volume` | Group volume |
 | `ma_title` | Music Assistant |
 | `ma_url_ph` | http://music-assistant.local:8095 |
 | `ma_token_ph` | Long-lived token |

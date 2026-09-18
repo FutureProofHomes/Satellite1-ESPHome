@@ -3,6 +3,45 @@
 Satellite1 serves its own configuration app from the device, at `http://<device>/`. It needs no
 internet connection, no CDN and no Home Assistant to load — everything it needs is in flash.
 
+### iOS Safari and the "This Connection Is Not Private" interstitial
+
+This one was chased in the wrong direction before it was understood, so the conclusion is worth
+stating plainly: **it is not a port problem and not something the firmware can fix.** With iCloud
+Private Relay on, iOS Safari shows a full-page "This Connection Is Not Private" interstitial before it
+will connect to a cleartext-HTTP destination that is **on a different subnet from the iPhone**.
+Private Relay leaves the phone's own local subnet alone and engages for everything else; for
+off-subnet HTTP to a private IP it cannot protect, it warns.
+
+It was pinned down on hardware across eight cases. With the Satellite1 and Home Assistant on the same
+scheme and port, Home Assistant — on the same subnet as the phone — loaded clean, while the Satellite1
+— on a separate IoT VLAN — warned. IP versus `.local` made no difference, and neither did moving the
+server's port from 80 to 8080 to 8123 (an earlier theory blamed the port; it was a red herring, the
+port and the host had simply moved together in the first tests). Because the interstitial is shown
+*before any byte is exchanged*, nothing the server does — headers, HTML, TLS, the login page — can
+change it; Home Assistant serves the same cleartext HTTP and only escapes the warning by being local
+to the phone. macOS Safari warned on none of the cases; this is iOS-only. So the app is served on port
+80, the friendly default, and the interstitial is addressed at the network layer instead:
+
+- **Turn off "Limit IP Address Tracking" for that Wi-Fi network** (Settings → Wi-Fi → the network).
+  This is the per-network Private Relay toggle, immediate, and does not disable Private Relay
+  elsewhere. The practical answer for a segmented network.
+- **Put the phone and the device on the same subnet.** Makes the device local to Private Relay, at
+  the cost of the IoT-VLAN separation.
+- **Front the device with an HTTPS reverse proxy** (see the reverse-proxy note under Authentication).
+  The only way to keep Private Relay on, stay cross-subnet, and load clean, because it is then real
+  HTTPS.
+- **The installed home-screen PWA is worth testing here.** Private Relay governs Safari browsing only;
+  a standalone home-screen web app runs outside it, so the app may load clean cross-subnet once
+  installed — even though the one-time "add to home screen" in Safari still hits the interstitial.
+
+The `.local` smart redirect is easy to over-credit in this context: it is JavaScript in the bundle, so
+it runs only *after* the page loads, and cannot prevent a pre-page-load interstitial. It exists for
+origin stability — a session cookie on the `.local` origin survives DHCP giving the device a new IP —
+not as a Private Relay workaround. For browsers that cannot resolve mDNS at all (Android Chrome, the
+HA app's webview), a failed probe is remembered per-origin for a day, so the 2.5-second timeout is
+paid once rather than on every visit, and a static boot splash covers the wait — the page is never
+blank while the probe runs.
+
 This note covers how it is put together and what it costs. For the wording of every control and
 tooltip, see [web-ui-copy.md](web-ui-copy.md); for TTS routing and ducking specifically, including the
 breaking changes in the current release, see [TTS-Routing.md](TTS-Routing.md).
@@ -49,7 +88,24 @@ only the handful of things `web_server` has no concept of get custom endpoints.
 | `GET /api/sat1/voice` | Assistant phase, timers, transcript ring |
 | `GET /api/sat1/ha` | The cached Home Assistant area and player tree |
 | `GET`/`POST /api/sat1/sel` | The routing and ducking selection |
+| `GET /api/sat1/login/nonce`, `POST /api/sat1/login` | Challenge-response sign-in; also accepts a `key` |
+| `POST /api/sat1/login/start`, `GET /api/sat1/login/poll` | The device-presence pairing window |
+| `POST /api/sat1/logout`, `POST /api/sat1/logout_all` | Expire this cookie; revoke every session |
+| `GET /api/sat1/whoami` | The mDNS hostname, the one deliberately public endpoint |
+| `/manifest.webmanifest`, `/ui/icon-*.png`, `/apple-touch-icon.png` | The PWA surface |
 | `/api/v1/...` | The radar's own API, served by `satellite1_radar` |
+
+The login and PWA endpoints, the SPA itself and `/ui/no-sensor.webp` are the only unauthenticated
+paths; `whoami` returns nothing but the hostname, which the pre-login smart redirect needs.
+Everything with device state in it — `GET /api/sat1/state` included — stays behind the gate, because
+its readings and voice transcripts are exactly what an unauthenticated surface would hand a
+DNS-rebinding page (a rebound hostname never carries the host-bound cookie). The pairing-window
+endpoints (`login/start`, `login/poll`, `login/cancel`) additionally require a `Host` header the
+device answers to — any IP literal, or the device's own mDNS name — which closes the rebinding play
+against the flow itself: a rebound page necessarily carries the attacker's registered hostname, and
+neither a dotted-quad nor a `.local` name can be registered in public DNS. Password and `?key=`
+logins are exempt from the Host check (they already demand a secret a rebound page does not have),
+so signing in through a reverse proxy that forwards its own `Host` still works — by password.
 
 Heap, PSRAM, loop time, uptime and reset reason are read straight from the IDF inside the handler rather
 than mirrored into entities, so the Diagnostics page costs no entity overhead. The one exception is chip
@@ -86,12 +142,85 @@ speaks when one genuinely could not have been served.
 
 ## Authentication
 
-`web_server` runs with auth enabled, so every request — the app, the entity API and the radar API — is
-behind Basic auth. The username is set in YAML because it must be non-empty before any handler
-registers. The password defaults to a value derived from the device MAC, can be overridden with a
-`web_ui_password` substitution, and is published as a diagnostic text sensor because that is the only
-way a customer can discover the generated value. Anyone who can read that sensor can already control the
-device through Home Assistant, so it gives away nothing they did not have.
+Every request — the app, the entity API, the radar API, `/events` — passes through a session gate
+(`session_gate.cpp`) that `satellite1_web_ui` registers ahead of every other handler on the shared
+server. `web_server` no longer carries an `auth:` block, and must not: it would wrap every later
+handler in ESPHome's digest middleware *behind* the gate's own cookie check and lock out every
+signed-in browser. The component's config validation refuses that combination with an error that says
+so.
+
+A browser signs in once and holds a 90-day `HttpOnly` cookie, which is what ends the iOS misery of a
+credential prompt on every visit (iOS never saves HTTP-auth logins). The session token is
+`HMAC-SHA256(nvs_salt, password || generation)`: a per-device random salt in NVS, keyed by the
+password and a generation counter. Changing the password invalidates every session; so does bumping
+the generation — the "Sign out everywhere" action on Diagnostics — which is the only way to revoke a
+leaked sign-in link or a stolen cookie without also changing the password. The cookie's `Max-Age`
+only expires the browser's own copy; the token value stays valid until the password or generation
+moves, which is why that action exists.
+
+The username and password are still set the same way — the username fixed in YAML, the password
+defaulting to a value derived from the device MAC, overridable with a `web_ui_password` substitution,
+and published as the **Web UI Password** diagnostic sensor because that is the only way a customer
+discovers the generated value. They now go to `satellite1_web_ui` at boot rather than to
+`web_server`, and they double as HTTP **digest** credentials: the gate runs the same digest check
+ESPHome used to, so `curl --digest -u satellite1:...` and the radar tuner scripts keep working
+unchanged. The digest challenge (`WWW-Authenticate`) is sent only to clients that look like scripts
+— requests whose `User-Agent` does not begin with `Mozilla/`, which every browser's does and no CLI
+tool's does — because digest cannot be spoken without the challenge, but handing it to a browser
+would pop the native credentials dialog over the app's own `fetch()` calls, the exact prompt the
+cookie session removes. (`Sec-Fetch-Mode` would be the principled discriminator, but browsers only
+send Fetch Metadata headers to HTTPS origins, and this device is plain HTTP; a script that fakes a
+browser UA simply forgoes digest and uses the cookie or `?key=` flow like a browser would.)
+
+### Ways to sign in
+
+- **Password.** Typed into the login page. It is challenge-response — the device issues a single-use
+  nonce and the browser answers `HMAC-SHA256(SHA-256(password), nonce)` — so the password itself
+  never crosses the wire, the one property Basic auth lacked. (`crypto.subtle` is unavailable on
+  insecure origins, so the app carries its own small SHA-256; see `frontend/src/lib/auth.js`.)
+- **On the device.** "Sign in on this device" opens a 60-second pairing window and the device
+  approves it by physical presence, so nothing is typed. When Home Assistant is connected the device
+  speaks a random four-digit code and opens its mic — say the code back. When it is not, the device
+  speaks a challenge built from its own wake words ("Hey Jarvis, Hey Jarvis, Stop") and you repeat
+  them in order; this path is fully offline. Either way a press of the **action button** approves the
+  window instead. Muted microphones fall back to the button alone, and the login page says which
+  applies. This is the flow for a ceiling-mounted device nobody can reach to type on.
+- **Sign-in link and QR.** Diagnostics → Launch shows a tokenized URL and a QR carrying the same
+  key. Scan the QR with a phone and it lands signed in with no typing; paste the link into a Home
+  Assistant dashboard button and it becomes a true launch button. The two are built on different
+  origins, each matched to its lifetime: the QR uses the device's current IP, because it is scanned
+  live off the screen (the address is fresh by construction) and an IP works on every phone where a
+  `.local` QR is a dead end for mDNS-less ones — phones that *can* resolve mDNS still end up on
+  `.local`, since the smart redirect carries `?key=` along. The copyable link uses the permanent
+  `.local` name, which survives DHCP churn — the right form for anything long-lived. If a dashboard
+  button must use an IP (say, for a browser that cannot resolve `.local`), give the device a DHCP
+  reservation first, or the button dies with the device's next lease. The link is a bearer
+  credential — anyone who has it can sign in — so treat it like the password, and use "Sign out
+  everywhere" to revoke it. If you paste it into a dashboard, the key then lives in that dashboard's
+  configuration, readable by anyone who can edit dashboards.
+
+Home-screen note for iOS: an app added to the home screen has its own cookie store, separate from
+Safari's, so its first launch shows the login page once even if Safari was already signed in — one
+approval and the installed app holds its own 90-day cookie. Android home-screen shortcuts open in
+Chrome proper and share its cookies, so they are signed in immediately.
+
+### The wire, honestly
+
+Two channels, and they are not the same. The native API to Home Assistant is Noise-encrypted
+(`api: encryption:` in `common/home_assistant.yaml`), so everything the device exchanges with Home
+Assistant is protected. The web server is plain HTTP — ESPHome offers no TLS there — and this design
+works within that: the password never crosses the wire, and the presence sign-ins never transmit a
+secret at all, but the session cookie and the sign-in key are bearer tokens a LAN sniffer could
+replay. That is unfixable without TLS. On-device HTTPS is deliberately not attempted: no public CA
+issues certificates for private IPs or `.local` names, so it would be self-signed — a permanent,
+scarier browser warning than the cross-subnet Private Relay interstitial (see the interstitial note
+near the top) — and it would cost TLS handshake memory on a chip already running audio pipelines.
+
+Anyone who wants encrypted browser access puts a reverse proxy with a real certificate in front of
+the device — the Nginx Proxy Manager or Caddy add-on in Home Assistant with an internal domain and a
+Let's Encrypt DNS-01 wildcard, or a Tailscale node, which issues real HTTPS certificates for tailnet
+hosts. No firmware change is needed, and it composes with everything here: the session cookie simply
+binds to the proxy's hostname.
 
 ## The bundle
 
@@ -105,24 +234,27 @@ expanded media view dressed as drawers):
 
 | | Bytes |
 |---|---|
-| Raw HTML document | 130,252 |
-| Gzipped, as embedded | **43,286** |
-| Budget | 49,152 |
+| Raw HTML document | 148,835 |
+| Gzipped, as embedded | **49,367** |
+| Budget | 51,200 |
 
-That is 88% of the ceiling. The budget was 40,960 B until September 2026, when the media footer
-landed at 99.8% of it; the owner raised the line to 48KB for the visual-polish pass. The number is
-a self-imposed discipline rather than a hardware limit - flash sits under 43% used either way - so
-the raise cost about 8KB of flash headroom and nothing else, and the discipline continues against
-the new line. The gzip figure is the one that matters, since that is what occupies flash
+That is 96% of the ceiling. The budget has been raised twice: from 40,960 B when the media footer
+landed at 99.8% of it, to 48 KB for the visual-polish pass, and to 50 KB (with the owner's approval)
+when the mobile sign-in work landed — the login screen, the challenge-response SHA-256/HMAC and the
+QR encoder cost about 7 KB together, and the parts that could never run were trimmed first (QR
+versions past 6, which nothing this encodes can reach, and the Inkscape-precision decimals in the
+inlined logo). The number is a self-imposed discipline rather than a hardware limit — flash sits
+under 46% used either way. The gzip figure is the one that matters, since that is what occupies flash
 and what crosses the network. It is produced by `gzip.compress(html, compresslevel=9)` in the
 component's codegen, so the number reported at compile time is the number that ships.
 
 `dist/index.html` is committed, and CI rebuilds it and fails on `git diff --exit-code` against `dist`,
-so the committed bundle cannot drift from the source it was built from. To rebuild locally:
+so the committed bundle cannot drift from the source it was built from. To rebuild locally (`npm ci`,
+not `npm install`, to match the pinned toolchain the drift check builds against):
 
 ```
 cd esphome/components/satellite1_web_ui/frontend
-npm install
+npm ci
 npm run build
 ```
 
@@ -279,6 +411,23 @@ and gets real-time player and queue events, true per-member volumes, instant gro
 server address and token live in `localStorage` and nowhere else — this tier costs the firmware zero
 bytes, and while the socket is up the tier-1 polling stops entirely. The connection panel is folded
 shut at the bottom of the sheet; the footer is complete without it.
+
+## Add to home screen
+
+The app ships a web manifest, three PNG icons (192, 512 and a 180px apple-touch-icon) and the iOS
+standalone meta tags, all embedded in flash and served from PROGMEM like the no-sensor photo, so they
+cost no heap. Added to a phone's home screen, the app opens full-screen without Safari's chrome, and
+its cookie keeps it signed in. Because a standalone home-screen app runs outside Safari's browsing
+context, it should also escape the iCloud Private Relay interstitial that a cross-subnet device draws
+in Safari itself (see the interstitial note near the top) — worth confirming on a segmented network,
+since the one-time "add to home screen" still happens in Safari and hits it once.
+
+On iOS this is a real standalone web app with its own cookie store, so its first launch asks for one
+sign-in even if Safari was already signed in (see the home-screen note under Authentication). On
+Android over plain HTTP the browser makes a home-screen *shortcut* rather than an installed PWA —
+`display: standalone` needs a secure context — which carries the same icon and name and shares
+Chrome's cookies, so it launches straight in. The icons are drawn from the FutureProofHomes mark on
+the app's dark background, so the home-screen icon, the splash and the app agree.
 
 ## The routing and ducking selection
 
