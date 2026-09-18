@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { HINTS, PRESENCE, TEXT } from "../copy.js";
 import { entity, pathFor, PHASE, post, useVoice } from "../lib/device.js";
-import { Arrow, Card, Chevron, Empty, Hint, Missing, Row, Slider, Toggle } from "../ui.jsx";
+import { Arrow, Card, Chevron, Empty, Hint, Missing, N_CHAT, Row, Slider, Toggle } from "../ui.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Sensor pills, with calibration on the pill itself                   */
@@ -380,7 +380,7 @@ function VoiceStatus({ ctx, voice }) {
   if (!phase && !lines.length && !mute && !vol) return null;
 
   return (
-    <Card title="Assistant" right={phase && <span class={`dim xs${voice?.running ? " accent" : ""}`}>{phase}</span>}>
+    <Card title="Assistant" icon={N_CHAT} right={phase && <span class={`dim xs${voice?.running ? " accent" : ""}`}>{phase}</span>}>
       {/* The transcript in a subcard of its own, per the owner - the same box the calibration editor
           draws, minus its accent border, which on that editor means "editing in progress" and here
           would promise an interaction the transcript does not have. The empty state sits inside the

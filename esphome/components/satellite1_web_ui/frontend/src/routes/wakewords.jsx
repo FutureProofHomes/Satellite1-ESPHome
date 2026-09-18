@@ -34,7 +34,7 @@ import {
   useAssist,
   useWakeWords,
 } from "../lib/device.js";
-import { Card, Missing, Row, Select, Toggle } from "../ui.jsx";
+import { Card, Missing, N_WAKE, Row, Select, Toggle } from "../ui.jsx";
 
 function WakeWordsCard({ ctx, wake, assist }) {
   const chime = entity(ctx, "wake_sound");
@@ -62,7 +62,7 @@ function WakeWordsCard({ ctx, wake, assist }) {
   if (!chime && !sens && !stopWord && !words.length) return <Missing what="Wake word control" />;
 
   return (
-    <Card title="Wake Words">
+    <Card title="Wake Words" icon={N_WAKE}>
       {/* First, because which words the device answers to is a bigger question than how readily it
           answers, and someone scanning for "can I turn off Hey Jarvis" should not have to read past
           a dropdown to find it.

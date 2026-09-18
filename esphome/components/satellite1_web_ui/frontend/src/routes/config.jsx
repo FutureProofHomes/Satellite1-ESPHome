@@ -25,7 +25,7 @@ import { useEffect } from "preact/hooks";
 import { HINTS, TEXT } from "../copy.js";
 import { HA_NEVER, entity, haSyncOnce, pathFor, post } from "../lib/device.js";
 import { TargetTree } from "../tree.jsx";
-import { Card, Missing, Row, Select, Slider, Toggle } from "../ui.jsx";
+import { Card, Missing, N_AUDIO, Row, Select, Slider, Toggle } from "../ui.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Reading and writing the entity-backed controls                      */
@@ -69,7 +69,7 @@ function AudioOutput({ ctx }) {
   if (!chan && !lineOut) return null;
 
   return (
-    <Card title="Audio Output">
+    <Card title="Audio Output" icon={N_AUDIO}>
       {chan && (
         <Row label="Channel" hint={HINTS.speaker_channel}>
           <Select

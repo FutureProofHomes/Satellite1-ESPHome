@@ -4,6 +4,64 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { TEXT } from "./copy.js";
 
 /* ------------------------------------------------------------------ */
+/* Drawn glyphs                                                        */
+/* ------------------------------------------------------------------ */
+
+/* The route glyphs, drawn like media.jsx's `mi` set: 16-box, stroked in currentColor so wherever one
+   sits, its surroundings' colour is the icon's colour too. One per route: a house, the waveform a
+   wake word is, a speaker for what remains on Audio, a radar sweep, and a pulse line for Diagnostics
+   - a wrench was considered and drew worse at 17px than the vitals it actually shows.
+   They lived in shell.jsx while only the nav drawer used them; they moved here when each route's top
+   card started wearing its glyph as a colour anchor (routes import ui.jsx, and shell.jsx imports the
+   routes, so shell.jsx exporting them would have been a cycle). */
+export const ni = (children) => (
+  <svg
+    class="ni"
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    {children}
+  </svg>
+);
+export const N_HOME = ni(
+  <>
+    <path d="M2.8 8.3 8 3.6l5.2 4.7" />
+    <path d="M4.4 7.6V13h7.2V7.6" />
+  </>,
+);
+export const N_WAKE = ni(
+  <>
+    <path d="M2.8 6.8v2.4" />
+    <path d="M5.4 4.8v6.4" />
+    <path d="M8 3v10" />
+    <path d="M10.6 4.8v6.4" />
+    <path d="M13.2 6.8v2.4" />
+  </>,
+);
+export const N_AUDIO = ni(
+  <>
+    <path d="M2.8 6.4h2.4L8.6 3.8v8.4L5.2 9.6H2.8z" />
+    <path d="M11.2 6a3.1 3.1 0 0 1 0 4" />
+  </>,
+);
+export const N_PRES = ni(
+  <>
+    <path d="M13.2 8A5.2 5.2 0 1 1 8 2.8" />
+    <path d="M8 8l3.7-3.7" />
+    <circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
+  </>,
+);
+export const N_DIAG = ni(<path d="M2 8.5h2.8L6.4 5l3.2 6.5 1.6-3H14" />);
+/* Not a route: the speech bubble on Home's Assistant card, whose route glyph (the house) belongs to
+   the page rather than to any one card on it. */
+export const N_CHAT = ni(<path d="M3 3.5h10v6.5H8.2L5.4 12.6V10H3z" />);
+
+/* ------------------------------------------------------------------ */
 /* Hint                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -167,7 +225,7 @@ export function Arrow({ cls }) {
  * The header becomes a button only when collapsible. Making every card's header a button would put a
  * dozen useless tab stops in front of a keyboard user before they reach a control.
  */
-export function Card({ title, hint, right, children, collapsible, name, defaultOpen = false, ...rest }) {
+export function Card({ title, icon, hint, right, children, collapsible, name, defaultOpen = false, ...rest }) {
   const [open, setOpen] = useState(() => (collapsible ? readOpen(name, defaultOpen) : true));
 
   const toggle = () => {
@@ -180,6 +238,9 @@ export function Card({ title, hint, right, children, collapsible, name, defaultO
     <section class={`card${collapsible ? " card-c" : ""}`} {...rest}>
       {title && (
         <h2>
+          {/* The colour anchor: a drawn glyph in a small accent-tinted circle, carried by each
+              route's top card - one drop of colour per page without painting any surface. */}
+          {icon && <span class="cico">{icon}</span>}
           {/* Title first, caret after. The caret used to lead, which indented a collapsible title by
               its width and made these headers visibly different from every other card's - the owner
               asked for them to match. The whole header is still one button, so the hit target did not

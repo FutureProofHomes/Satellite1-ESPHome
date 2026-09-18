@@ -15,8 +15,9 @@
  *  - The device alone (Sendspin): title, artist, album and artwork URL ride GET /api/sat1/media
  *    from the hub's metadata role, as do position, duration, shuffle and repeat state and the
  *    server's supported-command list. Transport, volume, shuffle and repeat all write locally.
- *  - Home Assistant reachable: the like button, the grouped-speakers section with per-speaker
- *    volumes, and a draggable scrubber - each a relayed action call.
+ *  - Home Assistant reachable: the grouped-speakers section with per-speaker volumes and a
+ *    draggable scrubber - each a relayed action call. (A like button rode this tier until
+ *    September 2026, when the owner cut favorites app-wide.)
  *  - Music Assistant connected directly (a token this browser holds): the same controls answered in
  *    real time over its WebSocket, with no device polling behind them.
  *
@@ -71,11 +72,6 @@ const I_REPEAT = mi(
   <path d="M2.5 6.5v-.4A2.6 2.6 0 0 1 5.1 3.5h7.4M13.5 9.5v.4a2.6 2.6 0 0 1-2.6 2.6H3.5" />,
   <path d="M10.8 1.8 12.6 3.5l-1.8 1.7M5.2 14.2 3.4 12.5l1.8-1.7" />,
 );
-const I_HEART = (on) => (
-  <svg class="mi" viewBox="0 0 16 16" fill={on ? "currentColor" : "none"} stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
-    <path d="M8 13.6C4.6 11.2 1.9 8.9 1.9 6.2 1.9 4.4 3.3 3 5 3c1.2 0 2.3.6 3 1.7C8.7 3.6 9.8 3 11 3c1.7 0 3.1 1.4 3.1 3.2 0 2.7-2.7 5-6.1 7.4Z" />
-  </svg>
-);
 /** A note in a rounded square: the artwork placeholder, and the bar's stand-in thumbnail. */
 const I_NOTE = (
   <svg class="mi" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -118,6 +114,12 @@ const I_SPK = mi(
 );
 /** A plus, for the add-speaker rows that replaced the native select in the players panel. */
 const I_PLUS = mi(<path d="M8 3.5v9M3.5 8h9" />);
+/** A speaker cone with a wave, marking the bar's second row as a volume (owner's report, September
+    2026: without a label the slider read as a scrubber). Same geometry as ui.jsx's Audio glyph. */
+const I_VOL = mi(
+  <path d="M2.8 6.4h2.4L8.6 3.8v8.4L5.2 9.6H2.8z" />,
+  <path d="M11.2 6a3.1 3.1 0 0 1 0 4" />,
+);
 
 /* ------------------------------------------------------------------ */
 /* The artwork's colour                                                */
@@ -338,6 +340,9 @@ function useTiers(ha, mac, wake) {
   // kind - MA player ids on the socket, Home Assistant entity ids through the relay - which is
   // fine, because the commands below come from the same tier as the rows they act on.
   const wsMemberIds = wsOn ? (ws.me.group_members?.length ? ws.me.group_members : [ws.me.player_id]) : null;
+  // Alphabetical on both tiers (owner's request, September 2026): the socket reports members in
+  // join order and the relay in payload order, and neither order means anything to the person
+  // scanning the list for a room's name.
   const members = (
     wsOn
       ? wsMemberIds.map((id) => {
@@ -345,13 +350,16 @@ function useTiers(ha, mac, wake) {
           return [id, p?.name || id, p?.volume_level ?? -1];
         })
       : live?.g || []
-  ).filter(([id]) => !optGone.includes(id));
-  const addables = wsOn
-    ? Object.values(ws.players)
-        .filter((p) => p.available && p.player_id !== ws.me.player_id && !wsMemberIds.includes(p.player_id))
-        .map((p) => [p.player_id, p.name])
-        .sort((a, b) => a[1].localeCompare(b[1]))
-    : (disc?.c || []).filter(([id]) => !members.some((m) => m[0] === id));
+  )
+    .filter(([id]) => !optGone.includes(id))
+    .sort((a, b) => a[1].localeCompare(b[1]));
+  const addables = (
+    wsOn
+      ? Object.values(ws.players)
+          .filter((p) => p.available && p.player_id !== ws.me.player_id && !wsMemberIds.includes(p.player_id))
+          .map((p) => [p.player_id, p.name])
+      : (disc?.c || []).filter(([id]) => !members.some((m) => m[0] === id))
+  ).sort((a, b) => a[1].localeCompare(b[1]));
 
   // Group commands, aimed at whichever tier produced the rows. The socket's promise failures are
   // swallowed: the optimistic row has already moved, the next player update is the truth, and the
@@ -381,18 +389,8 @@ function useTiers(ha, mac, wake) {
     }
   };
 
-  // The favorite press has no readable echo - nothing in any payload changes when a track is
-  // favorited - so the confirmation is a moment of filled heart, which is the truth available:
-  // "sent", not "stored". On the socket it is the resolver command MA's own UI uses; through the
-  // relay it is the favorite button the MA integration creates beside the player.
-  const canLike = wsOn || !!disc?.f;
-  const [liked, setLiked] = useState(false);
-  const like = () => {
-    setLiked(true);
-    if (wsOn) ws.cmd("players/add_currently_playing_to_favorites", { player_id: ws.me.player_id }).catch(() => {});
-    else maCmd("like", { e: disc.f });
-    setTimeout(() => setLiked(false), 2500);
-  };
+  // The favorites feature lived here until September 2026, when the owner cut it app-wide: a press
+  // had no readable echo in any payload, so the heart could only ever claim "sent", never "stored".
 
   return {
     maCfg,
@@ -410,9 +408,6 @@ function useTiers(ha, mac, wake) {
     gVol,
     gUnjoin,
     gJoin,
-    canLike,
-    liked,
-    like,
   };
 }
 
@@ -504,7 +499,7 @@ function Artwork({ art, big }) {
 
 function MediaSheet({ model, tiers, tint, onClose, onPlayers }) {
   const { media, mediaCmd, sendspin, playing, active, announcing, srcParam } = model;
-  const { ws, wsOn, me, maCmd, maCfg, setMaCfg, members, canLike, liked, like } = tiers;
+  const { ws, wsOn, me, maCmd, maCfg, setMaCfg, members } = tiers;
 
   // A drawer like the players panel now (owner's request, September 2026): Escape and the
   // one-drawer rule via useDrawer, the finger-following swipe-down via useSheetDrag.
@@ -600,16 +595,9 @@ function MediaSheet({ model, tiers, tint, onClose, onPlayers }) {
             don't render; the row centres whatever remains. */}
         {showTransport && (
           <div class="mrow">
-            {showSkips && canLike && (
-              <button
-                class={`mbtn${liked ? " on" : ""}`}
-                aria-label={liked ? TEXT.media_liked : TEXT.media_like}
-                title={liked ? TEXT.media_liked : TEXT.media_like}
-                onClick={like}
-              >
-                {I_HEART(liked)}
-              </button>
-            )}
+            {/* The heart went with the whole favorites feature (owner's request, September 2026) -
+                a press had no readable echo in any payload, so the button could only ever say
+                "sent", and the owner judged it not worth the row space. */}
             {showSkips && ctrl && supHas(SUP.SHUFFLE) && (
               <button class={`mbtn${shuffle ? " on" : ""}`} aria-label="Shuffle" aria-pressed={shuffle} onClick={toggleShuffle}>
                 {I_SHUFFLE}
@@ -637,13 +625,8 @@ function MediaSheet({ model, tiers, tint, onClose, onPlayers }) {
           </div>
         )}
 
-        <div class="mvol-row">
-          <span class="dim sm">Volume</span>
-          <Vol
-            value={model.groupHeld ? media.ss_volume : media.volume}
-            onCommit={(v) => mediaCmd("volume", { v, src: srcParam })}
-          />
-        </div>
+        {/* No volume slider here (owner's request, September 2026): the bar underneath and the
+            players panel both carry one, and a third copy on this screen was clutter, not control. */}
 
         {/* The group moved to the players panel the bar's speaker button opens; this chip is the
             expanded view's way in, named for who is playing (owner's screenshot 4). */}
@@ -760,10 +743,19 @@ function PlayersPanel({ model, tiers, tint, haReady, onClose }) {
           <Hint text={HINTS.media_group} />
         </div>
 
-        <div class="mvol-row">
-          <span class="dim sm">Volume</span>
-          <Vol value={groupHeld ? media.ss_volume : media.volume} onCommit={(v) => mediaCmd("volume", { v, src: srcParam })} />
-        </div>
+        {/* The whole-group slider, present only while there is a group to speak of (owner's request,
+            September 2026): with one speaker it duplicated that speaker's own row below and the
+            bar's slider both, and "Volume" over a list of speakers read as nobody's in particular. */}
+        {members.length > 1 && (
+          <div class="mvol-row">
+            <span class="dim sm">{TEXT.media_group_volume}</span>
+            <Vol
+              value={groupHeld ? media.ss_volume : media.volume}
+              label={TEXT.media_group_volume}
+              onCommit={(v) => mediaCmd("volume", { v, src: srcParam })}
+            />
+          </div>
+        )}
 
         {/* No tier at all: the payload arrived and named no player (Home Assistant absent, actions
             off, or no Music Assistant), and no direct connection is configured. Said plainly; the
@@ -892,6 +884,7 @@ export function MediaFooter({ ha, mac }) {
           // stopPropagation on the row, not the input: a miss around the slider should not flip
           // the whole page into the expanded view mid-drag.
           <div class="mbar-vol" onClick={(e) => e.stopPropagation()}>
+            {I_VOL}
             <Vol
               value={model.groupHeld ? media.ss_volume : media.volume}
               onCommit={(v) => mediaCmd("volume", { v, src: srcParam })}

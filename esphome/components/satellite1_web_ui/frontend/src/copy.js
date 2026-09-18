@@ -129,12 +129,12 @@ export const HINTS = {
     'Timers set by voice, held on the device - they keep counting and still ring if Home Assistant goes away. Voice is also how they are managed: name one when you set it ("set a pizza timer for ten minutes"), pause or cancel it the same way.',
 
   media:
-    "What this device is playing, from either source: a group stream, or media sent to it by Home Assistant. Track skipping, shuffle, repeat and the progress bar work on group streams - media sent directly to this speaker is one URL with none of that. The volume here is the media volume; the assistant's voice has its own level, in the Assistant card on the home page.",
+    "What this device is playing, from either source: a group stream, or media sent to it by Home Assistant. Track skipping, shuffle, repeat and the progress bar work on group streams - media sent directly to this speaker is one URL with none of that. The slider on the media bar is the media volume; the assistant's voice has its own level, in the Assistant card on the home page.",
 
   // The grouped-speakers section of the expanded media view. Speaks in Music Assistant's terms
   // because grouping is its feature - the device only relays the request.
   media_group:
-    "Speakers playing this stream together, with each one's own volume. Adding a speaker asks Music Assistant to bring it into the group; removing one lets it fall silent. The big slider above moves the whole group.",
+    "Speakers playing this stream together, with each one's own volume. Adding a speaker asks Music Assistant to bring it into the group; removing one lets it fall silent. With two or more grouped, the Group volume slider moves them all together.",
 
   // The Music Assistant connection panel. What the token is, where it comes from, and where it goes -
   // which is only this browser, a fact worth stating because pasting tokens into web pages should
@@ -228,10 +228,11 @@ export const TEXT = {
   // Names the way out - the connection fold at the bottom of the expanded view, since this line
   // renders in the players panel where "below" would point at nothing.
   media_no_tiers:
-    "Grouping, favorites and seeking need Home Assistant with Music Assistant - or connect this page to your Music Assistant server from the expanded media view.",
-  // The like button's two accessible names. "Favorite" is Music Assistant's own word for it.
-  media_like: "Add to favorites",
-  media_liked: "Added to favorites",
+    "Grouping and seeking need Home Assistant with Music Assistant - or connect this page to your Music Assistant server from the expanded media view.",
+  // media_like / media_liked went with the favorites feature, cut app-wide September 2026.
+  // The players panel's whole-group slider, shown only while two or more speakers are grouped -
+  // named so it cannot be mistaken for any one speaker's row below it.
+  media_group_volume: "Group volume",
 
   /* The Music Assistant connection panel. */
   ma_title: "Music Assistant",

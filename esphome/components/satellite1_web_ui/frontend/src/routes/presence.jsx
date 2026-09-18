@@ -30,7 +30,7 @@ import { useRef, useState } from "preact/hooks";
 
 import { HINTS, PRESENCE, TEXT } from "../copy.js";
 import { RADAR_LIVE_MS, useRadar } from "../lib/device.js";
-import { Btn, Card, Empty, Hint, Missing, Row, Slider, Toggle } from "../ui.jsx";
+import { Btn, Card, Empty, Hint, Missing, N_PRES, Row, Slider, Toggle } from "../ui.jsx";
 
 /* ------------------------------------------------------------------ */
 /* The LD2450 plot                                                     */
@@ -857,7 +857,7 @@ function StatusPills({ ctx, kind, live }) {
  */
 function NoSensor() {
   return (
-    <Card title="Presence">
+    <Card title="Presence" icon={N_PRES}>
       <p class="sm">
         {TEXT.no_sensor_lead}
         <a href={TEXT.no_sensor_docs_url} target="_blank" rel="noreferrer">
@@ -882,7 +882,7 @@ export function Presence({ ctx }) {
 
   if (!ctx.device) return <Missing what="the device" />;
   // Braced, not bare JSX text: a \u escape in a text child is literal characters, not an escape.
-  if (radarKind === null) return <Card title="Presence">{"Looking for a radar module\u2026"}</Card>;
+  if (radarKind === null) return <Card title="Presence" icon={N_PRES}>{"Looking for a radar module\u2026"}</Card>;
   if (radarKind === "none") return <NoSensor />;
   if (!radarConfig) return <Missing what="A radar module" />;
 
@@ -905,6 +905,7 @@ export function Presence({ ctx }) {
           worth having in a product with microphones in it: people assume presence is heard, not sensed. */}
       <Card
         title={is2450 ? "LD2450" : "LD2410"}
+        icon={N_PRES}
         hint={HINTS.presence}
         right={
           // Lit only while this route is mounted, which is also exactly when polling happens - so the

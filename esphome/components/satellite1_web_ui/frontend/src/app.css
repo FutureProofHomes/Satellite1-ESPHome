@@ -25,13 +25,18 @@
 
 :root,
 [data-theme="light"] {
-  --bg: #f2f4f7;
+  /* The neutrals lean a few degrees toward the accent's blue rather than sitting at true grey
+     (owner's request, September 2026 - light mode read as bare white). Hue ~210 at 25-40%
+     saturation: enough that the page has a temperature, not enough to register as a colour.
+     --bg-elev stays pure white on purpose - the fg tier contrast figures below were measured
+     against white cards and stay valid only while the cards stay white. */
+  --bg: #eef3f8;
   --bg-elev: #ffffff;
-  --bg-sunk: #f7f8fa;
-  --fill: #f0f2f5;
-  --fill-2: #e6e9ee;
-  --line: #e6e9ee;
-  --line-2: #d5dae1;
+  --bg-sunk: #f4f7fa;
+  --fill: #ecf1f6;
+  --fill-2: #e1e8ef;
+  --line: #e1e8ef;
+  --line-2: #cfd9e3;
   --fg: #12171d;
   --fg-2: #414a56;
   /* These three are a shade darker than they look like they want to be. On a white card the obvious
@@ -82,13 +87,16 @@
 }
 
 [data-theme="dark"] {
-  --bg: #111418;
+  /* The same blue lean as light's neutrals, deepened a notch - dark was already slate rather than
+     true grey, so these move less. --bg-elev holds still for the same reason light's does: the fg
+     tiers were measured against it. */
+  --bg: #0f151c;
   --bg-elev: #1c2026;
-  --bg-sunk: #0b0e11;
-  --fill: #262b33;
-  --fill-2: #313842;
-  --line: #262b33;
-  --line-2: #39414c;
+  --bg-sunk: #090e14;
+  --fill: #232b36;
+  --fill-2: #2d3946;
+  --line: #232b36;
+  --line-2: #35424f;
   --fg: #eaeef3;
   --fg-2: #b9c2cd;
   --fg-3: #8b95a3;
@@ -154,6 +162,10 @@
      bottom offset = 102, then a few px of slack so a line-height change cannot quietly put the last
      card's button under the bar. */
   --mbar-h: 110px;
+  /* One width for all three drawers - the media view, the players panel and the device switcher.
+     The switcher and the panel already agreed on 480px; the media drawer spanned the whole viewport,
+     which on a desktop made it the odd one out of a set that should read as one family. */
+  --drawer-w: 480px;
 }
 
 * {
@@ -163,11 +175,34 @@
 html,
 body {
   margin: 0;
-  background: var(--bg);
   color: var(--fg);
   font: var(--t-l) / 1.5 Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
+}
+/* The page colour lives on html alone - body stays transparent so the ambient wash below can slot
+   between the canvas and the content. When body also painted --bg, a negative-z-index layer had
+   nothing to show through: it sat above the canvas but under body's own opaque background. */
+html {
+  background: var(--bg);
+}
+/* The ambient wash: .login-glow's soft accent radial, generalised to the whole app - the answer to
+   both themes reading as bare grey the moment no music is playing. A fixed pseudo-element rather
+   than a canvas background image because iOS ignores background-attachment: fixed; negative
+   z-index keeps it behind every card while html's background keeps it off the bare canvas. At this
+   opacity it is atmosphere, not a surface - nothing sits on it, so no contrast budget is spent. */
+body::before {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  top: -180px;
+  left: 50%;
+  width: 640px;
+  height: 540px;
+  transform: translateX(-50%);
+  background: radial-gradient(closest-side, var(--accent), transparent 72%);
+  opacity: 0.07;
+  pointer-events: none;
 }
 
 a {
@@ -617,7 +652,7 @@ html.held body {
    and width cap, and the grab handle at the edge it dismisses toward. Capped in height and
    scrolling its own overflow (contained, so a long roster cannot hand its scroll to the page). */
 .sheet {
-  max-width: 480px;
+  max-width: var(--drawer-w);
   max-height: 82vh;
   margin: 0 auto;
   padding: calc(var(--s-1) + env(safe-area-inset-top)) var(--s-4) 0;
@@ -729,6 +764,25 @@ html.held body {
 .card > h2 > span:first-child {
   flex: none;
 }
+/* The colour anchor on each route's top card: the route's own drawn glyph in a circle of the accent
+   tint. --accent-bg rather than a translucent accent for the same reason that token exists at all -
+   a stated colour cannot drift with what is behind it. One per page, on purpose: a chip on every
+   card would be wallpaper, one on the first is a landmark. */
+.cico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: var(--r-pill);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+.cico .ni {
+  width: 15px;
+  height: 15px;
+}
 .card-right {
   margin-left: auto;
   display: flex;
@@ -815,6 +869,23 @@ html.held body {
      the readings should out-shout their labels. */
   font-size: var(--t-2xl);
   font-weight: 600;
+}
+/* The brand gradient on the display-size readings - the Device card's facts and the timers'
+   countdown. Texture, never a control's face, same rule as the drawer bar and slider fills; two
+   appearances was scarce enough to read as an accident rather than a signature. Excluded wherever
+   another colour is the message: a warn/err tone on a fact, or a finished timer's dim - a
+   transparent text-fill would swallow both. */
+.fact-value:not(.t-warn):not(.t-err):not(.t-ok),
+.lg:not(.dim) {
+  background: var(--grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+/* text-fill-color inherits, so the dim unit span must win its fill back or it vanishes into the
+   parent's gradient. */
+.fact-value .fact-unit {
+  -webkit-text-fill-color: var(--fg-3);
 }
 .fact-unit {
   font-size: var(--t-xs);
@@ -1849,6 +1920,15 @@ polyline.draft {
 }
 .mbar[style] {
   border-color: transparent;
+  /* The bleed: while the bar wears an album's colour, that colour spills onto the page around it as
+     a soft halo. A tinted box-shadow rather than a blurred pseudo-element, for two reasons: a
+     ::before reaching past the bar would extend the bar's tap area with it (pseudo-elements hit-test
+     as their origin element, and pointer-events on them is not dependable), and box-shadow is
+     animatable, so the halo rides the same 400ms crossfade as the tint itself. The theme shadow
+     stays underneath so the bar keeps its lift even on a pale album. */
+  box-shadow:
+    0 2px 44px 2px color-mix(in srgb, var(--tint) 55%, transparent),
+    0 6px 20px var(--shadow);
 }
 .mbar .dim {
   color: var(--tdim, var(--fg-3));
@@ -1869,11 +1949,23 @@ polyline.draft {
   text-align: left;
   cursor: pointer;
 }
-/* The bar's own volume row, sliding the same command the expanded view's does. */
+/* The bar's own volume row, sliding the same command the players panel's group slider does. */
 .mbar-vol {
   display: flex;
+  align-items: center;
+  gap: var(--s-1);
   cursor: default;
   --sl: var(--tfg, var(--accent));
+}
+/* The speaker glyph naming the row: without it the slider read as a scrubber (owner's report,
+   September 2026). The generic .mi centres itself with auto margins for the transport row; here
+   that would fling the glyph to the middle, so they come off. */
+.mbar-vol > .mi {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  margin: 0;
+  color: var(--tdim, var(--fg-3));
 }
 /* The speaker button, its badge carrying the group's size - members including this device. */
 .mspk {
@@ -1955,6 +2047,11 @@ polyline.draft {
   left: 0;
   right: 0;
   bottom: 0;
+  /* The drawers' shared width (--drawer-w): this one spanned the whole viewport while its two
+     siblings stopped at 480px, so on anything wider than a phone the family broke. left/right 0
+     plus auto margins is what centres a fixed element. */
+  max-width: var(--drawer-w);
+  margin: 0 auto;
   top: calc(env(safe-area-inset-top) + 16px);
   z-index: 40;
   display: flex;
@@ -1991,7 +2088,8 @@ polyline.draft {
   align-items: center;
   gap: var(--s-3);
   padding: var(--s-4) var(--s-4) calc(var(--s-5) + env(safe-area-inset-bottom));
-  max-width: 480px;
+  /* No max-width of its own any more: the drawer itself is capped at --drawer-w, so the 480px this
+     carried became dead weight against the byte budget. */
   width: 100%;
   margin: 0 auto;
   box-sizing: border-box;
@@ -2255,7 +2353,7 @@ polyline.draft {
   display: flex;
   flex-direction: column;
   gap: var(--s-2);
-  max-width: 480px;
+  max-width: var(--drawer-w);
   max-height: 75vh;
   margin: 0 auto;
   padding: var(--s-1) var(--s-4) calc(var(--s-4) + env(safe-area-inset-bottom));
@@ -2493,13 +2591,15 @@ polyline.draft {
   }
   /* The artwork tint: a track change repaints the bar, sheet and panel in the new record's colour,
      and a 400ms fade makes that a moment instead of a glitch. Colour only - layout never moves,
-     except the drawers' transform, which is the swipe spring-back. */
+     except the drawers' transform, which is the swipe spring-back. box-shadow is in the list for
+     the bar's tinted halo, which should fade with the colour it belongs to. */
   .mbar,
   .msheet,
   .mpanel {
     transition:
       background-color 0.4s ease,
       color 0.4s ease,
+      box-shadow 0.4s ease,
       transform 0.18s ease;
   }
   /* An expanding area's players rise in like everything else; collapse stays instant, because the
