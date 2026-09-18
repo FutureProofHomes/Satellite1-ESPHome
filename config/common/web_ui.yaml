@@ -4,10 +4,34 @@
 # Until now nothing in config/ declared web_server:. The radar tuner ran its own esp_http_server on
 # port 80 behind the "Radar Tuner WebUI" switch, and satellite1_radar faked USE_WEBSERVER so Home
 # Assistant would offer a "Visit device" link to it. This file replaces all of that with the real
-# component, which the tuner is now a handler on and which the on-device web app will build on.
+# component, which the tuner is now a handler on and which the on-device web app builds on.
 #
-# Turning it on hands the network every entity this device has, so read the auth notes below before
-# changing anything here.
+# A note on the port and iOS, because it was chased in the wrong direction once and the record should
+# save the next person the trip. The server is on 80.
+#
+# iOS Safari, with iCloud Private Relay on, shows a full-page "This Connection Is Not Private"
+# interstitial before it will connect to some cleartext-HTTP destinations. It looks like an HTTP or a
+# port problem and is neither: the trigger is that the destination is on a *different subnet from the
+# iPhone*. Private Relay leaves the phone's own local subnet alone and engages for everything else,
+# and for off-subnet cleartext HTTP to a private IP it cannot protect, it warns. Pinned down on
+# hardware: with the device and Home Assistant on the same port and scheme, HA (same subnet as the
+# phone) loaded clean while the device (on an IoT VLAN) warned - IP or .local made no difference, and
+# neither did moving the port from 80 to 8080 to 8123. Nothing the server does can change it, because
+# the interstitial is shown before any byte is exchanged. So the port earns nothing by being unusual,
+# and 80 is the friendlier choice - http://<device>/ with no port to type. The real fixes for a
+# segmented network are documented in docs/web-ui.md: turn off "Limit IP Address Tracking" for that
+# Wi-Fi, put the phone on the device's subnet, or front the device with an HTTPS reverse proxy.
+#
+# No auth: block. Authentication moved into satellite1_web_ui's session gate: browsers sign in once
+# - password, or a press of the action button, or a spoken challenge - and hold a 90-day cookie, so
+# iOS stops demanding credentials on every visit (it never saves HTTP-auth logins). The same
+# username and password still work as HTTP digest for curl and scripts; the gate checks them
+# itself. Do not re-add an auth: block: web_server_base would wrap every handler in a digest
+# middleware *behind* the cookie check and lock every signed-in browser out. The component's config
+# validation refuses it with this explanation.
+#
+# Turning the server on hands the network every entity this device has, so read the notes below
+# before changing anything here.
 ####################################################################################################
 
 substitutions:
@@ -21,10 +45,9 @@ substitutions:
   web_ui_password: ""
 
 globals:
-  # Owns the password's storage for the life of the process. WebServerBase::Credentials holds a
-  # bare const char*, and its own comment says "All fields point to string literals in generated
-  # code; nothing is copied" - so whatever we hand set_auth_password() has to outlive every request,
-  # which rules out a local. Never assigned after the on_boot block, so c_str() stays valid.
+  # Owns the password's storage for the life of the process. The session gate copies what it is
+  # handed, but this global is also what the Web UI Password sensor publishes from, and keeping one
+  # authoritative copy beats reasoning about two. Never assigned after the on_boot block.
   - id: web_ui_password_value
     type: std::string
     restore_value: true
@@ -79,12 +102,13 @@ esphome:
               id(web_ui_password_value) = generated;
             }
 
-            // A plain setter on WebServerBase, and AuthMiddlewareHandler reads the credentials
-            // through a pointer on every request, so installing it here rather than at codegen is
-            // enough. The username cannot move: Credentials::is_set() tests it at the moment a
-            // handler is added, and that decides whether the handler is wrapped in auth at all.
-            web_server_base::global_web_server_base->set_auth_password(
-                id(web_ui_password_value).c_str());
+            // To the session gate, not to web_server_base: the gate owns authentication now -
+            // cookie sessions for browsers, the same digest check for curl and scripts - and
+            // web_server_base must never see a username, because Credentials::is_set() is what
+            // decides whether later handlers get wrapped in the digest middleware the gate
+            // replaces. Priority 600 puts this after the restore above and before the gate
+            // computes its session token at setup priority 250.
+            id(web_ui_app)->set_credentials("${web_ui_username}", id(web_ui_password_value));
             id(web_ui_password_text).publish_state(id(web_ui_password_value));
 
     # The on-demand listener. 200 runs after WebServer::setup() has taken web_server_base's one
@@ -104,6 +128,9 @@ esphome:
 
 web_server:
   id: web_ui_server
+  # 80, the default HTTP port, so the app is reached at a bare http://<device>/ with no port to type.
+  # The port does not affect the iOS Private Relay interstitial (see the header); there is no reason
+  # to serve anywhere else.
   port: 80
 
   # Version 2 rather than 3 (900KB of embedded frontend) or 1 (deprecated, removed in 2027.1.0).
@@ -125,17 +152,9 @@ web_server:
   # is attack surface with nothing behind it.
   ota: false
 
-  auth:
-    username: ${web_ui_username}
-
-    # Replaced in the on_boot block above, before the listener starts. It has to be non-empty here
-    # because the schema requires it, and it has to be something that could never be a real
-    # generated password - the generator's alphabet has no hyphens.
-    password: "placeholder-replaced-at-boot"
-
-    # Basic sends the password in an easily reversible form on every one of the tuner's two polls a
-    # second. Digest does not, costs an MD5 per request, and becomes ESPHome's default in 2027.1.0.
-    type: digest
+  # No auth: block, deliberately - see the header. The session gate in satellite1_web_ui fronts
+  # every handler on this server, including the entity REST API and /events, and speaks both cookie
+  # sessions and the old digest credentials.
 
 # The on-device web app. Registers at setup_priority::WIFI (250) so it lands ahead of web_server
 # (WIFI - 1.0f = 249) in web_server_base's handler vector and answers "/" instead of ESPHome's own
@@ -173,6 +192,93 @@ satellite1_web_ui:
   # common/sendspin.yaml beside the player it points at; the endpoints prefer that one while it is
   # playing.
   media_player_id: external_media_player
+
+  # Whether a voice approval could be heard right now, read when a pairing window opens. Only the
+  # hardware mute slider counts: it is the one mute software cannot clear, so it alone forces a
+  # button-only window (and the login page says so, from the poll's hw flag). A software mute is no
+  # obstacle - the window-open handler below lifts it before announcing, on the reasoning that a
+  # person asking for voice sign-in has answered the question of whether the device may speak.
+  login_mic_available: !lambda "return !id(btn_left).state;"
+
+  # The pairing window opening: LED on, then the mode's announcement. The scripts live in
+  # common/web_ui_login.yaml. `mode` is button/code/seq; `secret` is the spoken code's digits, or
+  # the challenge sequence as symbol indices ("012" = Hey Jarvis, Okay Nabu, Stop). The secret
+  # exists only here and as audio in the room - the browser that asked never sees it, which is what
+  # makes saying it back proof of presence.
+  on_login_window:
+    - lambda: id(login_window_active) = true;
+    - script.execute: control_leds
+    # A software mute would swallow the announcement and the reply alike. Lift it for voice
+    # windows - and remember that we did, because the close handler below puts it back. The mute
+    # was somebody's deliberate choice, and the request that opens a window is unauthenticated by
+    # design, so the lift must never outlive the window it served. The guard inside turn_on/
+    # turn_off means this cannot fight the hardware slider (and a hardware-muted device never
+    # reaches here with a voice mode anyway).
+    - if:
+        condition:
+          and:
+            - lambda: return mode != "button";
+            - switch.is_on: master_mute_switch
+        then:
+          - lambda: 'id(login_lifted_mute) = true;'
+          - switch.turn_off: master_mute_switch
+    - if:
+        condition:
+          lambda: return mode == "code";
+        then:
+          # Stash the code for every re-prompt, then speak-and-listen in one action.
+          - lambda: 'id(login_code_value) = secret;'
+          - script.execute: login_code_converse
+    - if:
+        condition:
+          lambda: return mode == "seq";
+        then:
+          - script.execute:
+              id: login_announce_seq
+              seq: !lambda return secret;
+
+  # The window closing, whatever closed it. Stop whatever stage the announcement machinery was in,
+  # hand the wake models back (see login_models_restore for the ringing-timer edge), and say how it
+  # went: green sweep and the press chime for an approval, the warning pulses for a denial, and a
+  # quiet return to normal for a window that simply ran out.
+  on_login_window_end:
+    - lambda: id(login_window_active) = false;
+    - script.stop: login_code_converse
+    - script.stop: login_announce_seq
+    - script.stop: login_code_relisten
+    - script.execute: login_models_restore
+    # The software mute goes back exactly as the open handler found it. Whatever ended the window
+    # - approval included - the mute predates the sign-in and outlives it; the signed-in user can
+    # unmute from the app, with a session to their name.
+    - if:
+        condition:
+          lambda: 'return id(login_lifted_mute);'
+        then:
+          - lambda: 'id(login_lifted_mute) = false;'
+          - switch.turn_on: master_mute_switch
+    - if:
+        condition:
+          lambda: return result == "approved";
+        then:
+          - script.execute:
+              id: play_sound
+              priority: true
+              sound_file: "center_button_press_sound"
+          - light.turn_on:
+              id: voice_assistant_leds
+              brightness: 66%
+              effect: "Success"
+          - delay: 1500ms
+          - script.execute: control_leds
+        else:
+          - if:
+              condition:
+                lambda: return result == "denied";
+              then:
+                # The warning global drives five red pulses through control_leds and clears itself
+                # there, exactly as tts_call_flash uses it.
+                - lambda: id(warning) = true;
+          - script.execute: control_leds
 
   # Which entity backs which control in the app.
   #

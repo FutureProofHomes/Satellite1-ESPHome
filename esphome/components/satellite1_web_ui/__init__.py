@@ -1,5 +1,6 @@
 import gzip
 import hashlib
+import json
 import logging
 from pathlib import Path
 
@@ -27,8 +28,9 @@ from esphome.components.sendspin import (
     request_metadata_support,
 )
 from esphome.components.voice_assistant import VoiceAssistant
+from esphome.components.web_server_base import CONF_WEB_SERVER_BASE_ID, WebServerBase
 from esphome.const import CONF_ID, Framework
-from esphome.core import HexInt
+from esphome.core import CORE, HexInt
 import esphome.final_validate as fv
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,7 +51,14 @@ MULTI_CONF = False
 
 CONF_INDEX_ID = "index_id"
 CONF_NO_SENSOR_ID = "no_sensor_id"
+CONF_MANIFEST_ID = "manifest_id"
+CONF_ICON_192_ID = "icon_192_id"
+CONF_ICON_512_ID = "icon_512_id"
+CONF_ICON_180_ID = "icon_180_id"
 CONF_ENTITIES = "entities"
+CONF_LOGIN_MIC_AVAILABLE = "login_mic_available"
+CONF_ON_LOGIN_WINDOW = "on_login_window"
+CONF_ON_LOGIN_WINDOW_END = "on_login_window_end"
 CONF_MICRO_WAKE_WORD_ID = "micro_wake_word_id"
 CONF_VOICE_ASSISTANT_ID = "voice_assistant_id"
 CONF_VOICE_PHASE = "voice_phase"
@@ -128,7 +137,24 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(): cv.declare_id(Satellite1WebUI),
             cv.GenerateID(CONF_INDEX_ID): cv.declare_id(cg.uint8),
             cv.GenerateID(CONF_NO_SENSOR_ID): cv.declare_id(cg.uint8),
+            cv.GenerateID(CONF_MANIFEST_ID): cv.declare_id(cg.uint8),
+            cv.GenerateID(CONF_ICON_192_ID): cv.declare_id(cg.uint8),
+            cv.GenerateID(CONF_ICON_512_ID): cv.declare_id(cg.uint8),
+            cv.GenerateID(CONF_ICON_180_ID): cv.declare_id(cg.uint8),
+            # The shared server the session gate registers on. Resolved with use_id so codegen
+            # orders web_server_base's construction ahead of the registration statement.
+            cv.GenerateID(CONF_WEB_SERVER_BASE_ID): cv.use_id(WebServerBase),
             cv.Optional(CONF_ENTITIES, default={}): _ENTITIES_SCHEMA,
+            # Whether the microphones could hear a voice approval right now, read when a pairing
+            # window opens. From YAML because only YAML knows which entities mean "muted" on this
+            # build; without it every window opens button-only.
+            cv.Optional(CONF_LOGIN_MIC_AVAILABLE): cv.returning_lambda,
+            # The pairing window's lifecycle, for the announcement, the LED breathe and the model
+            # arming. Open fires with (mode, secret); end fires with (result). Both optional so a
+            # build without the YAML wiring still compiles - windows then open and close silently,
+            # approvable by the button alone.
+            cv.Optional(CONF_ON_LOGIN_WINDOW): automation.validate_automation(single=True),
+            cv.Optional(CONF_ON_LOGIN_WINDOW_END): automation.validate_automation(single=True),
             # Timers and the assistant's phase have no entity to read them from: get_timers() is a
             # plain vector on the component, and the phase is a `globals:` int that config/ already
             # maintains through the existing on_listening / on_stt_vad_* triggers. Both optional so
@@ -214,6 +240,19 @@ def _final_validate(config):
             "'web_server:' must set 'include_internal: true'."
         )
 
+    # The session gate owns authentication now: cookie sessions for browsers, with the same digest
+    # check as the curl/script fallback. A web_server auth: block would install credentials on
+    # web_server_base, which wraps every later handler in AuthMiddlewareHandler - putting a digest
+    # prompt behind the gate's cookie check and breaking every signed-in browser. Refused here,
+    # where the error can say what to do instead.
+    if web_server.get("auth") is not None:
+        raise cv.Invalid(
+            "satellite1_web_ui provides cookie-session authentication with a digest fallback, "
+            "so 'web_server:' must not carry an 'auth:' block. Hand the credentials to "
+            "satellite1_web_ui via set_credentials() at boot instead - see "
+            "config/common/web_ui.yaml."
+        )
+
     return config
 
 
@@ -223,6 +262,42 @@ FINAL_VALIDATE_SCHEMA = _final_validate
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
+
+    # The session gate registers from generated code, not from setup(). Codegen statements all run
+    # before any component's setup(), so the gate lands at position 0 of web_server_base's handler
+    # vector - ahead of satellite1_radar (which registers at setup priority 800), ahead of this
+    # component's own handler (250), ahead of web_server (249). First position is what makes it a
+    # gate, and init() replays the vector in order, so it survives the Web UI switch's listener
+    # restarts. The get_variable is what orders web_server_base's construction ahead of this.
+    await cg.get_variable(config[CONF_WEB_SERVER_BASE_ID])
+    cg.add(var.register_session_gate())
+
+    # The gate's digest fallback calls request->authenticate(), which only exists under these
+    # defines - web_server used to add them from its auth: block, which this design removes.
+    # Digest specifically, because that is what the config shipped with ('type: digest') and what
+    # every existing curl invocation and tuner script already speaks.
+    cg.add_define("USE_WEBSERVER_AUTH")
+    cg.add_define("USE_WEBSERVER_AUTH_DIGEST")
+
+    if CONF_LOGIN_MIC_AVAILABLE in config:
+        mic = await cg.process_lambda(
+            config[CONF_LOGIN_MIC_AVAILABLE], [], return_type=cg.bool_
+        )
+        cg.add(var.set_login_mic_available(mic))
+
+    if CONF_ON_LOGIN_WINDOW in config:
+        await automation.build_automation(
+            var.get_login_window_trigger(),
+            [(cg.std_string, "mode"), (cg.std_string, "secret")],
+            config[CONF_ON_LOGIN_WINDOW],
+        )
+
+    if CONF_ON_LOGIN_WINDOW_END in config:
+        await automation.build_automation(
+            var.get_login_window_end_trigger(),
+            [(cg.std_string, "result")],
+            config[CONF_ON_LOGIN_WINDOW_END],
+        )
 
     # Sorted so the generated code, and the JSON the device serves, are stable across builds
     # regardless of how the YAML happens to be ordered.
@@ -348,3 +423,39 @@ async def to_code(config):
     webp = _NO_SENSOR.read_bytes()
     no_sensor = cg.progmem_array(config[CONF_NO_SENSOR_ID], tuple(map(HexInt, webp)))
     cg.add(var.set_no_sensor_image(no_sensor, len(webp)))
+
+    # The PWA surface: home-screen icons committed as artifacts (like the photo above, so the CI
+    # drift check compares reviewed bytes), and a manifest rendered here because it carries the
+    # device's friendly name, which only codegen knows. Colors are the app's dark theme tokens
+    # from frontend/src/app.css - the icons are drawn on the same background, so the home screen,
+    # the splash and the app agree. iOS reads none of this (it wants the apple-touch-icon and the
+    # meta tags in index.html); the manifest is for Chrome's add-to-home-screen path.
+    manifest = json.dumps(
+        {
+            "name": CORE.friendly_name or CORE.name or "Satellite1",
+            "short_name": "Satellite1",
+            "start_url": "/",
+            "display": "standalone",
+            "background_color": "#111418",
+            "theme_color": "#111418",
+            "icons": [
+                {"src": "/ui/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                {"src": "/ui/icon-512.png", "sizes": "512x512", "type": "image/png"},
+            ],
+        },
+        separators=(",", ":"),
+    ).encode()
+    manifest_arr = cg.progmem_array(config[CONF_MANIFEST_ID], tuple(map(HexInt, manifest)))
+    cg.add(var.set_manifest(manifest_arr, len(manifest)))
+
+    for which, conf_key, name in (
+        (0, CONF_ICON_192_ID, "icon_192.png"),
+        (1, CONF_ICON_512_ID, "icon_512.png"),
+        (2, CONF_ICON_180_ID, "icon_180.png"),
+    ):
+        icon_path = Path(__file__).parent / "assets" / name
+        if not icon_path.is_file():
+            raise cv.Invalid(f"The web app icon is missing at {icon_path}.")
+        png = icon_path.read_bytes()
+        arr = cg.progmem_array(config[conf_key], tuple(map(HexInt, png)))
+        cg.add(var.set_icon(which, arr, len(png)))

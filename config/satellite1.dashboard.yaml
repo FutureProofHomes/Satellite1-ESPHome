@@ -10,11 +10,14 @@ substitutions:
   ## Leave these commented out and each Satellite1 invents its own password on first boot and
   ## publishes it as the "Web UI Password" diagnostic sensor in Home Assistant. Set them here and
   ## every device built from this config shares one login, which is what you want once you have
-  ## more than one - browsers scope these credentials per device, so ten Satellite1s otherwise
-  ## mean ten different passwords to look up.
+  ## more than one - sessions are scoped per device, so ten Satellite1s otherwise mean ten
+  ## different passwords to look up. Most sign-ins never type it: the login page can ask the
+  ## device itself for approval - a press of the action button, or a spoken challenge - and a
+  ## browser that signs in once stays signed in for 90 days.
   ##
   ## Changing these later is safe. The username is fixed at build time; the password is applied
-  ## at every boot, so a new one takes effect as soon as the device restarts.
+  ## at every boot, so a new one takes effect as soon as the device restarts - and with it, every
+  ## signed-in browser is signed out.
   # web_ui_username: satellite1
   # web_ui_password: !secret web_ui_password
 

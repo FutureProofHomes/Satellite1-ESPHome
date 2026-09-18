@@ -300,6 +300,15 @@ light:
           min_brightness: 50%
           max_brightness: 100%
 
+      # The web sign-in pairing window: a slow, soft breathe, unhurried on purpose - it has to read
+      # as "waiting for you" from across a room for up to a minute without becoming an alarm.
+      - pulse:
+          name: "Breathe"
+          transition_length: 1400ms
+          update_interval: 1500ms
+          min_brightness: 12%
+          max_brightness: 80%
+
       - addressable_lambda:
           name: "Timer Ring"
           update_interval: 10ms
@@ -489,6 +498,12 @@ script:
             id(control_leds_warning).execute();
           } else if (id(timer_ringing).state) {
             id(control_leds_timer_ringing).execute();
+          } else if (id(login_window_active)) {
+            // A web sign-in is waiting for its button press or voice answer. Below mute, timers
+            // and the warning states, which all say something more urgent than "someone is
+            // logging in" - and above the assistant phases, so the breathe holds steady through
+            // the spoken-code pipeline instead of flickering between animations mid-answer.
+            id(control_leds_login_window).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_waiting_for_command_phase_id}) {
             id(control_leds_voice_assistant_waiting_for_command_phase).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_listening_for_command_phase_id}) {
@@ -688,6 +703,19 @@ script:
           brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.2f );
           id: voice_assistant_leds
           effect: "Jack Plugged"
+
+  # Script executed while a web sign-in pairing window is open
+  # A slow breathe in the app's accent blue, whatever color the ring is otherwise set to - the
+  # login page tells the user to look for it, so it has to look the same on every device.
+  - id: control_leds_login_window
+    then:
+      - light.turn_on:
+          brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.25f );
+          red: 1.2%
+          green: 66%
+          blue: 96%
+          id: voice_assistant_leds
+          effect: "Breathe"
 
   # Script executed when the center button is touched
   # The complete LED ring turns on

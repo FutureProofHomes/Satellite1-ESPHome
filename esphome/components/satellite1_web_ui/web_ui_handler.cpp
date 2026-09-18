@@ -115,6 +115,16 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
     return Route::INDEX;
   if (url == "/ui/no-sensor.webp")
     return Route::ASSET_NO_SENSOR;
+  // The PWA surface. All exempt in the session gate, because a browser needs them before it has a
+  // session - iOS fetches the touch icon at add-to-home-screen time with no cookies at all.
+  if (url == "/manifest.webmanifest")
+    return Route::MANIFEST;
+  if (url == "/ui/icon-192.png")
+    return Route::ICON_192;
+  if (url == "/ui/icon-512.png")
+    return Route::ICON_512;
+  if (url == "/apple-touch-icon.png")
+    return Route::ICON_180;
   if (url == "/api/sat1/state")
     return Route::STATE;
   if (url == "/api/sat1/ha")
@@ -156,8 +166,13 @@ bool WebUIHandler::route_streams_(Route route) {
       return true;
     case Route::NONE:
     case Route::INDEX:
-    // The image is PROGMEM like the bundle, so it too answers without heap.
+    // The image is PROGMEM like the bundle, so it too answers without heap - and so are the
+    // manifest and the icons.
     case Route::ASSET_NO_SENSOR:
+    case Route::MANIFEST:
+    case Route::ICON_192:
+    case Route::ICON_512:
+    case Route::ICON_180:
     case Route::HA:
     case Route::HA_REFRESH:
     case Route::HA_SELECT:
@@ -224,6 +239,18 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
       break;
     case Route::ASSET_NO_SENSOR:
       this->handle_no_sensor_(request);
+      break;
+    case Route::MANIFEST:
+      this->handle_pwa_asset_(request, this->manifest_, this->manifest_len_, "application/manifest+json");
+      break;
+    case Route::ICON_192:
+      this->handle_pwa_asset_(request, this->icons_[0], this->icon_lens_[0], "image/png");
+      break;
+    case Route::ICON_512:
+      this->handle_pwa_asset_(request, this->icons_[1], this->icon_lens_[1], "image/png");
+      break;
+    case Route::ICON_180:
+      this->handle_pwa_asset_(request, this->icons_[2], this->icon_lens_[2], "image/png");
       break;
     case Route::STATE:
       this->handle_state_(request);
@@ -1461,6 +1488,20 @@ void WebUIHandler::handle_no_sensor_(AsyncWebServerRequest *request) {
   request->send(response);
 }
 
+/// The manifest and the icons, the photo's exact recipe: PROGMEM, a day of cache, and no gzip layer
+/// (PNG is already compressed; the manifest is a few hundred bytes and not worth a second ETag
+/// dance).
+void WebUIHandler::handle_pwa_asset_(AsyncWebServerRequest *request, const uint8_t *data, size_t len,
+                                     const char *type) {
+  if (data == nullptr || len == 0) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  auto *response = request->beginResponse(200, type, data, len);
+  response->addHeader("Cache-Control", "max-age=86400");
+  request->send(response);
+}
+
 #ifdef USE_VOICE_ASSISTANT
 
 void WebUIHandler::push_utterance(const std::string &text, bool heard) {
@@ -1573,6 +1614,16 @@ void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
 #else
   stream->print(R"("ha":false,)");
 #endif
+
+  // The sign-in key, for the Diagnostics Launch section's link and QR code. Safe to carry here
+  // because this endpoint sits behind the session gate: whoever can read it already holds a
+  // session minted from the same value. Re-read per request so a regenerate shows up on the next
+  // poll rather than the next reboot.
+  if (this->session_key_fn_) {
+    const char *key = this->session_key_fn_();
+    if (key != nullptr && key[0] != '\0')
+      stream->printf(R"("key":"%s",)", key);
+  }
 
   stream->printf(R"("heap":{"free":%zu,"total":%zu,"block":%zu},)", internal.total_free_bytes,
                  internal.total_free_bytes + internal.total_allocated_bytes, internal.largest_free_block);

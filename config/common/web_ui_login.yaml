@@ -1,0 +1,271 @@
+# The device side of the web app's sign-in-by-presence flow. The session gate in satellite1_web_ui
+# owns the window itself (who asked, what the secret is, what approves it); this file owns
+# everything with a speaker, a microphone or an LED in it: announcing the spoken code through Home
+# Assistant, speaking the offline challenge from embedded clips, opening the mic for the code, and
+# handing the wake models back afterwards. The dispatch lives on the component block in
+# common/web_ui.yaml; these are the scripts it calls.
+#
+# The two voice modes, and why they differ:
+#
+# Online (mode "code"): Home Assistant is connected, so the device announces a random four-digit
+# code through its own assist_satellite entity and opens the mic. The transcript comes back through
+# on_stt_end in common/voice_assistant.yaml, which offers it to the gate before anything else sees
+# it - a match approves the window, and either way the pipeline is stopped so the code never
+# reaches the conversation agent, and the utterance never reaches the app's Voice card.
+#
+# Offline (mode "seq"): no Home Assistant means no TTS and no STT, so the challenge is built from
+# what the firmware can say and hear on its own. The three compiled wake models - Hey Jarvis, Okay
+# Nabu and the internal "stop" - are a three-symbol alphabet; the gate picks a random three-symbol
+# sequence and this file speaks it from clips embedded at build time (config/sounds/, synthesized
+# text-to-speech). The models stay disabled while the clips play, so the device cannot hear its own
+# challenge and approve itself; they arm afterwards, and every firing during the window is consumed
+# as a symbol by the hook in voice_assistant.yaml instead of starting the assistant. The gate
+# judges the answer only after eight seconds of silence, as an exact sequence where overshooting
+# fails - which is what makes counting upward through the answer worthless.
+
+globals:
+  # What the LED chain reads: true from window open to window close, driving the breathe effect in
+  # common/led_ring.yaml at a priority below mute, timers and the ring's warning states.
+  - id: login_window_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  # The current window's spoken code, stored when the window opens so every re-prompt can rebuild
+  # the same message. It lives here rather than being passed as a script parameter because the
+  # re-arm is fired from the voice assistant's on_end, which has no parameter to carry it.
+  - id: login_code_value
+    type: std::string
+    restore_value: no
+
+  # Why the next prompt is happening: false means a fresh window or a listen that heard nothing
+  # (repeat the welcome), true means the gate rejected a spoken attempt (say so, then repeat the
+  # code - the same code; a wrong guess must not reroll the answer). Set by on_stt_end in
+  # common/voice_assistant.yaml, read and cleared by login_code_converse. A global rather than a
+  # parameter because the two re-arm paths (on_stt_end and the assistant's on_end) both fire after
+  # a mismatch and the later one would overwrite a parameter with its own idea of why.
+  - id: login_code_retry
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  # Whether the window-open handler in common/web_ui.yaml lifted the software mute to run a voice
+  # mode, so the window-close handler can put it back. The lift is temporary by design: the person
+  # who muted the device decided it, and an unauthenticated sign-in request must not be able to
+  # override that decision beyond the window it needed the microphone for.
+  - id: login_lifted_mute
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  # Whether login_announce_seq has touched the wake models, and what it found before it did. The
+  # restore script puts these exact states back, with one exception the comment there explains.
+  - id: login_models_armed
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: login_prior_jarvis
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: login_prior_nabu
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: login_prior_stop
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+# The offline challenge's voice, embedded at build time like every other device sound. Local files
+# rather than the S3 bucket the other sounds use, because the challenge words and the wake models
+# they must match are pinned by this repository, not by an asset server - a re-recorded "Hey Jarvis"
+# that the hey_jarvis model no longer parses would be a silent regression nobody could bisect.
+# 16kHz mono WAV, ~150KB of flash for all four.
+audio_file:
+  - id: login_challenge_intro_sound
+    file: sounds/login_challenge_intro.wav
+  - id: login_word_jarvis_sound
+    file: sounds/login_word_jarvis.wav
+  - id: login_word_nabu_sound
+    file: sounds/login_word_nabu.wav
+  - id: login_word_stop_sound
+    file: sounds/login_word_stop.wav
+
+script:
+  # Online mode: announce the code, then open the mic.
+  #
+  # The announcement rides assist_satellite.announce on this device's own satellite entity, resolved
+  # by MAC the same way area_ducking.yaml resolves the device - the entity id is Home Assistant's to
+  # mint and cannot be hardcoded. The waits below are the completion signal remote TTS does not
+  # have: watch the announcement start on the local media player, watch it end, then listen. If the
+  # action fails (actions checkbox unticked, no satellite entity), the waits fall through on their
+  # timeouts and the window keeps working by button and password - the poll already told the page
+  # which modes exist, and the docs cover the checkbox.
+  # Speak the code and listen for the reply, as one coordinated turn.
+  #
+  # assist_satellite.start_conversation, not assist_satellite.announce plus voice_assistant.start.
+  # announce only speaks; the separate voice_assistant.start that used to follow it did not reliably
+  # open a listening turn on a device Home Assistant drives as an assist_satellite - the two steps
+  # were uncoordinated, so the prompt played but the reply was never captured and the window idled to
+  # its timeout. start_conversation is the action built for exactly this: it speaks start_message and
+  # then opens a listening turn through the same assist_satellite layer, so the reply runs the
+  # device's pipeline and reaches on_stt_end (common/voice_assistant.yaml), which hands it to the
+  # gate. Guarded so a re-arm cannot stack a second conversation or fire against muted mics.
+  - id: login_code_converse
+    mode: restart
+    then:
+      - if:
+          condition:
+            and:
+              - lambda: 'return id(web_ui_app)->login_voice_pending();'
+              - not: voice_assistant.is_running
+              - switch.is_off: master_mute_switch
+          then:
+            - logger.log:
+                level: INFO
+                format: "Login: speaking the code and listening (start_conversation)"
+            - homeassistant.action:
+                action: assist_satellite.start_conversation
+                data_template:
+                  entity_id: >-
+                    {% set ns = namespace(e='') %}
+                    {% for s in states.assist_satellite %}
+                      {% set d = device_id(s.entity_id) %}
+                      {% if not ns.e and d and (mac | lower) in device_attr(d, 'connections') | map(attribute=1) | list %}
+                        {% set ns.e = s.entity_id %}
+                      {% endif %}
+                    {% endfor %}
+                    {{ ns.e }}
+                  # Two prompts, one code. The digits are joined with commas - and one more comma
+                  # before the first digit - so TTS reads "the code, 7, 8, 7, 0" as four digits
+                  # rather than a number. `retry` picks the wrong-code phrasing after a rejected
+                  # attempt; the code itself never changes within a window.
+                  start_message: >-
+                    {% if retry | int %}Your voice code was wrong. Please press the action button,
+                    or say the code, {{ code | list | join(', ') }}.{% else %}Welcome to Satellite
+                    1. To sign in, press the action button on your device, or say the code,
+                    {{ code | list | join(', ') }}.{% endif %}
+                  # No chime ahead of the prompt - the words are the announcement. Written as a
+                  # template, not the literal "false": ESPHome ships every service-data value as a
+                  # string, and start_conversation validates preannounce as a strict boolean - the
+                  # string "false" fails that validation and Home Assistant rejects the whole call,
+                  # which played as "the announcement never happens". Rendering {{ false }} hands
+                  # HA a native boolean.
+                  preannounce: "{{ false }}"
+                variables:
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  code: !lambda 'return id(login_code_value);'
+                  retry: !lambda 'return id(login_code_retry) ? 1 : 0;'
+                on_error:
+                  - logger.log:
+                      level: WARN
+                      format: "Sign-in conversation failed; the window still accepts the button and password"
+            # The reason has been spoken; the next prompt is a welcome again unless another
+            # mismatch says otherwise.
+            - lambda: 'id(login_code_retry) = false;'
+
+  # Another turn, after a mismatch (from on_stt_end) or a silent listen that timed out (from the
+  # voice assistant's on_end). The delay lets the previous run fully end before the guard in
+  # login_code_converse re-checks is_running. The gate closes the window on the third miss or at
+  # timeout, at which point login_voice_pending() reads false and this stays quiet.
+  - id: login_code_relisten
+    mode: restart
+    then:
+      - delay: 1200ms
+      - script.execute: login_code_converse
+
+  # Offline mode: speak the challenge from the embedded clips, then arm the models and listen.
+  #
+  # Model handling is the delicate part. All three challenge models are disabled before the first
+  # clip plays - the device must not hear its own voice say "Hey Jarvis" and record a symbol against
+  # its own challenge - and enabled together once the last clip ends. Prior states are saved first
+  # and handed back by login_models_restore when the window closes. Enables and disables are gated
+  # on is_enabled() because each write costs an NVS save, per the component's own discipline.
+  - id: login_announce_seq
+    mode: restart
+    parameters:
+      seq: string
+    then:
+      - lambda: |-
+          id(login_prior_jarvis) = id(hey_jarvis).is_enabled();
+          id(login_prior_nabu) = id(okay_nabu).is_enabled();
+          id(login_prior_stop) = id(stop).is_enabled();
+          id(login_models_armed) = true;
+          if (id(hey_jarvis).is_enabled()) id(hey_jarvis).disable();
+          if (id(okay_nabu).is_enabled()) id(okay_nabu).disable();
+          if (id(stop).is_enabled()) id(stop).disable();
+      - script.execute:
+          id: play_sound
+          priority: true
+          sound_file: "login_challenge_intro_sound"
+      - delay: 300ms
+      - wait_until:
+          condition:
+            not:
+              media_player.is_announcing:
+                id: external_media_player
+          timeout: 8s
+      - script.execute:
+          id: login_say_symbol
+          sym: !lambda "return seq.size() > 0 ? seq[0] - '0' : 0;"
+      - script.wait: login_say_symbol
+      - script.execute:
+          id: login_say_symbol
+          sym: !lambda "return seq.size() > 1 ? seq[1] - '0' : 0;"
+      - script.wait: login_say_symbol
+      - script.execute:
+          id: login_say_symbol
+          sym: !lambda "return seq.size() > 2 ? seq[2] - '0' : 0;"
+      - script.wait: login_say_symbol
+      # Listening phase. micro_wake_word.start is for the device that has never seen Home
+      # Assistant - on_client_connected is what normally starts the detector, and a never-connected
+      # device would otherwise have nothing running to hear the answer. Idempotent when it already
+      # is.
+      - micro_wake_word.start:
+      - lambda: |-
+          if (!id(hey_jarvis).is_enabled()) id(hey_jarvis).enable();
+          if (!id(okay_nabu).is_enabled()) id(okay_nabu).enable();
+          if (!id(stop).is_enabled()) id(stop).enable();
+
+  # One challenge word: 0 = Hey Jarvis, 1 = Okay Nabu, 2 = Stop. A beat of silence ahead of each so
+  # the words read as a list, then wait for the clip to drain so the next call cannot start over it.
+  - id: login_say_symbol
+    parameters:
+      sym: int
+    then:
+      - delay: 400ms
+      - lambda: |-
+          const char *file = sym == 0   ? "login_word_jarvis_sound"
+                             : sym == 1 ? "login_word_nabu_sound"
+                                        : "login_word_stop_sound";
+          id(play_sound)->execute(true, file);
+      - delay: 300ms
+      - wait_until:
+          condition:
+            not:
+              media_player.is_announcing:
+                id: external_media_player
+          timeout: 5s
+
+  # Hands the wake models back to whatever the window found. One deliberate exception: the stop
+  # model is armed by a ringing timer independently (see timer.yaml), so if a timer began ringing
+  # mid-window, "restore to disabled" would break silencing it by voice - the ring wins.
+  - id: login_models_restore
+    then:
+      - if:
+          condition:
+            lambda: 'return id(login_models_armed);'
+          then:
+            - lambda: |-
+                id(login_models_armed) = false;
+                if (id(hey_jarvis).is_enabled() != id(login_prior_jarvis)) {
+                  id(login_prior_jarvis) ? id(hey_jarvis).enable() : id(hey_jarvis).disable();
+                }
+                if (id(okay_nabu).is_enabled() != id(login_prior_nabu)) {
+                  id(login_prior_nabu) ? id(okay_nabu).enable() : id(okay_nabu).disable();
+                }
+                const bool want_stop = id(login_prior_stop) || id(timer_ringing).state;
+                if (id(stop).is_enabled() != want_stop) {
+                  want_stop ? id(stop).enable() : id(stop).disable();
+                }

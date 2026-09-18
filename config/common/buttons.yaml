@@ -122,7 +122,14 @@ binary_sensor:
         then:
           - if:
               condition:
-                lambda: return !id(init_in_progress);
+                and:
+                  - lambda: return !id(init_in_progress);
+                  # A pending web sign-in claims the press whole: approve_pending_login() returns
+                  # true only while a pairing window is open, and a press that approved a sign-in
+                  # must not also fire the event entity or stop whatever is playing - the person
+                  # pressing was answering the login page, not the music. Double, triple and long
+                  # presses are untouched.
+                  - lambda: return !id(web_ui_app)->approve_pending_login();
               then:
                 - event.trigger:
                     id: action_button_press_event

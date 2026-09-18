@@ -72,66 +72,79 @@ micro_wake_word:
     gain_factor: 6
   stop_after_detection: false
   on_wake_word_detected:
-    # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
+    # An open offline-mode sign-in window claims every firing: the wake words are the challenge's
+    # alphabet, and consume_login_wake records this one as a symbol instead of letting it start
+    # the assistant. One thing outranks it - a ringing timer. "Stop" must silence the alarm even
+    # mid-challenge (an alarm that cannot be stopped by voice because someone is signing in would
+    # be the worse bug), so the firing is only offered to the gate when nothing is ringing; the
+    # short-circuit means the symbol is simply not recorded and the challenge can be re-answered.
+    # False the rest of the time, at the cost of one string compare - see common/web_ui_login.yaml
+    # for the whole flow.
     - if:
         condition:
-          switch.is_off: master_mute_switch
+          lambda: return id(timer_ringing).state || !id(web_ui_app)->consume_login_wake(wake_word);
         then:
-          # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
+          # If the wake word is detected when the device is muted (Possible with the software mute
+          # switch): Do nothing
           - if:
               condition:
-                switch.is_on: timer_ringing
+                switch.is_off: master_mute_switch
               then:
-                - switch.turn_off: timer_ringing
-              # Stop voice assistant if running
-              else:
+                # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
                 - if:
                     condition:
-                      voice_assistant.is_running:
+                      switch.is_on: timer_ringing
                     then:
-                      # A response this device routed elsewhere is playing there too, so the local
-                      # stop fans out. The script's own guard makes it free when nothing was routed.
-                      - voice_assistant.stop:
-                      - script.execute: tts_remote_stop
-                    # Stop any other media player announcement
+                      - switch.turn_off: timer_ringing
+                    # Stop voice assistant if running
                     else:
                       - if:
                           condition:
-                            media_player.is_announcing:
-                              id: external_media_player
-
+                            voice_assistant.is_running:
                           then:
-                            # Ahead of the local stop on purpose: the broadcast's guard reads the
-                            # announcement source's state, and stopping the pipeline is what makes
-                            # that unreadable. Order is enough - the stop below is a command the
-                            # media player processes on its own loop, after this guard has run.
-                            - script.execute: tts_stop_broadcast
-                            - media_player.stop:
-                                announcement: true
-                                id: external_media_player
-                            # The usual path for "stop" mid-response: the pipeline has ended by the
-                            # time the audio is still playing, so is_running above is already false.
+                            # A response this device routed elsewhere is playing there too, so the local
+                            # stop fans out. The script's own guard makes it free when nothing was routed.
+                            - voice_assistant.stop:
                             - script.execute: tts_remote_stop
-                          # Start the voice assistant and play the wake sound, if enabled
+                          # Stop any other media player announcement
                           else:
-                            # Ahead of the local chime so the call is out before the 300ms below,
-                            # and outside the switch beneath it because that one governs this
-                            # device's speaker alone - each target's own Wake sound decides for
-                            # itself. Everything that suppresses the local chime still suppresses
-                            # this: muted microphones, a ringing timer, a running assistant and an
-                            # announcement already playing are all branches that never reach here.
-                            - script.execute: remote_wake_chime_send
                             - if:
                                 condition:
-                                  switch.is_on: wake_sound
+                                  media_player.is_announcing:
+                                    id: external_media_player
+
                                 then:
-                                  - script.execute:
-                                      id: play_sound
-                                      priority: true
-                                      sound_file: "wake_word_triggered_sound"
-                                  - delay: 300ms
-                            - voice_assistant.start:
-                                wake_word: !lambda return wake_word;
+                                  # Ahead of the local stop on purpose: the broadcast's guard reads the
+                                  # announcement source's state, and stopping the pipeline is what makes
+                                  # that unreadable. Order is enough - the stop below is a command the
+                                  # media player processes on its own loop, after this guard has run.
+                                  - script.execute: tts_stop_broadcast
+                                  - media_player.stop:
+                                      announcement: true
+                                      id: external_media_player
+                                  # The usual path for "stop" mid-response: the pipeline has ended by the
+                                  # time the audio is still playing, so is_running above is already false.
+                                  - script.execute: tts_remote_stop
+                                # Start the voice assistant and play the wake sound, if enabled
+                                else:
+                                  # Ahead of the local chime so the call is out before the 300ms below,
+                                  # and outside the switch beneath it because that one governs this
+                                  # device's speaker alone - each target's own Wake sound decides for
+                                  # itself. Everything that suppresses the local chime still suppresses
+                                  # this: muted microphones, a ringing timer, a running assistant and an
+                                  # announcement already playing are all branches that never reach here.
+                                  - script.execute: remote_wake_chime_send
+                                  - if:
+                                      condition:
+                                        switch.is_on: wake_sound
+                                      then:
+                                        - script.execute:
+                                            id: play_sound
+                                            priority: true
+                                            sound_file: "wake_word_triggered_sound"
+                                        - delay: 300ms
+                                  - voice_assistant.start:
+                                      wake_word: !lambda return wake_word;
 
 voice_assistant:
   id: va
@@ -179,8 +192,27 @@ voice_assistant:
     - script.execute: control_leds
   # What the device heard, for the Voice card in the web UI. Held in a ring of eight on the device
   # and never written to flash, so this is a "what did it mishear" readout rather than a history.
+  #
+  # The pairing window gets first refusal: while an online-mode sign-in is waiting for its spoken
+  # code, the transcript is the answer to a challenge, not a query. Consumed means the pipeline is
+  # stopped before the intent stage can ship the code to the conversation agent, the utterance
+  # stays off the Voice card, and the mic reopens for another attempt if the gate left any - the
+  # gate itself counts the misses and closes the window on the third.
   on_stt_end:
-    - lambda: id(web_ui_app)->push_utterance(x, true);
+    - if:
+        condition:
+          lambda: return id(web_ui_app)->consume_login_transcript(x);
+        then:
+          - voice_assistant.stop:
+          # If the window is still pending after the gate saw the transcript, the attempt was
+          # wrong - flag it so the next prompt says so instead of replaying the welcome. A match
+          # closes the window, login_voice_pending() reads false, and the flag stays untouched.
+          - lambda: |-
+              if (id(web_ui_app)->login_voice_pending())
+                id(login_code_retry) = true;
+          - script.execute: login_code_relisten
+        else:
+          - lambda: id(web_ui_app)->push_utterance(x, true);
   on_intent_progress:
     - if:
         condition:
@@ -210,6 +242,19 @@ voice_assistant:
     - script.execute: audio_gain_reconcile
   # When the voice assistant ends ...
   on_end:
+    # While a spoken-code sign-in window is open, the conversation has to keep reopening. A turn
+    # started by login_code_converse (assist_satellite.start_conversation) ends on VAD silence if the
+    # person has not answered yet - the common case, since the prompt takes a moment to process - and
+    # without re-arming here their reply lands when nothing is listening and the window idles to its
+    # 60s timeout (the reported bug). The re-arm is guarded and delayed inside login_code_relisten,
+    # and it stops on its own the moment the window approves or closes, since login_voice_pending()
+    # then reads false. Only fires during a pending spoken-code window; a normal wake-word
+    # conversation reads false here and skips it.
+    - if:
+        condition:
+          lambda: 'return id(web_ui_app)->login_voice_pending();'
+        then:
+          - script.execute: login_code_relisten
     - wait_until:
         not:
           voice_assistant.is_running:

@@ -187,6 +187,27 @@ class WebUIHandler : public AsyncWebHandler {
     this->no_sensor_webp_len_ = len;
   }
 
+  /// The PWA surface: the manifest and the home-screen icons, all PROGMEM like the photo above so
+  /// serving them costs no heap. Icons are PNG because iOS accepts nothing else for home-screen
+  /// marks, and they live in flash rather than the bundle because PNG does not gzip - inlining one
+  /// would spend the entire remaining bundle budget on pixels.
+  void set_manifest(const uint8_t *json, size_t len) {
+    this->manifest_ = json;
+    this->manifest_len_ = len;
+  }
+  /// `which`: 0 = 192px, 1 = 512px, 2 = the 180px apple-touch-icon.
+  void set_icon(uint8_t which, const uint8_t *png, size_t len) {
+    if (which < 3) {
+      this->icons_[which] = png;
+      this->icon_lens_[which] = len;
+    }
+  }
+
+  /// The session token as the sign-in link carries it, read from the gate at request time so a
+  /// regenerate is reflected immediately. GET /api/sat1/state serves it to the Diagnostics Launch
+  /// section - behind the gate, so only a signed-in browser ever reads it.
+  void set_session_key_fn(std::function<const char *()> fn) { this->session_key_fn_ = std::move(fn); }
+
   /// Longest gap between two consecutive main-loop iterations since this was last read, in
   /// milliseconds. Written from the main loop, read from the httpd task, and reset by the read -
   /// which is why it is an exchange rather than a load. Diagnostics is the only reader.
@@ -376,6 +397,10 @@ class WebUIHandler : public AsyncWebHandler {
     NONE = 0,
     INDEX,
     ASSET_NO_SENSOR,
+    MANIFEST,
+    ICON_192,
+    ICON_512,
+    ICON_180,
     STATE,
 #ifdef USE_VOICE_ASSISTANT
     VOICE,
@@ -409,6 +434,9 @@ class WebUIHandler : public AsyncWebHandler {
 
   void handle_index_(AsyncWebServerRequest *request);
   void handle_no_sensor_(AsyncWebServerRequest *request);
+  /// One handler for the manifest and all three icons: the same PROGMEM send with a different
+  /// pointer and content type each.
+  void handle_pwa_asset_(AsyncWebServerRequest *request, const uint8_t *data, size_t len, const char *type);
   void handle_state_(AsyncWebServerRequest *request);
 #ifdef USE_VOICE_ASSISTANT
   void handle_voice_(AsyncWebServerRequest *request);
@@ -465,6 +493,11 @@ class WebUIHandler : public AsyncWebHandler {
   const char *etag_{nullptr};
   const uint8_t *no_sensor_webp_{nullptr};
   size_t no_sensor_webp_len_{0};
+  const uint8_t *manifest_{nullptr};
+  size_t manifest_len_{0};
+  const uint8_t *icons_[3]{nullptr, nullptr, nullptr};
+  size_t icon_lens_[3]{0, 0, 0};
+  std::function<const char *()> session_key_fn_{};
   std::atomic<uint32_t> *max_loop_ms_{nullptr};
   std::vector<EntityRef> entities_;
 

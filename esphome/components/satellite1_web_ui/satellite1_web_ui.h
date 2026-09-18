@@ -5,6 +5,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/defines.h"
 
+#include "session_gate.h"
 #include "web_ui_handler.h"
 
 #ifdef USE_SAT1_WEB_UI_SENDSPIN
@@ -40,9 +41,55 @@ class Satellite1WebUI : public Component {
   void set_index(const uint8_t *gz, size_t gz_len) { this->handler_.set_index(gz, gz_len); }
   void set_etag(const char *etag) { this->handler_.set_etag(etag); }
   void set_no_sensor_image(const uint8_t *webp, size_t len) { this->handler_.set_no_sensor_image(webp, len); }
+  void set_manifest(const uint8_t *json, size_t len) { this->handler_.set_manifest(json, len); }
+  void set_icon(uint8_t which, const uint8_t *png, size_t len) { this->handler_.set_icon(which, png, len); }
   void add_entity(const char *key, const char *domain, EntityBase *entity) {
     this->handler_.add_entity(key, domain, entity);
   }
+
+  /* ---- The session gate: cookie auth and the device-presence login. ---- */
+
+  /// Called from generated code in main.cpp, before any component's setup() - which is what puts
+  /// the gate at position 0 of web_server_base's handler vector, ahead of satellite1_radar (which
+  /// registers at setup priority 800) and everything after. Registered without auth wrapping on
+  /// purpose: the gate *is* the auth, and wrapping it in AuthMiddlewareHandler would put a digest
+  /// prompt in front of the login page itself.
+  void register_session_gate() { web_server_base::global_web_server_base->add_handler_without_auth(&this->gate_); }
+
+  /// The credentials, handed over by the on_boot lambda in common/web_ui.yaml at priority 600 -
+  /// after the stored password is restored, before the gate computes its token at setup (250).
+  /// These no longer go to web_server_base at all, so no handler is ever wrapped in the digest
+  /// middleware; the gate runs the same digest check itself as its curl/script fallback.
+  void set_credentials(const char *username, const std::string &password) {
+    this->gate_.set_credentials(username, password);
+  }
+
+  /// Whether a voice approval could be heard right now - the mute slider and switch, read at
+  /// window-open time. From YAML because only YAML knows which entities mean "muted" on this build.
+  void set_login_mic_available(std::function<bool()> fn) { this->gate_.set_mic_available_fn(std::move(fn)); }
+
+  /// The action button's approval. Returns true when a pending window was approved, which is the
+  /// dispatcher's cue to consume the press instead of running its normal single-press action.
+  bool approve_pending_login() { return this->gate_.approve_pending_login(); }
+
+  /// The voice approvals, called from the on_stt_end and on_wake_word_detected hooks in
+  /// common/voice_assistant.yaml. True means consumed: suppress the transcript ring / skip the
+  /// assistant start, because the utterance was an answer to the pairing window.
+  bool consume_login_transcript(const std::string &text) { return this->gate_.consume_login_transcript(text); }
+  bool consume_login_wake(const std::string &phrase) { return this->gate_.consume_login_wake(phrase); }
+
+  /// Window state reads for the YAML scripts: whether any window is pending (the LED breathe), and
+  /// whether an online-mode window is still waiting for a code (the re-listen loop).
+  bool login_pending() { return this->gate_.login_pending(); }
+  bool login_voice_pending() { return this->gate_.login_voice_pending(); }
+
+  /// Fired from loop() when a pairing window opens, with the mode ("button"/"code"/"seq") and the
+  /// secret ("4271", or the challenge sequence as symbol digits "012" for hey_jarvis/okay_nabu/
+  /// stop). YAML owns the announcement and the LED from here.
+  Trigger<std::string, std::string> *get_login_window_trigger() { return &this->login_window_trigger_; }
+
+  /// Fired from loop() when the window closes, with the result ("approved"/"expired"/"denied").
+  Trigger<std::string> *get_login_window_end_trigger() { return &this->login_window_end_trigger_; }
 
 #ifdef USE_VOICE_ASSISTANT
   void set_voice_assistant(voice_assistant::VoiceAssistant *va) { this->handler_.set_voice_assistant(va); }
@@ -53,7 +100,11 @@ class Satellite1WebUI : public Component {
 #endif
 
 #ifdef USE_MICRO_WAKE_WORD
-  void set_micro_wake_word(micro_wake_word::MicroWakeWord *mww) { this->handler_.set_micro_wake_word(mww); }
+  void set_micro_wake_word(micro_wake_word::MicroWakeWord *mww) {
+    this->handler_.set_micro_wake_word(mww);
+    // The offline wake-word challenge exists exactly when the models it is built from do.
+    this->gate_.set_seq_available(mww != nullptr);
+  }
 #endif
 
 #ifdef USE_MEDIA_PLAYER
@@ -140,7 +191,10 @@ class Satellite1WebUI : public Component {
   void adopt_ha_area_(const char *json);
 
   WebUIHandler handler_;
+  SessionGate gate_;
   Selection selection_;
+  Trigger<std::string, std::string> login_window_trigger_;
+  Trigger<std::string> login_window_end_trigger_;
 #ifdef USE_SAT1_WEB_UI_SENDSPIN
   sendspin_::SendspinHub *sendspin_hub_{nullptr};
 #endif

@@ -13,6 +13,13 @@ static const char *const TAG = "satellite1_web_ui";
 void Satellite1WebUI::setup() {
   this->handler_.set_loop_time_source(&this->max_loop_ms_);
 
+  // The gate was registered from generated code long before this, but its token needs the
+  // credentials the on_boot block installs at priority 600 - this setup runs at 250, after them
+  // and before the listener starts at 249, so no request is ever checked against a half-built
+  // token.
+  this->gate_.setup();
+  this->handler_.set_session_key_fn([this]() { return this->gate_.session_key(); });
+
   // Before the handler is registered, so a request arriving immediately cannot read an empty
   // selection and report that nothing is configured.
   this->selection_.setup();
@@ -67,6 +74,18 @@ void Satellite1WebUI::loop() {
   // Monotonic max, so a slow loop is never lost to a concurrent read that happened to land first.
   uint32_t seen = this->max_loop_ms_.load(std::memory_order_relaxed);
   while (elapsed > seen && !this->max_loop_ms_.compare_exchange_weak(seen, elapsed, std::memory_order_relaxed)) {
+  }
+
+  // The pairing window's lifecycle: expiry, the offline quiet-period judgement, and the open/close
+  // events that drive the announcement and the LED. Triggers fire here rather than from the
+  // endpoints because the endpoints run on the httpd task and what these start are scripts.
+  this->gate_.tick(now);
+  {
+    std::string a, b;
+    if (this->gate_.take_open_event(a, b))
+      this->login_window_trigger_.trigger(a, b);
+    if (this->gate_.take_close_event(a))
+      this->login_window_end_trigger_.trigger(a);
   }
 
   // Collapses any number of refresh requests since the last iteration into one sync, which is what we
