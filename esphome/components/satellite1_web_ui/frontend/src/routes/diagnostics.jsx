@@ -9,8 +9,10 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
 import { CONFIRM, HINTS, TEXT } from "../copy.js";
+import { logoutAll, qrSignInLink, signInLink } from "../lib/auth.js";
 import { entity, pathFor, post } from "../lib/device.js";
-import { Card, Chevron, Confirm, Fact, Missing, Row, Toggle } from "../ui.jsx";
+import { qrSvgPath } from "../lib/qr.js";
+import { Btn, Card, Chevron, Confirm, Fact, Missing, N_DIAG, Row, Toggle } from "../ui.jsx";
 
 const kb = (n) => `${Math.round(n / 1024)} KB`;
 const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
@@ -32,7 +34,7 @@ const uptime = (s) => {
 function Device({ ctx }) {
   const d = ctx.device;
   const espTemp = entity(ctx, "esp_temp");
-  if (!d) return <Card title="Device">{ctx.deviceError ? <p class="t-err sm">{ctx.deviceError}</p> : <p class="dim sm">Reading&hellip;</p>}</Card>;
+  if (!d) return <Card title="Device" icon={N_DIAG}>{ctx.deviceError ? <p class="t-err sm">{ctx.deviceError}</p> : <p class="dim sm">Reading&hellip;</p>}</Card>;
 
   // Internal RAM is what runs out first, so it gets the warning colours; PSRAM is plentiful enough
   // that colouring it would only train people to ignore the colour.
@@ -41,7 +43,7 @@ function Device({ ctx }) {
   const loopTone = d.loop_ms > 500 ? "err" : d.loop_ms > 150 ? "warn" : null;
 
   return (
-    <Card title="Device">
+    <Card title="Device" icon={N_DIAG}>
       <div class="facts">
         <Fact label="Internal RAM free" value={kb(d.heap.free)} unit={` of ${kb(d.heap.total)}`} hint={HINTS.heap} tone={heapTone} />
         <Fact label="PSRAM free" value={mb(d.psram.free)} unit={` of ${mb(d.psram.total)}`} hint={HINTS.psram} />
@@ -513,6 +515,88 @@ function Maintenance({ ctx }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Launch: the sign-in link, its QR, and the revocation                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The tokenized sign-in URL, rendered only to a browser that is already signed in (the key rides
+ * GET /api/sat1/state, which sits behind the session gate). Scan the QR with a phone and it lands
+ * signed in with zero typing; paste the link into a Home Assistant dashboard button and it becomes
+ * a true launch button.
+ *
+ * The two carry the same key on different origins, each matched to its lifetime. The QR is built on
+ * the device's current IP: it is scanned live off this screen, so the address is fresh by
+ * construction, and an IP works on every phone where a .local QR is a dead end for the ones that
+ * cannot resolve mDNS (Android Chrome, the HA app's webview) - phones that can still end up on
+ * .local, because the smart redirect carries ?key= along when it upgrades the origin. The copyable
+ * link keeps the .local hostname: it is the form that gets pasted somewhere long-lived, and the
+ * name survives DHCP handing the device a new address. Before the first state poll delivers the IP,
+ * the QR falls back to the .local link rather than rendering a dead code.
+ *
+ * "Sign out everywhere" is the revocation half, and the reason offering the link at all is
+ * defensible: the key is a bearer credential, and this is the one action that kills every copy of
+ * it - every cookie, every QR, every pasted dashboard button - in one press. This browser stays
+ * signed in (the device answers with a fresh cookie), and the new link takes over here within a
+ * state poll.
+ */
+function Launch({ ctx }) {
+  const d = ctx.device;
+  const [copied, setCopied] = useState(false);
+  if (!d?.key) return null;
+
+  const link = signInLink(d.name, d.key);
+  const qr = qrSvgPath(qrSignInLink(d.ip, d.key) || link);
+
+  const copy = () => {
+    try {
+      // navigator.clipboard does not exist on insecure origins, which this page always is - the
+      // textarea dance is the fallback that still works everywhere.
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(link);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = link;
+        ta.style.cssText = "position:fixed;opacity:0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* The link is on screen; selecting it by hand still works. */
+    }
+  };
+
+  return (
+    <Card title="Launch" collapsible name="launch" hint={HINTS.launch}>
+      <div class="launch">
+        {qr && (
+          <svg class="launch-qr" viewBox={`-2 -2 ${qr.size + 4} ${qr.size + 4}`} role="img" aria-label="Sign-in QR code">
+            <path d={qr.path} />
+          </svg>
+        )}
+        <div class="launch-side">
+          <div class="launch-link num">{link}</div>
+          <div class="launch-actions">
+            <Btn onClick={copy}>{copied ? TEXT.launch_copied : TEXT.launch_copy}</Btn>
+            <Confirm
+              label={TEXT.launch_regen}
+              title={TEXT.launch_regen_title}
+              body={TEXT.launch_regen_body}
+              confirmLabel={TEXT.launch_regen_confirm}
+              danger
+              onConfirm={() => logoutAll().catch(() => {})}
+            />
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 
 export function Diagnostics({ ctx }) {
   return (
@@ -520,6 +604,7 @@ export function Diagnostics({ ctx }) {
       {ctx.device && ctx.device.ha === false && <p class="banner">{TEXT.ha_disconnected_detail}</p>}
       <Device ctx={ctx} />
       <Firmware ctx={ctx} />
+      <Launch ctx={ctx} />
       {/* Buttons moved to the foot of Controls. It is the one card here that answers "does the hardware
           respond to me", which is a question about the thing you are holding rather than about its
           internals - and it belongs beside the volume and mute controls it duplicates in hardware. */}

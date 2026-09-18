@@ -951,7 +951,9 @@ function reduceStates(states, msg) {
  */
 export function useEvents() {
   const [states, dispatch] = useReducer(reduceStates, {});
-  const [connected, setConnected] = useState(false);
+  // Starts true, not false: the stream has not failed yet, and a banner that flashes on every cold
+  // load while the first connection is still dialing would be the bug this hook exists to fix.
+  const [connected, setConnected] = useState(true);
   const logRef = useRef([]);
   const [logSeq, setLogSeq] = useState(0);
   const pausedRef = useRef(false);
@@ -963,15 +965,35 @@ export function useEvents() {
   const logWatchRef = useRef(0);
 
   useEffect(() => {
-    const es = new EventSource("/events");
+    let es = null;
+    let closed = false;
+    let graceTimer = null;
+    // When the stream last proved itself alive, for the staleness test on foreground below.
+    let lastSeen = 0;
 
-    es.onopen = () => setConnected(true);
-    es.onerror = () => setConnected(false);
+    /* iOS kills the SSE socket the moment Safari is backgrounded, and that is routine, not failure.
+       So the banner runs on a grace timer: a disconnect only shows after ~4 seconds of being down
+       while the tab is visible, and disconnects that happen while hidden are ignored outright -
+       the pageshow/visibility handler below reconnects before the grace ever elapses on a healthy
+       network, so returning from another app never flashes "lost the connection". */
+    const markDown = () => {
+      if (document.hidden || graceTimer || closed) return;
+      graceTimer = setTimeout(() => {
+        graceTimer = null;
+        setConnected(false);
+      }, 4000);
+    };
+    const markUp = () => {
+      lastSeen = Date.now();
+      if (graceTimer) {
+        clearTimeout(graceTimer);
+        graceTimer = null;
+      }
+      setConnected(true);
+    };
 
-    es.addEventListener("state", (e) => dispatch(JSON.parse(e.data)));
-    es.addEventListener("ping", () => setConnected(true));
-
-    es.addEventListener("log", (e) => {
+    const onLog = (e) => {
+      lastSeen = Date.now();
       if (pausedRef.current) return;
       const text = e.data.replace(ANSI, "");
       const m = LEVEL.exec(text);
@@ -986,9 +1008,43 @@ export function useEvents() {
       // no render at all while nothing displays the log. The card catches up on mount: it reads the
       // ring directly, and mounting is itself the render.
       if (logWatchRef.current > 0) setLogSeq((n) => n + 1);
-    });
+    };
 
-    return () => es.close();
+    const connect = () => {
+      if (closed) return;
+      es?.close();
+      es = new EventSource("/events");
+      es.onopen = markUp;
+      es.onerror = markDown;
+      es.addEventListener("state", (e) => {
+        lastSeen = Date.now();
+        dispatch(JSON.parse(e.data));
+      });
+      es.addEventListener("ping", markUp);
+      es.addEventListener("log", onLog);
+    };
+
+    /* The foreground reconnect. EventSource retries on its own, but with a backoff that can leave
+       the page dead for many seconds after returning from the background - the fourth screenshot
+       this work started from. Recreate immediately instead, unless the stream is demonstrably fine:
+       open and heard from within the server's ping interval. The "demonstrably" matters on iOS,
+       where a suspended socket can report OPEN while carrying nothing. */
+    const onVisible = () => {
+      if (document.hidden || closed) return;
+      const fresh = es && es.readyState === EventSource.OPEN && Date.now() - lastSeen < 35000;
+      if (!fresh) connect();
+    };
+    addEventListener("visibilitychange", onVisible);
+    addEventListener("pageshow", onVisible);
+
+    connect();
+    return () => {
+      closed = true;
+      removeEventListener("visibilitychange", onVisible);
+      removeEventListener("pageshow", onVisible);
+      if (graceTimer) clearTimeout(graceTimer);
+      es?.close();
+    };
   }, []);
 
   // Empties the ring in place rather than swapping the array, because consumers hold the same

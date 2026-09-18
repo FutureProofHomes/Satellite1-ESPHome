@@ -5,16 +5,43 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>Satellite1</title>
+<!-- The home-screen surface. The manifest covers Chrome's add-to-home-screen (over plain HTTP it
+     makes a shortcut, not an installed PWA - install wants a secure context - but the shortcut
+     carries the same icon and name); the apple-* tags are iOS's own vocabulary for the same thing,
+     and the touch icon is fetched from the path in the link with no cookies at all, which is why
+     the session gate exempts it. status-bar black-translucent lets the app paint under the notch,
+     which viewport-fit=cover above already opted into. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<!-- The tab favicon reuses the touch icon: the logo already embedded for the home screen, one more
+     link and zero more bytes. Browsers scale the 180px PNG down without complaint. -->
+<link rel="icon" type="image/png" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Satellite1">
+<meta name="theme-color" content="#111418">
 <!-- Applies the remembered theme before the stylesheet paints. In <head> and not in main.jsx on
      purpose: the app script is at the end of <body>, and setting the attribute there is late enough
      that a phone remembering dark can show a white background first. Inline and tiny for the same
      reason - a separate request would be a second round trip on a seven-socket server.
      Light is the default when nothing is stored. localStorage throws rather than no-ops with site
      data blocked, so the whole thing is guarded; the cost of failure is the default theme. -->
-<script>try{var t=localStorage.getItem("sat1.theme");document.documentElement.dataset.theme=t==="dark"?"dark":"light"}catch(e){}</script>
+<script>try{var t=localStorage.getItem("sat1.theme");document.documentElement.dataset.theme=t==="dark"?"dark":"light"}catch(e){}
+/* iOS Safari auto-zooms onto any focused text control under 16px and leaves the page zoomed after -
+   the login field made every first visit end up magnified. maximum-scale=1 turns that off, and iOS
+   has ignored it for real pinch gestures since iOS 10, so a person who wants to zoom still can.
+   Applied to iOS only (the platform test catches iPadOS masquerading as a Mac): Android Chrome
+   would honour it by blocking pinch zoom, which is an accessibility cost for a bug it never had. */
+if(/iPhone|iPod|iPad/.test(navigator.userAgent)||(navigator.maxTouchPoints>1&&/Mac/.test(navigator.platform)))document.querySelector("meta[name=viewport]").content+=",maximum-scale=1";</script>
 <style>/*%CSS%*/</style>
 </head>
 <body>
+<!-- The boot splash: painted with the document, before the app script at the end of <body> has even
+     been parsed, and removed by App (shell.jsx) the moment the boot phase resolves into a real
+     screen. A sibling of #app rather than a child so Preact's first render never reconciles against
+     it. Styles live in app.css (#splash), themed by the data-theme script above. -->
+<div id="splash" aria-hidden="true"><div class="spl-mark">Satellite1</div><div class="spl-spin"></div></div>
 <div id="app"></div>
 <script>/*%JS%*/</script>
 </body>

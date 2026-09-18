@@ -5,12 +5,14 @@
   "description": "On-device web app for Satellite1, bundled into the satellite1_web_ui external component.",
   "type": "module",
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "preact": "10.29.8"
   },
   "devDependencies": {
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "jsqr": "1.4.0"
   }
 }

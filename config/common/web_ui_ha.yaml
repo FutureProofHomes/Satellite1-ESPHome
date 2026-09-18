@@ -269,13 +269,22 @@ substitutions:
                         | list)
                         | map(attribute='state')
                         | reject('in', ['unavailable', 'unknown']) | list %}
+          {# The peer's Web UI Password sensor, for the switcher's silent cross-sign-in: the app
+             runs a challenge-response login against the peer before jumping, so moving between
+             devices never shows a login page. Carrying it here adds no exposure that did not
+             already exist - the sensor is deliberately visible in Home Assistant (it is how a
+             customer finds a generated password at all), so anyone who can read this payload could
+             already read every device's password from HA itself. An empty string on devices
+             running older firmware simply makes the jump land on their normal page. #}
+          {% set pw = device_entities(d) | select('search', 'web_ui_password') | first | default('') %}
           {% set out.dev = out.dev + [[device_attr(d, 'model'),
                                        device_attr(d, 'name_by_user') or device_attr(d, 'name'),
                                        area_name(a),
                                        macs | first if macs else '',
                                        device_attr(d, 'sw_version') or '',
                                        device_attr(d, 'configuration_url') or '',
-                                       1 if live | count > 0 else 0]] %}
+                                       1 if live | count > 0 else 0,
+                                       states(pw) if pw and states(pw) not in ['unavailable', 'unknown'] else '']] %}
         {% endif %}
       {% endfor %}
     {% endfor %}

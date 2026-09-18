@@ -5,17 +5,19 @@
  * client-side routes, so a path-based router would 404 on reload for every route but "/". The hash
  * never reaches the server, which also means a bookmarked route survives a firmware update.
  */
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 
 import { HINTS, TEXT } from "./copy.js";
+import { loginKey, logout, maybeRedirectLocal, peerLogin, primeOtherOrigin, takeUrlKey } from "./lib/auth.js";
 import { deviceIdentity, onWriteError, useDeviceState, useEvents, useHaData, useSelection } from "./lib/device.js";
+import { LoginScreen } from "./login.jsx";
 import { MediaFooter } from "./media.jsx";
 import { Config } from "./routes/config.jsx";
 import { Controls } from "./routes/controls.jsx";
 import { Diagnostics } from "./routes/diagnostics.jsx";
 import { Presence } from "./routes/presence.jsx";
 import { WakeWords } from "./routes/wakewords.jsx";
-import { Chevron, Hint, useDrawer, useSheetDrag } from "./ui.jsx";
+import { Chevron, Hint, N_AUDIO, N_DIAG, N_HOME, N_PRES, N_WAKE, ni, useDrawer, useSheetDrag } from "./ui.jsx";
 
 /**
  * Five routes, in the order the owner set in the September 2026 information-architecture pass:
@@ -25,53 +27,16 @@ import { Chevron, Hint, useDrawer, useSheetDrag } from "./ui.jsx";
  * data does not come from entities at all - the radar settings live in the module's own config,
  * behind `satellite1_radar`'s /api/v1 endpoints.
  */
-/* The drawer glyphs, drawn like media.jsx's `mi` set: 16-box, stroked in currentColor so the row's
-   colour (dim at rest, accent when active) is the icon's colour too. One per route: a house, the
-   waveform a wake word is, a speaker for what remains on Audio, a radar sweep, and a pulse line for
-   Diagnostics - a wrench was considered and drew worse at 17px than the vitals it actually shows. */
-const ni = (children) => (
-  <svg
-    class="ni"
-    viewBox="0 0 16 16"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    aria-hidden="true"
-  >
-    {children}
-  </svg>
-);
-const N_HOME = ni(
+/* The drawer glyphs live in ui.jsx now (the routes' top cards wear them too, and importing them from
+   here would be a cycle). Only the logout mark is drawn locally, because only this drawer uses it:
+   a door frame with the arrow leaving it, on the same 16-box as its siblings. */
+const N_OUT = ni(
   <>
-    <path d="M2.8 8.3 8 3.6l5.2 4.7" />
-    <path d="M4.4 7.6V13h7.2V7.6" />
+    <path d="M6.5 3H3.5v10h3" />
+    <path d="M6.8 8h6" />
+    <path d="M10.6 5.8 12.8 8l-2.2 2.2" />
   </>,
 );
-const N_WAKE = ni(
-  <>
-    <path d="M2.8 6.8v2.4" />
-    <path d="M5.4 4.8v6.4" />
-    <path d="M8 3v10" />
-    <path d="M10.6 4.8v6.4" />
-    <path d="M13.2 6.8v2.4" />
-  </>,
-);
-const N_AUDIO = ni(
-  <>
-    <path d="M2.8 6.4h2.4L8.6 3.8v8.4L5.2 9.6H2.8z" />
-    <path d="M11.2 6a3.1 3.1 0 0 1 0 4" />
-  </>,
-);
-const N_PRES = ni(
-  <>
-    <path d="M13.2 8A5.2 5.2 0 1 1 8 2.8" />
-    <path d="M8 8l3.7-3.7" />
-    <circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
-  </>,
-);
-const N_DIAG = ni(<path d="M2 8.5h2.8L6.4 5l3.2 6.5 1.6-3H14" />);
 
 const ROUTES = [
   { id: "home", label: "Home", view: Controls, icon: N_HOME },
@@ -191,6 +156,19 @@ function NavPane({ route, go, open, onClose, label, fw }) {
         <div class="navpane-foot">
           <div class="navpane-dev">{label || "Satellite1"}</div>
           {fw && <div class="navpane-fw">Firmware {fw}</div>}
+          {/* This browser only - the everywhere version lives on Diagnostics, where its blast
+              radius can be explained. The reload lands on the boot probe, which now finds no
+              session and shows the login screen. */}
+          <button
+            class="btn ghost sm navpane-logout"
+            onClick={async () => {
+              await logout();
+              location.reload();
+            }}
+          >
+            {N_OUT}
+            {TEXT.logout}
+          </button>
         </div>
       </nav>
     </div>
@@ -278,6 +256,39 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, onClose }) {
     </div>
   );
 
+  // The seamless jump: sign in to the peer before leaving, so its page opens as the app rather
+  // than as its login screen. The peer's password rides the roster (see web_ui_ha.yaml - it is the
+  // Web UI Password sensor every device already publishes to Home Assistant), the sign-in is the
+  // same challenge-response the login form uses, and the landing goes through ?key= so the peer
+  // sets its cookie first-party, where third-party cookie blocking cannot eat it. Anything that
+  // declines - a peer on older firmware, a missing password, mDNS trouble - falls back to plain
+  // navigation and the peer's own login page. The href stays real underneath, so middle-click and
+  // open-in-new-tab keep working (they skip the sign-in and land on the fallback).
+  //
+  // When the login body carries the peer's hostname (newer firmware) and this page is itself on a
+  // .local origin - free proof this browser resolves mDNS - the landing goes straight to the peer's
+  // .local origin, skipping its IP-then-redirect double load; peers run the same firmware, so this
+  // page's port is the peer's port. The name is regex-checked before it becomes a URL: it arrives
+  // in a CORS-readable body, and hostname characters are all a hostname needs. Known accepted risk:
+  // this proves our mDNS works, not that the peer's name resolves - a peer with mdns: disabled
+  // lands on a browser error page instead of its IP. The fleet ships mDNS on (the whole redirect
+  // strategy assumes it), and the failure is recoverable: back, or middle-click the real href.
+  const jump = async (e, url, pw) => {
+    if (!pw || e.button !== 0 || e.metaKey || e.ctrlKey) return;
+    e.preventDefault();
+    const origin = String(url).replace(/\/+$/, "");
+    const peer = await peerLogin(origin, pw);
+    if (!peer) {
+      location.href = peerHref(url, route);
+      return;
+    }
+    const base =
+      location.hostname.endsWith(".local") && peer.name && /^[a-z0-9-]+$/i.test(peer.name)
+        ? `http://${peer.name}.local${location.port ? `:${location.port}` : ""}`
+        : origin;
+    location.href = `${base}/?key=${peer.key}#/${route}`;
+  };
+
   const peerRow = (d) => {
     const url = d[5] ? String(d[5]) : "";
     const up = isUp(d);
@@ -292,7 +303,7 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, onClose }) {
       </>
     );
     return url ? (
-      <a key={d[3]} class={`peer go${up ? "" : " off"}`} href={peerHref(url, route)}>
+      <a key={d[3]} class={`peer go${up ? "" : " off"}`} href={peerHref(url, route)} onClick={(e) => jump(e, url, d[7])}>
         {body}
       </a>
     ) : (
@@ -392,7 +403,70 @@ function ErrorToast() {
 /* Shell                                                               */
 /* ------------------------------------------------------------------ */
 
+/**
+ * The gatekeeper around the app: nothing below mounts until the session question is answered, so
+ * an unauthenticated tab costs the device one probe rather than a storm of 401s from every hook.
+ *
+ * The boot sequence, in order and each for a reason. The smart redirect runs first, so everything
+ * that follows - the cookie a login sets most of all - lands on the stable .local origin rather
+ * than an IP that DHCP can reassign. Then a ?key= from a sign-in link is redeemed and scrubbed
+ * from the URL. Then the session probe: one tiny gated GET whose 401 is the difference between
+ * the login screen and the app.
+ */
 export function App() {
+  // "boot" while the redirect probe and session check run, then "login" or "in".
+  const [phase, setPhase] = useState("boot");
+  // The sign-in key, held only long enough for the dual-origin priming in AppInner, then dropped.
+  const primeKey = useRef(null);
+
+  // The static splash from index.html, torn down the moment boot resolves into a real screen.
+  // Removed rather than hidden: it exists only for boot, and boot happens once per page load. While
+  // the smart redirect is navigating away, phase stays "boot" and the splash stays up - the right
+  // cover for a page about to be replaced.
+  useEffect(() => {
+    if (phase !== "boot") document.getElementById("splash")?.remove();
+  }, [phase]);
+
+  useEffect(() => {
+    (async () => {
+      if (await maybeRedirectLocal()) return; // The page is navigating away; render nothing.
+      const urlKey = takeUrlKey();
+      if (urlKey) {
+        try {
+          const r = await loginKey(urlKey);
+          if (r.ok) {
+            primeKey.current = r.key;
+            setPhase("in");
+            return;
+          }
+        } catch {
+          /* A dead link falls through to the probe; a live cookie may still exist. */
+        }
+      }
+      try {
+        const r = await fetch("/api/sat1/sel", { cache: "no-store", signal: AbortSignal.timeout(15000) });
+        setPhase(r.status === 401 ? "login" : "in");
+      } catch {
+        setPhase("login");
+      }
+    })();
+  }, []);
+
+  if (phase === "boot") return null;
+  if (phase === "login") {
+    return (
+      <LoginScreen
+        onSignedIn={(key) => {
+          primeKey.current = key || null;
+          setPhase("in");
+        }}
+      />
+    );
+  }
+  return <AppInner primeKey={primeKey} onAuthLost={() => setPhase("login")} />;
+}
+
+function AppInner({ primeKey, onAuthLost }) {
   const [route, go] = useHashRoute();
   const [nav, setNav] = useState(false);
   const [switcher, setSwitcher] = useState(false);
@@ -415,12 +489,36 @@ export function App() {
   // overwrite an edit the customer just made.
   const selection = useSelection();
 
+  // Dual-origin cookie priming: one CORS login against the device's other entrance (.local when we
+  // are on the IP, the IP when we are on .local), fired once the state payload supplies the halves
+  // we do not know. The key is dropped the moment it is used - it lives nowhere but the cookie
+  // after this.
+  useEffect(() => {
+    if (!primeKey.current || !device) return;
+    primeOtherOrigin(primeKey.current, device.name, device.ip);
+    primeKey.current = null;
+  }, [device, primeKey]);
+
+  // A session dying under a running app - the password changed, or Sign out everywhere pressed
+  // somewhere else. The state poll is the heartbeat that notices, and the login screen is the only
+  // honest response.
+  useEffect(() => {
+    if (deviceError === "HTTP 401") onAuthLost();
+  }, [deviceError, onAuthLost]);
+
   const active = ROUTES.find((r) => r.id === route) || ROUTES[0];
   const View = active.view;
   const ctx = { device, deviceError, ...events, ...ha, ...selection };
   // Resolved once here rather than in the three places that show it, so the bar, the nav pane and the
   // switcher sheet cannot end up disagreeing about what this device is called.
   const { name: label, area } = deviceIdentity(device, ha.ha);
+
+  // The tab title follows the same identity: the friendly name once it is known, with the login
+  // screen having already set the hostname as the fallback for the time before (and for browsers
+  // that never sign in).
+  useEffect(() => {
+    if (label) document.title = label;
+  }, [label]);
 
   return (
     <div class="app">

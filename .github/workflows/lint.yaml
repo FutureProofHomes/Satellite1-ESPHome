@@ -59,6 +59,12 @@ jobs:
       - name: Install pinned toolchain
         run: npm ci
 
+      # The hand-rolled SHA-256/HMAC (crypto.subtle is unavailable on plain-HTTP origins) against
+      # node:crypto, and the QR encoder round-tripped through jsQR. Both fail silently in the
+      # field - a wrong HMAC is just a 401 - so they are verified here instead.
+      - name: Run frontend tests
+        run: npm test
+
       - name: Build the bundle
         run: npm run build | tee -a "$GITHUB_STEP_SUMMARY"
 

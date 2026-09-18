@@ -209,6 +209,41 @@ a {
   color: var(--accent);
 }
 
+/* The boot splash, #splash in index.html. Static markup outside #app - Preact never has to
+   reconcile against it - painted with the document itself and removed by App the moment the boot
+   phase resolves (shell.jsx). It exists for the visitor who used to stare at a blank page: an
+   mDNS-less browser on the IP origin waiting out the .local probe. Themed by the same data-theme
+   attribute the pre-paint script in <head> sets, so it never flashes the wrong background. */
+#splash {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-4);
+  background: var(--bg);
+}
+.spl-mark {
+  font-size: var(--t-xl);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+}
+.spl-spin {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--line-2);
+  border-top-color: var(--accent);
+  border-radius: var(--r-pill);
+  animation: spl-rot 0.9s linear infinite;
+}
+@keyframes spl-rot {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Form controls inherit neither font nor border from the page, so a rule that dresses one without
    stating both silently gets a UA default instead - and the default is invisible in the stylesheet,
    which is what makes it easy to ship. The sensor pills spent a release rendering in Arial for exactly
@@ -632,6 +667,20 @@ html.held body {
 .navpane-fw {
   font-size: var(--t-xs);
   color: var(--fg-3);
+}
+/* The sign-out under the identity block: full width so it cannot be missed, ghost so it does not
+   compete with the navigation above it. The exit glyph makes it read as an action rather than a
+   label; sized here because the bare .ni class carries no size of its own (the nav rows size theirs
+   via .navpane-item .ni), and 14px sits right against the button's small text. */
+.navpane-logout {
+  width: 100%;
+  margin-top: var(--s-3);
+  justify-content: center;
+  gap: var(--s-1);
+}
+.navpane-logout .ni {
+  width: 14px;
+  height: 14px;
 }
 
 /* The theme toggle, in the top bar rather than behind the menu: one icon costs almost no room, and a
@@ -2664,4 +2713,312 @@ polyline.draft {
   .msheet {
     animation: none;
   }
+}
+
+/* ---------------------------------------------------------------- */
+/* The login screen                                                 */
+/* ---------------------------------------------------------------- */
+
+.login {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+  position: relative;
+  overflow: hidden;
+}
+/* A soft radial wash behind the mark, in the accent at a whisper. Positioned off the element rather
+   than the viewport so it rises with the hero on small screens. */
+.login-glow {
+  position: absolute;
+  top: 12%;
+  left: 50%;
+  width: 480px;
+  height: 480px;
+  transform: translateX(-50%);
+  background: radial-gradient(closest-side, var(--accent) 0%, transparent 70%);
+  opacity: 0.14;
+  pointer-events: none;
+}
+.login-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  z-index: 1;
+}
+/* The mark: the brand's own rule - black on light, blue on dark - which is why this is the one
+   element whose colour is stated per theme rather than riding a shared token. */
+.login-logo {
+  width: 112px;
+  height: 112px;
+  color: var(--fg);
+}
+[data-theme="dark"] .login-logo {
+  color: var(--accent);
+}
+.login-name {
+  font-size: 1.35rem;
+  font-weight: 650;
+  margin: 0;
+  text-align: center;
+}
+.login-sub {
+  color: var(--fg-3);
+  font-size: 0.85rem;
+}
+.login-card {
+  width: min(400px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  z-index: 1;
+}
+.login-device {
+  width: 100%;
+  padding: 12px;
+  font-size: 0.95rem;
+  justify-content: center;
+  text-align: center;
+}
+.login-pending,
+.login-ended {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+/* The on-screen twin of the ring's breathe, so the page and the device visibly wait together. */
+.login-pulse {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .login-pulse {
+    animation: login-breathe 2.8s ease-in-out infinite;
+  }
+  .login-hero,
+  .login-card {
+    animation: login-rise 0.45s ease-out both;
+  }
+  .login-card {
+    animation-delay: 0.08s;
+  }
+}
+@keyframes login-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 1;
+  }
+}
+@keyframes login-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.login-mode {
+  font-size: 0.9rem;
+  color: var(--fg-2);
+  max-width: 34ch;
+}
+.login-left {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-3);
+  font-size: 0.85rem;
+}
+.login-endmsg {
+  font-size: 0.9rem;
+  color: var(--fg-2);
+  max-width: 36ch;
+}
+.login-endmsg.warn {
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+/* "or use the password", ruled on both sides. */
+.login-or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--fg-4);
+  font-size: 0.78rem;
+}
+.login-or::before,
+.login-or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* The field and the submit share a row: the field takes what the button leaves. */
+.login-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.login-row .login-field {
+  flex: 1;
+  min-width: 0;
+}
+.login-field {
+  position: relative;
+}
+.login-field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px 42px 11px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--bg-sunk);
+  color: var(--fg);
+  font: inherit;
+  /* 16px exactly: the iOS focus-zoom threshold. Belt to the viewport script's braces - even a
+     browser that ignores maximum-scale has nothing to zoom for here. */
+  font-size: 16px;
+}
+.login-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.login-field.err input {
+  border-color: var(--err);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .login-field.err {
+    animation: login-shake 0.35s ease-out;
+  }
+}
+@keyframes login-shake {
+  20% {
+    transform: translateX(-5px);
+  }
+  45% {
+    transform: translateX(4px);
+  }
+  70% {
+    transform: translateX(-3px);
+  }
+  90% {
+    transform: translateX(2px);
+  }
+}
+.login-eye {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: none;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.login-eye svg {
+  width: 18px;
+  height: 18px;
+}
+.login-err {
+  color: var(--err-fg);
+  font-size: 0.83rem;
+}
+.login-submit {
+  padding: 11px 16px;
+  min-height: 42px;
+  flex: none;
+  white-space: nowrap;
+}
+.login-spin {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  border: 2px solid var(--on-accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: login-spin 0.7s linear infinite;
+}
+@keyframes login-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.login-hint {
+  color: var(--fg-4);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------- */
+/* The Launch card on Diagnostics                                   */
+/* ---------------------------------------------------------------- */
+
+.launch {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+/* Always dark modules on a white tile, whatever the theme: scanners want contrast and a known
+   polarity, and a themed QR that fails to scan is decoration. The viewBox already carries the
+   two-module quiet zone; the padding widens it to the four the spec asks for. */
+.launch-qr {
+  width: 148px;
+  height: 148px;
+  flex: none;
+  background: #fff;
+  border-radius: 10px;
+  padding: 8px;
+  box-sizing: border-box;
+}
+.launch-qr path {
+  fill: #000;
+}
+.launch-side {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.launch-link {
+  font-size: 0.8rem;
+  color: var(--fg-2);
+  word-break: break-all;
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.launch-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }

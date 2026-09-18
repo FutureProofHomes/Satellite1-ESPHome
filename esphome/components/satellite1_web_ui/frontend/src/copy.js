@@ -22,6 +22,14 @@ export const HINTS = {
   switcher:
     "Each Satellite1 serves its own copy of this page, so everything you change applies to the device named above. Use this list to move to another device without typing its address - you stay on the page you are on.",
 
+  /* The Launch card on Diagnostics. The warning is the substance: the link is a bearer credential,
+     and saying so here is what makes offering it defensible. The QR-versus-link sentence lives here
+     rather than as visible copy on the card: the divergence (QR on the current IP so every phone
+     can scan it, link on the permanent .local name for pasting somewhere long-lived) is invisible
+     in the moment and only needs explaining to someone who goes looking. */
+  launch:
+    "Scan the code with a phone, or paste the link into a Home Assistant dashboard button, and that browser lands here already signed in - no password, no button press. The code carries the device's current network address, so any phone on your network can scan it; the link carries the device's permanent name, the right form to paste somewhere that keeps it. Anyone who has either can sign in with it, so treat them like the password. Sign out everywhere revokes them and every session, then issues a new one.",
+
   /* On the card title rather than a row, because what needs explaining is the tree, and the tree has no
      row of its own to hang an ⓘ off. This is also the only place Local Speaker is explained: it is the
      one tick in there whose effect is not obvious from its name, since it silences this device rather
@@ -179,6 +187,54 @@ export const HINTS = {
 };
 
 export const TEXT = {
+  /* The login screen. The device sign-in is offered first and the password second, because the
+     password is the thing iOS made miserable enough to build all of this around. The three mode
+     lines follow what the poll reports - the device picks how it can be answered when the window
+     opens, and the page's only job is to say what to do right now. */
+  login_sub: "Your home. Your voice. Your AI.",
+  login_tap: "Use VoiceTap Sign-In",
+  // The pending instructions, one per mode. Each names the physical thing to do and nothing else;
+  // the countdown beside them says how long it can wait.
+  login_mode_button: "Press the action button on top of your Satellite1 - the ring is breathing while it waits.",
+  // The button mode's variant when the poll says the hardware mute slider forced it: same
+  // instruction, plus the one thing only the person in the room can fix.
+  login_mode_button_hw:
+    "Press the action button on top of your Satellite1 - the ring is breathing while it waits. (Voice sign-in is off while the hardware mute switch is on - slide it off and try again to sign in by voice.)",
+  login_mode_code: "Listen: your Satellite1 is saying a code. Say the code back, or press the action button.",
+  login_mode_seq:
+    "Listen: your Satellite1 will say three wake words. Repeat them back in the same order, or press the action button.",
+  login_cancel: "Cancel",
+  // The confused-deputy warning, and the one string here that is doing security work: the action
+  // button approves whoever asked first, so a person "helping" a stuck screen by pressing it could
+  // be letting someone else in.
+  login_busy:
+    "Another sign-in is already waiting on this device. If that isn't you, don't press the button - wait for the light to stop.",
+  login_expired: "Nothing answered in time, so the sign-in closed.",
+  login_denied: "The spoken answer didn't match, so the sign-in closed.",
+  login_start_failed: "Couldn't reach the device to start. Check the connection and try again.",
+  login_retry: "Try again",
+  login_or: "or use the password",
+  login_pw_placeholder: "Password",
+  login_pw_submit: "Sign in",
+  login_show_pw: "Show password",
+  login_hide_pw: "Hide password",
+  login_wrong: "That's not the password.",
+  login_locked: "Too many tries. Wait %s seconds and try again.",
+  login_unreachable: "Couldn't reach the device. Check the connection and try again.",
+  // Where the password lives, for the person standing in front of this form for the first time.
+  login_pw_hint: 'See "Web UI Password" on this device\'s page in Home Assistant.',
+  // The side nav's sign-out: this browser only, unlike Diagnostics' sign-out-everywhere.
+  logout: "Sign out",
+
+  /* The Launch section on Diagnostics. */
+  launch_copy: "Copy link",
+  launch_copied: "Copied",
+  launch_regen: "Sign out everywhere",
+  launch_regen_title: "Sign out everywhere?",
+  launch_regen_body:
+    "Every signed-in browser and every sign-in link or QR code stops working immediately. This browser stays signed in, and the new link appears here.",
+  launch_regen_confirm: "Sign out everywhere",
+
   ha_connected: "Connected to Home Assistant",
   ha_disconnected: "Not connected to Home Assistant",
   ha_disconnected_detail:
