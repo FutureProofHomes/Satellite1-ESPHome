@@ -371,6 +371,44 @@ The consequence worth knowing is that when Home Assistant is unreachable, the ap
 everything local — sensors, LEDs, the radar, the log, maintenance — and greys out only what genuinely
 depends on Home Assistant, with a one-line explanation of the problem and the fix.
 
+## The actions verdict and the onboarding splash
+
+The single most common broken state is none of the above: Home Assistant connected and healthy, but
+the "Allow the device to perform Home Assistant actions" checkbox unticked — which it is for every
+newly added ESPHome device. Every payload above rides an action call, so a blocked device serves an
+empty `GET /api/sat1/ha` forever, and until September 2026 the app could only hedge ("too old, or
+not allowed") because a refused call and an unsupported one look identical from the response.
+
+The hedge is gone because the device already knows the difference: `tts_routing.yaml`'s probe
+concludes `ha_actions_allowed` (0 unknown, 1 allowed, 2 blocked, 3 unverifiable — a pre-2025.12 Home
+Assistant answers no action call, so silence must not accuse the checkbox). The probe runs on every
+Home Assistant connect — it was gated on an active routing selection until a live blocked test
+device (September 18 2026) showed the splash "asking" forever because nothing had ever concluded the
+verdict. The same test exposed that the sync ladder in `web_ui_ha.yaml` could not see a refusal
+either: a blocked checkbox makes Home Assistant drop the call *silently*, so the ladder's `on_error`
+never fires — it now carries a 10s silence watchdog that records `rung: -1` when no rung answers.
+The verdict is pushed into `satellite1_web_ui` from `tts_routing_status_publish` — the one script
+every transition runs through — and rides `GET /api/sat1/ha` as `actions`, next to the `rung` it
+disambiguates.
+
+What the app builds on it (`frontend/src/splash.jsx`): a verdict overlay at the first authenticated
+moment — mounted with the app, right after login hands over or immediately for a returning cookie —
+that holds the reveal while the boot calls land. Happy path: a sub-second fade. Blocked: the
+checkbox walk-through, quoted verbatim, with a My Home Assistant deep link to the ESPHome
+integration page and a 3s watch on the device's cache — ticking the box makes Home Assistant reload
+the config entry, which re-syncs the payload, so the screen melts into the app on its own. Not
+connected, too old, slow and device-error each get their own card, and every card carries "Continue
+without Home Assistant" into the degraded app, because the device's own controls owe nothing to any
+of them. The same walk-through reappears as a bottom drawer (the app's shared drawer pattern),
+opened by a one-time toast nudge after Continue and by "Show fix" links beside every blocked
+caption, so the fix stays one tap away from wherever the absence is felt.
+
+The same pass retired the amber banners app-wide (owner decision): the stream-lost banner became the
+one sticky toast on the shared toast surface at the bottom edge (transients — a failed write, the
+blocked nudge — stack above it), the selection-write banner folded into the ordinary write-failed
+toast, and the Audio cards' data-layer states became quiet dim captions. `.banner` survives only in
+its neutral form, on Diagnostics.
+
 ## The media footer and its three tiers
 
 The media surface is a floating bar under every route, styled after Music Assistant's own mobile

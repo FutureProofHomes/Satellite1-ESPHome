@@ -61,6 +61,24 @@ export const N_DIAG = ni(<path d="M2 8.5h2.8L6.4 5l3.2 6.5 1.6-3H14" />);
    the page rather than to any one card on it. */
 export const N_CHAT = ni(<path d="M3 3.5h10v6.5H8.2L5.4 12.6V10H3z" />);
 
+/** The FutureProofHomes mark, inlined from the vector master (Documentation repo) and stroked in
+ *  currentColor so one copy serves both themes. ~700 bytes gzipped, against two PNGs that would
+ *  not gzip at all. It lived in login.jsx while the login screen was its only wearer; it moved here
+ *  when the splash overlay (splash.jsx) started opening every session with the same mark - one copy,
+ *  and the two screens cannot drift apart. `cls` sizes it per surface; the login size is the default. */
+export const Logo = ({ cls = "login-logo" }) => (
+  <svg class={cls} viewBox="0 0 79.375 79.375" fill="none" stroke="currentColor" stroke-linecap="square" aria-hidden="true">
+    <g transform="matrix(1.6754,0,0,1.6754,84.9754,-16.4554)" stroke-width="1.31">
+      <path d="m -45.44,31.52 11,-10.96 11,10.96 v 16.25 l -5.82,.01" />
+      <path d="m -27.49,20.19 10.94,9.29 v 18.3 l 8.35,.03 V 29.29 l -10.94,-9.66 -1.92,1.73" />
+      <path stroke-width="1.36" d="m -32.25,47.75 c 0,-7.27 -5.89,-13.42 -13.16,-13.42 h 0 c -.05,0 -.1,0 -.15,.01" />
+      <path stroke-width="1.36" d="m -36.31,47.73 c .01,-.12 .01,-.12 .01,-.24 0,-5.03 -4.08,-9.11 -9.11,-9.11 l 0,0 c -.05,0 -.1,0 -.15,.01" />
+      <path stroke-width="1.36" d="m -40.36,47.8 c .01,-.12 .01,-.18 .01,-.31 0,-2.8 -2.27,-5.06 -5.06,-5.06 l 0,0 c -.05,0 -.1,0 -.15,.01" />
+      <path stroke-width="1.36" d="m -45.41,46.48 a 1.01,1.01 0 0 0 -.15,.01 v 1.38 h 1.09 a 1.01,1.01 0 0 0 .07,-.37 1.01,1.01 0 0 0 -1.01,-1.01 z" />
+    </g>
+  </svg>
+);
+
 /* ------------------------------------------------------------------ */
 /* Hint                                                                */
 /* ------------------------------------------------------------------ */

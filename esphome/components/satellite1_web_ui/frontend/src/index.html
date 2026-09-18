@@ -40,8 +40,30 @@ if(/iPhone|iPod|iPad/.test(navigator.userAgent)||(navigator.maxTouchPoints>1&&/M
 <!-- The boot splash: painted with the document, before the app script at the end of <body> has even
      been parsed, and removed by App (shell.jsx) the moment the boot phase resolves into a real
      screen. A sibling of #app rather than a child so Preact's first render never reconciles against
-     it. Styles live in app.css (#splash), themed by the data-theme script above. -->
-<div id="splash" aria-hidden="true"><div class="spl-mark">Satellite1</div><div class="spl-spin"></div></div>
+     it. Themed by the data-theme script above.
+     It wears the login screen's own classes (app.css already sits inlined in <head>), so the first
+     paint is the sign-in hero to the pixel; #splash itself only adds the fixed overlay positioning
+     and the spinner that stands in for the card. The SVG is a hand-inlined copy of Logo (ui.jsx)
+     and the tagline mirrors TEXT.login_sub (copy.js) - neither module has been parsed yet, so both
+     are duplicated here on purpose; change them together. -->
+<div id="splash" class="login" aria-hidden="true">
+<div class="login-glow"></div>
+<div class="login-hero">
+<svg class="login-logo" viewBox="0 0 79.375 79.375" fill="none" stroke="currentColor" stroke-linecap="square">
+<g transform="matrix(1.6754,0,0,1.6754,84.9754,-16.4554)" stroke-width="1.31">
+<path d="m -45.44,31.52 11,-10.96 11,10.96 v 16.25 l -5.82,.01"/>
+<path d="m -27.49,20.19 10.94,9.29 v 18.3 l 8.35,.03 V 29.29 l -10.94,-9.66 -1.92,1.73"/>
+<path stroke-width="1.36" d="m -32.25,47.75 c 0,-7.27 -5.89,-13.42 -13.16,-13.42 h 0 c -.05,0 -.1,0 -.15,.01"/>
+<path stroke-width="1.36" d="m -36.31,47.73 c .01,-.12 .01,-.12 .01,-.24 0,-5.03 -4.08,-9.11 -9.11,-9.11 l 0,0 c -.05,0 -.1,0 -.15,.01"/>
+<path stroke-width="1.36" d="m -40.36,47.8 c .01,-.12 .01,-.18 .01,-.31 0,-2.8 -2.27,-5.06 -5.06,-5.06 l 0,0 c -.05,0 -.1,0 -.15,.01"/>
+<path stroke-width="1.36" d="m -45.41,46.48 a 1.01,1.01 0 0 0 -.15,.01 v 1.38 h 1.09 a 1.01,1.01 0 0 0 .07,-.37 1.01,1.01 0 0 0 -1.01,-1.01 z"/>
+</g>
+</svg>
+<div class="login-name">Satellite1</div>
+<div class="login-sub">Your home. Your voice. Your AI.</div>
+</div>
+<div class="spl-spin"></div>
+</div>
 <div id="app"></div>
 <script>/*%JS%*/</script>
 </body>

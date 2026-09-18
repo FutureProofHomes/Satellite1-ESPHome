@@ -1068,9 +1068,12 @@ void WebUIHandler::handle_ha_(AsyncWebServerRequest *request) {
   // `d` is whatever Home Assistant rendered, passed through byte for byte rather than reparsed. The
   // age is what lets the app decide to ask again; -1 says nothing has ever arrived, which is a
   // different thing from a payload that is merely old.
+  // `actions` rides both shapes: the checkbox verdict matters most on exactly the loads where the
+  // payload is null, because a blocked device has never fetched one.
   if (this->ha_at_ == 0) {
-    char empty[48];
-    snprintf(empty, sizeof(empty), R"({"rung":%d,"age":-1,"d":null})", this->ha_rung_);
+    char empty[64];
+    snprintf(empty, sizeof(empty), R"({"rung":%d,"actions":%d,"age":-1,"d":null})", this->ha_rung_,
+             this->ha_actions_.load());
     request->send(200, "application/json", empty);
     return;
   }
@@ -1078,9 +1081,9 @@ void WebUIHandler::handle_ha_(AsyncWebServerRequest *request) {
   httpd_resp_set_type(*request, "application/json");
   httpd_resp_set_hdr(*request, "Cache-Control", CACHE_REVALIDATE);
 
-  char head[48];
+  char head[64];
   const int head_len =
-      snprintf(head, sizeof(head), R"({"rung":%d,"age":%u,"d":)", this->ha_rung_,
+      snprintf(head, sizeof(head), R"({"rung":%d,"actions":%d,"age":%u,"d":)", this->ha_rung_, this->ha_actions_.load(),
                static_cast<unsigned int>(static_cast<uint32_t>(millis_64() / 1000) - this->ha_at_));
   httpd_resp_send_chunk(*request, head, head_len);
   httpd_resp_send_chunk(*request, this->ha_buf_, static_cast<ssize_t>(this->ha_len_));

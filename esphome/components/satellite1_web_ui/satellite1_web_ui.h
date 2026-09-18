@@ -145,6 +145,11 @@ class Satellite1WebUI : public Component {
   void set_ha_payload(const std::string &json, int rung);
   void set_ha_failed() { this->handler_.set_ha_failed(); }
 
+  /// The actions-checkbox verdict from tts_routing's probe (0 unknown, 1 allowed, 2 blocked,
+  /// 3 Home Assistant too old), pushed from tts_routing_status_publish and served as `actions`
+  /// on /api/sat1/ha. See WebUIHandler::set_ha_actions.
+  void set_ha_actions(int verdict) { this->handler_.set_ha_actions(verdict); }
+
   /// Fired from loop() when a browser has posted to /api/sat1/ha/refresh. A trigger rather than a
   /// direct call, because the work is a Home Assistant action and the script that owns it lives in
   /// YAML - which also keeps the ladder's only caller in one file.

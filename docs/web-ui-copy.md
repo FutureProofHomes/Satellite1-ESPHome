@@ -189,8 +189,10 @@ loud rather than the name of a setting. Unquoted beside a dropdown full of assis
 reads like another one of them.
 
 With Home Assistant unreachable the row falls back to a plain on/off toggle, because there are no assistants
-to list and a dropdown holding one real option would be a worse lie than a switch. `assistant_needs_ha`
-says what that costs.
+to list and a dropdown holding one real option would be a worse lie than a switch. One of three lines says
+what that costs, most specific cause first: `assistant_blocked` when the actions checkbox is off (with a
+**Show fix** link that opens the walk-through drawer), `ha_too_old` when Home Assistant predates 2025.12,
+and `assistant_needs_ha` for plain unreachable.
 
 ### Audio
 
@@ -247,11 +249,20 @@ screen states.
 
 The `ha_*` block below is the Home Assistant data layer explaining its own absence. Each string is a
 different cause with a different fix, which is why they are not collapsed into one "unavailable"
-message: `ha_pending` is a five-second wait on a fresh boot rather than a fault, `ha_refused` is the
-only one that asks the customer to change a setting, and the last three are properties of their Home
-Assistant rather than of the device. `sel_failed` is not one of them: it is the device refusing a
-write, and it is shown as a banner rather than a silent revert because the checkbox has already moved
-back, which on its own looks like a page that ignores clicks.
+message: `ha_pending` is a five-second wait on a fresh boot rather than a fault, `ha_blocked` is the
+only one that asks the customer to change a setting (its **Show fix** link opens the walk-through
+drawer), and the rest are properties of their Home Assistant rather than of the device. `ha_refused`
+- the old string that hedged "either it is older than 2025.12, or actions are not allowed" - was
+split into `ha_blocked` and `ha_too_old` when the firmware started reporting which one it is (the
+`actions` field on `/api/sat1/ha`, September 2026).
+
+These render as quiet dim text above the trees they explain, not banners: the amber banners were
+retired app-wide in the same pass (owner decision). `sel_failed` went with them - a refused selection
+write now reports through the shared `write_failed` toast like every other write, and the checkbox
+still puts itself back.
+
+`stream_lost` also changed surface, not wording: it is the one sticky toast, standing until the event
+stream reconnects, where the transient toasts (`write_failed`, the blocked nudge below) time out.
 
 | Key | Text |
 | --- | --- |
@@ -260,6 +271,7 @@ back, which on its own looks like a page that ignores clicks.
 | `ha_disconnected_detail` | Everything on this page still works - it talks to the device directly. Media and anything that needs your smart home will be unavailable until the connection returns. |
 | `stream_lost` | Lost the connection to the device. Retrying. |
 | `no_devices` | Only this device. Other Satellite1s appear here once Home Assistant lists them. |
+| `no_devices_blocked` | Only this device. Other Satellite1s cannot be listed while Home Assistant actions are off. |
 | `peer_up` | Available, according to Home Assistant |
 | `peer_down` | Unavailable, according to Home Assistant |
 
@@ -313,6 +325,7 @@ the last because `zi_more` already says a zone needs three corners.
 | `pipeline_off` | Off |
 | `pipeline_preferred` | Preferred |
 | `assistant_needs_ha` | Home Assistant keeps which assistant answers each wake word, so that cannot be set from here until it is reachable. Turning a wake word on and off is the device's own setting and still works. |
+| `assistant_blocked` | Home Assistant is not letting this device perform actions, so the assistants cannot be listed. Wake words switched here still change the device, but Home Assistant may switch them back when it reconnects. |
 | `assistant_slots_full` | Home Assistant can pair only two wake words with an assistant of their own. The rest are answered by the first one's assistant, which is what their dropdowns show. |
 | `confirm` | Confirm |
 | `cancel` | Cancel |
@@ -320,7 +333,9 @@ the last because `zi_more` already says a zone needs three corners.
 | `theme_to_light` | Switch to light theme |
 | `ha_pending` | Asking Home Assistant which speakers you have. |
 | `ha_never` | Not connected to Home Assistant, so the device does not know which areas or speakers exist. The controls below still hold their current settings and will apply as soon as the connection returns. |
-| `ha_refused` | Home Assistant did not answer. Either it is older than 2025.12, or this device is not allowed to perform actions: Settings › Devices & services › ESPHome › this device › CONFIGURE, then tick “Allow the device to perform Home Assistant actions”. |
+| `ha_blocked` | Home Assistant is not letting this device perform actions, so your areas and speakers cannot be listed - and answers play only on this speaker until it can. |
+| `ha_too_old` | This Home Assistant is older than 2025.12, which cannot answer the calls these lists are built from. Update Home Assistant to choose speakers here. |
+| `show_fix` | Show fix |
 | `ha_no_area` | This device is not in a Home Assistant area, so “Route TTS To All Area Players” and “Duck All Area Players” have no room to refer to. You can still pick any room below. Assign it to an area in Home Assistant and refresh. |
 | `ha_no_players` | Home Assistant has no media players at all, so there is nothing to choose between. |
 | `ha_truncated` | Too many areas to send in one go, so the list is cut short. Players already chosen are still used, whether or not they appear below. |
@@ -328,7 +343,6 @@ the last because `zi_more` already says a zone needs three corners.
 | `cap_no_volume` | No volume control |
 | `cap_self` | This device |
 | `player_offline` | Offline |
-| `sel_failed` | That change was not saved. The device rejected it, or the connection dropped. |
 
 `copied` was deleted along with the Logs card's Copy button. The button never worked honestly on this
 origin - the Clipboard API needs a secure context, this app is served over plain HTTP, so it ran on a
@@ -351,10 +365,13 @@ neither can be matched by its label, because a customer who names one of their o
 travel as values and this is the only place their display text exists. Reusing `no_wake_word` rather than
 inventing a sentinel for Off keeps the entire value space Home Assistant's.
 
-`assistant_needs_ha` appears under the wake words when the four selects could not be read at all: Home
-Assistant unreachable, older than 2025.10, or those entities disabled in its registry. It says which half of
+`assistant_needs_ha` appears under the wake words when the four selects could not be read and no more
+specific cause applies; `assistant_blocked` (actions checkbox off, with the **Show fix** link) and
+`ha_too_old` take precedence when the `actions` verdict names one of them. All three say which half of
 the card is affected on purpose — whether the device listens is the device's own setting and keeps working,
-so a single "unavailable" over the whole card would be false.
+so a single "unavailable" over the whole card would be false. `assistant_blocked` additionally warns that
+Home Assistant may push its own slot state back over locally flipped wake words when it reconnects, because
+the slot sync that normally prevents that is itself an action call.
 
 `assistant_slots_full` needs three or more wake words listening at once, which this product cannot reach: it
 ships two models. It is written anyway because the payload and the card are both general, and because the
@@ -371,6 +388,77 @@ gesture that fetches a newly added speaker is reloading the page. There is no in
 device otherwise only re-asks Home Assistant five seconds after the native API connects. The device
 switcher also asks for a sync each time it opens, so its availability dots are at most a couple of
 seconds old.
+
+## The verdict splash, the fix drawer, and the blocked toast
+
+The splash is the overlay that holds the app's first paint after sign-in (or straight away for a
+returning cookie) while the boot calls land. On the happy path nobody reads it - it fades in under a
+second. The strings below are for the paths that need a person, and the star among them is the
+blocked card: the "Allow the device to perform Home Assistant actions" checkbox, off for every newly
+added ESPHome device, walked through step by step. The same walk-through reappears in the fix drawer,
+opened by the blocked toast and by every in-place **Show fix** link, so the fix stays one tap away
+after "Continue without Home Assistant actions".
+
+Every line on the blocked card was read on a phone and cut down with the owner (September 2026) -
+resist re-expanding them. The body leads with what ticking the box buys rather than what is broken.
+Step 3 quotes the checkbox verbatim so it matches what Home Assistant renders. Step 2 comes in two
+forms because of a catch-22: Home Assistant's display name for the device travels only over the
+action channel the card exists to unblock, so on first onboarding only the firmware name is known
+and the `_unnamed` hedge ("unless you renamed it") is honest, while a device that ever synced still
+holds the real name and gets the short form. In both, `%c` is where the guide draws the mdi:cog
+glyph inline - the same icon Home Assistant puts on the device's row, matched by sight - and `%s`
+is the device's name. `blocked_open_ha` (centred, so it lines up with Continue into one action
+column) carries two URLs: on phones a tap tries the companion app's own scheme first
+(`homeassistant://navigate/config/integrations/integration/esphome`), which opens the app directly
+at the integrations page with no interstitial tab and no internet needed; if no app claims it - or
+on a desktop - it falls back to the My Home Assistant redirect
+(`my.home-assistant.io/redirect/integration/?domain=esphome`), which opens the user's own
+installation at the same page. Home Assistant has no URL that lands on the Configure dialog itself,
+so the last two taps stay written out. The web fallback needs the browser to have internet; without
+it, the steps stand alone.
+
+The watching line under the button is one row beside a small spinning ring (the boot ring at text
+size - spinning reads "actively checking" where the old breathing dot read as merely alive):
+`blocked_watching`, then `blocked_recheck` as an inline link that runs the manual check, then a
+period. It leads with "Advances automatically" because that is the fact people missed when the
+sentence led with "watching". The Continue button under the card wears a real button face (the
+ghost did not read as pressable) and its label admits only what is missing: `splash_continue_actions`
+on the blocked and too-old cards, where Home Assistant itself is fine, and the plain
+`splash_continue` on the rest.
+
+| Key | Where | Text |
+| --- | --- | --- |
+| `splash_connecting` | status line, first moments | Connecting to your Satellite1… |
+| `splash_asking` | status line, Home Assistant sync in flight | Asking Home Assistant which speakers you have… |
+| `splash_connected` | status line, the beat before the fade after a recovery | Connected to Home Assistant. |
+| `splash_slow` | card, after 15s of asking | This is taking longer than it should. The device may still be starting up, or Home Assistant may be slow to answer. |
+| `splash_error` | card, device answering errors | The device answered with an error, so the app cannot start. |
+| `splash_retry` | button under `splash_error` | Try again |
+| `splash_continue` | button under the not-connected, slow and error cards | Continue without Home Assistant |
+| `splash_continue_actions` | button under the blocked and too-old cards | Continue without Home Assistant actions |
+| `splash_continue_sub` | line under that button | Your experience will be limited. |
+| `blocked_title` | blocked card and fix drawer title | Allow Home Assistant actions |
+| `blocked_body` | blocked card and fix drawer | One checkbox in Home Assistant lets this device list your areas and media players. |
+| `blocked_step1` | step 1 | In Home Assistant, open Settings › Devices & services › ESPHome. |
+| `blocked_step2` | step 2, name known to be Home Assistant's | Tap the %c cog next to %s. |
+| `blocked_step2_unnamed` | step 2, firmware-name fallback | Tap the %c cog next to this device - %s, unless you renamed it. |
+| `blocked_step3` | step 3 | Tick “Allow the device to perform Home Assistant actions”, then Submit. |
+| `blocked_open_ha` | link button, centred | Open Home Assistant |
+| `blocked_watching` | watching line, beside the small ring | Advances automatically - or |
+| `blocked_recheck` | inline link ending the watching line | manually check again |
+| `blocked_check` | button on the slow card | Check again |
+| `noha_title` | not-connected card title | Not connected to Home Assistant |
+| `noha_body` | not-connected card | The device has no connection to Home Assistant right now, so it cannot list your areas, media players, or other Satellite1 devices. Its own controls all work. This screen continues on its own when the connection returns. |
+| `old_ha_title` | old-Home-Assistant card title | Home Assistant needs an update |
+| `old_ha_body` | old-Home-Assistant card | This Home Assistant is older than 2025.12, which cannot answer the calls the app's speaker and assistant lists are built from. Update Home Assistant to use them - everything on the device itself works now. |
+| `blocked_toast_t` | toast title, once on entering the app while blocked | Home Assistant actions are off. |
+| `blocked_toast_s` | toast second line | Speaker lists, assistants and other devices are unavailable. Tap for the fix. |
+
+The blocked and not-connected cards recover on their own: the app polls the device's cached verdict
+every three seconds while one is up, and ticking the checkbox makes Home Assistant reload the device's
+connection, which triggers a fresh sync - so the card melts into `splash_connected` and the fade
+without anyone pressing anything. `blocked_check` exists for the impatient; the fix drawer closes
+itself the same way.
 
 ## Confirmation modals (`CONFIRM`)
 

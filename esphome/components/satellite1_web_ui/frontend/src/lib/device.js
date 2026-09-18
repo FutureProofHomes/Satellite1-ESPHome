@@ -215,7 +215,11 @@ export function deviceIdentity(device, ha) {
   const own = device?.friendly_name || device?.name || "";
   const mac = device?.mac?.toLowerCase();
   const hit = mac ? (ha?.d?.dev || []).find((d) => (d?.[3] || "").toLowerCase() === mac) : null;
-  return { name: hit?.[1] || own, area: hit?.[2] || ha?.d?.area || "" };
+  // `named`: the name is Home Assistant's own for this device, not the firmware fallback. What lets
+  // the blocked card say "tap the cog next to Satellite1 Loft Refurb" with confidence when a stale
+  // payload holds the real name, and hedge with "unless you renamed it" only when first onboarding
+  // leaves it guessing (owner hit the unhedged firmware name on a renamed fleet, September 2026).
+  return { name: hit?.[1] || own, area: hit?.[2] || ha?.d?.area || "", named: !!hit };
 }
 
 /**
@@ -223,16 +227,33 @@ export function deviceIdentity(device, ha) {
  *
  * The browser cannot ask Home Assistant itself - it has no token, and requiring one to open a
  * settings page is not a setup step this product can have - so the device asks over the native API
- * and caches the answer. What comes back is `{rung, age, d}`: which rung of the responding-action
- * ladder worked, how many seconds ago, and the payload.
+ * and caches the answer. What comes back is `{rung, actions, age, d}`: which rung of the
+ * responding-action ladder worked, what the device's own probe concluded about the actions
+ * checkbox, how many seconds ago, and the payload.
  *
- * `rung` is what the degraded copy is written from. 1 or 2 means the channel works; 0 means nothing
- * has been asked yet, which on a fresh boot is simply "not for another five seconds"; -1 means both
- * rungs were refused, which is either an installation below 2025.12 or the actions checkbox off.
+ * `rung` says what the last sync managed. 1 or 2 means the channel works; 0 means nothing has been
+ * asked yet, which on a fresh boot is simply "not for another five seconds"; -1 means both rungs
+ * were refused.
+ *
+ * `actions` says why a refused one was refused, which the rung alone cannot: 0 nothing concluded
+ * yet, 1 allowed, 2 blocked (the "Allow the device to perform Home Assistant actions" checkbox is
+ * off), 3 unverifiable (Home Assistant predates 2025.12 and answers no action call, so a silence
+ * must not accuse the checkbox). It is tts_routing's ha_actions_allowed verdict, pushed into the
+ * component at every transition - see tts_routing_status_publish.
  *
  * A stale payload is still served with its real age rather than withheld, because a list of speakers
  * from a minute ago is more use than an empty one - so `stale` is advice to the UI, not an error.
  */
+
+/** The checkbox is off. Also inferred from rung -1 alone: the ladder only runs at all when the
+ *  connected Home Assistant supports action replies, so a refusal there cannot mean "too old" - it
+ *  is the same evidence the probe's watchdog reads, arriving a few seconds sooner. */
+export const haBlocked = (ha) => !!ha && (ha.actions === 2 || ha.rung === -1);
+
+/** Home Assistant predates 2025.12. Never true alongside a working payload: a rung that answered
+ *  proves the calls work, whatever an earlier probe concluded. */
+export const haTooOld = (ha) => !!ha && ha.actions === 3 && ha.rung !== 1 && ha.rung !== 2;
+
 export function useHaData() {
   const [ha, setHa] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -294,6 +315,11 @@ export function useHaData() {
     ha,
     haRefresh: refresh,
     haRefreshing: refreshing,
+    // One plain re-read of the device's cache, no refresh POST: what the splash and the fix drawer
+    // poll while they are watching for the checkbox verdict to change. The device re-syncs on its
+    // own when Home Assistant reconnects (ticking the checkbox reloads the config entry, which is a
+    // reconnect), so reading the cache is enough to notice recovery - no action call is spent on it.
+    haRead: read,
     haStale: ha ? ha.age === HA_NEVER || ha.age > HA_STALE_S : false,
   };
 }
@@ -377,14 +403,17 @@ export function useSelection() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
-        // The sel_failed banner below is this write's own surface, and it says more than the toast
-        // could - the checkbox has already been put back, which is the part that needs explaining.
-        quiet: true,
+        // Not quiet any more: this used to opt out of the toast in favour of a sel_failed banner by
+        // the trees, which went with the amber banners (owner decision, September 2026). The
+        // write-failed toast is now this write's surface like every other write's - one failure,
+        // one report - and the revert below stays.
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
     } catch {
+      // The revert only; selError stays what the *read* concluded. It used to flip here too, which
+      // fed a banner that no longer exists - and a route deciding it cannot render because one write
+      // bounced would be the wrong lesson to draw anyway.
       setSel(previous);
-      setError(true);
     }
   };
 

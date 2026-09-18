@@ -213,22 +213,14 @@ a {
    reconcile against it - painted with the document itself and removed by App the moment the boot
    phase resolves (shell.jsx). It exists for the visitor who used to stare at a blank page: an
    mDNS-less browser on the IP origin waiting out the .local probe. Themed by the same data-theme
-   attribute the pre-paint script in <head> sets, so it never flashes the wrong background. */
+   attribute the pre-paint script in <head> sets, so it never flashes the wrong background.
+   The markup wears the login screen's classes (.login, .login-glow, .login-hero and children), so
+   the splash and the sign-in screen are the same picture by construction; the two rules below are
+   all the splash owns - the fixed overlay footing and the spinner that stands in for the card. */
 #splash {
   position: fixed;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--s-4);
   background: var(--bg);
-}
-.spl-mark {
-  font-size: var(--t-xl);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--fg-3);
 }
 .spl-spin {
   width: 22px;
@@ -237,6 +229,8 @@ a {
   border-top-color: var(--accent);
   border-radius: var(--r-pill);
   animation: spl-rot 0.9s linear infinite;
+  /* Above the glow wash, like .login-hero. A flex item honours z-index without position. */
+  z-index: 1;
 }
 @keyframes spl-rot {
   to {
@@ -443,6 +437,11 @@ textarea {
    competed with the green one in the bar for the same meaning. The row shows Home Assistant's state now,
    and which device you are on is the only row there is. */
 
+/* Neutral only. .banner.warn is gone with the amber banners (owner decision, September 2026): the
+   stream-lost and blocked states report on the toast surface, and the Audio cards' data-layer
+   captions are quiet dim text. What remains here dresses ha_disconnected_detail on Diagnostics,
+   which was always neutral. The --warn-* tokens stay - the login screen's denied message and the
+   warn toasts still speak in them. */
 .banner {
   margin: 0;
   padding: var(--s-2) var(--s-4);
@@ -451,31 +450,38 @@ textarea {
   background: var(--fill);
   border-bottom: 1px solid var(--line);
 }
-.banner.warn {
-  color: var(--warn-fg);
-  background: var(--warn-bg);
-  border-color: var(--warn-line);
-}
 
-/* The failed-write toast. Fixed to the bottom rather than joining the banners at the top: banners
-   describe an ongoing state and can sit above the content they qualify, but this reports a moment,
-   and it appears where the thumb that just did the failing already is. z-index above the sheets and
-   the hint layer both, because a write can fail while either is open and a toast under a scrim is a
-   toast nobody saw. One shadowed elevated card, same grammar as the hint bubble; the error palette
-   is on the title line, not the whole card, so it catches the eye without shouting. */
-.toast {
+/* The toast surface (ToastHost in shell.jsx): every out-of-band report in the app, since the amber
+   banners retired. Fixed to the bottom rather than the top: banners could sit above the content they
+   qualified, but these report to the thumb that just did the tapping. A column so the two kinds can
+   coexist - the transient moment (a failed write, the blocked nudge) stacks above the sticky state
+   (stream lost), newest news nearest the thumb. z-index above the sheets and the hint layer both,
+   because a write can fail while either is open and a toast under a scrim is a toast nobody saw.
+   The container itself ignores the pointer - it is an invisible column, and a phantom strip eating
+   taps above the media bar would be a worse bug than any toast fixes. */
+.toasts {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  /* Above the media bar, which owns the bottom edge now - a toast behind the bar is a toast nobody
-     saw, same reasoning as its z-index. */
+  /* Above the media bar, which owns the bottom edge - a toast behind the bar is a toast nobody
+     saw, same reasoning as the z-index. */
   bottom: calc(var(--mbar-h) + var(--s-4) + env(safe-area-inset-bottom));
   z-index: 50;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  max-width: min(360px, calc(100vw - 24px));
+  pointer-events: none;
+}
+/* One shadowed elevated card, same grammar as the hint bubble; the state palette is on the title
+   line, not the whole card, so it catches the eye without shouting. Error voice by default (the
+   failed write); .warn below reads the same card in the warning tokens. */
+.toast {
+  display: flex;
+  flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  max-width: min(360px, calc(100vw - 24px));
   padding: var(--s-2) var(--s-3);
   background: var(--fill-2);
   border: 1px solid var(--err-line);
@@ -483,7 +489,14 @@ textarea {
   box-shadow: 0 6px 20px var(--shadow);
   cursor: pointer;
   text-align: left;
+  pointer-events: auto;
   animation: toast-in 160ms ease-out;
+}
+.toast.warn {
+  border-color: var(--warn-line);
+}
+.toast.warn .toast-t {
+  color: var(--warn-fg);
 }
 .toast-t {
   font: 600 var(--t-s) inherit;
@@ -496,11 +509,11 @@ textarea {
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(6px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(0);
   }
 }
 
@@ -3021,4 +3034,144 @@ polyline.draft {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* ---------------------------------------------------------------- */
+/* The verdict splash and the actions fix drawer (splash.jsx)       */
+/* ---------------------------------------------------------------- */
+
+/* The overlay wears the login screen's clothes - .login-glow, .login-hero, .login-name, .login-card
+   are all reused above - so boot splash, login and this read as one sequence. Only what it adds is
+   here: the fixed positioning over the app, the fade, the orbiting satellite, and the fix content. */
+.splash {
+  position: fixed;
+  inset: 0;
+  /* Above everything, the toasts included: while the verdict is up it is the whole story, and a
+     stream-lost toast poking out from under it would be the app talking over itself. */
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  background: var(--bg);
+}
+/* The graceful exit. Opacity only - the app is already painted underneath, so nothing needs to
+   move - and pointer-events off from the first frame of the fade, because a half-faded overlay
+   that still eats taps reads as a hang. The transition lives in the no-preference block below;
+   reduced motion gets the same instant disappearance the unmount would be. */
+.splash.out {
+  opacity: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .splash {
+    transition: opacity 0.45s ease;
+  }
+}
+/* No spinner of its own: the overlay reuses .spl-spin, the boot splash's ring, as a sibling of the
+   hero in the same flex column - so the handoff from the static splash is invisible. An orbiting-dot
+   flourish lived here briefly; it read as a different screen (owner, September 2026) and went. */
+.splash-status {
+  font-size: 0.85rem;
+  color: var(--fg-3);
+  text-align: center;
+}
+/* The failure cards, in the login card's frame. Their own type scale rather than the card h2, which
+   drags the route-header styling in with it. */
+.splash-card {
+  gap: 10px;
+}
+.splash-t {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+.splash-b {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--fg-2);
+}
+/* The walk-through, shared by the splash card and the fix drawer. */
+.fix-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--fg-2);
+}
+/* Centred (owner, September 2026): lines up with Continue below into one action column. */
+.fix-open {
+  align-self: center;
+}
+/* Step 2's inline cog: the mdi:cog glyph Home Assistant draws on the device's row, sized to the
+   text and nudged down to sit on the baseline like a character. */
+.fix-cog {
+  width: 15px;
+  height: 15px;
+  vertical-align: -2px;
+  margin: 0 1px;
+  fill: currentColor;
+}
+/* The watching line: a small ring beside the sentence that says the screen recovers on its own.
+   The blocked card spins the boot ring here at text size - spinning reads "actively checking"
+   where the breathing dot (which the noha card keeps) read as merely alive. */
+.fix-watch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.fix-watch .login-pulse {
+  flex: none;
+}
+.fix-watch .spl-spin {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+.fix-check {
+  align-self: flex-start;
+}
+/* Continue-anyway, under whichever card is up: the button, then the one line saying what survives. */
+.splash-skip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  z-index: 1;
+}
+.splash-skip p {
+  margin: 0;
+}
+/* The fix drawer's body inherits .mpanel; only the walk-through's breathing room is its own. */
+.fixpanel {
+  gap: var(--s-3);
+  padding-left: var(--s-4);
+  padding-right: var(--s-4);
+}
+
+/* An inline text link that is a button - the "Show fix" affordance beside the quiet blocked
+   captions. Underlined because it sits inside running dim text, where colour alone is not enough
+   to say "this one phrase is pressable". */
+.linkish {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* The data-layer captions above the trees hold plain <p>s now that the banners are gone. */
+.habox p {
+  margin: 0 0 var(--s-1);
+}
+.habox p:last-child {
+  margin-bottom: 0;
 }

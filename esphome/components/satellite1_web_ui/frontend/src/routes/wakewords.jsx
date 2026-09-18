@@ -28,7 +28,9 @@ import {
   NO_WAKE_WORD,
   PIPELINE_PREFERRED,
   entity,
+  haBlocked,
   haSyncOnce,
+  haTooOld,
   pathFor,
   post,
   useAssist,
@@ -116,8 +118,22 @@ function WakeWordsCard({ ctx, wake, assist }) {
       ))}
 
       {/* Wake words to switch, but no assistants to point them at. Worth one line rather than silently
-          falling back to switches, because the reader was told this could be set. */}
-      {words.length > 0 && !assist.ready && <p class="dim sm">{TEXT.assistant_needs_ha}</p>}
+          falling back to switches, because the reader was told this could be set. Three variants for
+          three causes, most specific first: the actions checkbox (with the fix one tap away), an old
+          Home Assistant, and plain unreachable. */}
+      {words.length > 0 && !assist.ready && (
+        <p class="dim sm">
+          {haBlocked(ctx.ha) ? TEXT.assistant_blocked : haTooOld(ctx.ha) ? TEXT.ha_too_old : TEXT.assistant_needs_ha}
+          {haBlocked(ctx.ha) && ctx.onShowFix && (
+            <>
+              {" "}
+              <button class="linkish" onClick={ctx.onShowFix}>
+                {TEXT.show_fix}
+              </button>
+            </>
+          )}
+        </p>
+      )}
 
       {/* More wake words listening than Home Assistant has slots to pair them with, which needs a build
           with three or more models - this product has two. Home Assistant sends anything it cannot match

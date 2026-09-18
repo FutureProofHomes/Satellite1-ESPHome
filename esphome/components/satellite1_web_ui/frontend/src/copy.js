@@ -240,12 +240,19 @@ export const TEXT = {
   ha_disconnected_detail:
     "Everything on this page still works - it talks to the device directly. Media and anything that needs your smart home will be unavailable until the connection returns.",
 
+  // On the shared toast surface since the amber banners were retired (September 2026), and the one
+  // sticky toast: it describes an ongoing state, so it stays until the stream reconnects rather than
+  // timing out. Tapping it goes to the device log, same as the write-failed toast.
   stream_lost: "Lost the connection to the device. Retrying.",
 
   // Only when the sheet has no peer rows at all. It used to also name the add-by-address field that
   // ended the sheet; the field is gone (owner's call), so Home Assistant's roster is the one way a
   // row appears and the sentence says only that.
   no_devices: "Only this device. Other Satellite1s appear here once Home Assistant lists them.",
+
+  // The same foot-line while the actions checkbox is off, which is a fixable reason rather than an
+  // empty house - so it points at the fix instead of promising rows that cannot arrive.
+  no_devices_blocked: "Only this device. Other Satellite1s cannot be listed while Home Assistant actions are off.",
 
   // Titles on the peer dots. Attributed to Home Assistant rather than stated as fact, because that is
   // the only witness: the page cannot probe a peer itself, and its view can lag a reboot by seconds.
@@ -335,12 +342,18 @@ export const TEXT = {
   pipeline_off: "Off",
   pipeline_preferred: "Preferred",
 
-  // Shown under the wake words when the assistant selects could not be read: Home Assistant unreachable,
-  // too old, or its four selects disabled. Says which half of the card is affected, because whether the
-  // device listens is its own to answer and that half keeps working - as a switch, since with no
-  // assistants to list a dropdown would have nothing in it.
+  // Shown under the wake words when the assistant selects could not be read and no more specific
+  // reason applies (the two below cover blocked actions and an old Home Assistant). Says which half
+  // of the card is affected, because whether the device listens is its own to answer and that half
+  // keeps working - as a switch, since with no assistants to list a dropdown would have nothing in it.
   assistant_needs_ha:
     "Home Assistant keeps which assistant answers each wake word, so that cannot be set from here until it is reachable. Turning a wake word on and off is the device's own setting and still works.",
+
+  // The same line's precise variant when the actions checkbox is the reason, with the Show fix link
+  // rendered after it. Warns about the drift the blocked state actually causes here: the slot sync
+  // that keeps Home Assistant agreeing with these toggles is itself an action call.
+  assistant_blocked:
+    "Home Assistant is not letting this device perform actions, so the assistants cannot be listed. Wake words switched here still change the device, but Home Assistant may switch them back when it reconnects.",
 
   // Only with three or more wake words on at once, which needs a build with more models than this product
   // ships. Home Assistant has two pairings, and sends anything it cannot match to the first one - so the
@@ -361,8 +374,18 @@ export const TEXT = {
   ha_never:
     "Not connected to Home Assistant, so the device does not know which areas or speakers exist. The controls below still hold their current settings and will apply as soon as the connection returns.",
 
-  ha_refused:
-    "Home Assistant did not answer. Either it is older than 2025.12, or this device is not allowed to perform actions: Settings \u203A Devices & services \u203A ESPHome \u203A this device \u203A CONFIGURE, then tick \u201CAllow the device to perform Home Assistant actions\u201D.",
+  /* ha_refused is gone. It hedged "either it is older than 2025.12, or this device is not allowed to
+     perform actions" because the frontend could not tell the two apart; the `actions` field on
+     /api/sat1/ha now says which, so each gets its own precise line. The blocked one leans on the fix
+     drawer (the Show fix link rendered beside it) rather than walking the whole path itself. */
+  ha_blocked:
+    "Home Assistant is not letting this device perform actions, so your areas and speakers cannot be listed - and answers play only on this speaker until it can.",
+
+  ha_too_old:
+    "This Home Assistant is older than 2025.12, which cannot answer the calls these lists are built from. Update Home Assistant to choose speakers here.",
+
+  /* The link that opens the fix drawer, wherever the blocked state is mentioned in place. */
+  show_fix: "Show fix",
 
   ha_no_area:
     "This device is not in a Home Assistant area, so \u201CRoute TTS To All Area Players\u201D and \u201CDuck All Area Players\u201D have no room to refer to. You can still pick any room below. Assign it to an area in Home Assistant and refresh.",
@@ -389,9 +412,79 @@ export const TEXT = {
   ha_truncated:
     "Too many areas to send in one go, so the list is cut short. Players already chosen are still used, whether or not they appear below.",
 
-  /* The selection endpoint refused a write. Shown as a banner rather than a silent revert, because the
-     checkbox has already moved back and that on its own looks like a page that ignores clicks. */
-  sel_failed: "That change was not saved. The device rejected it, or the connection dropped.",
+  /* sel_failed is gone with the amber banners (owner decision, September 2026): a refused selection
+     write now flows through the write-failed toast like every other write - one failure, one surface. */
+
+  /* The splash: the verdict overlay that holds the app's first paint while the boot calls land
+     (splash.jsx). One status line per waiting phase, then either a graceful fade or one of the
+     failure cards below. */
+  splash_connecting: "Connecting to your Satellite1\u2026",
+  splash_asking: "Asking Home Assistant which speakers you have\u2026",
+  splash_connected: "Connected to Home Assistant.",
+  splash_slow:
+    "This is taking longer than it should. The device may still be starting up, or Home Assistant may be slow to answer.",
+  splash_error: "The device answered with an error, so the app cannot start.",
+  splash_retry: "Try again",
+  // The escape into the degraded app, on every failure card. Two labels: the cards where Home
+  // Assistant itself is fine and only the actions channel is shut (blocked, too-old) say so, because
+  // "without Home Assistant" there would claim more is broken than is; the cards with no Home
+  // Assistant at all keep the plain form. One shared sub-line, cut to five words from a fourteen-word
+  // list of survivors (owner, September 2026: "a lot of words down there").
+  splash_continue: "Continue without Home Assistant",
+  splash_continue_actions: "Continue without Home Assistant actions",
+  splash_continue_sub: "Your experience will be limited.",
+
+  /* The blocked card: the actions checkbox walk-through, shared by the splash and the fix drawer.
+     Every line here was read on a phone and cut down with the owner (September 2026) - resist
+     re-expanding them. The body leads with what ticking the box buys, not what is broken: the title
+     already names the problem. The checkbox label in step 3 is quoted verbatim so it matches what
+     Home Assistant renders. In step 2, %c is where BlockedGuide draws the cog icon - the same
+     mdi:cog glyph Home Assistant puts on the device's row, matched by sight rather than by name -
+     and %s is the device's name. Two step-2 forms because of a catch-22: Home Assistant's display
+     name for the device travels only over the action channel this card exists to unblock, so on
+     first onboarding the firmware name is all there is and the hedge is honest, while a device that
+     ever synced (the box was ticked once, then unticked) still holds the real name and earns the
+     short form. deviceIdentity's `named` says which. */
+  blocked_title: "Allow Home Assistant actions",
+  blocked_body: "One checkbox in Home Assistant lets this device list your areas and media players.",
+  blocked_step1: "In Home Assistant, open Settings \u203A Devices & services \u203A ESPHome.",
+  blocked_step2: "Tap the %c cog next to %s.",
+  blocked_step2_unnamed: "Tap the %c cog next to this device - %s, unless you renamed it.",
+  blocked_step3: "Tick \u201CAllow the device to perform Home Assistant actions\u201D, then Submit.",
+  // Two URLs behind one button - see openHomeAssistant in splash.jsx for the handoff. The app URL
+  // is the companion app's own scheme, tried first on phones because it lands inside the app
+  // directly (the My Home Assistant redirect always stops at an interstitial tab first - owner hit
+  // it on iOS, September 2026) and needs no internet. The https redirect stays as the anchor's real
+  // href and the fallback: desktops, and phones without the app. Neither can land on the Configure
+  // dialog itself - Home Assistant has no URL for an options flow, and the device-page link would
+  // need a registry id that rides the exact payload a blocked device cannot fetch - so steps 2 and
+  // 3 cover the last two taps. The web redirect needs the browser to have internet; without it the
+  // written steps stand alone. The device itself serves nothing external either way.
+  blocked_open_ha: "Open Home Assistant",
+  blocked_open_ha_url: "https://my.home-assistant.io/redirect/integration/?domain=esphome",
+  blocked_open_ha_app_url: "homeassistant://navigate/config/integrations/integration/esphome",
+  // One row beside a small spinner, and the manual escape rides inside the sentence as a link
+  // instead of standing as its own button (owner, September 2026). "Advances automatically" leads
+  // because it is the fact people missed when the sentence led with "watching"; the trigger goes
+  // unsaid because step 3 directly above is the trigger. blocked_recheck is the link's text; the
+  // rendering adds the period after it so the sentence closes whatever the link's tap state.
+  blocked_watching: "Advances automatically - or",
+  blocked_recheck: "manually check again",
+  // The slow card's button, not the blocked card's (that one's manual check is the link above).
+  blocked_check: "Check again",
+
+  /* The other two failure cards the splash can land on. */
+  noha_title: "Not connected to Home Assistant",
+  noha_body:
+    "The device has no connection to Home Assistant right now, so it cannot list your areas, media players, or other Satellite1 devices. Its own controls all work. This screen continues on its own when the connection returns.",
+  old_ha_title: "Home Assistant needs an update",
+  old_ha_body:
+    "This Home Assistant is older than 2025.12, which cannot answer the calls the app's speaker and assistant lists are built from. Update Home Assistant to use them - everything on the device itself works now.",
+
+  /* The blocked nudge, on the shared toast surface: shown once when the app is entered while actions
+     are off, so the fix stays one tap away after the splash's Continue. */
+  blocked_toast_t: "Home Assistant actions are off.",
+  blocked_toast_s: "Speaker lists, assistants and other devices are unavailable. Tap for the fix.",
 
   /* The theme toggle. Deliberately not offering an "Auto" that follows the phone, because the device is
      often used in a room whose lighting has nothing to do with what the phone last decided. Phrased as

@@ -570,15 +570,20 @@ script:
   # Tests the actions checkbox by asking one harmless question and reading the answer off whether one
   # comes back at all - with the box unticked Home Assistant returns without responding, and that
   # silence is the entire signal available. Firing the call is also what raises the repair issue in
-  # Home Assistant that carries the fix. Gated on routing, so a device that never routes never trips it.
+  # Home Assistant that carries the fix.
+  #
+  # No longer gated on routing (it was, "so a device that never routes never trips it"). The web
+  # app's onboarding splash reads this verdict off /api/sat1/ha on every device, routing or not -
+  # found the hard way September 18 2026, when a blocked test device with an empty selection showed
+  # the splash "still asking" forever because nothing had ever concluded the verdict. The cost of
+  # ungating is one no-op call per connect; a blocked device already fires dropped action calls at
+  # Home Assistant from the web UI's own sync ladder, so this adds no new noise where it matters.
   - id: ha_action_probe
     mode: restart
     then:
       - if:
           condition:
-            and:
-              - api.connected:
-              - lambda: 'return ${tts_routing_active};'
+            api.connected:
           then:
             - lambda: 'id(ha_action_probe_pending) = true;'
             - homeassistant.service:
@@ -695,6 +700,12 @@ script:
   - id: tts_routing_status_publish
     then:
       - component.update: tts_routing_status
+      # The web app reads the same verdict as `actions` on /api/sat1/ha, where it is what lets the
+      # onboarding screen say "tick this checkbox" or "upgrade Home Assistant" instead of hedging
+      # between them. Pushed here because this script is the one chokepoint every transition of
+      # ha_actions_allowed already runs through - boot, a probe answered, the silence watchdog's
+      # verdict, a selection change.
+      - lambda: 'id(web_ui_app)->set_ha_actions(id(ha_actions_allowed));'
 
   # Renders the selection for the call log.
   #

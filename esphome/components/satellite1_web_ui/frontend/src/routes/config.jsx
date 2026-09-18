@@ -23,7 +23,7 @@
 import { useEffect } from "preact/hooks";
 
 import { HINTS, TEXT } from "../copy.js";
-import { HA_NEVER, entity, haSyncOnce, pathFor, post } from "../lib/device.js";
+import { HA_NEVER, entity, haBlocked, haSyncOnce, haTooOld, pathFor, post } from "../lib/device.js";
 import { TargetTree } from "../tree.jsx";
 import { Card, Missing, N_AUDIO, Row, Select, Slider, Toggle } from "../ui.jsx";
 
@@ -93,9 +93,13 @@ function AudioOutput({ ctx }) {
 /* ------------------------------------------------------------------ */
 
 /**
- * One of five states, never a generic failure. `rung` is what separates them: 0 means the device has
- * not asked yet, which on a fresh boot is a five-second wait rather than a problem, and -1 means both
- * rungs of the ladder were refused, which has a specific fix.
+ * One of six states, never a generic failure. `rung` and the `actions` verdict are what separate
+ * them: 0 means the device has not asked yet, which on a fresh boot is a five-second wait rather
+ * than a problem, and a refusal is read through haBlocked/haTooOld so the checkbox and an old Home
+ * Assistant each get their own precise sentence (they used to share a hedged one).
+ *
+ * Returns `{ text, fix }` rather than a bare string: `fix` marks the one state a link can actually
+ * act on - the blocked one, whose "Show fix" opens the walk-through drawer.
  *
  * "No area" is still reported, and still matters, but it no longer stops the trees being useful: with
  * no area of its own a device can still route to and duck any other room. What it cannot do is answer
@@ -106,13 +110,14 @@ function haProblem(ctx, ha) {
   // used to return null, which said "no problem, go ahead and read ha.d" about a payload that was not
   // there - so whether the route crashed came down to whether /api/sat1/sel answered before
   // /api/sat1/ha, since the selection is what gates the first render.
-  if (!ha) return TEXT.ha_pending;
-  if (ha.rung === -1) return TEXT.ha_refused;
-  if (ha.age === HA_NEVER) return ctx.device?.ha ? TEXT.ha_pending : TEXT.ha_never;
-  if (!ha.d) return TEXT.ha_never;
+  if (!ha) return { text: TEXT.ha_pending };
+  if (haBlocked(ha)) return { text: TEXT.ha_blocked, fix: true };
+  if (haTooOld(ha)) return { text: TEXT.ha_too_old };
+  if (ha.age === HA_NEVER) return ctx.device?.ha ? { text: TEXT.ha_pending } : { text: TEXT.ha_never };
+  if (!ha.d) return { text: TEXT.ha_never };
   const empty = (!ha.d.areas || ha.d.areas.length === 0) && (!ha.d.loose || ha.d.loose.length === 0);
-  if (empty) return TEXT.ha_no_players;
-  if (!ha.d.area) return TEXT.ha_no_area;
+  if (empty) return { text: TEXT.ha_no_players };
+  if (!ha.d.area) return { text: TEXT.ha_no_area };
   return null;
 }
 
@@ -121,16 +126,32 @@ function haProblem(ctx, ha) {
  * sync happens once when the app loads (see Config), so there is nothing here for anyone to operate, and
  * a timestamp on a list of speakers is an answer to a question nobody was asking.
  *
+ * Quiet dim text rather than the amber banners these used to be (owner decision, September 2026):
+ * a tree standing empty is already the signal, and this is the caption saying why - plus the "Show
+ * fix" link when the why is the actions checkbox, which is the one with a fix to show.
+ *
  * Renders nothing at all rather than an empty box, which would otherwise leave its own margins behind
  * above every tree.
  */
-function HaState({ problem, ha }) {
+function HaState({ problem, ha, onFix }) {
   const truncated = !problem && ha?.d?.t === 1;
   if (!problem && !truncated) return null;
   return (
-    <div class="ctl-sub habox">
-      {problem && <div class="banner warn">{problem}</div>}
-      {truncated && <div class="banner warn">{TEXT.ha_truncated}</div>}
+    <div class="habox dim sm">
+      {problem && (
+        <p>
+          {problem.text}
+          {problem.fix && onFix && (
+            <>
+              {" "}
+              <button class="linkish" onClick={onFix}>
+                {TEXT.show_fix}
+              </button>
+            </>
+          )}
+        </p>
+      )}
+      {truncated && <p>{TEXT.ha_truncated}</p>}
     </div>
   );
 }
@@ -167,7 +188,7 @@ function RemoteRouting({ ctx, ha, sel, write }) {
           "responses" next to a list of speakers reads as either. Styled as the title's subtitle:
           tight above, padded below, so it explains the card rather than captioning the tree. */}
       <p class="tree-title">Play assistant responses on selected players</p>
-      <HaState problem={problem} ha={ha} />
+      <HaState problem={problem} ha={ha} onFix={ctx.onShowFix} />
       {/* need=1: routing's call is media_player.play_media, so players without PLAY_MEDIA render
           greyed with a reason rather than being offered. */}
       <TargetTree
@@ -223,7 +244,7 @@ function AreaDucking({ ctx, ha, sel, write }) {
       {/* Was "Quieten while talking", which was wrong as well as vague: the duck starts at the wake word
           and holds until the answer ends, so it is also quiet while the device listens. */}
       <p class="tree-title">Lower the volume on selected players upon wake word detection</p>
-      <HaState problem={problem} ha={ha} />
+      <HaState problem={problem} ha={ha} onFix={ctx.onShowFix} />
       {/* No Local Speaker row: this device's own volume while it is talking is the voice level, which
           lives on the home page, and its own player is filtered out of the payload anyway. Every area in
           the house is offered, not just this device's own - ducking a room this device is not in is a
@@ -282,7 +303,8 @@ export function Config({ ctx }) {
           selection specifically. */}
       {sel ? (
         <>
-          {selError && <div class="banner warn">{TEXT.sel_failed}</div>}
+          {/* The sel_failed banner that led here is gone with the amber banners: a refused selection
+              write reports through the shared write-failed toast now, like every other write. */}
           <RemoteRouting ctx={ctx} ha={ha} sel={sel} write={selWrite} />
           <AreaDucking ctx={ctx} ha={ha} sel={sel} write={selWrite} />
         </>

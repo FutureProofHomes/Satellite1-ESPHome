@@ -283,6 +283,16 @@ class WebUIHandler : public AsyncWebHandler {
   /// Stale data with an honest age is more use to the app than nothing.
   void set_ha_failed() { this->ha_rung_ = -1; }
 
+  /// What tts_routing's probe concluded about the "Allow the device to perform Home Assistant
+  /// actions" checkbox: 0 unknown, 1 allowed, 2 blocked (the checkbox is off), 3 unverifiable
+  /// (Home Assistant predates 2025.12 and answers no action call). Pushed from
+  /// tts_routing_status_publish - the one script every verdict transition already runs through -
+  /// and served as `actions` on /api/sat1/ha, where it is what lets the app tell "tick this
+  /// checkbox" apart from "upgrade Home Assistant" instead of hedging between them. An atomic
+  /// because it is written from the main loop and read from the httpd task, the same split as the
+  /// refresh flag above.
+  void set_ha_actions(int verdict) { this->ha_actions_.store(verdict); }
+
   /// True once, if a browser has asked for a resync since the last call. An atomic exchange rather
   /// than a scheduler call, because this is set from the httpd task and read from the main loop -
   /// the same split satellite1_radar's engineering-mode gating uses.
@@ -531,6 +541,9 @@ class WebUIHandler : public AsyncWebHandler {
   /// Zero means nothing has ever arrived, which is why the endpoint reports an age of -1 for it.
   uint32_t ha_at_{0};
   int ha_rung_{0};
+  /// See set_ha_actions. Separate from ha_rung_ because the two answer different questions: the rung
+  /// says what the last sync managed, this says why a refused one was refused.
+  std::atomic<int> ha_actions_{0};
   Mutex ha_lock_;
   std::atomic<bool> ha_refresh_requested_{false};
 

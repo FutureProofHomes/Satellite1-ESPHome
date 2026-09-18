@@ -504,6 +504,18 @@ globals:
     restore_value: no
     initial_value: '0'
 
+  # True from the moment a sync fires rung 1 until any rung answers or errors. What the silence
+  # watchdog in web_ui_ha_sync reads: a blocked actions checkbox makes Home Assistant drop the call
+  # without replying - no on_success, no on_error, and ESPHome never times a pending response out -
+  # so without this flag the ladder hung at rung 0 forever and the web app's onboarding splash never
+  # learned it was blocked (found on a live test device, September 18 2026). A flag rather than
+  # reading web_ui_ha_rung, because the rung records what last *worked* and survives across syncs -
+  # a checkbox unticked mid-session leaves it at 1.
+  - id: web_ui_ha_awaiting
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
 esphome:
   on_boot:
     # 600 matches the block in common/web_ui.yaml: after globals restore, before anything serves a
@@ -565,7 +577,25 @@ script:
                 id(web_ui_app)->begin_ha_pages();
                 id(web_ui_ha_page) = 0;
                 id(web_ui_ha_more) = 0;
+                id(web_ui_ha_awaiting) = true;
             - script.execute: web_ui_ha_rung_1
+            # The silence watchdog. A blocked actions checkbox drops both rungs' calls without any
+            # reply, so the error path below this ladder never runs on the failure it was written
+            # for. Ten seconds covers the honest slow cases - rung 1 erroring into rung 2, and rung
+            # 2's ~3s round trip - and mirrors ha_action_probe's pattern in common/tts_routing.yaml.
+            # `restart` on this script means a refresh mid-wait re-arms it rather than stacking two.
+            - delay: 10s
+            - if:
+                condition:
+                  lambda: 'return id(web_ui_ha_awaiting) && id(api_id).is_connected();'
+                then:
+                  - lambda: |-
+                      id(web_ui_ha_awaiting) = false;
+                      id(web_ui_ha_rung) = -1;
+                      id(web_ui_app)->set_ha_failed();
+                      ESP_LOGW("web_ui", "Home Assistant answered no action call within 10s - the "
+                                         "'Allow the device to perform Home Assistant actions' "
+                                         "checkbox is likely off. The web app has been told.");
 
   # Runs after every page: asks for the next one on whichever rung answered, or finishes.
   #
@@ -627,6 +657,8 @@ script:
                 // Recorded per page rather than once at the end, because web_ui_ha_advance reads
                 // it to decide which rung to ask for the next page on.
                 id(web_ui_ha_rung) = 1;
+                // An answer arrived, so the silence watchdog in web_ui_ha_sync stands down.
+                id(web_ui_ha_awaiting) = false;
             - script.execute: web_ui_ha_advance
           on_error:
             - script.execute: web_ui_ha_rung_2
@@ -658,9 +690,12 @@ script:
             - lambda: |-
                 ${web_ui_ha_page_lambda}
                 id(web_ui_ha_rung) = 2;
+                // An answer arrived, so the silence watchdog in web_ui_ha_sync stands down.
+                id(web_ui_ha_awaiting) = false;
             - script.execute: web_ui_ha_advance
           on_error:
             - lambda: |-
+                id(web_ui_ha_awaiting) = false;
                 id(web_ui_ha_rung) = -1;
                 id(web_ui_app)->set_ha_failed();
                 // Split across messages: the logger's tx_buffer_size defaults to 512 bytes.

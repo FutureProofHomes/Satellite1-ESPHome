@@ -9,9 +9,10 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { HINTS, TEXT } from "./copy.js";
 import { loginKey, logout, maybeRedirectLocal, peerLogin, primeOtherOrigin, takeUrlKey } from "./lib/auth.js";
-import { deviceIdentity, onWriteError, useDeviceState, useEvents, useHaData, useSelection } from "./lib/device.js";
+import { deviceIdentity, haBlocked, onWriteError, useDeviceState, useEvents, useHaData, useSelection } from "./lib/device.js";
 import { LoginScreen } from "./login.jsx";
 import { MediaFooter } from "./media.jsx";
+import { FixDrawer, Splash } from "./splash.jsx";
 import { Config } from "./routes/config.jsx";
 import { Controls } from "./routes/controls.jsx";
 import { Diagnostics } from "./routes/diagnostics.jsx";
@@ -345,7 +346,10 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, onClose }) {
             {showOff && offline.map(peerRow)}
           </>
         )}
-        {peers.length === 0 && <p class="sheet-foot">{TEXT.no_devices}</p>}
+        {/* An empty roster has two honest readings: nothing else in the house, or a roster the device
+            is not allowed to fetch. While actions are blocked the foot says so, instead of promising
+            rows that cannot arrive. */}
+        {peers.length === 0 && <p class="sheet-foot">{haBlocked(ha) ? TEXT.no_devices_blocked : TEXT.no_devices}</p>}
         {/* The grab handle, at the bottom edge because that is the edge this drawer hangs toward -
             the mirror of the bottom drawers' top handle. */}
         <button class="mpanel-handle" data-grab aria-label="Close" onClick={onClose} />
@@ -355,47 +359,85 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, onClose }) {
 }
 
 /**
- * One toast for every write that did not land, on whatever route it happened.
+ * Every toast in the app, on one shared surface at the bottom edge. Toasts are the app's whole
+ * out-of-band vocabulary since the amber banners were retired (owner decision, September 2026).
  *
- * The controls already handle failure correctly and silently - each optimistic one puts its old
- * value back - and the silence is the problem: a switch that un-flips itself a second after being
- * tapped looks like a page that ignores clicks. This says the one thing all those cases share, and
- * tapping it goes to Diagnostics, whose log panel is where the specific reason is.
+ * Two kinds live here, stacked when they coexist. The one transient slot holds a moment: a write
+ * that did not land (the controls already put their old values back, and that silence is the
+ * problem - a switch that un-flips itself looks like a page that ignores clicks), or the blocked
+ * nudge (Home Assistant actions are off; tapping opens the fix drawer). New transients replace the
+ * standing one rather than stacking - a slider mid-drag against a dead device can fail a dozen
+ * writes a second, and a dozen identical toasts is a haranguing, not a notification. Six seconds
+ * for the write, eight for the nudge, which carries a sentence more.
  *
- * A button rather than a div with a handler, so it is focusable and announced. New failures reset
- * the timer rather than stacking: a slider mid-drag against a dead device can fail a dozen writes a
- * second, and a dozen identical toasts is a haranguing, not a notification. Six seconds, matching
- * nothing in particular - long enough to read on a phone at arm's length, short enough that the
- * page does not wear a permanent error for one dropped packet.
+ * The sticky toast below them is the stream-lost state - an ongoing condition, not a moment, so it
+ * stays until the SSE stream reconnects rather than timing out. It used to be a banner under the
+ * top bar; it kept its wording and its meaning, only the surface changed.
+ *
+ * Buttons rather than divs with handlers, so each is focusable and announced. The write toast and
+ * the stream toast go to Diagnostics, whose log panel is where the specific reason is.
  */
-function ErrorToast() {
-  const [shown, setShown] = useState(false);
+function ToastHost({ connected, blocked, onFix }) {
+  const [t, setT] = useState(null);
+  const timer = useRef(null);
+
+  const show = (kind, ms) => {
+    setT(kind);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setT(null), ms);
+  };
 
   useEffect(() => {
-    let timer;
-    const off = onWriteError(() => {
-      setShown(true);
-      clearTimeout(timer);
-      timer = setTimeout(() => setShown(false), 6000);
-    });
+    const off = onWriteError(() => show("write", 6000));
     return () => {
       off();
-      clearTimeout(timer);
+      clearTimeout(timer.current);
     };
+    // show holds no state; the empty deps are the subscription's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!shown) return null;
+  // The nudge, on the rising edge only: once when the app is entered while blocked (which includes
+  // arriving through the splash's Continue), and again only if the state genuinely re-enters -
+  // never on every re-render of a blocked session.
+  useEffect(() => {
+    if (blocked) show("blocked", 8000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocked]);
+
   return (
-    <button
-      class="toast"
-      onClick={() => {
-        setShown(false);
-        location.hash = "#/diagnostics";
-      }}
-    >
-      <span class="toast-t">{TEXT.write_failed}</span>
-      <span class="toast-s">{TEXT.write_failed_go}</span>
-    </button>
+    <div class="toasts">
+      {t === "write" && (
+        <button
+          class="toast"
+          onClick={() => {
+            setT(null);
+            location.hash = "#/diagnostics";
+          }}
+        >
+          <span class="toast-t">{TEXT.write_failed}</span>
+          <span class="toast-s">{TEXT.write_failed_go}</span>
+        </button>
+      )}
+      {t === "blocked" && (
+        <button
+          class="toast warn"
+          onClick={() => {
+            setT(null);
+            onFix();
+          }}
+        >
+          <span class="toast-t">{TEXT.blocked_toast_t}</span>
+          <span class="toast-s">{TEXT.blocked_toast_s}</span>
+        </button>
+      )}
+      {!connected && (
+        <button class="toast warn" onClick={() => (location.hash = "#/diagnostics")}>
+          <span class="toast-t">{TEXT.stream_lost}</span>
+          <span class="toast-s">{TEXT.write_failed_go}</span>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -470,6 +512,11 @@ function AppInner({ primeKey, onAuthLost }) {
   const [route, go] = useHashRoute();
   const [nav, setNav] = useState(false);
   const [switcher, setSwitcher] = useState(false);
+  // The verdict overlay (splash.jsx): up from the first authenticated render, gone for good once it
+  // fades - state rather than anything remembered, so every page load gets the same honest check.
+  const [splashDone, setSplashDone] = useState(false);
+  // The fix drawer, reachable from the blocked toast and every in-place "Show fix" link.
+  const [fixOpen, setFixOpen] = useState(false);
 
   // The drawer's own items close it as they navigate; this covers the routes nobody tapped - the
   // back button, a bookmark, a hash typed over the current one - so a navigation never leaves the
@@ -508,7 +555,9 @@ function AppInner({ primeKey, onAuthLost }) {
 
   const active = ROUTES.find((r) => r.id === route) || ROUTES[0];
   const View = active.view;
-  const ctx = { device, deviceError, ...events, ...ha, ...selection };
+  // onShowFix rides the ctx so any route's "Show fix" link can open the drawer without threading a
+  // prop through every card between here and there.
+  const ctx = { device, deviceError, ...events, ...ha, ...selection, onShowFix: () => setFixOpen(true) };
   // Resolved once here rather than in the three places that show it, so the bar, the nav pane and the
   // switcher sheet cannot end up disagreeing about what this device is called.
   const { name: label, area } = deviceIdentity(device, ha.ha);
@@ -550,7 +599,8 @@ function AppInner({ primeKey, onAuthLost }) {
         <ThemeSwitch />
       </header>
 
-      {!events.connected && <div class="banner warn">{TEXT.stream_lost}</div>}
+      {/* The stream-lost banner that sat here moved onto the toast surface below when the amber
+          banners were retired - same wording, same meaning, one place for out-of-band news. */}
 
       <main class="wrap">
         <View ctx={ctx} />
@@ -561,7 +611,16 @@ function AppInner({ primeKey, onAuthLost }) {
           lived on home and polled only there). */}
       <MediaFooter ha={ha.ha} mac={device?.mac} />
 
-      <ErrorToast />
+      {/* `blocked` waits for the splash to leave: while it is up, the verdict is its story to tell,
+          and the toast's job is to keep the fix reachable afterwards. */}
+      <ToastHost connected={events.connected} blocked={splashDone && haBlocked(ha.ha)} onFix={() => setFixOpen(true)} />
+
+      {fixOpen && <FixDrawer ctx={ctx} onClose={() => setFixOpen(false)} />}
+
+      {/* Last, so it paints over everything below while it stands. Mounted with AppInner: this is
+          the first authenticated moment, whether the session came from the login screen a second
+          ago or from a 90-day cookie. */}
+      {!splashDone && <Splash ctx={ctx} onDone={() => setSplashDone(true)} />}
 
       {/* Mounted whether or not it is open - see NavPane. */}
       <NavPane route={route} go={go} open={nav} onClose={() => setNav(false)} label={label} fw={device?.fw} />
