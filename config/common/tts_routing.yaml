@@ -38,11 +38,15 @@ substitutions:
   # Assistant raises ServiceNotSupported for an explicitly listed entity missing a service's required
   # feature before calling anything (helpers/service.py) - so one incompatible player in a wholesale-
   # selected area would silence the announcement for every speaker in the call. Only area_id targets
-  # get the lenient skip, and this is not one. A player whose supported_features cannot be read
-  # (unavailable, attributes gone) is kept: Home Assistant drops unavailable entities from calls
-  # safely on its own, and dropping it here would un-target a speaker that is merely rebooting. The
-  # same two feature bits drive the app's greyed-out rows (web_ui_ha.yaml), so what the tree shows
-  # as untickable and what this walk removes agree by construction.
+  # get the lenient skip, and this is not one. The same pass drops players whose state is
+  # `unavailable` or `unknown`: nothing plays on a speaker that is off the network, and every walk
+  # downstream of `targets_list` - the wake chime, the stop buttons, the volume snapshots in
+  # area_ducking.yaml - inherits the filter, so none of them calls a service against it either. The
+  # selection itself is untouched, so the speaker resumes the moment it comes back. A player whose
+  # supported_features cannot be read *while its state is real* is kept, since the capability test
+  # cannot condemn what it cannot read. The same feature bits and the same state test drive the
+  # app's greyed-out rows (web_ui_ha.yaml), so what the tree shows as untickable or offline and
+  # what this walk removes agree by construction.
   tts_targets_resolve: >-
     {% set ma = integration_entities('music_assistant') %}
     {% set cut = sel_cut.split(',') | map('trim') | reject('eq', '')
@@ -57,7 +61,8 @@ substitutions:
     {% set cap = namespace(t=[]) %}
     {% for t in res.t | unique | reject('in', cut) | reject('in', mine) %}
       {% set f = state_attr(t, 'supported_features') %}
-      {% if f is none or f | int | bitwise_and(512) %}
+      {% if states(t) not in ['unavailable', 'unknown']
+            and (f is none or f | int | bitwise_and(512)) %}
         {% set cap.t = cap.t + [t] %}
       {% endif %}
     {% endfor %}

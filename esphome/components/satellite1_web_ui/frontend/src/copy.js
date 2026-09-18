@@ -376,6 +376,15 @@ export const TEXT = {
      speaker cannot do" is the part its owner can act on. */
   cap_no_media: "Can't play media",
   cap_no_volume: "No volume control",
+  /* This device's own media player, shown greyed rather than omitted. Routing to yourself is the
+     Local Speaker row's job, and ducking your own volume while you talk is never right. */
+  cap_self: "This device",
+
+  /* A player Home Assistant cannot currently reach. Greyed like the capability rows above, but the
+     checkbox keeps working and a prior selection stays ticked: being offline is transient, and the
+     call-time walks already skip the player, so unticking it would throw away a setting its owner
+     still wants the day the speaker comes back. */
+  player_offline: "Offline",
 
   ha_truncated:
     "Too many areas to send in one go, so the list is cut short. Players already chosen are still used, whether or not they appear below.",

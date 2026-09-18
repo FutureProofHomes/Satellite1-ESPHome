@@ -52,9 +52,13 @@ substitutions:
   # fail here.
   #
   # Music Assistant entities are rejected for the reason tts_targets_ma_check explains - a speaker
-  # with two entity ids would otherwise appear twice - and this device's own media player is rejected
-  # through `mine` from the shared walk. Measured against a 22-area, 104-media-player installation:
-  # 82 bytes per player (85 with the capability int below), 90 per device, 4.3KB in total - before
+  # with two entity ids would otherwise appear twice. This device's own media player used to be
+  # rejected through `mine` from the shared walk; it is now kept and tagged (caps bit 4 below), so
+  # the app can show it greyed with "This device" instead of leaving a hole where its owner expects
+  # a row - routing to yourself is the Local Speaker row's job, and ducking yourself while you talk
+  # is never right, but a player silently missing from the list reads as a bug. Measured against a
+  # 22-area, 104-media-player installation: 82 bytes per player (85 with the capability int below,
+  # 87 with availability), 90 per device, 4.3KB in total - before
   # the switcher's URL and availability fields, which add roughly 30 bytes per device on top of that.
   #
   # One call returns {"m": 1, "d": "<fragment>"}: `m` is whether another page follows, `d` is this
@@ -68,8 +72,8 @@ substitutions:
   #
   # Shape of the reassembled document:
   #   {"area": "Media Room", "aid": "media_room",
-  #    "areas": [{"i": "kitchen", "n": "Kitchen", "p": [["media_player.kitchen", "Kitchen Sonos", 3]]}],
-  #    "loose": [["media_player.all_sonos", "All Sonos", 1]],
+  #    "areas": [{"i": "kitchen", "n": "Kitchen", "p": [["media_player.kitchen", "Kitchen Sonos", 3, 1]]}],
+  #    "loose": [["media_player.all_sonos", "All Sonos", 1, 1]],
   #    "dev": [["Satellite1", "Ceiling Mount", "Media Room", "3c:0f:02:c5:ac:00", "dev (ESP...)",
   #             "http://192.168.4.31", 1]],
   #    "asst": {"o": ["Home Assistant Cloud", "OllamaBradStudio"],
@@ -94,10 +98,19 @@ substitutions:
   # entity that lacks a service's required feature *before calling anything*, so one incompatible
   # player would fail the whole call for every speaker in it. A player whose supported_features
   # cannot be read (unavailable, attributes gone) is sent as 3 rather than 0, so a temporarily
-  # offline speaker keeps its place in a selection its owner already made - Home Assistant drops
-  # unavailable entities from calls safely on its own. Rows supporting neither call are kept, not
-  # dropped: a player silently missing from the list reads as a bug, a greyed row explains itself.
-  # An int, never a boolean, for the literal_eval reason above.
+  # offline speaker keeps its place in a selection its owner already made. Rows supporting neither
+  # call are kept, not dropped: a player silently missing from the list reads as a bug, a greyed
+  # row explains itself. Bit 4 marks this device's own media player, which the app greys in both
+  # trees as "This device" - the call-time walks still reject it through `mine`, so the tag is
+  # display-only. An int, never a boolean, for the literal_eval reason above.
+  #
+  # The fourth element is availability: 1 while the player's state is anything real, 0 for
+  # `unavailable` or `unknown`. The app greys an offline row and marks it "Offline" without
+  # touching its checkbox - the selection persists, so the player resumes routing and ducking the
+  # moment it comes back - and tts_targets_resolve in tts_routing.yaml applies the same state test
+  # at call time, so no play_media, chime, stop or volume call targets a player that is off the
+  # network. Missing on payloads cached by older firmware, which the app reads as online - the
+  # behaviour those payloads always had.
   #
   # The name is `name_by_user or name`, which is the order Home Assistant itself displays them in.
   # Renaming a device writes name_by_user and leaves name as the integration registered it, so sending
@@ -240,11 +253,13 @@ substitutions:
     {% for a in areas() %}
       {% set out.rows = [] %}
       {% for e in area_entities(a) | select('match', 'media_player\.')
-                  | reject('in', ma) | reject('in', mine) %}
+                  | reject('in', ma) %}
         {% set f = state_attr(e, 'supported_features') %}
         {% set out.rows = out.rows + [[e, state_attr(e, 'friendly_name') or e,
-             3 if f is none else (1 if f | int | bitwise_and(512) else 0)
-                               + (2 if f | int | bitwise_and(4) else 0)]] %}
+             (4 if e in mine else 0) +
+             (3 if f is none else (1 if f | int | bitwise_and(512) else 0)
+                                + (2 if f | int | bitwise_and(4) else 0)),
+             0 if states(e) in ['unavailable', 'unknown'] else 1]] %}
       {% endfor %}
       {% if out.rows | count > 0 %}
         {% set out.areas = out.areas + [{'i': a, 'n': area_name(a), 'p': out.rows}] %}
@@ -253,11 +268,13 @@ substitutions:
     {% set assigned = areas() | map('area_entities') | sum(start=[])
                       | select('match', 'media_player\.') | list %}
     {% for e in states.media_player | map(attribute='entity_id')
-                | reject('in', ma) | reject('in', mine) | reject('in', assigned) %}
+                | reject('in', ma) | reject('in', assigned) %}
       {% set f = state_attr(e, 'supported_features') %}
       {% set out.loose = out.loose + [[e, state_attr(e, 'friendly_name') or e,
-           3 if f is none else (1 if f | int | bitwise_and(512) else 0)
-                             + (2 if f | int | bitwise_and(4) else 0)]] %}
+           (4 if e in mine else 0) +
+           (3 if f is none else (1 if f | int | bitwise_and(512) else 0)
+                              + (2 if f | int | bitwise_and(4) else 0)),
+           0 if states(e) in ['unavailable', 'unknown'] else 1]] %}
     {% endfor %}
     {% for a in areas() %}
       {% for d in area_devices(a) %}

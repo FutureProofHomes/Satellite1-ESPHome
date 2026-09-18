@@ -13,6 +13,15 @@ substitutions:
   # cannot disagree about which area this device is in. That file cannot send `mac` as a variable,
   # because a response_template is rendered with only the response in scope, so it prepends its own
   # `{% set mac = ... %}` - which is why this expects a variable rather than reading one itself.
+  #
+  # The area walk cannot find a device that is in no area, and for a long time that blind spot only
+  # cost the area name (`ha_no_area` copy). It cost more than that: `mine` came back empty, so a
+  # no-area Satellite1 failed to reject its own media player everywhere `mine` is read - it offered
+  # itself in its own target trees, and the duck walk could duck the very device that was talking.
+  # Hence the second walk, over the esphome integration's entities, which finds the device wherever
+  # it lives; the area genuinely stays empty in that case, which is what ha_no_area is for. One
+  # entity is enough to find the device, so devices already seen are skipped rather than re-walked -
+  # the same shape as tts_stop_all_jinja.
   self_area_jinja: >-
     {% set ns = namespace(dev='', area='') %}
     {% for a in areas() %}
@@ -25,6 +34,18 @@ substitutions:
         {% endfor %}
       {% endif %}
     {% endfor %}
+    {% if not ns.dev %}
+      {% set sns = namespace(seen=[]) %}
+      {% for e in integration_entities('esphome') %}
+        {% set d = device_id(e) %}
+        {% if not ns.dev and d and d not in sns.seen %}
+          {% set sns.seen = sns.seen + [d] %}
+          {% if (mac | lower) in device_attr(d, 'connections') | map(attribute=1) | list %}
+            {% set ns.dev = d %}
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+    {% endif %}
     {% set mine = device_entities(ns.dev) if ns.dev else [] %}
 
   # The chosen players worth ducking, split into `players` and `tts_players`. Expects `mac`, `duck`,
@@ -55,8 +76,11 @@ substitutions:
   # media_player.volume_set, where one entity missing the required feature makes Home Assistant
   # reject the whole call before setting anything - nobody's music would duck. Filtering at `pick`
   # keeps the duck and its restore consistent, since both derive from it. A player with unreadable
-  # supported_features (unavailable) is kept; the `room` walk already rejects silent and unavailable
-  # states on its own. The same bit drives the greyed-out rows in the app's ducking tree.
+  # supported_features is kept at this pass; offline players never make it into a call regardless,
+  # because the `room` walk rejects silent and unavailable states on its own, and `targets_list`
+  # (which tts_players and the volume walks derive from) is filtered for them in tts_targets_resolve.
+  # The same bit drives the greyed-out rows in the app's ducking tree, which also mark offline
+  # players from the payload's availability field.
   duck_players_jinja: >-
     ${self_area_jinja}
     ${tts_targets_resolve}

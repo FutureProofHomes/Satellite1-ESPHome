@@ -84,7 +84,8 @@ function Group({ label, count, state, expanded, onExpand, onBulk, disabled, chil
 }
 
 /**
- * @param payload  the `/api/sat1/ha` body: {areas: [{i, n, p: [[id, name, caps], ...]}], loose: [[id, name, caps]]}
+ * @param payload  the `/api/sat1/ha` body:
+ *                 {areas: [{i, n, p: [[id, name, caps, avail], ...]}], loose: [[id, name, caps, avail]]}
  * @param sel      {areas, extra, excluded} as Sets
  * @param onSel    receives the next {areas, extra, excluded}
  * @param local    when not null, a "Local Speaker" row is shown first, holding this boolean
@@ -104,6 +105,22 @@ export function TargetTree({ payload, sel, onSel, local, onLocal, disabled, need
    *  device cached before the caps field existed live in both trees rather than greying everything. */
   const capOk = (row) => ((row[2] ?? 3) & need) !== 0;
   const reason = need === 2 ? TEXT.cap_no_volume : TEXT.cap_no_media;
+
+  /** Caps bit 4 marks this device's own media player. Shown greyed as "This device" rather than
+   *  omitted - routing to yourself is the Local Speaker row's job, and ducking your own volume while
+   *  you talk is never right, but a hole where a row should be reads as a bug. */
+  const isSelf = (row) => ((row[2] ?? 0) & 4) !== 0;
+
+  /** Whether a row can be added to the selection at all: capable, and not this device itself. */
+  const elig = (row) => capOk(row) && !isSelf(row);
+
+  /** Whether Home Assistant could reach the player when the payload was rendered. `?? 1` keeps rows
+   *  from a payload cached before the availability field existed reading as online, which is the
+   *  behaviour those payloads always had. Offline changes styling and adds a label, nothing else:
+   *  unlike a missing capability it is transient, so the checkbox keeps working and the stored
+   *  selection is untouched - the call-time walks (tts_routing.yaml) are what skip the player until
+   *  it comes back. */
+  const isLive = (row) => (row[3] ?? 1) !== 0;
 
   const edit = (fn) => {
     const next = {
@@ -148,7 +165,7 @@ export function TargetTree({ payload, sel, onSel, local, onLocal, disabled, need
   // eligible players are all ticked would read "mixed" forever and "select whole area" would look
   // broken - the greyed rows are visible but they are not part of what the box is deciding.
   const areaState = (area) => {
-    const ids = area.p.filter(capOk).map(([id]) => id);
+    const ids = area.p.filter(elig).map(([id]) => id);
     if (sel.areas.has(area.i)) {
       // Whole, unless something has been carved out of it - which is exactly what the two derived
       // switches in the firmware report, so the box here and the switch in Home Assistant agree.
@@ -176,7 +193,7 @@ export function TargetTree({ payload, sel, onSel, local, onLocal, disabled, need
   };
 
   const looseState = () => {
-    const rows = loose.filter(capOk);
+    const rows = loose.filter(elig);
     const on = rows.filter(([id]) => sel.extra.has(id)).length;
     return on === 0 ? "off" : on === rows.length ? "on" : "mixed";
   };
@@ -187,13 +204,13 @@ export function TargetTree({ payload, sel, onSel, local, onLocal, disabled, need
       // Bulk-ticking adds eligible players only; bulk-unticking is likewise scoped, so a stale
       // ineligible extra is removed by its own row (always allowed) rather than as a side effect.
       loose
-        .filter(capOk)
+        .filter(elig)
         .forEach(([id]) => (state === "on" ? next.extra.delete(id) : next.extra.add(id)));
     });
   };
 
   const areaCount = (area) => {
-    const rows = area.p.filter(capOk);
+    const rows = area.p.filter(elig);
     if (sel.areas.has(area.i)) {
       const cut = rows.filter(([id]) => sel.excluded.has(`${area.i}:${id}`)).length;
       return cut === 0 ? "whole area" : `${rows.length - cut}/${rows.length}`;
@@ -231,29 +248,36 @@ export function TargetTree({ payload, sel, onSel, local, onLocal, disabled, need
             onBulk={() => clickArea(area)}
             // An area with nothing eligible in it has nothing for the bulk box to add - unless a
             // stale selection still covers it, in which case unticking must stay possible.
-            disabled={disabled || (state === "off" && !area.p.some(capOk))}
+            disabled={disabled || (state === "off" && !area.p.some(elig))}
           >
             {area.p.map((row) => {
               const [id, name] = row;
-              const ok = capOk(row);
-              // An ineligible row never reads as ticked off the back of a wholesale area: the
-              // call-time walks skip it, so showing it selected would be a lie about what plays.
-              // The area's own box still shows a full tick, and the stored selection still says
-              // "whole area" - which is what keeps the Route TTS To All Area Players switch in
-              // Home Assistant flipping. Only an explicit pick (sel.extra, from before the caps
-              // field existed) still shows, and stays clickable so it can be removed - removing a
-              // selection is always safe, only adding an ineligible player is blocked.
-              const on = ok ? isOn(area.i, id) : sel.extra.has(id);
+              const capable = capOk(row);
+              const self = isSelf(row);
+              const eligible = capable && !self;
+              const live = isLive(row);
+              // A permanently ineligible row never reads as selected and is never operable, even
+              // when an old saved selection explicitly names it. The call-time walks skip it, so a
+              // tick would be a false promise. Offline is different: it is transient, so a capable
+              // remote player's saved tick remains visible and editable until the player returns.
+              const on = eligible && isOn(area.i, id);
+              // Permanent facts outrank the transient one: "This device" and the capability reason
+              // never change, while offline fixes itself. A row that is both incompatible and
+              // offline therefore says why it will remain grey after the player comes back.
               return (
-                <div class={`tree-p${ok ? "" : " tree-off"}`} key={id}>
+                <div class={`tree-p${eligible && live ? "" : " tree-off"}`} key={id}>
                   <Check
                     state={on ? "on" : "off"}
-                    disabled={disabled || (!ok && !on)}
+                    disabled={disabled || !eligible}
                     onClick={() => clickPlayer(area.i, id)}
                     label={name}
                   />
                   <span class="grow">{name}</span>
-                  {!ok && <span class="tree-why">{reason}</span>}
+                  {(!eligible || !live) && (
+                    <span class="tree-why">
+                      {self ? TEXT.cap_self : !capable ? reason : TEXT.player_offline}
+                    </span>
+                  )}
                 </div>
               );
             })}
@@ -268,27 +292,34 @@ export function TargetTree({ payload, sel, onSel, local, onLocal, disabled, need
         // which asked someone to know an id the page could simply have shown them.
         <Group
           label="No Area Assigned"
-          count={`${loose.filter(capOk).filter(([id]) => sel.extra.has(id)).length}/${loose.filter(capOk).length}`}
+          count={`${loose.filter(elig).filter(([id]) => sel.extra.has(id)).length}/${loose.filter(elig).length}`}
           state={looseState()}
           expanded={open.__loose}
           onExpand={() => setOpen({ ...open, __loose: !open.__loose })}
           onBulk={clickLoose}
-          disabled={disabled || (looseState() === "off" && !loose.some(capOk))}
+          disabled={disabled || (looseState() === "off" && !loose.some(elig))}
         >
           {loose.map((row) => {
             const [id, name] = row;
-            const on = sel.extra.has(id);
-            const ok = capOk(row);
+            const capable = capOk(row);
+            const self = isSelf(row);
+            const eligible = capable && !self;
+            const on = eligible && sel.extra.has(id);
+            const live = isLive(row);
             return (
-              <div class={`tree-p${ok ? "" : " tree-off"}`} key={id}>
+              <div class={`tree-p${eligible && live ? "" : " tree-off"}`} key={id}>
                 <Check
                   state={on ? "on" : "off"}
-                  disabled={disabled || (!ok && !on)}
+                  disabled={disabled || !eligible}
                   onClick={() => clickPlayer(null, id)}
                   label={name}
                 />
                 <span class="grow">{name}</span>
-                {!ok && <span class="tree-why">{reason}</span>}
+                {(!eligible || !live) && (
+                  <span class="tree-why">
+                    {self ? TEXT.cap_self : !capable ? reason : TEXT.player_offline}
+                  </span>
+                )}
               </div>
             );
           })}

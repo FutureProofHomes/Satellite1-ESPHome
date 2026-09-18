@@ -349,13 +349,23 @@ the ducking tree rows without bit 2, each with a one-line reason, rather than om
 silently missing from the list reads as a bug. Selecting a whole area shows a full tick on the area
 and on its eligible players, while the greyed rows stay unticked — the call skips them, so showing
 them selected would misstate what plays — and the stored selection still says "whole area", which is
-what keeps the Route TTS To All Area Players switch in Home Assistant flipping with it. A greyed row
-explicitly picked before this existed still shows its tick and can always be *un*ticked — only adding
-is blocked. The call-time walks in `tts_routing.yaml` and `area_ducking.yaml` apply the same two bits
-when expanding the selection, which matters more than the cosmetics: Home Assistant rejects an
-explicit entity list wholesale if one listed entity lacks the service's required feature, so one
+what keeps the Route TTS To All Area Players switch in Home Assistant flipping with it. Permanently
+ineligible rows — an incompatible player or this device's own media player — are always shown
+unticked and disabled, even if an old explicit selection still names one. The call-time walks in
+`tts_routing.yaml` and `area_ducking.yaml` apply the same capability tests and reject this device
+itself when expanding the selection, which matters more than the cosmetics: Home Assistant rejects
+an explicit entity list wholesale if one listed entity lacks the service's required feature, so one
 incompatible player in a selected area used to be able to silence an announcement for every speaker
 in the call.
+
+Each row also carries an availability flag: 0 when Home Assistant reported the player `unavailable`
+or `unknown` at render time. An offline row greys out and gains an "Offline" marker in both trees,
+but — unlike a missing capability — its checkbox keeps working and a prior tick stays ticked, because
+being offline is transient and the selection is a setting its owner still wants when the speaker
+returns. The call-time walk in `tts_routing.yaml` applies the same state test, so no routing, chime,
+stop or volume call targets an offline player; ducking's walk already rejected unavailable states.
+Availability is as fresh as the cached payload — synced on connect and once per page load — so a
+player that drops while the page is open shows stale until reload, like every other fact in it.
 
 The consequence worth knowing is that when Home Assistant is unreachable, the app keeps working for
 everything local — sensors, LEDs, the radar, the log, maintenance — and greys out only what genuinely

@@ -326,6 +326,8 @@ the last because `zi_more` already says a zone needs three corners.
 | `ha_truncated` | Too many areas to send in one go, so the list is cut short. Players already chosen are still used, whether or not they appear below. |
 | `cap_no_media` | Can't play media |
 | `cap_no_volume` | No volume control |
+| `cap_self` | This device |
+| `player_offline` | Offline |
 | `sel_failed` | That change was not saved. The device rejected it, or the connection dropped. |
 
 `copied` was deleted along with the Logs card's Copy button. The button never worked honestly on this
