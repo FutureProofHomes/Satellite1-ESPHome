@@ -243,11 +243,14 @@ above it, and stating the window in both made the two bubbles read as descriptio
 
 | Key | Where | Text |
 | --- | --- | --- |
-| `switcher` | Device switcher sheet title | Each Satellite1 serves its own copy of this page, so everything you change applies to the device named above. Use this list to move to another device without typing its address - you stay on the page you are on. |
+| `switcher` | Device switcher sheet title | Everything on this page applies to the device named above. Pick another device and this page becomes its controls - no address to type, no leaving the page. A device on older firmware opens its own page instead. |
 
 This one answers a question the app's shape provokes rather than one the hardware does. Every Satellite1
 serves its own copy of the page, so "which device am I changing?" has a real answer that nothing else on
-screen states.
+screen states. The wording changed with single-origin device switching (September 2026): picking a
+device now retargets this page at the peer rather than navigating to it - the change that keeps the iOS
+home-screen app out of Safari's in-app sheet - so the sentence owns both outcomes: the takeover for
+fleet-current firmware, the old navigation for anything older.
 
 ## Standing text
 
@@ -278,6 +281,13 @@ stream reconnects, where the transient toasts (`write_failed`, the blocked nudge
 | `no_devices_blocked` | Only this device. Other Satellite1s cannot be listed while Home Assistant actions are off. |
 | `peer_up` | Available, according to Home Assistant |
 | `peer_down` | Unavailable, according to Home Assistant |
+| `remote_tag` | Remote |
+| `switcher_home` | This page |
+
+`remote_tag` is the one word in the top bar while a peer is being controlled (single-origin device
+switching): the name beside it already identifies the device, so the badge adds only the mode. The
+same pill marks the switcher row for the device actually serving the page - `switcher_home` - which
+is the way back: tapping it is a plain reset to the local session, not another cross-sign-in.
 
 `peer_manual`, `peer_add_ph` and `peer_add` were deleted with the switcher's add-by-address feature
 (owner's call: a fallback that needs a paragraph to explain is not pulling its weight). The sheet also

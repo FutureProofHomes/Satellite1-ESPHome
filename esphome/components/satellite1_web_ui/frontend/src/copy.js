@@ -15,12 +15,14 @@ export const HINTS = {
   // list of rooms with "Local Speaker" at the top of it. The manual id field was replaced by the "No
   // Area Assigned" group, which shows those players by name instead of asking for their entity ids.
 
-  /* The switcher sheet. What needs saying is not "this is a list of devices", which is visible, but that
-     each device has its own copy of this app - the single fact that makes the whole page make sense, and
-     the one someone who has just changed a setting on the wrong device wishes they had been told. Does not
-     repeat why the list has one entry in it; that sentence is already at the foot of the same sheet. */
+  /* The switcher sheet. What needs saying is not "this is a list of devices", which is visible, but
+     which device the page's controls currently belong to - the single fact that makes the whole page
+     make sense, and the one someone who has just changed a setting on the wrong device wishes they
+     had been told. The second sentence owns the switch's two outcomes honestly: the single-origin
+     takeover for fleet-current firmware, the old navigation for anything older. Does not repeat why
+     the list has one entry in it; that sentence is already at the foot of the same sheet. */
   switcher:
-    "Each Satellite1 serves its own copy of this page, so everything you change applies to the device named above. Use this list to move to another device without typing its address - you stay on the page you are on.",
+    "Everything on this page applies to the device named above. Pick another device and this page becomes its controls - no address to type, no leaving the page. A device on older firmware opens its own page instead.",
 
   /* The Launch card on Diagnostics. The warning is the substance: the link is a bearer credential,
      and saying so here is what makes offering it defensible. The QR-versus-link sentence lives here
@@ -261,6 +263,15 @@ export const TEXT = {
   // peer_manual, peer_add_ph and peer_add went with the manual add-by-address feature.
   peer_up: "Available, according to Home Assistant",
   peer_down: "Unavailable, according to Home Assistant",
+
+  // The one word in the top bar while a peer is being controlled (single-origin device switching).
+  // "Remote" and not the peer's address: the name beside it already identifies the device, and what
+  // the badge adds is only the mode - this page is serving as another device's controls.
+  remote_tag: "Remote",
+
+  // On the roster row that is the device serving this page, visible only while another device is
+  // being controlled. It marks the way back - a plain return, not another cross-sign-in.
+  switcher_home: "This page",
 
   // The failed-write toast, shown on any route. First line is the one fact every failure shares;
   // the control involved has already put its old value back, which is why "hasn't been applied"

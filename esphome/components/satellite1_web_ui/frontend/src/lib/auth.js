@@ -14,6 +14,8 @@
  * numbers). Verified against node:crypto over random inputs before shipping.
  */
 
+import { apiUrl, updateRemoteKey } from "./device.js";
+
 /* ------------------------------------------------------------------ */
 /* SHA-256 and HMAC                                                    */
 /* ------------------------------------------------------------------ */
@@ -151,8 +153,14 @@ export async function logout() {
 }
 
 export async function logoutAll() {
-  const res = await f("/api/sat1/logout_all", form({}));
+  // Through apiUrl, unlike everything else in this file: the rest of the gate's endpoints are about
+  // *this browser's* session on *this origin* (login, logout, pairing), but "sign out everywhere"
+  // belongs to whichever device the page is showing - while remote-controlling a peer, that is the
+  // peer. The regenerate takes our own key with it, so the fresh one in the body is adopted on the
+  // spot; the next poll then carries it and the Launch card re-renders from there.
+  const res = await f(apiUrl("/api/sat1/logout_all"), form({}));
   const body = await res.json().catch(() => ({}));
+  if (res.ok && body.key) updateRemoteKey(body.key);
   return { ok: res.ok && body.ok === 1, key: body.key };
 }
 
@@ -299,6 +307,35 @@ export function qrSignInLink(ip, key) {
  * that cookie silently, but a key in the body is readable under plain CORS, and the ?key= landing
  * sets the cookie first-party where nothing blocks it.
  */
+/**
+ * Whether a peer can be remote-controlled rather than navigated to: one gated read with the key
+ * peerLogin just returned, judged on the `apiv` contract number the state payload carries.
+ *
+ * This one probe answers everything the single-origin switch needs to know before it commits:
+ * that the peer's firmware accepts ?key= on gated routes at all (older firmware answers 401 and
+ * the catch below turns it into null), that the key is good, and that the peer speaks the same
+ * /api/sat1/* shapes this app was built against. Anything short of a clean yes means the switcher
+ * navigates the old way and the peer's own self-consistent UI takes over - an old device must
+ * never be driven by an app that misunderstands it.
+ *
+ * Returns the peer's state payload (so the caller starts with fresh facts) or null.
+ */
+export async function probePeer(origin, key) {
+  try {
+    const r = await fetch(`${origin}/api/sat1/state?key=${key}`, {
+      mode: "cors",
+      credentials: "omit",
+      signal: AbortSignal.timeout(4000),
+      cache: "no-store",
+    });
+    if (!r.ok) return null;
+    const state = await r.json();
+    return state && state.apiv === 1 ? state : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function peerLogin(origin, password) {
   try {
     const opts = { mode: "cors", credentials: "omit", signal: AbortSignal.timeout(4000), cache: "no-store" };

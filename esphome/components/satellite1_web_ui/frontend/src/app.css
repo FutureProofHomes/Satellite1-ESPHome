@@ -392,6 +392,19 @@ textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The one word that says these controls belong to another device (single-origin device switching).
+   A quiet outlined pill rather than a filled one: it must be legible at a glance without competing
+   with the name it qualifies, and it is on screen for the whole remote session. Worn twice - the
+   top bar while remote, and the switcher's way-home row - so the two facts share one look. */
+.remote-tag {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--fg-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  padding: 1px var(--s-2);
+  margin-left: var(--s-1);
+}
 .title .grow {
   overflow: hidden;
   text-overflow: ellipsis;

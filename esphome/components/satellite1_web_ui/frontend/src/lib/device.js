@@ -11,6 +11,50 @@
 import { useEffect, useReducer, useRef, useState } from "preact/hooks";
 
 /* ------------------------------------------------------------------ */
+/* The remote-control target                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Which device this app is talking to: its own (null) or a peer being remote-controlled - the
+ * single-origin device switch that keeps the iOS home-screen app inside its install origin, where
+ * a navigation to the peer would push it into Safari's in-app sheet.
+ *
+ * Module scope rather than context, because request() below is module scope and every hook in this
+ * file rides it. The shell owns the value's lifecycle: it calls setRemoteTarget and then remounts
+ * the whole app keyed on it, so no hook ever holds one device's state while the URLs point at
+ * another - entity ids collide across devices by construction ("switch/Wake Chime" is every
+ * device's id), and a reducer left standing across a switch would blend two devices.
+ *
+ * The key rides the query string on every remote request because it has to ride it on one of them:
+ * EventSource can set no headers, and Safari refuses cross-site cookies outright. Same secret the
+ * peer's own cookie carries, held in memory only - a reload lands back on the local device.
+ */
+let remoteTarget = null; // { base, key } | null
+
+export function setRemoteTarget(target) {
+  remoteTarget = target ? { base: String(target.base).replace(/\/+$/, ""), key: target.key } : null;
+  // The once-per-load HA sync guard is per-device state in disguise: a fresh target deserves the
+  // same one fresh sync a page load gets.
+  haAskedThisLoad = false;
+}
+
+export const isRemote = () => remoteTarget != null;
+
+/** The peer regenerated its sessions with us among the callers ("sign out everywhere" on its
+ *  Diagnostics) and handed back the fresh key; adopting it is what keeps this session being the
+ *  one caller that survives, same as the cookie path does for a local session. */
+export function updateRemoteKey(key) {
+  if (remoteTarget && key) remoteTarget = { ...remoteTarget, key };
+}
+
+/** A path like "/api/sat1/state" as this app should actually fetch it: untouched for the local
+ *  device, prefixed and key-carrying for a remote one. */
+export function apiUrl(path) {
+  if (!remoteTarget) return path;
+  return `${remoteTarget.base}${path}${path.includes("?") ? "&" : "?"}key=${remoteTarget.key}`;
+}
+
+/* ------------------------------------------------------------------ */
 /* The request queue                                                   */
 /* ------------------------------------------------------------------ */
 
@@ -84,7 +128,7 @@ export function request(path, init) {
       // radar module" and the media bar absent, while the same endpoints answered a bare fetch
       // instantly). Twenty seconds is several times anything the device legitimately takes; a
       // caller's own signal in `init` still wins the spread.
-      const r = await fetch(path, { signal: AbortSignal.timeout(20000), ...opts });
+      const r = await fetch(apiUrl(path), { signal: AbortSignal.timeout(20000), ...opts });
       const out = { ok: r.ok, status: r.status, text: await r.text() };
       if (!out.ok && opts.method === "POST" && !quiet) reportWriteError(path, `HTTP ${out.status}`);
       return out;
@@ -1042,7 +1086,10 @@ export function useEvents() {
     const connect = () => {
       if (closed) return;
       es?.close();
-      es = new EventSource("/events");
+      // apiUrl carries the remote base and key when a peer is being controlled; EventSource is the
+      // reason the key rides query strings at all (it can set no headers), so this line is the one
+      // the whole cross-origin auth design is shaped around.
+      es = new EventSource(apiUrl("/events"));
       es.onopen = markUp;
       es.onerror = markDown;
       es.addEventListener("state", (e) => {

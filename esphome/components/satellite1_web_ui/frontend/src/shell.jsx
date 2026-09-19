@@ -8,8 +8,17 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
 import { HINTS, TEXT } from "./copy.js";
-import { loginKey, logout, maybeRedirectLocal, peerLogin, primeOtherOrigin, takeUrlKey } from "./lib/auth.js";
-import { deviceIdentity, haBlocked, onWriteError, useDeviceState, useEvents, useHaData, useSelection } from "./lib/device.js";
+import { loginKey, logout, maybeRedirectLocal, peerLogin, primeOtherOrigin, probePeer, takeUrlKey } from "./lib/auth.js";
+import {
+  deviceIdentity,
+  haBlocked,
+  onWriteError,
+  setRemoteTarget,
+  useDeviceState,
+  useEvents,
+  useHaData,
+  useSelection,
+} from "./lib/device.js";
 import { LoginScreen } from "./login.jsx";
 import { MediaFooter } from "./media.jsx";
 import { FixDrawer, Splash } from "./splash.jsx";
@@ -214,7 +223,7 @@ const hostOf = (u) => String(u || "").replace(/^https?:\/\//, "").replace(/[/:].
  * paragraph to explain). The roster covers the case that matters; a peer Home Assistant cannot
  * list is reachable the way it always was - by typing its address in the URL bar.
  */
-function SwitcherSheet({ device, label, area, route, ha, haRefresh, onClose }) {
+function SwitcherSheet({ device, label, area, route, ha, haRefresh, remote, localMac, onRemote, onLocal, onClose }) {
   const haOn = !!device?.ha;
   const haText = haOn ? TEXT.ha_connected : TEXT.ha_disconnected;
   const mac = (device?.mac || "").toLowerCase();
@@ -283,6 +292,19 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, onClose }) {
       location.href = peerHref(url, route);
       return;
     }
+    // The single-origin switch, tried first: one gated read with the fresh key tells us the peer's
+    // firmware accepts remote control and speaks this app's API contract (see probePeer). A yes
+    // means the app retargets itself and remounts - no navigation, so the iOS home-screen app never
+    // meets Safari's in-app sheet. The base is the roster's IP origin rather than the .local
+    // upgrade the navigation path prefers: this target lives in memory for the session, so DHCP
+    // stability buys nothing, and skipping mDNS removes the one way the switch could land on a
+    // browser error page. The mac rides along only on the way out of the local device, so the
+    // sheet can offer the way back (see isHome below).
+    if (await probePeer(origin, peer.key)) {
+      onRemote({ base: origin, key: peer.key }, remote ? null : (device?.mac || "").toLowerCase());
+      return;
+    }
+    // Older peer firmware: the navigation everyone already knows, exactly as before.
     const base =
       location.hostname.endsWith(".local") && peer.name && /^[a-z0-9-]+$/i.test(peer.name)
         ? `http://${peer.name}.local${location.port ? `:${location.port}` : ""}`
@@ -290,19 +312,44 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, onClose }) {
     location.href = `${base}/?key=${peer.key}#/${route}`;
   };
 
+  // While remote, the device serving this page is just another row in the roster (the mac filter
+  // above excludes the *controlled* device, not the serving one). It deserves different handling:
+  // going home is a state reset on a session this browser already holds - no cross-sign-in, no
+  // probe, nothing that can fail.
+  const isHome = (d) => !!remote && !!localMac && (d?.[3] || "").toLowerCase() === localMac;
+
   const peerRow = (d) => {
     const url = d[5] ? String(d[5]) : "";
     const up = isUp(d);
+    const home = isHome(d);
     const dotText = up ? TEXT.peer_up : TEXT.peer_down;
     const body = (
       <>
         <div class="row">
           <span class={`dot${up ? " ok" : ""}`} title={dotText} aria-label={dotText} />
           <span class="grow">{d[1]}</span>
+          {home && <span class="remote-tag">{TEXT.switcher_home}</span>}
         </div>
         {peerSub(d[2], hostOf(url))}
       </>
     );
+    if (home) {
+      // A real href underneath (this very page), so middle-click and open-in-new-tab stay honest.
+      return (
+        <a
+          key={d[3]}
+          class="peer go"
+          href={`${location.origin}/#/${route}`}
+          onClick={(e) => {
+            if (e.button !== 0 || e.metaKey || e.ctrlKey) return;
+            e.preventDefault();
+            onLocal();
+          }}
+        >
+          {body}
+        </a>
+      );
+    }
     return url ? (
       <a key={d[3]} class={`peer go${up ? "" : " off"}`} href={peerHref(url, route)} onClick={(e) => jump(e, url, d[7])}>
         {body}
@@ -460,6 +507,27 @@ export function App() {
   const [phase, setPhase] = useState("boot");
   // The sign-in key, held only long enough for the dual-origin priming in AppInner, then dropped.
   const primeKey = useRef(null);
+  // The remote-control target: null when the app is talking to the device that serves it, or
+  // { base, key } when the switcher has pointed it at a peer (single-origin device switching - the
+  // iOS home-screen app must never navigate cross-origin, or Safari wraps the peer in its in-app
+  // sheet). Held here so the switch can remount AppInner: entity ids collide across devices by
+  // construction, so no hook state may survive a change of target. In memory only, on purpose - a
+  // reload lands back on the local device, which is the one whose session cookie is real.
+  const [remote, setRemote] = useState(null);
+  // Who the local device is (mac), captured on the way out so the switcher can tell "back to the
+  // device serving this page" apart from "another peer" while remote - the roster row for home is
+  // a plain state reset, not a cross-sign-in.
+  const localMac = useRef(null);
+
+  const goRemote = (target, mac) => {
+    if (mac) localMac.current = mac;
+    setRemoteTarget(target);
+    setRemote(target);
+  };
+  const goLocal = () => {
+    setRemoteTarget(null);
+    setRemote(null);
+  };
 
   // The static splash from index.html, torn down the moment boot resolves into a real screen.
   // Removed rather than hidden: it exists only for boot, and boot happens once per page load. While
@@ -505,10 +573,23 @@ export function App() {
       />
     );
   }
-  return <AppInner primeKey={primeKey} onAuthLost={() => setPhase("login")} />;
+  return (
+    <AppInner
+      // The remount that keeps two devices' state from ever blending: a new target is a new app.
+      key={remote ? remote.base : "local"}
+      primeKey={primeKey}
+      remote={remote}
+      localMac={localMac.current}
+      onRemote={goRemote}
+      onLocal={goLocal}
+      // A 401 while remote means the peer's sessions were regenerated under us - the local cookie
+      // is a separate fact and probably fine, so the honest response is home, not the login screen.
+      onAuthLost={remote ? goLocal : () => setPhase("login")}
+    />
+  );
 }
 
-function AppInner({ primeKey, onAuthLost }) {
+function AppInner({ primeKey, remote, localMac, onRemote, onLocal, onAuthLost }) {
   const [route, go] = useHashRoute();
   const [nav, setNav] = useState(false);
   const [switcher, setSwitcher] = useState(false);
@@ -541,9 +622,12 @@ function AppInner({ primeKey, onAuthLost }) {
   // we do not know. The key is dropped the moment it is used - it lives nowhere but the cookie
   // after this.
   useEffect(() => {
-    if (!primeKey.current || !device) return;
+    // Never while remote: `device` is the peer's state there, and priming the peer's other origin
+    // with the local device's key would be a login that can only fail.
+    if (remote || !primeKey.current || !device) return;
     primeOtherOrigin(primeKey.current, device.name, device.ip);
     primeKey.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [device, primeKey]);
 
   // A session dying under a running app - the password changed, or Sign out everywhere pressed
@@ -593,6 +677,10 @@ function AppInner({ primeKey, onAuthLost }) {
           {/* A placeholder for the one paint before /api/sat1/state answers, not a prefix - the name is
               whatever deviceLabel returns, on its own, so nothing here can double it up. */}
           <span class="tname">{label || "Satellite1"}</span>
+          {/* While a peer is being controlled, one word says so. The name alone cannot: every device
+              in the house has a name of the same shape, and the whole point of the single-origin
+              switch is that nothing else about the page changes. */}
+          {remote && <span class="remote-tag">{TEXT.remote_tag}</span>}
           {/* Always down: this opens a sheet, and a dropdown that points sideways reads as a link. */}
           <Chevron down cls="caret" />
         </button>
@@ -632,6 +720,10 @@ function AppInner({ primeKey, onAuthLost }) {
           route={route}
           ha={ha.ha}
           haRefresh={ha.haRefresh}
+          remote={remote}
+          localMac={localMac}
+          onRemote={onRemote}
+          onLocal={onLocal}
           onClose={() => setSwitcher(false)}
         />
       )}
