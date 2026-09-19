@@ -185,8 +185,10 @@ class SessionGate : public AsyncWebHandler {
   /// never carries the host-bound cookie, so the unauthenticated surface is its whole reach).
   static bool exempt_(const char *url, size_t len);
 
-  /// A valid session cookie, or valid digest credentials - the latter is what keeps curl and the
-  /// radar tuner scripts working exactly as they did when web_server owned the auth.
+  /// A valid session cookie, a valid ?key= bearer (the same token the cookie carries, for a peer
+  /// Satellite1's page remote-controlling this device cross-origin, where cookies cannot follow
+  /// and EventSource can set no headers), or valid digest credentials - the last is what keeps
+  /// curl and the radar tuner scripts working exactly as they did when web_server owned the auth.
   bool authorized_(AsyncWebServerRequest *request) const;
   bool cookie_valid_(AsyncWebServerRequest *request) const;
 

@@ -249,6 +249,15 @@ bool SessionGate::cookie_valid_(AsyncWebServerRequest *request) const {
 bool SessionGate::authorized_(AsyncWebServerRequest *request) const {
   if (this->cookie_valid_(request))
     return true;
+  // The bearer fallback, for a caller that cannot carry this device's cookie: a peer Satellite1's
+  // page remote-controlling this device cross-origin (single-origin device switching). Safari
+  // blocks third-party cookies outright, and EventSource can set no headers, so the query string
+  // is the one channel that fetch, EventSource and the entity REST posts all share. The value is
+  // the same token the cookie carries, obtained the same way (the login challenge), checked with
+  // the same constant-time compare the login endpoint's bearer path uses - so this widens where
+  // the secret may ride, not who can mint one.
+  if (auto *key = request->getParam("key"); key != nullptr && ct_equal_(this->token_hex_, key->value().c_str()))
+    return true;
 #ifdef USE_WEBSERVER_AUTH
   // The digest fallback: exactly the check AuthMiddlewareHandler ran when web_server owned the
   // auth block, against the same credentials, so curl and the radar tuner scripts keep working
@@ -433,6 +442,18 @@ void SessionGate::deny_(AsyncWebServerRequest *request) {
     snprintf(header, sizeof(header), R"(Digest realm="Login Required", qop="auth", nonce="%s")", nonce);
     httpd_resp_set_hdr(*request, "WWW-Authenticate", header);
   }
+  // CORS on the refusal, for LAN origins only: a peer Satellite1's page remote-controlling this
+  // device needs to *read* the 401 to tell "your key is stale" apart from "the device is gone" -
+  // without the header, the browser reports both as the same opaque network error. The body is
+  // {"ok":0,"auth":0} either way, so a readable refusal discloses nothing new. origin_buf_ is the
+  // member send_json_ uses for the same purpose; safe here for the same reason (one request at a
+  // time on one task, and httpd_resp_send below happens before this frame unwinds).
+  const auto origin = request->get_header("Origin");
+  if (origin.has_value() && (this->origin_is_self_(origin.value()) || origin_is_lan_(origin.value()))) {
+    snprintf(this->origin_buf_, sizeof(this->origin_buf_), "%s", origin.value().c_str());
+    httpd_resp_set_hdr(*request, "Access-Control-Allow-Origin", this->origin_buf_);
+    httpd_resp_set_hdr(*request, "Vary", "Origin");
+  }
   const char *body = R"({"ok":0,"auth":0})";
   httpd_resp_send(*request, body, HTTPD_RESP_USE_STRLEN);
 }
@@ -583,9 +604,14 @@ void SessionGate::handle_logout_all_(AsyncWebServerRequest *request) {
   // The caller stays signed in on the new generation - "sign out everywhere else" would be the
   // truthful button label, and the fresh cookie plus the fresh key are what the page re-renders
   // its Launch section from.
+  //
+  // lan_cors: a peer Satellite1's page remote-controlling this device presses this button too, and
+  // it must be able to read the fresh key or the regenerate strands its own session mid-use. The
+  // caller just proved a session (the authorized_ check above), so echoing CORS to a LAN origin
+  // hands the new key only to someone the old key already vouched for.
   char body[96];
   snprintf(body, sizeof(body), R"({"ok":1,"key":"%s"})", this->token_hex_);
-  this->send_json_(request, "200 OK", body, true, false, nullptr);
+  this->send_json_(request, "200 OK", body, true, false, nullptr, true);
 }
 
 /* ---- The pairing window --------------------------------------------------------------------- */

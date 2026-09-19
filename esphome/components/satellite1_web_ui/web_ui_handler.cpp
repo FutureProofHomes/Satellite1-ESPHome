@@ -30,6 +30,9 @@ namespace satellite1_web_ui {
 
 static const char *const TAG_WU = "web_ui";
 
+/// The remote-control API contract version - see the comment where handle_state_ serves it.
+static constexpr int WU_API_VERSION = 1;
+
 /// Revalidate rather than refetch. A long max-age on a URL whose content changes with every
 /// firmware update is a bug; "no-cache" plus an ETag means one conditional request per load and a
 /// 304 with no body for the 99% of loads where the firmware has not moved.
@@ -220,6 +223,12 @@ void WebUIHandler::send_low_memory_(AsyncWebServerRequest *request) {
   httpd_resp_set_status(*request, "503 Service Unavailable");
   httpd_resp_set_type(*request, "application/json");
   httpd_resp_set_hdr(*request, "Retry-After", "2");
+  // Every raw-httpd response a remote page reads must carry this by hand: reaching past
+  // init_response_ also reaches past the Access-Control-Allow-Origin: * default web_server_base
+  // installs, and without it a peer Satellite1's page remote-controlling this device sees a CORS
+  // error - indistinguishable from the device being gone, on exactly the response that says
+  // "ask me again in a moment".
+  httpd_resp_set_hdr(*request, "Access-Control-Allow-Origin", "*");
   httpd_resp_send(*request, R"({"ok":0,"low_memory":1})", HTTPD_RESP_USE_STRLEN);
 }
 
@@ -1097,6 +1106,10 @@ void WebUIHandler::handle_ha_(AsyncWebServerRequest *request) {
 
   httpd_resp_set_type(*request, "application/json");
   httpd_resp_set_hdr(*request, "Cache-Control", CACHE_REVALIDATE);
+  // By hand on this raw-httpd path - see send_low_memory_. Found live: everything else on the
+  // remote-control path answered and the app still sat on "Connecting", because this one payload
+  // is what the splash's verdict waits for.
+  httpd_resp_set_hdr(*request, "Access-Control-Allow-Origin", "*");
 
   char head[64];
   const int head_len =
@@ -1286,6 +1299,8 @@ void WebUIHandler::handle_ma_(AsyncWebServerRequest *request) {
 
   httpd_resp_set_type(*request, "application/json");
   httpd_resp_set_hdr(*request, "Cache-Control", CACHE_REVALIDATE);
+  // By hand on this raw-httpd path - see send_low_memory_.
+  httpd_resp_set_hdr(*request, "Access-Control-Allow-Origin", "*");
 
   char head[32];
   const int head_len = snprintf(head, sizeof(head), R"({"age":%u,"d":)",
@@ -1716,7 +1731,13 @@ void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
   multi_heap_info_t psram{};
   heap_caps_get_info(&psram, MALLOC_CAP_SPIRAM);
 
-  stream->printf(R"({"name":"%s","friendly_name":"%s","mac":"%s","ip":"%s",)", App.get_name().c_str(),
+  // The remote-control contract version, read by a peer Satellite1's page before it retargets
+  // itself at this device (single-origin device switching). Bump it only for a breaking change to
+  // the /api/sat1/* shapes, the entity key names, or the auth story; additive changes ride the
+  // same number. A peer whose app finds this missing or out of range falls back to plain
+  // navigation, so an old device is never driven by an app that misunderstands it.
+  stream->printf(R"({"apiv":%d,)", WU_API_VERSION);
+  stream->printf(R"("name":"%s","friendly_name":"%s","mac":"%s","ip":"%s",)", App.get_name().c_str(),
                  App.get_friendly_name().c_str(), mac_buf, ip_buf);
 
 #ifdef USE_ETHERNET
