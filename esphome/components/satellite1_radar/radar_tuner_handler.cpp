@@ -240,6 +240,10 @@ void RadarTunerHandler::handle_ld2410_get_config_(AsyncWebServerRequest *request
 
   const auto &cfg = ld2410_->get_backend_config();
   httpd_resp_set_type(*request, "application/json");
+  // By hand on every raw-httpd path a peer Satellite1's remote-control page reads: reaching past
+  // ESPHome's response API also reaches past the Access-Control-Allow-Origin default it stamps,
+  // and without the header the cross-origin probe fails and the page reports no radar module.
+  httpd_resp_set_hdr(*request, "Access-Control-Allow-Origin", "*");
   ChunkWriter out(*request);
   out.printf("{\"timeout\":%u,\"max_move_gate\":%u,\"max_still_gate\":%u,\"distance_resolution\":\"%s\","
              "\"bluetooth\":%s,\"gate_move_thresholds\":[",
@@ -391,6 +395,10 @@ void RadarTunerHandler::handle_ld2410_live_(AsyncWebServerRequest *request) {
   // own reply will still be all zeroes. The page polls twice a second and redraws.
   this->ld2410_live_poll_ms_.store(millis(), std::memory_order_relaxed);
   httpd_resp_set_type(*request, "application/json");
+  // By hand on every raw-httpd path a peer Satellite1's remote-control page reads: reaching past
+  // ESPHome's response API also reaches past the Access-Control-Allow-Origin default it stamps,
+  // and without the header the cross-origin probe fails and the page reports no radar module.
+  httpd_resp_set_hdr(*request, "Access-Control-Allow-Origin", "*");
   ChunkWriter out(*request);
   out.print("{\"gates\":{\"move\":[");
   for (int g = 0; g < RT_NUM_GATES; g++) {
@@ -418,6 +426,10 @@ void RadarTunerHandler::handle_ld2450_get_config_(AsyncWebServerRequest *request
 
   const auto &cfg = ld2450_->get_backend_config();
   httpd_resp_set_type(*request, "application/json");
+  // By hand on every raw-httpd path a peer Satellite1's remote-control page reads: reaching past
+  // ESPHome's response API also reaches past the Access-Control-Allow-Origin default it stamps,
+  // and without the header the cross-origin probe fails and the page reports no radar module.
+  httpd_resp_set_hdr(*request, "Access-Control-Allow-Origin", "*");
   ChunkWriter out(*request);
   out.printf("{\"detection_range\":%u,\"stability\":%u,\"timeout\":%u,\"bluetooth\":%s,\"multi_target\":%s,"
              "\"reboot_required\":%s,\"zones\":[",
@@ -568,6 +580,10 @@ void RadarTunerHandler::handle_ld2450_set_config_(AsyncWebServerRequest *request
 void RadarTunerHandler::handle_ld2450_live_(AsyncWebServerRequest *request) {
   // Always fits one fragment, so the writer buys nothing here beyond reading like the other three.
   httpd_resp_set_type(*request, "application/json");
+  // By hand on every raw-httpd path a peer Satellite1's remote-control page reads: reaching past
+  // ESPHome's response API also reaches past the Access-Control-Allow-Origin default it stamps,
+  // and without the header the cross-origin probe fails and the page reports no radar module.
+  httpd_resp_set_hdr(*request, "Access-Control-Allow-Origin", "*");
   ChunkWriter out(*request);
   out.printf("{\"targets\":[{\"x\":%.1f,\"y\":%.1f},{\"x\":%.1f,\"y\":%.1f},{\"x\":%.1f,\"y\":%.1f}]}",
              targets_[0].x, targets_[0].y, targets_[1].x, targets_[1].y, targets_[2].x, targets_[2].y);
