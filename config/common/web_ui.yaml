@@ -193,6 +193,15 @@ satellite1_web_ui:
   # playing.
   media_player_id: external_media_player
 
+  # The two sounds the routing feature mirrors to third-party speakers, served at
+  # GET /api/sat1/sounds/<name> straight from the audio_file bytes in flash (session-gate exempt;
+  # the fetcher is a Sonos or Cast with no session). The keys are the URL tails the calls in
+  # tts_routing.yaml render - change one and the other must move with it. Both files are MP3 in
+  # media_player.yaml because a Sonos AudioClip accepts MP3 and WAV only.
+  sounds:
+    timer_finished.mp3: timer_finished_sound
+    wake_word_triggered.mp3: wake_word_triggered_sound
+
   # Whether a voice approval could be heard right now, read when a pairing window opens. Only the
   # hardware mute slider counts: it is the one mute software cannot clear, so it alone forces a
   # button-only window (and the login page says so, from the poll's hw flag). A software mute is no
@@ -347,11 +356,14 @@ satellite1_web_ui:
       # app's "Local Speaker" row and the second is unconditional.
       tts_routing: tts_routing_enabled
       remote_wake_chime: remote_wake_chime
+      remote_timer_ring: remote_timer_ring
       duck_area: duck_area_players
 
     selects:
       speaker_channel: tas_mode_select
       wake_sensitivity: mww_sensitivity_select
+      # The mic-guard length, on the Audio routing card under the toggles it belongs with.
+      remote_sync_guard: remote_sync_guard
 
     buttons:
       restart: restart_button

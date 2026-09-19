@@ -237,8 +237,16 @@ voice_assistant:
           # Start a script that would potentially enable the stop word if the response is longer than a second
           - script.execute: activate_stop_word_once
     - lambda: id(tts_playing) = true;
-    # The reply, paired with the on_stt_end line above so the card can show both halves.
-    - lambda: id(web_ui_app)->push_utterance(x, false);
+    # The reply, paired with the on_stt_end line above so the card can show both halves. Not during
+    # a spoken-code sign-in window: the announce path fires this trigger with the prompt text, and
+    # the prompt CONTAINS the code - on_stt_end already keeps the spoken answer off the card, and
+    # printing the question would hand the secret to whoever is already signed in while someone
+    # else is proving presence.
+    - if:
+        condition:
+          lambda: 'return !id(web_ui_app)->login_voice_pending();'
+        then:
+          - lambda: id(web_ui_app)->push_utterance(x, false);
     - script.execute: audio_gain_reconcile
   # When the voice assistant ends ...
   on_end:

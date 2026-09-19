@@ -3,8 +3,16 @@ substitutions:
   jack_disconnected_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/jack_disconnected.flac
   mute_switch_on_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/mute_switch_on.flac
   mute_switch_off_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/mute_switch_off.flac
-  timer_finished_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/timer_finished.flac
-  wake_word_triggered_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/wake_word_triggered.flac
+  # MP3 rather than FLAC, and local rather than the S3 bucket, for the two sounds that travel: the
+  # timer ring and the wake chime are served to non-Satellite1 routing targets straight off this
+  # device's flash (GET /api/sat1/sounds/<name>.mp3 in satellite1_web_ui), and a Sonos AudioClip
+  # accepts MP3 and WAV only - hand it FLAC and it reports success and plays nothing, the same
+  # silent failure the TTS codec swap in tts_routing.yaml exists to prevent. One embedded copy
+  # serves both local playback (the decoder handles MP3 fine) and remote fetches, so the format
+  # has to be the travelling one. Local files rather than S3 so the bytes a release plays are the
+  # bytes its repository reviewed - the same provenance reasoning as the login clips.
+  timer_finished_sound_file: sounds/timer_finished.mp3
+  wake_word_triggered_sound_file: sounds/wake_word_triggered.mp3
   factory_reset_initiated_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/factory_reset_initiated.mp3
   factory_reset_cancelled_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/factory_reset_cancelled.mp3
   factory_reset_confirmed_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/factory_reset_confirmed.mp3
@@ -40,6 +48,13 @@ audio_file:
     file: ${center_button_triple_press_sound_file}
   - id: center_button_long_press_sound
     file: ${center_button_long_press_sound_file}
+  # Half a second of true silence, 8kHz mono, ~8KB of flash. The remote sync guard in
+  # tts_routing.yaml enqueues it 1-4 times behind a routed response so the announcement pipeline
+  # stays in ANNOUNCING past the remote targets' playback skew - which is the one lever YAML has
+  # over when the assistant reopens the microphone. See tts_routing.yaml for why a clip and not a
+  # delay.
+  - id: routing_guard_silence_sound
+    file: sounds/routing_guard_silence.wav
 
 media_source:
   - platform: audio_file

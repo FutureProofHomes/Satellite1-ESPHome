@@ -145,6 +145,13 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
   if (url == "/api/sat1/media")
     return Route::MEDIA;
 #endif
+#ifdef USE_SAT1_WEB_UI_SOUNDS
+  // A prefix like MEDIA_SET's: the sound's name rides the path. Exempt in the session gate for the
+  // same reason the PWA assets are - the fetcher is a Sonos or a Cast retrieving a mirrored timer
+  // ring or wake chime, and it has no session and never will.
+  if (strncmp(url_buf, "/api/sat1/sounds/", 17) == 0)
+    return Route::SOUND;
+#endif
 
   return Route::NONE;
 }
@@ -190,6 +197,11 @@ bool WebUIHandler::route_streams_(Route route) {
     // needs no AsyncResponseStream and works when the heap could not provide one.
     case Route::MEDIA:
     case Route::MEDIA_SET:
+#endif
+#ifdef USE_SAT1_WEB_UI_SOUNDS
+    // Sounds are PROGMEM sends like the icons, range slices included - the slice is a pointer
+    // offset into flash, not a copy.
+    case Route::SOUND:
 #endif
       // The bundle is sent from PROGMEM, the Home Assistant payload from PSRAM, and every write
       // answers with a string literal. None of them need heap to reply.
@@ -302,6 +314,11 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
       break;
     case Route::MEDIA_SET:
       this->handle_media_set_(request);
+      break;
+#endif
+#ifdef USE_SAT1_WEB_UI_SOUNDS
+    case Route::SOUND:
+      this->handle_sound_(request);
       break;
 #endif
     case Route::NONE:
@@ -1504,6 +1521,118 @@ void WebUIHandler::handle_pwa_asset_(AsyncWebServerRequest *request, const uint8
   response->addHeader("Cache-Control", "max-age=86400");
   request->send(response);
 }
+
+#ifdef USE_SAT1_WEB_UI_SOUNDS
+
+/// The sounds the routing feature hands out URLs for - the mirrored timer ring and the
+/// non-Satellite1 wake chime - served straight from the audio_file bytes already in flash, so the
+/// device carries exactly one copy of each and remote playback needs no internet.
+///
+/// The Range handling is not optional polish. Cast refuses media whose origin cannot answer a Range
+/// request, and Sonos may probe with `bytes=0-` before fetching - and ESPHome's response API cannot
+/// express a 206, so this reaches past it to the raw httpd calls the same way handle_index_ does for
+/// its 304. Single ranges only; a multipart range asks for more ceremony than any speaker sends.
+/// The Content-Range buffer lives on this stack frame, which outlives the send - httpd_resp_set_hdr
+/// stores the pointer rather than copying.
+void WebUIHandler::handle_sound_(AsyncWebServerRequest *request) {
+  char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+  request->url_to(url_buf);
+  const char *name = url_buf + 17;  // strlen("/api/sat1/sounds/"), guaranteed by match_route_
+
+  const audio::AudioFile *file = nullptr;
+  for (const auto &sound : this->sounds_) {
+    if (strcmp(sound.name, name) == 0) {
+      file = sound.file;
+      break;
+    }
+  }
+  if (file == nullptr || file->data == nullptr || file->length == 0) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  // From the embedded bytes rather than the URL's extension, so the header cannot lie about the
+  // payload. The enum's members only exist for compiled-in codecs, hence the guards.
+  const char *type = "application/octet-stream";
+  switch (file->file_type) {
+#ifdef USE_AUDIO_MP3_SUPPORT
+    case audio::AudioFileType::MP3:
+      type = "audio/mpeg";
+      break;
+#endif
+#ifdef USE_AUDIO_WAV_SUPPORT
+    case audio::AudioFileType::WAV:
+      type = "audio/wav";
+      break;
+#endif
+#ifdef USE_AUDIO_FLAC_SUPPORT
+    case audio::AudioFileType::FLAC:
+      type = "audio/flac";
+      break;
+#endif
+    default:
+      break;
+  }
+
+  const auto range = request->get_header("Range");
+  if (range.has_value()) {
+    const char *spec = strstr(range.value().c_str(), "bytes=");
+    if (spec != nullptr) {
+      spec += 6;
+      size_t start = 0;
+      size_t end = file->length - 1;
+      bool valid = false;
+      if (*spec == '-') {
+        // Suffix form: the last N bytes.
+        char *endp = nullptr;
+        unsigned long n = strtoul(spec + 1, &endp, 10);
+        if (endp != spec + 1 && n > 0) {
+          start = n >= file->length ? 0 : file->length - n;
+          valid = true;
+        }
+      } else {
+        char *endp = nullptr;
+        unsigned long s = strtoul(spec, &endp, 10);
+        if (endp != spec && *endp == '-' && s < file->length) {
+          start = s;
+          if (*(endp + 1) != '\0') {
+            unsigned long e = strtoul(endp + 1, nullptr, 10);
+            if (e >= s)
+              end = e < file->length ? e : file->length - 1;
+          }
+          valid = true;
+        }
+      }
+      if (!valid) {
+        // A range that names nothing inside the file. 416 with the length, per the RFC, so the
+        // fetcher can retry whole.
+        char content_range[48];
+        snprintf(content_range, sizeof(content_range), "bytes */%u", static_cast<unsigned>(file->length));
+        httpd_resp_set_status(*request, "416 Range Not Satisfiable");
+        httpd_resp_set_hdr(*request, "Content-Range", content_range);
+        httpd_resp_send(*request, nullptr, 0);
+        return;
+      }
+      char content_range[64];
+      snprintf(content_range, sizeof(content_range), "bytes %u-%u/%u", static_cast<unsigned>(start),
+               static_cast<unsigned>(end), static_cast<unsigned>(file->length));
+      httpd_resp_set_status(*request, "206 Partial Content");
+      httpd_resp_set_type(*request, type);
+      httpd_resp_set_hdr(*request, "Content-Range", content_range);
+      httpd_resp_set_hdr(*request, "Accept-Ranges", "bytes");
+      httpd_resp_send(*request, reinterpret_cast<const char *>(file->data) + start, end - start + 1);
+      return;
+    }
+  }
+
+  auto *response = request->beginResponse(200, type, file->data, file->length);
+  // The bytes only change with a reflash, exactly like the icons.
+  response->addHeader("Cache-Control", "max-age=86400");
+  response->addHeader("Accept-Ranges", "bytes");
+  request->send(response);
+}
+
+#endif  // USE_SAT1_WEB_UI_SOUNDS
 
 #ifdef USE_VOICE_ASSISTANT
 

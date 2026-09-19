@@ -25,6 +25,10 @@
 #include "esphome/components/media_player/media_player.h"
 #endif
 
+#ifdef USE_SAT1_WEB_UI_SOUNDS
+#include "esphome/components/audio/audio.h"
+#endif
+
 #include "esphome/core/entity_base.h"
 #include "esphome/core/helpers.h"
 
@@ -145,6 +149,18 @@ struct EntityRef {
   EntityBase *entity;
 };
 
+#ifdef USE_SAT1_WEB_UI_SOUNDS
+/// One device-served sound: the tail of its URL under /api/sat1/sounds/, and the audio_file whose
+/// embedded bytes answer it. `name` is a string literal from generated code and carries its own
+/// extension ("timer_finished.mp3"), because the device cannot rename what a remote speaker will
+/// key its decoder on; the Content-Type is taken from the embedded file_type instead, so the two
+/// can never disagree about what the bytes actually are.
+struct SoundRef {
+  const char *name;
+  const audio::AudioFile *file;
+};
+#endif
+
 /**
  * The web app's HTTP surface: the bundle itself, plus the endpoints web_server cannot cover.
  *
@@ -218,6 +234,13 @@ class WebUIHandler : public AsyncWebHandler {
   void add_entity(const char *key, const char *domain, EntityBase *entity) {
     this->entities_.push_back({key, domain, entity});
   }
+
+#ifdef USE_SAT1_WEB_UI_SOUNDS
+  /// The device-served sounds, from generated code like the entity table above and immutable for
+  /// the same reason. Serving them from here rather than S3 is what keeps a mirrored timer ring
+  /// working with the internet down - see tts_routing.yaml for the decision and its cost.
+  void add_sound(const char *name, const audio::AudioFile *file) { this->sounds_.push_back({name, file}); }
+#endif
 
 #ifdef USE_VOICE_ASSISTANT
   void set_voice_assistant(voice_assistant::VoiceAssistant *va) { this->va_ = va; }
@@ -431,6 +454,9 @@ class WebUIHandler : public AsyncWebHandler {
     MEDIA,
     MEDIA_SET,
 #endif
+#ifdef USE_SAT1_WEB_UI_SOUNDS
+    SOUND,
+#endif
   };
 
   static Route match_route_(AsyncWebServerRequest *request);
@@ -447,6 +473,11 @@ class WebUIHandler : public AsyncWebHandler {
   /// One handler for the manifest and all three icons: the same PROGMEM send with a different
   /// pointer and content type each.
   void handle_pwa_asset_(AsyncWebServerRequest *request, const uint8_t *data, size_t len, const char *type);
+#ifdef USE_SAT1_WEB_UI_SOUNDS
+  /// A device-served sound, PROGMEM like the assets above but with single-range support on top:
+  /// Cast refuses media whose origin cannot answer a Range request, and Sonos may probe with one.
+  void handle_sound_(AsyncWebServerRequest *request);
+#endif
   void handle_state_(AsyncWebServerRequest *request);
 #ifdef USE_VOICE_ASSISTANT
   void handle_voice_(AsyncWebServerRequest *request);
@@ -510,6 +541,9 @@ class WebUIHandler : public AsyncWebHandler {
   std::function<const char *()> session_key_fn_{};
   std::atomic<uint32_t> *max_loop_ms_{nullptr};
   std::vector<EntityRef> entities_;
+#ifdef USE_SAT1_WEB_UI_SOUNDS
+  std::vector<SoundRef> sounds_;
+#endif
 
   /// The Home Assistant payload, in PSRAM. It is bounded on Home Assistant's side rather than here -
   /// see the size cap in common/web_ui_ha.yaml - but the bound is 24KB, which has no business in a

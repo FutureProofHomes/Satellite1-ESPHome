@@ -189,6 +189,12 @@ bool SessionGate::exempt_(const char *url, size_t len) {
     if (strcmp(url, path) == 0)
       return true;
   }
+  // The device-served sounds, fetched by third-party speakers playing a mirrored timer ring or
+  // wake chime (web_ui_handler.cpp's SOUND route). A Sonos or Cast has no session and never will,
+  // and the content is a chime, not a secret. Reached only under HTTP_GET - route_ tests exempt_
+  // in its GET branch alone - so nothing here widens what a POST can do.
+  if (strncmp(url, "/api/sat1/sounds/", 17) == 0)
+    return true;
   (void) len;
   return false;
 }

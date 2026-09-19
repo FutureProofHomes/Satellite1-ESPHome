@@ -47,6 +47,11 @@ class Satellite1WebUI : public Component {
     this->handler_.add_entity(key, domain, entity);
   }
 
+#ifdef USE_SAT1_WEB_UI_SOUNDS
+  /// The sounds served at /api/sat1/sounds/<name>, from generated code like the entity table.
+  void add_sound(const char *name, const audio::AudioFile *file) { this->handler_.add_sound(name, file); }
+#endif
+
   /* ---- The session gate: cookie auth and the device-presence login. ---- */
 
   /// Called from generated code in main.cpp, before any component's setup() - which is what puts

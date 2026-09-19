@@ -1,7 +1,17 @@
-# TTS Routing and Area Ducking
+# Audio Routing and Area Ducking
 
-Routing a Satellite1's voice responses to other speakers, and turning down the speakers in the
+Routing a Satellite1's audio - the assistant's spoken answers, the sign-in prompt, a ringing
+timer, and optionally the wake chime - to other speakers, and turning down the speakers in the
 same room while you talk to it.
+
+> [!NOTE]
+> **This feature was called "TTS routing", and the Home Assistant entities keep that name.**
+> `Route TTS To All Area Players`, `Remote TTS Volume` and `Remote TTS Status` are unchanged,
+> because Home Assistant derives an ESPHome entity's id from its name - a rename orphans the
+> entity and breaks every automation that referenced it (see [Renamed](#renamed) below for the
+> last time that price was paid). The web app and this document say "Audio routing"; the entities
+> say TTS. Entities added by the expansion (`Remote Timer Ring`, `Remote Sync Guard`) are named
+> for what they actually govern.
 
 > [!NOTE]
 > **This file is temporary.** It exists so the commit that introduced these features can be
@@ -148,8 +158,10 @@ in a browser and use the **Config** route. Home Assistant keeps one switch for t
 | Entity | Purpose |
 | --- | --- |
 | **Route TTS To All Area Players** | Switch. On sends the response to every media player in this device's area. A projection of the selection, not a value of its own — see below. |
-| **Remote TTS Volume** | The level the response should arrive at on the targets. `0` leaves every target's volume alone. |
-| **Remote Wake Chime** | Switch, off by default. Satellite1 targets sound their own wake chime when this device hears the wake word. |
+| **Remote TTS Volume** | The level the response — and the mirrored timer ring — should arrive at on the targets. `0` leaves every target's volume alone. |
+| **Remote Wake Chime** | Switch, off by default. Targets sound the wake chime when this device hears the wake word: a Satellite1 from its own flash, anything else from this device's sounds route. On Sonos and similar the chime can land up to a second late — clip playback has a fixed startup cost. |
+| **Remote Timer Ring** | Switch, on by default. A ringing timer is mirrored to the routing targets until it is stopped. The selection is already the opt-in; this is the opt-out. |
+| **Remote Sync Guard** | Select, default `1s` (options `0.5s`–`2s`). How long the microphone stays closed after a routed response finishes locally, covering the targets' playback skew so the device cannot hear its own response — or its own sign-in code — off a lagging speaker. |
 | **Voice Override** | This device's own level for speech, local or received. `0` follows the media volume. |
 | **Remote TTS Status** | Diagnostic. Everything that has to be true before a response reaches a remote speaker, in one line. |
 
@@ -222,6 +234,66 @@ per device. On an install with several Satellite1s that means visiting each one,
 after a factory reset. The trade was made deliberately — one source of truth for the selection, and the
 web app is it — but if you have many devices and one problem amplifier, this is the part that costs
 you. If you were using the label, it now does nothing and can be deleted.
+
+## Beyond responses: the sign-in prompt, the timer ring, the chime
+
+The selection routes four kinds of audio, not one. All of them ride the same resolved target list,
+the same stop machinery and the same error reporting; what differs is where each one's audio comes
+from.
+
+**The sign-in prompt.** The web app's spoken-code sign-in speaks its prompt through
+`assist_satellite.start_conversation`, whose TTS arrives over the announce path rather than a
+pipeline run — it fires `on_tts_end` with the same kind of `tts_proxy` URL a response gets, and
+never passes through `on_start`. An `on_tts_start` hook arms routing for it while a spoken-code
+window is pending, and the URL then fans out through `tts_route_response` unchanged: same targets,
+same codec swap, same watchdog, one TTS generation and one voice everywhere. The microphone only
+opens on this device, so routing the prompt cannot cause several devices to capture the answer.
+Deliberately scoped to the sign-in window: routing *every* announce (a `tts.speak` aimed at this
+device, a doorbell clip) is a one-condition change, left unmade because an announcement someone
+aimed at only this device silently following the selection would surprise its sender. The offline
+challenge mode cannot route by definition — no Home Assistant connection means no action calls.
+
+**The timer ring.** When a timer rings, `timer_remote_ring_loop` sends one announcement per ring
+cycle to the whole resolved list — Satellite1 peers included, as HTTP rather than `audio-file://`,
+because an HTTP announcement is what arms a peer's stop word, so "stop" spoken next to any target
+works with no target-side changes. The relay closes at the origin: the **Stop Announcement** button
+now also silences a ringing timer, so a target that hears "stop" (whose broadcast presses every
+FutureProofHomes stop button) ends the ring *everywhere* — the loop stops re-firing, and the ring's
+end fans a stop out to the non-Satellite1 targets. Sonos cannot cancel a clip mid-play, so the
+short re-fired clip **is** the stop story there: the current clip finishes and no more arrive.
+
+**The wake chime**, on non-Satellite1 targets. Satellite1 peers still chime from their own flash
+(`audio-file://`, no audio on the wire); everything else is sent the chime MP3 from the sounds
+route below, behind the same Remote Wake Chime switch. Expectation to set: a Sonos plays a clip
+0.5–1.5 s after the request and offers no preload, so the remote chime can land after listening has
+already begun. The call is dispatched before the local chime plays and the file is small; that is
+the best available, and it is physics, not a bug.
+
+**The remote sync guard.** Each target fetches the response URL independently, so playback skews by
+0.5–2 s — and the lead device's own audio drains first, the continued-conversation microphone
+reopens, and a lagging target still speaking the answer gets transcribed as a human reply (the AEC
+only cancels the local speaker). The guard holds the mic shut past the skew: at `on_end` the device
+enqueues an embedded 0.5 s silence clip 1–4 times (the **Remote Sync Guard** select), keeping the
+announcement pipeline in `ANNOUNCING` — the one state the upstream component's listen transition,
+the un-duck, the drain waits and the stop windows all gate on, so one mechanism extends them all
+coherently. It also covers the sign-in hazard above: without it the device could hear its own
+mirrored code off a lagging target and approve the sign-in by itself. An exact per-target
+completion callback was investigated and rejected for v1: it exists for assist-satellite targets
+(`VoiceAssistantAnnounceFinished`) and Music Assistant, but a Sonos AudioClip is invisible to Home
+Assistant end to end, so one Sonos target forces a fixed floor regardless.
+
+### The device serves its own sounds
+
+The timer ring and chime MP3s are fetched from the device itself — `GET
+/api/sat1/sounds/timer_finished.mp3` and `wake_word_triggered.mp3`, session-gate exempt, served
+from the same `audio_file` bytes local playback uses, with single-range support because Cast
+refuses media whose origin cannot answer a Range request. Chosen over S3 hosting so a mirrored
+timer ring works with the internet down; the cost is a topology requirement — **the speakers must
+be able to reach the satellite over HTTP**. A home that VLAN-isolates them gets a silent failure,
+because `play_media` reports nothing back. The check: open
+`http://<device-ip>/api/sat1/sounds/timer_finished.mp3` from a device on the speakers' network. If
+it does not play, allow that path in the firewall. Both files are MP3 because a Sonos AudioClip
+accepts MP3 and WAV only — the same codec rule the TTS swap exists for.
 
 ## How a routed interaction runs
 
@@ -549,6 +621,16 @@ instead used to cut the wake chime off mid-sound, since it shares the announceme
   snapshotted, since `tts_volume_targets_jinja` is rendered once for the snapshot and once for the
   call.
 - **Labels need Home Assistant 2024.4**; the actions-checkbox verification needs **2025.12**.
+- **The remote sync guard adds its own length to every follow-up turn** while routing is active —
+  the price of never hearing your own answer. Shorten the select if the pause grates and the
+  targets are fast.
+- **A Sonos finishes its current ring clip after "stop"** — a clip cannot be cancelled, so the tail
+  is at most one clip (~3 s).
+- **Device-served sounds need speaker-to-satellite HTTP.** A VLAN that blocks it silences the
+  remote ring and chime with no error anywhere; see the check above.
+- **The sign-in prompt is not ducked on the targets** — the ducking snapshot rides the pipeline's
+  `on_start`, which the announce path never fires. The prompt plays at each target's standing
+  volume, plus `extra.volume` on Sonos.
 
 ## Troubleshooting
 

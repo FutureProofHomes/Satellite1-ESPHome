@@ -8,6 +8,7 @@ import esphome.automation as automation
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import (
+    audio,
     binary_sensor,
     button,
     event,
@@ -74,6 +75,7 @@ CONF_ON_MA_UNJOIN = "on_ma_unjoin"
 CONF_ON_MA_VOLUME = "on_ma_volume"
 CONF_ON_MA_SEEK = "on_ma_seek"
 CONF_ON_SELECTION_CHANGE = "on_selection_change"
+CONF_SOUNDS = "sounds"
 
 satellite1_web_ui_ns = cg.esphome_ns.namespace("satellite1_web_ui")
 Satellite1WebUI = satellite1_web_ui_ns.class_("Satellite1WebUI", cg.Component)
@@ -202,6 +204,15 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_ON_MA_VOLUME): automation.validate_automation(single=True),
             cv.Optional(CONF_ON_MA_SEEK): automation.validate_automation(single=True),
             cv.Optional(CONF_ON_SELECTION_CHANGE): automation.validate_automation(single=True),
+            # Sounds served at GET /api/sat1/sounds/<name>, session-gate exempt, for the routing
+            # feature's third-party targets: a Sonos playing the mirrored timer ring cannot read
+            # this device's flash, so it fetches the same audio_file bytes over HTTP instead. The
+            # key is the URL tail and should carry the real extension ("timer_finished.mp3") -
+            # remote decoders key on it - while the Content-Type is derived from the embedded
+            # bytes at request time, so the two cannot drift apart.
+            cv.Optional(CONF_SOUNDS, default={}): cv.Schema(
+                {cv.string_strict: cv.use_id(audio.AudioFile)}
+            ),
         }
     ).extend(cv.COMPONENT_SCHEMA),
     cv.only_with_framework(Framework.ESP_IDF),
@@ -298,6 +309,14 @@ async def to_code(config):
             [(cg.std_string, "result")],
             config[CONF_ON_LOGIN_WINDOW_END],
         )
+
+    # Behind a define, like the sendspin hub below: without it the handler never includes audio.h,
+    # whose header only exists once some audio component is in the build.
+    if config[CONF_SOUNDS]:
+        cg.add_define("USE_SAT1_WEB_UI_SOUNDS", True)
+        for name in sorted(config[CONF_SOUNDS]):
+            sound = await cg.get_variable(config[CONF_SOUNDS][name])
+            cg.add(var.add_sound(name, sound))
 
     # Sorted so the generated code, and the JSON the device serves, are stable across builds
     # regardless of how the YAML happens to be ordered.

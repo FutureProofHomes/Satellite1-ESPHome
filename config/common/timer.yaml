@@ -32,6 +32,12 @@ switch:
       - script.execute: audio_gain_reconcile
       # Refresh the LED ring
       - script.execute: control_leds
+      # The remote half: end the mirror loop and stop the ring it started on the routing targets.
+      # Both scripts live in tts_routing.yaml with the rest of the routing machinery; the stop is
+      # self-gated on the loop having actually sent something, so a ring that never routed costs
+      # nothing here.
+      - script.stop: timer_remote_ring_loop
+      - script.execute: timer_remote_ring_stop
     on_turn_on:
       # Duck audio
       - script.execute: audio_gain_reconcile
@@ -39,6 +45,10 @@ switch:
       - micro_wake_word.enable_model: stop
       # Ring timer
       - script.execute: ring_timer
+      # Mirror the ring onto the routing targets (tts_routing.yaml; self-gated on the Remote Timer
+      # Ring switch and the routing selection). Ahead of the delay below, which would otherwise
+      # hold it for fifteen minutes.
+      - script.execute: timer_remote_ring_loop
       # Refresh LED
       - script.execute: control_leds
       # If 15 minutes have passed and the timer is still ringing, stop it.
