@@ -136,13 +136,9 @@ export const HINTS = {
   timers:
     'Timers set by voice, held on the device - they keep counting and still ring if Home Assistant goes away. Voice is also how they are managed: name one when you set it ("set a pizza timer for ten minutes"), pause or cancel it the same way.',
 
-  media:
-    "What this device is playing, from either source: a group stream, or media sent to it by Home Assistant. Track skipping, shuffle, repeat and the progress bar work on group streams - media sent directly to this speaker is one URL with none of that. The slider on the media bar is the media volume; the assistant's voice has its own level, in the Assistant card on the home page.",
-
-  // The grouped-speakers section of the expanded media view. Speaks in Music Assistant's terms
-  // because grouping is its feature - the device only relays the request.
-  media_group:
-    "Speakers playing this stream together, with each one's own volume. Adding a speaker asks Music Assistant to bring it into the group; removing one lets it fall silent. With two or more grouped, the Group volume slider moves them all together.",
+  // `media` and `media_group` hints rode the drawers' title rows until September 2026, when the
+  // owner cut the titles themselves: the artwork names the media drawer and the speaker rows name
+  // the players drawer, so the ⓘ had nowhere left to sit.
 
   // The Music Assistant connection panel. What the token is, where it comes from, and where it goes -
   // which is only this browser, a fact worth stating because pasting tokens into web pages should

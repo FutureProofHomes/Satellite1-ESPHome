@@ -2132,12 +2132,8 @@ polyline.draft {
 .msheet .mpanel-handle {
   margin-top: 2px;
 }
-/* The label row under the handle - the players panel's mgroup-head, with the side padding the
-   panel's own container would have provided. */
-.msheet-head {
-  padding: 0 var(--s-4) var(--s-1);
-  color: var(--tdim, var(--fg-3));
-}
+/* .msheet-head went with the "Media" label row (owner's request, September 2026) - the handle is
+   the sheet's whole top now. */
 .msheet .dim {
   color: var(--tdim, var(--fg-3));
 }
@@ -2301,17 +2297,16 @@ polyline.draft {
   color: var(--tdim, var(--fg-3));
 }
 
-/* The grouped-speakers section of the expanded sheet: one row per member - name above, volume and
-   the remove control beside each other - and the join picker as the closing row. Bordered off from
-   the player controls above it, because it is the one part of the sheet about other devices. */
+/* The speaker list of the players panel: one row per member - name above, volume and the remove
+   control beside each other - and the join picker as the closing row. The border that used to top
+   this block went with the panel's title row (owner's request, September 2026); the spacing alone
+   separates it from the group volume above. */
 .mgroup {
   width: 100%;
   display: flex;
   flex-direction: column;
   gap: var(--s-2);
-  border-top: 1px solid var(--line);
-  padding-top: var(--s-3);
-  margin-top: var(--s-2);
+  padding-top: var(--s-2);
 }
 .mgroup-head {
   display: flex;
@@ -2325,6 +2320,8 @@ polyline.draft {
   gap: var(--s-1) var(--s-2);
 }
 .mgroup-name {
+  /* The full row's width: the remove control sits beside the slider now, not beside the name. */
+  grid-column: 1 / -1;
   font-size: var(--t-sm);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2334,16 +2331,22 @@ polyline.draft {
   grid-column: 1;
 }
 .mgroup-x {
-  grid-row: 1 / span 2;
+  /* On the slider's own row (owner's request, September 2026) - it used to straddle name and
+     slider, which left it lined up with neither. Centred against the slider it acts beside. */
+  grid-row: 2;
   grid-column: 2;
-  /* Centred against the whole name-plus-slider pair, stated outright - the row's own align-items
-     was leaving it optically high (owner's phone screenshot, September 2026). */
   align-self: center;
   color: var(--fg-3);
-  /* A text ✕ under .icon's line-height: 0; both come back so it has thumb-sized ink. 22px, up from
-     18: with .icon's padding that is a ~40px target, and the glyph finally reads at arm's length. */
-  font-size: 22px;
-  line-height: 1;
+}
+/* The drawn minus, dressed exactly as the add rows' + (same size, same hairline circle), so the
+   two read as one add/remove pair. It replaced a bare text ✕, which read as "close". */
+.mgroup-x .mi {
+  width: 15px;
+  height: 15px;
+  padding: 4px;
+  margin: 0;
+  border: 1px solid var(--tdim, var(--line-2));
+  border-radius: var(--r-pill);
 }
 /* The add-speaker list: a quiet heading and one drawn-+ row per joinable player, replacing the
    native select (see PlayersPanel). Rows are full-width thumb targets; the + rides in a hairline

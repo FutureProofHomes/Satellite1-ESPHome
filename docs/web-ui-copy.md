@@ -40,9 +40,11 @@ labelled User and Assist rather than heard and said).
 | `calibrate` | Calibration editor, offset row | Adjust until the reading matches a trusted instrument in the same room. The correction is stored on the device and survives restarts. |
 | `led_ring` | LED ring | The ring the assistant animates. Colour and brightness set here are the resting state - the device still overrides both while it is listening, thinking or reporting an error. |
 | `timers` | Timers card | Timers set by voice, held on the device - they keep counting and still ring if Home Assistant goes away. Voice is also how they are managed: name one when you set it ("set a pizza timer for ten minutes"), pause or cancel it the same way. |
-| `media` | Media footer, expanded view | What this device is playing, from either source: a group stream, or media sent to it by Home Assistant. Track skipping, shuffle, repeat and the progress bar work on group streams - media sent directly to this speaker is one URL with none of that. The slider on the media bar is the media volume; the assistant's voice has its own level, in the Assistant card on the home page. |
-| `media_group` | Media footer, Grouped speakers | Speakers playing this stream together, with each one's own volume. Adding a speaker asks Music Assistant to bring it into the group; removing one lets it fall silent. With two or more grouped, the Group volume slider moves them all together. |
 | `ma_connect` | Media footer, Music Assistant panel | Connecting this page straight to your Music Assistant server makes the controls instant and unlocks anything Home Assistant cannot relay. Create a long-lived token in Music Assistant under Settings, then your profile, and paste it here with the server's address. Both stay in this browser only - the device never sees them. |
+
+The media drawer and the players drawer carried `media` and `media_group` hints on their title rows until
+September 2026, when the titles were cut (the artwork names one drawer, the speaker rows the other), and
+the hints went with them.
 
 The first four sit on the ⓘ inside the calibration editor, which opens by tapping a sensor chip — not on
 the chips themselves. A chip is 50–80px wide, and a finger-sized ⓘ inside one is indistinguishable from a

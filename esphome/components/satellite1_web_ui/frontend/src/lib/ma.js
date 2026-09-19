@@ -63,6 +63,13 @@ export function maWsUrl(raw) {
 
 const normMac = (s) => String(s || "").toLowerCase().replace(/[:-]/g, "");
 
+/** Whether a player is this device. The player_id of a Sendspin player was the client id - this
+ *  device's MAC - until MA 2.11 wrapped every player in its universal_player provider and made the
+ *  ids opaque (`up` + hash); since then the MAC lives in device_info.mac_address. Checked both
+ *  ways, so either server generation matches. */
+const isMe = (p, mac) =>
+  normMac(p?.player_id) === normMac(mac) || normMac(p?.device_info?.mac_address) === normMac(mac);
+
 /**
  * One live connection, for as long as `cfg` names a server and the caller stays mounted.
  *
@@ -175,7 +182,7 @@ export function useMaSocket(mac, cfg) {
             if (!live) return;
             const map = {};
             for (const p of all || []) map[p.player_id] = p;
-            myId = Object.keys(map).find((id) => normMac(id) === normMac(mac)) || "";
+            myId = Object.keys(map).find((id) => isMe(map[id], mac)) || "";
             setPlayers(map);
             setStatus("on");
             tries = 0;
@@ -227,7 +234,7 @@ export function useMaSocket(mac, cfg) {
     status,
     players,
     queue,
-    me: players ? Object.values(players).find((p) => normMac(p.player_id) === normMac(mac)) || null : null,
+    me: players ? Object.values(players).find((p) => isMe(p, mac)) || null : null,
     cmd: (command, args) => (io.current ? io.current.send(command, args) : Promise.reject(new Error("off"))),
   };
 }

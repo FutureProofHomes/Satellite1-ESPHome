@@ -39,7 +39,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { HINTS, TEXT } from "./copy.js";
 import { useMaData, useMedia } from "./lib/device.js";
 import { maSettings, useMaSocket } from "./lib/ma.js";
-import { Chevron, Hint, rangeFill, useDrawer, useHeld, useSheetDrag } from "./ui.jsx";
+import { Chevron, rangeFill, useDrawer, useHeld, useSheetDrag } from "./ui.jsx";
 
 const MEDIA_STATE = { 2: "Playing", 3: "Paused", 4: "Announcing" };
 
@@ -114,6 +114,10 @@ const I_SPK = mi(
 );
 /** A plus, for the add-speaker rows that replaced the native select in the players panel. */
 const I_PLUS = mi(<path d="M8 3.5v9M3.5 8h9" />);
+/** A minus, for the remove control on each member row - the visual inverse of the + above, and
+ *  drawn in the same hairline circle, so the pair reads as add/remove without a legend. Replaced
+ *  the bare ✕ (owner's request, September 2026), which read as "close" rather than "remove". */
+const I_MINUS = mi(<path d="M3.5 8h9" />);
 /** A speaker cone with a wave, marking the bar's second row as a volume (owner's report, September
     2026: without a label the slider read as a scrubber). Same geometry as ui.jsx's Audio glyph. */
 const I_VOL = mi(
@@ -563,15 +567,11 @@ function MediaSheet({ model, tiers, tint, onClose, onPlayers }) {
           contract as the players panel's. */}
       <div class="scrim msheet-scrim" onClick={onClose} />
       <div class="msheet" style={(tint || "") + dragStyle} {...drag}>
-        {/* The players panel's own top, verbatim (owner's request, September 2026): handle, then a
-            small dim label with the ⓘ. The ✕/title/caret header this replaced was the full-screen
-            era's furniture - a drawer with a handle, a scrim and a swipe does not also need three
-            close buttons in a row under a rule. Handle and label row are both swipe zones. */}
+        {/* Just the handle on top (owner's request, September 2026, twice): first the ✕/title/caret
+            header went - a drawer with a handle, a scrim and a swipe does not also need three close
+            buttons in a row under a rule - and then the "Media" label with its ⓘ went too. The
+            artwork announces what this drawer is; a caption above it was furniture. */}
         <button class="mpanel-handle" data-grab aria-label="Close" onClick={onClose} />
-        <div class="mgroup-head msheet-head dim sm" data-grab>
-          Media
-          <Hint text={HINTS.media} />
-        </div>
 
       <div class="msheet-body">
         <Artwork art={model.art} big />
@@ -737,11 +737,10 @@ function PlayersPanel({ model, tiers, tint, haReady, onClose }) {
     <>
       <div class="scrim mpanel-scrim" onClick={onClose} />
       <div class="mpanel" style={(tint || "") + dragStyle} {...drag} role="dialog" aria-label={TEXT.media_players_title}>
+        {/* Just the handle, like the media sheet (owner's request, September 2026): the "Players"
+            label with its ⓘ and the rule under the top block went - the speaker rows say what this
+            drawer is. The name survives in the dialog's aria-label above. */}
         <button class="mpanel-handle" data-grab aria-label="Close" onClick={onClose} />
-        <div class="mgroup-head dim sm" data-grab>
-          {TEXT.media_players_title}
-          <Hint text={HINTS.media_group} />
-        </div>
 
         {/* The whole-group slider, present only while there is a group to speak of (owner's request,
             September 2026): with one speaker it duplicated that speaker's own row below and the
@@ -774,10 +773,10 @@ function PlayersPanel({ model, tiers, tint, haReady, onClose }) {
                   <button
                     class="icon mgroup-x"
                     aria-label={`Remove ${name} from the group`}
-                    title={`Remove ${name}`}
+                    title={`Remove ${name} from the group`}
                     onClick={() => gUnjoin(id)}
                   >
-                    &#10005;
+                    {I_MINUS}
                   </button>
                 )}
               </div>
