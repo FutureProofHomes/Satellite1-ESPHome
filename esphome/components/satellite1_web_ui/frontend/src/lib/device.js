@@ -728,6 +728,11 @@ export function useMedia(enabled) {
  * resync it schedules is the only confirmation that exists. `maRead` is the early re-read a group
  * edit schedules so the change shows before the next full cycle.
  */
+/** How old (seconds) the device's cached Music Assistant payload may be before the badge read
+ *  asks for a fresh one. Thirty seconds spans a route change or reload comfortably while staying
+ *  well inside how long a playback session lasts - the badge's subject. */
+const MA_BADGE_STALE_S = 30;
+
 export function useMaData(enabled) {
   const [ma, setMa] = useState(null);
 
@@ -736,10 +741,30 @@ export function useMaData(enabled) {
     if (json) setMa(json);
   };
 
-  // The one badge read. Deliberately outside the enabled cycle: no refresh request, no polling,
-  // just the payload the device last landed.
+  // The badge read. It starts from the payload the device last landed - but "last landed" can be
+  // whenever a browser last had the panel open, and the group-count badge painting from a stale
+  // payload (or not painting at all, on a device whose cache is empty) read as "not streaming" on
+  // a device that audibly was (owner's report, September 2026: the badge only appeared after
+  // opening the panel, whose cycle below runs the refresh this read deliberately skipped). So the
+  // cached copy still paints first - immediately, with its honest age - and then one refresh cycle
+  // runs when that copy is missing or older than MA_BADGE_STALE_S. One, not a poll: the badge only
+  // needs to be right about now, and the panel's own cycle owns liveness from the moment it opens.
+  // Harmless when the panel is already open at mount - the device floors the relayed sync at one
+  // per two seconds however many callers ask.
   useEffect(() => {
-    read();
+    let live = true;
+    (async () => {
+      const json = await requestJson("/api/sat1/ma").catch(() => null);
+      if (!live) return;
+      if (json) setMa(json);
+      if (json && json.age != null && json.age <= MA_BADGE_STALE_S) return;
+      await post("/api/sat1/ma/refresh").catch(() => {});
+      await new Promise((r) => setTimeout(r, 1400));
+      if (live) await read();
+    })();
+    return () => {
+      live = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
