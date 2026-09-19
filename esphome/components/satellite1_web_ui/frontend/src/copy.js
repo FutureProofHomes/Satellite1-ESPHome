@@ -35,7 +35,7 @@ export const HINTS = {
      one tick in there whose effect is not obvious from its name, since it silences this device rather
      than adding a target. */
   remote_routing:
-    "Plays the assistant's spoken answers on other speakers as well as this one. Tick a room to include every player in it, or open the room and pick players. Local Speaker is this device's own speaker - untick it and answers play only where you have chosen.",
+    "Plays this device's audio on other speakers as well as this one: the assistant's spoken answers, sign-in prompts, ringing timers, and the wake chime if you turn that on below. Tick a room to include every player in it, or open the room and pick players. Local Speaker is this device's own speaker - untick it and answers play only where you have chosen.",
 
   /* The last sentence used to be three sentences of its own paragraph under the slider. It is here
      because it explains the control rather than the page, and a permanent paragraph for something you
@@ -45,7 +45,13 @@ export const HINTS = {
     "How loud answers are on the remote speakers. This device's own level is Assistant volume, on the home page. Sonos reads the level from the announcement itself; anything else has its volume set for the answer and put back afterwards.",
 
   remote_wake_chime:
-    "Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to.",
+    "Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to. On Sonos and similar speakers the chime can land up to a second late - their clip playback has a fixed startup cost the device cannot remove.",
+
+  remote_timer_ring:
+    'Rings a finished timer on the target speakers too, until the alarm is stopped. Saying "stop" at any speaker silences it everywhere.',
+
+  remote_sync_guard:
+    "How long this device keeps its microphone closed after a routed answer, so it cannot hear its own answer from a speaker running slightly behind and mistake it for you.",
 
   // duck_area, duck_players and duck_tts_targets are gone for the same reason. Ducking is now the same
   // tree, and the answer to "which players" is visibly the thing being ticked.

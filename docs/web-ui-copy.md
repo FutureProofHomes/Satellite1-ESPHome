@@ -212,10 +212,12 @@ that selection has.
 | Key | Where | Text |
 | --- | --- | --- |
 | `speaker_channel` | Audio Output, Channel | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
-| `remote_routing` | Remote routing card title | Plays the assistant's spoken answers on other speakers as well as this one. Tick a room to include every player in it, or open the room and pick players. Local Speaker is this device's own speaker - untick it and answers play only where you have chosen. |
+| `remote_routing` | Audio routing card title | Plays this device's audio on other speakers as well as this one: the assistant's spoken answers, sign-in prompts, ringing timers, and the wake chime if you turn that on below. Tick a room to include every player in it, or open the room and pick players. Local Speaker is this device's own speaker - untick it and answers play only where you have chosen. |
 | `area_ducking` | Area ducking card title | Turns other speakers down while the assistant listens and answers, then puts them back where they were. Tick a room to cover every player in it. |
 | `remote_tts_volume` | Remote TTS volume | How loud answers are on the remote speakers. This device's own level is Assistant volume, on the home page. Sonos reads the level from the announcement itself; anything else has its volume set for the answer and put back afterwards. |
-| `remote_wake_chime` | Remote wake chime | Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to. |
+| `remote_wake_chime` | Remote wake chime | Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to. On Sonos and similar speakers the chime can land up to a second late - their clip playback has a fixed startup cost the device cannot remove. |
+| `remote_timer_ring` | Remote timer ring | Rings a finished timer on the target speakers too, until the alarm is stopped. Saying "stop" at any speaker silences it everywhere. |
+| `remote_sync_guard` | Remote sync guard | How long this device keeps its microphone closed after a routed answer, so it cannot hear its own answer from a speaker running slightly behind and mistake it for you. |
 | `duck_volume` | Duck volume | The level they drop to. Players already quieter than this are left alone, so a whole-house group does not get turned up. |
 
 `voice_override` and `remote_tts_volume` are the pair most easily confused, and with Assistant volume
@@ -498,11 +500,14 @@ edit:
   the button rather than described beside one, because pressing it is the whole point of the panel.
 - `Local Speaker`, `No Area Assigned`, `whole area` and the `n/m` counts in the two trees. All four are
   structure rather than explanation - the first two are row labels and the last two are state readouts.
-- `Play assistant responses on selected players` and `Lower the volume on selected players upon wake word
+- `Play assistant audio on selected players` and `Lower the volume on selected players upon wake word
   detection`, the two tree headings. Both say what ticking something does, and leave the rest to the card's
   ⓘ. The second was `Quieten while talking`, which was inaccurate: the duck also covers the listening half
   of the interaction. It wraps to two lines at every phone width, which is deliberate — the alternative was
-  a heading that stopped short of naming the trigger.
+  a heading that stopped short of naming the trigger. The first was `Play assistant responses on selected
+  players`, widened alongside the card's retitle from `Remote routing` to `Audio routing` when the feature
+  grew past responses (sign-in prompts, timer rings, the chime); the Home Assistant entities keep their
+  legacy TTS names, since renaming an ESPHome entity orphans it.
 - The five route names in the nav drawer — `Home`, `Wake Word`, `Audio`, `Presence`, `Diagnostics`, in
   that order — which are the same strings as the routes themselves. The drawer has no heading; the
   device name is in the bar above it.

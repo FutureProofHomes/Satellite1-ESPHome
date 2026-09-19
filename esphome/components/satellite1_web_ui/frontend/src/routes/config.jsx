@@ -157,7 +157,7 @@ function HaState({ problem, ha, onFix }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Remote routing                                                      */
+/* Audio routing                                                       */
 /* ------------------------------------------------------------------ */
 
 /*
@@ -175,6 +175,10 @@ function HaState({ problem, ha, onFix }) {
 function RemoteRouting({ ctx, ha, sel, write }) {
   const vol = useEntity(ctx, "remote_tts_volume");
   const chime = useEntity(ctx, "remote_wake_chime");
+  const timer = useEntity(ctx, "remote_timer_ring");
+  // Raw entity() rather than useEntity: a select's payload carries value and option list, and the
+  // wrapper's on/num readings mean nothing for it. Same shape as the Channel select on Audio Output.
+  const guard = entity(ctx, "remote_sync_guard");
 
   const problem = haProblem(ctx, ha);
   // Anything chosen means a response is going somewhere other than this speaker, which is the same
@@ -183,11 +187,15 @@ function RemoteRouting({ ctx, ha, sel, write }) {
   const active = sel.routing.areas.size > 0 || sel.routing.extra.size > 0;
 
   return (
-    <Card title="Remote routing" hint={HINTS.remote_routing}>
+    // "Audio routing" rather than the old "Remote routing", since the feature now carries more than
+    // answers: sign-in prompts, timer rings and the wake chime ride the same selection. The Home
+    // Assistant entities keep their legacy TTS names - renaming an ESPHome entity orphans it - and
+    // the hint says so is not needed here; docs/TTS-Routing.md carries the compatibility note.
+    <Card title="Audio routing" hint={HINTS.remote_routing}>
       {/* "Play responses on" left it open which responses - the device also plays media, and a bare
           "responses" next to a list of speakers reads as either. Styled as the title's subtitle:
           tight above, padded below, so it explains the card rather than captioning the tree. */}
-      <p class="tree-title">Play assistant responses on selected players</p>
+      <p class="tree-title">Play assistant audio on selected players</p>
       <HaState problem={problem} ha={ha} onFix={ctx.onShowFix} />
       {/* need=1: routing's call is media_player.play_media, so players without PLAY_MEDIA render
           greyed with a reason rather than being offered. */}
@@ -222,6 +230,28 @@ function RemoteRouting({ ctx, ha, sel, write }) {
             checked={chime.on}
             disabled={!active}
             onChange={(v) => writeSwitch(ctx, "remote_wake_chime", v)}
+          />
+        </Row>
+      )}
+
+      {timer.exists && (
+        <Row label="Remote timer ring" hint={HINTS.remote_timer_ring}>
+          <Toggle
+            checked={timer.on}
+            disabled={!active}
+            onChange={(v) => writeSwitch(ctx, "remote_timer_ring", v)}
+          />
+        </Row>
+      )}
+
+      {/* Last, because it is about what happens after playback rather than what plays. */}
+      {guard && (
+        <Row label="Remote sync guard" hint={HINTS.remote_sync_guard}>
+          <Select
+            value={guard.value}
+            options={guard.option}
+            disabled={!active}
+            onChange={(v) => post(`${pathFor(ctx, "remote_sync_guard", "set")}?option=${encodeURIComponent(v)}`)}
           />
         </Row>
       )}
