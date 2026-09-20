@@ -301,7 +301,7 @@ above it, and stating the window in both made the two bubbles read as descriptio
 
 | Key | Where | Text |
 | --- | --- | --- |
-| `switcher` | Device switcher sheet title | Everything on this page applies to the device named above. Pick another device and this page becomes its controls - no address to type, no leaving the page. A device on older firmware opens its own page instead. |
+| `switcher` | Device switcher sheet title | Everything on this page applies to the device named above. Pick another device and this page becomes its controls - no address to type, no leaving the page. A device on older firmware opens its own page instead. A radar tag lights up while that device detects someone in its room. |
 
 This one answers a question the app's shape provokes rather than one the hardware does. Every Satellite1
 serves its own copy of the page, so "which device am I changing?" has a real answer that nothing else on
@@ -339,6 +339,8 @@ stream reconnects, where the transient toasts (`write_failed`, the blocked nudge
 | `no_devices_blocked` | Only this device. Other Satellite1s cannot be listed while Home Assistant actions are off. |
 | `peer_up` | Available, according to Home Assistant |
 | `peer_down` | Unavailable, according to Home Assistant |
+| `presence_on` | Presence detected |
+| `presence_off` | No presence detected |
 | `remote_tag` | Remote |
 | `switcher_home` | This page |
 
@@ -346,6 +348,12 @@ stream reconnects, where the transient toasts (`write_failed`, the blocked nudge
 switching): the name beside it already identifies the device, so the badge adds only the mode. The
 same pill marks the switcher row for the device actually serving the page - `switcher_home` - which
 is the way back: tapping it is a plain reset to the local session, not another cross-sign-in.
+
+`presence_on` / `presence_off` title the radar tag on every switcher row (September 2026): each row's
+right edge carries the device's transport (Ethernet or WiFi) and radar model (LD2450 or LD2410), and
+the radar tag doubles as a presence light. Unattributed, unlike the dots' "according to Home
+Assistant": on the serving device's own row the light is the radar's live state over the page's
+stream, and on a peer's it is at most one sync beat (~5s, while the sheet is open) behind.
 
 `peer_manual`, `peer_add_ph` and `peer_add` were deleted with the switcher's add-by-address feature
 (owner's call: a fallback that needs a paragraph to explain is not pulling its weight). The sheet also

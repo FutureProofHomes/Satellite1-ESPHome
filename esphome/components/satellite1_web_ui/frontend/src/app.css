@@ -405,6 +405,34 @@ textarea {
   padding: 1px var(--s-2);
   margin-left: var(--s-1);
 }
+/* The switcher's variant labels - the same pill as .remote-tag, kept separate because .lit below
+   must never land on "This page". Right edge of the row by construction: the name's .grow pushes
+   them there. */
+.vtag {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--fg-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  padding: 1px var(--s-2);
+  margin-left: var(--s-1);
+}
+/* Presence, live: the latched-accent treatment buttons already use, on the radar tag only -
+   presence is the radar's meaning, and a transport tag that lights would read as a second,
+   unexplained signal. */
+.vtag.lit {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+/* An offline peer's row is dimmed wholesale, and a lit tag inside it would claim presence data the
+   dot just said cannot be current. The payload should never produce this (a device HA cannot reach
+   has no presence state), but the belt costs one rule. */
+.peer.off .vtag.lit {
+  color: var(--fg-3);
+  border-color: var(--line-2);
+  background: none;
+}
 .title .grow {
   overflow: hidden;
   text-overflow: ellipsis;

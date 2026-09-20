@@ -222,20 +222,57 @@ const hostOf = (u) => String(u || "").replace(/^https?:\/\//, "").replace(/[/:].
  * owner's request ("I don't know what that is" is a fair review of a fallback that needed a
  * paragraph to explain). The roster covers the case that matters; a peer Home Assistant cannot
  * list is reachable the way it always was - by typing its address in the URL bar.
+ *
+ * Each row's right edge carries the variant labels (September 2026): how the device is on the
+ * network (Ethernet or WiFi, from its own Network Status sensor via the payload - runtime truth,
+ * so the planned unified firmware needs nothing new here) and which radar it wears (LD2450 or
+ * LD2410, from the firmware version suffix or the auto-detect sensor). The radar tag lights while
+ * that device sees presence - the latched-accent treatment, so "someone is in that room" reads at
+ * a glance across the house. Peers on older firmware send none of the three fields and simply
+ * show no tags. The peer tags ride the cached payload, so while the sheet is open it re-syncs on
+ * an interval (rung 1 only - the conversation.process fallback costs ~3s a call, which would
+ * serialise into a permanently busy queue); the serving device's own tags skip the round trip and
+ * read the SSE stream, so its presence lights the moment the radar does.
  */
-function SwitcherSheet({ device, label, area, route, ha, haRefresh, remote, localMac, onRemote, onLocal, onClose }) {
+function SwitcherSheet({ device, label, area, route, ha, haRefresh, remote, localMac, states, onRemote, onLocal, onClose }) {
   const haOn = !!device?.ha;
   const haText = haOn ? TEXT.ha_connected : TEXT.ha_disconnected;
   const mac = (device?.mac || "").toLowerCase();
   const [showOff, setShowOff] = useState(false);
 
-  // Re-sync the roster the moment the sheet opens. The dots ride the device's cached payload, and
-  // before this the cache was only rebuilt when the Audio or Wake Word route asked (once per page
-  // load) - so a sheet opened from Home showed availability from whenever that last was, and a peer
-  // powered off in between kept a green dot for days. One action call per open is cheap, haRefresh
-  // re-reads the payload after the round trip, and the rows correct themselves a second or two in.
+  // Re-sync the roster the moment the sheet opens. The dots and tags ride the device's cached
+  // payload, and before this the cache was only rebuilt when the Audio or Wake Word route asked
+  // (once per page load) - so a sheet opened from Home showed availability from whenever that last
+  // was, and a peer powered off in between kept a green dot for days. One action call per open is
+  // cheap, haRefresh re-reads the payload after the round trip, and the rows correct themselves a
+  // second or two in.
+  //
+  // Then, while the sheet stays open, the same sync on a 5s beat - this is what makes a peer's
+  // presence tag light while you watch. Gated three ways: never while a sync is already running
+  // (haRefresh sleeps ~3s inside, so an ungated interval would stack them), never while the tab is
+  // hidden (a background poll spends Home Assistant action calls on a sheet nobody sees), and only
+  // while the last answer came on rung 1 - the recorder.get_statistics fast path. The rung 2
+  // fallback takes ~3s per page through conversation.process, and a poll that slow would sit on
+  // the request queue the jump itself needs; those installations keep the once-per-open behaviour.
+  const haNow = useRef(ha);
+  haNow.current = ha;
   useEffect(() => {
-    haRefresh();
+    let busy = false;
+    const sync = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        await haRefresh();
+      } finally {
+        busy = false;
+      }
+    };
+    sync();
+    const t = setInterval(() => {
+      if (document.hidden || haNow.current?.rung !== 1) return;
+      sync();
+    }, 5000);
+    return () => clearInterval(t);
     // haRefresh is stable for the life of the app; this is per-open by design.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -265,6 +302,45 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, remote, loca
       {host}
     </div>
   );
+
+  // The variant labels on a row's right edge: the radar tag on the inside, transport at the far
+  // edge (the owner's order, September 2026). The radar tag doubles as the presence light (the
+  // latched-accent treatment - presence is the radar's meaning, so the radar tag is the thing that
+  // lights; the transport tag stays neutral). Values are the payload's own encoding - 'e'/'w',
+  // 2450/2410, 1/0 - so a row from older firmware, which sends none of the three fields, renders
+  // no tags at all rather than wrong ones.
+  const varTags = (net, radar, present) => {
+    const model = radar === 2450 || radar === 2410 ? `LD${radar}` : "";
+    const lit = !!model && (present === 1 || present === true);
+    const presText = model && (lit ? TEXT.presence_on : TEXT.presence_off);
+    return (
+      <>
+        {model && (
+          <span class={`vtag${lit ? " lit" : ""}`} title={presText} aria-label={`${model}: ${presText}`}>
+            {model}
+          </span>
+        )}
+        {net === "e" && <span class="vtag">Ethernet</span>}
+        {net === "w" && <span class="vtag">WiFi</span>}
+      </>
+    );
+  };
+
+  // The serving device's own tags. The static halves (transport fallback, radar model) come from
+  // its own roster row - the mac filter below keeps it out of the peers list, but the row is in the
+  // payload - and the live halves read the SSE stream this page already holds: the presence binary
+  // sensor ("Room Presence" is the auto-detect build's runtime registration, "Presence" the pinned
+  // builds' YAML - C++/YAML-owned names, referenced by id for the reason controls.jsx gives for
+  // Radar Target) and the Network Status text sensor via the entity table. So the local presence
+  // tag lights the moment the radar does, no sync in between. While remote, `device` and `states`
+  // are the controlled peer's own - which is whose facts this row is showing.
+  const mineRow = (ha?.d?.dev || []).find((d) => (d?.[3] || "").toLowerCase() === mac);
+  const netLive = String(states?.[device?.e?.network]?.value || "");
+  const myNet = netLive.startsWith("Eth") ? "e" : netLive.startsWith("WiFi") ? "w" : mineRow?.[8];
+  const modLive = String(states?.[device?.e?.radar_module]?.value || "").toLowerCase();
+  const myRadar = modLive.includes("2450") ? 2450 : modLive.includes("2410") ? 2410 : mineRow?.[9];
+  const presLive = states?.["binary_sensor/Room Presence"] || states?.["binary_sensor/Presence"];
+  const myPres = presLive ? presLive.value === true || presLive.state === "ON" : mineRow?.[10];
 
   // The seamless jump: sign in to the peer before leaving, so its page opens as the app rather
   // than as its login screen. The peer's password rides the roster (see web_ui_ha.yaml - it is the
@@ -328,6 +404,7 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, remote, loca
         <div class="row">
           <span class={`dot${up ? " ok" : ""}`} title={dotText} aria-label={dotText} />
           <span class="grow">{d[1]}</span>
+          {varTags(d[8], d[9], d[10])}
           {home && <span class="remote-tag">{TEXT.switcher_home}</span>}
         </div>
         {peerSub(d[2], hostOf(url))}
@@ -380,6 +457,7 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, remote, loca
                 not, so the colour is the signal rather than its presence. */}
             <span class={`dot${haOn ? " ok" : ""}`} title={haText} aria-label={haText} />
             <span class="grow">{label || "This device"}</span>
+            {varTags(myNet, myRadar, myPres)}
           </div>
           {peerSub(area, device?.ip)}
         </div>
@@ -722,6 +800,7 @@ function AppInner({ primeKey, remote, localMac, onRemote, onLocal, onAuthLost })
           haRefresh={ha.haRefresh}
           remote={remote}
           localMac={localMac}
+          states={events.states}
           onRemote={onRemote}
           onLocal={onLocal}
           onClose={() => setSwitcher(false)}

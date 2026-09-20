@@ -367,6 +367,18 @@ stop or volume call targets an offline player; ducking's walk already rejected u
 Availability is as fresh as the cached payload — synced on connect and once per page load — so a
 player that drops while the page is open shows stale until reload, like every other fact in it.
 
+The device rows carry the switcher's variant labels alongside the jump fields (September 2026): the
+device's transport (`e`/`w`, read from its own Network Status sensor's `Eth:`/`WiFi:` prefix — runtime
+truth, so a future unified firmware needs nothing new), its radar model (2450/2410/0, from the
+firmware version's `+ld2450`/`+ld2410` suffix on pinned builds or the auto-detect build's "Radar
+Detected" sensor), and its presence state (the `Presence`/`Room Presence` binary sensor). The
+switcher renders these as right-edge pills on every row, with the radar pill doubling as a presence
+light. Presence is the one fact in the payload that is genuinely live-ish: while the switcher sheet
+is open the app re-runs the sync every 5 seconds (rung 1 installations only — the fallback rung is
+too slow to poll), so a peer's light follows the room within a beat; the serving device's own light
+skips the payload entirely and rides the page's SSE stream. Peers on older firmware send none of the
+three fields and show no pills.
+
 The consequence worth knowing is that when Home Assistant is unreachable, the app keeps working for
 everything local — sensors, LEDs, the radar, the log, maintenance — and greys out only what genuinely
 depends on Home Assistant, with a one-line explanation of the problem and the fix.

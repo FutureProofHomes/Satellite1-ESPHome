@@ -20,9 +20,11 @@ export const HINTS = {
      make sense, and the one someone who has just changed a setting on the wrong device wishes they
      had been told. The second sentence owns the switch's two outcomes honestly: the single-origin
      takeover for fleet-current firmware, the old navigation for anything older. Does not repeat why
-     the list has one entry in it; that sentence is already at the foot of the same sheet. */
+     the list has one entry in it; that sentence is already at the foot of the same sheet. The third
+     sentence explains the one mark on the sheet that is not self-evident: a lit radar tag. The tags
+     themselves (Ethernet/WiFi, LD2450/LD2410) are their own words and need no glossary here. */
   switcher:
-    "Everything on this page applies to the device named above. Pick another device and this page becomes its controls - no address to type, no leaving the page. A device on older firmware opens its own page instead.",
+    "Everything on this page applies to the device named above. Pick another device and this page becomes its controls - no address to type, no leaving the page. A device on older firmware opens its own page instead. A radar tag lights up while that device detects someone in its room.",
 
   /* The Launch card on Diagnostics. The warning is the substance: the link is a bearer credential,
      and saying so here is what makes offering it defensible. The QR-versus-link sentence lives here
@@ -278,6 +280,13 @@ export const TEXT = {
   // peer_manual, peer_add_ph and peer_add went with the manual add-by-address feature.
   peer_up: "Available, according to Home Assistant",
   peer_down: "Unavailable, according to Home Assistant",
+
+  // Titles on the radar tag, which doubles as the presence light. Unattributed, unlike the dots:
+  // on the serving device's row this is the radar's own live state over the page's stream, and on a
+  // peer's it is at most one sync beat behind - hedging both to cover the beat would cost the
+  // sentence more than the lag costs the truth.
+  presence_on: "Presence detected",
+  presence_off: "No presence detected",
 
   // The one word in the top bar while a peer is being controlled (single-origin device switching).
   // "Remote" and not the peer's address: the name beside it already identifies the device, and what
