@@ -200,6 +200,10 @@ re-check them on every bump (the parser site in mww_runtime_loader.cpp says the 
 
 The picker wears the /audio route's tree clothes — the sunken scrolling box, group headers with a
 caret and a count pill, the drawn checkbox — because that is the app's one selection-list pattern.
+A row's small facts — languages ("en"), model size ("61 KB"), the `ww_unverified` caveat, and the
+training-generation tag that disambiguates twins ("v3") — all wear that same count-pill shape
+(owner request, September 2026: the dot-joined italic line they replaced read as a sentence rather
+than as tags); only the speak button keeps its own glyph.
 Groups are the sources: **Built-In wake words** first (the two compiled into the firmware, listed
 by the device itself), then
 one group per source. ESPHome's experiments folder is excluded at enumeration entirely (owner,

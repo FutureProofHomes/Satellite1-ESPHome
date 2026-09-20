@@ -99,22 +99,28 @@ function SpeakBtn({ word }) {
 }
 
 /** One pickable word, on the /audio tree's row grammar: the drawn checkbox, the name in the grow
- *  slot, the fine print right-aligned where tree-why sits. Single-select semantics ride the same
+ *  slot, the small facts trailing as .tree-n pills. Single-select semantics ride the same
  *  visuals - a slot holds one word, so ticking one is what unticks the rest. */
 function PickRow({ entry, selected, disabled, onPick }) {
-  const meta = [entry.langs?.length ? entry.langs.join(",") : null, kb(entry.size), entry.unverified ? TEXT.ww_unverified : null]
-    .filter(Boolean)
-    .join(" \u00b7 ");
   return (
     <div class={`tree-p${disabled ? " tree-off" : ""}`}>
       <Check state={selected ? "on" : "off"} disabled={disabled} onClick={() => onPick(entry)} label={entry.word} />
       <button class="ww-name grow" disabled={disabled} onClick={() => onPick(entry)}>
         &ldquo;{entry.word}&rdquo;
       </button>
-      {meta && <span class="tree-why">{meta}</span>}
-      {/* The training-generation tag, shown only when this phrase has twins in the list - it
-          exists to tell three "Computer"s apart, not to decorate every row. The count pill's
-          clothes, because it is the same kind of small fact. */}
+      {/* Every small fact about the row - languages, size, the unverified caveat, the
+          training-generation tag - wears the count pill's clothes (owner request, September 2026:
+          they are the same kind of small fact, and the dot-joined italic line they replaced read
+          as a sentence rather than as tags). Only the speaker button stays its own shape. */}
+      {(entry.langs || []).map((l) => (
+        <span class="tree-n" key={l}>
+          {l}
+        </span>
+      ))}
+      {entry.size > 0 && <span class="tree-n">{kb(entry.size)}</span>}
+      {entry.unverified && <span class="tree-n">{TEXT.ww_unverified}</span>}
+      {/* The training-generation tag, still shown only when this phrase has twins in the list - it
+          exists to tell three "Computer"s apart, not to decorate every row. */}
       {entry.dup && entry.ver && <span class="tree-n">{entry.ver}</span>}
       <SpeakBtn word={entry.word} />
     </div>
