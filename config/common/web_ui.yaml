@@ -199,6 +199,11 @@ satellite1_web_ui:
   # arms it only while a timer is ringing, so a switch over it would be rewritten from under the reader.
   micro_wake_word_id: mww
 
+  # The runtime wake word loader (common/voice_assistant.yaml). With it, GET/POST /api/sat1/wakewords
+  # speaks two slots - the Primary and Secondary pickers in the app - and the slot/cutoff endpoints
+  # exist; the loader owns the downloads and the enabled-iff-slotted invariant.
+  wake_loader_id: mww_loader
+
   # The local speaker player, for GET/POST /api/sat1/media - web_server has no media_player handler,
   # so the endpoints are the only way the app sees or moves it. Its Sendspin counterpart is named in
   # common/sendspin.yaml beside the player it points at; the endpoints prefer that one while it is
@@ -373,7 +378,8 @@ satellite1_web_ui:
 
     selects:
       speaker_channel: tas_mode_select
-      wake_sensitivity: mww_sensitivity_select
+      # wake_sensitivity is gone from this map: the app's sensitivity is per wake word now, through
+      # the loader's slot endpoints, and the two Home Assistant selects read the same loader state.
       # The mic-guard length, on the Audio routing card under the toggles it belongs with.
       remote_sync_guard: remote_sync_guard
 

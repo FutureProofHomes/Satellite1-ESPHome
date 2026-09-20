@@ -17,6 +17,10 @@
 #include "esphome/components/micro_wake_word/micro_wake_word.h"
 #endif
 
+#ifdef USE_SAT1_MWW_LOADER
+#include "esphome/components/mww_runtime_loader/mww_runtime_loader.h"
+#endif
+
 #ifdef USE_VOICE_ASSISTANT
 #include "esphome/components/voice_assistant/voice_assistant.h"
 #endif
@@ -58,6 +62,20 @@ struct Utterance {
   uint32_t at_uptime;
   bool heard;
 };
+
+#ifdef USE_MICRO_WAKE_WORD
+/// One wake word firing, for the "say it now" test moment and the Diagnostics history. The same
+/// ring serves both readers. Held as uptime so the payload can report an honest time-ago whatever
+/// the browser's clock thinks.
+struct WakeDetection {
+  std::string word;
+  uint32_t at_ms;
+};
+
+/// Eight, like the transcript ring and for the same reason: this is "what fired recently", not a
+/// history, and it is never written to flash.
+static constexpr size_t WU_DETECTION_RING = 8;
+#endif
 
 /// One queued change to a Home Assistant select, waiting for the main loop to turn it into an action
 /// call. See the queue itself for why it cannot be made from the request.
@@ -402,6 +420,25 @@ class WebUIHandler : public AsyncWebHandler {
 
   /// Applies whatever a browser asked for since the last call. Must run on the main loop.
   void apply_wake_word_requests();
+
+  /// Called from the on_wake_word_detected automation, on the main loop. Feeds the ring the test
+  /// moment and the Diagnostics history read from.
+  void push_wake_detection(const std::string &word);
+
+  /// Whether a "say it now" test window is open. Read from the on_wake_word_detected automation:
+  /// while true, a firing is recorded in the ring (which is how the app celebrates it) but the
+  /// assistant is not started and no chime plays - the customer asked to hear whether the word
+  /// works, not to open a conversation (owner request, September 2026). A ringing timer outranks
+  /// the window in YAML, exactly as it outranks the sign-in gate, so "stop" still silences an
+  /// alarm mid-test.
+  bool wake_test_active() { return millis() < this->wake_test_until_.load(std::memory_order_relaxed); }
+#endif
+
+#ifdef USE_SAT1_MWW_LOADER
+  /// Set from the component's setup(), before this handler is registered. With a loader present
+  /// the wake words endpoint speaks slots - see handle_wake_words_ - and the slot/cutoff POSTs
+  /// exist at all.
+  void set_wake_loader(mww_runtime_loader::MwwRuntimeLoader *loader) { this->wake_loader_ = loader; }
 #endif
 
   // NOLINTNEXTLINE(readability-identifier-naming)
@@ -448,7 +485,16 @@ class WebUIHandler : public AsyncWebHandler {
     SEL_SET,
 #ifdef USE_MICRO_WAKE_WORD
     WAKE_WORDS,
+#ifndef USE_SAT1_MWW_LOADER
+    // The old per-index arm/disarm toggle. Compiled out when the loader owns the slots, because a
+    // raw toggle would be undone by the loader's reconciliation on the next iteration.
     WAKE_WORDS_SET,
+#endif
+#endif
+#ifdef USE_SAT1_MWW_LOADER
+    WAKE_SLOT_SET,
+    WAKE_CUTOFF_SET,
+    WAKE_TUNE_SET,
 #endif
 #ifdef USE_MEDIA_PLAYER
     MEDIA,
@@ -503,7 +549,14 @@ class WebUIHandler : public AsyncWebHandler {
   void handle_sel_set_(AsyncWebServerRequest *request);
 #ifdef USE_MICRO_WAKE_WORD
   void handle_wake_words_(AsyncWebServerRequest *request);
+#ifndef USE_SAT1_MWW_LOADER
   void handle_wake_words_set_(AsyncWebServerRequest *request);
+#endif
+#endif
+#ifdef USE_SAT1_MWW_LOADER
+  void handle_wake_slot_set_(AsyncWebServerRequest *request);
+  void handle_wake_cutoff_set_(AsyncWebServerRequest *request);
+  void handle_wake_tune_set_(AsyncWebServerRequest *request);
 #endif
 #ifdef USE_MEDIA_PLAYER
   void handle_media_(AsyncWebServerRequest *request);
@@ -644,6 +697,22 @@ class WebUIHandler : public AsyncWebHandler {
   /// in the tensor arenas, and the index is bounds-checked against it anyway.
   std::atomic<uint32_t> ww_pending_mask_{0};
   std::atomic<uint32_t> ww_pending_on_{0};
+
+  /// The detection ring, written from the main loop (on_wake_word_detected) and read from the httpd
+  /// task, so both sides take the lock - the transcript ring's exact shape. `seq` counts every
+  /// firing ever, so the test moment can tell a fresh detection from the one it already showed
+  /// without comparing timestamps across two clocks.
+  std::vector<WakeDetection> detections_;
+  uint32_t detection_seq_{0};
+  Mutex detection_lock_;
+
+  /// millis() deadline of the open test window, 0 when none. Written from the httpd task (the POST
+  /// that opens it), read from the main loop - an atomic, like the refresh flags.
+  std::atomic<uint32_t> wake_test_until_{0};
+#endif
+
+#ifdef USE_SAT1_MWW_LOADER
+  mww_runtime_loader::MwwRuntimeLoader *wake_loader_{nullptr};
 #endif
 
 #ifdef USE_VOICE_ASSISTANT

@@ -98,7 +98,18 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
       return Route::MA_SET;
     if (url == "/api/sat1/sel")
       return Route::SEL_SET;
-#ifdef USE_MICRO_WAKE_WORD
+#ifdef USE_SAT1_MWW_LOADER
+    // Before the bare path below would ever match: these are prefixes of nothing, but the bare
+    // /api/sat1/wakewords is a prefix of these, so exact-match order matters to nobody - listed
+    // first purely so the reader sees the live routes ahead of the legacy one.
+    if (url == "/api/sat1/wakewords/slot")
+      return Route::WAKE_SLOT_SET;
+    if (url == "/api/sat1/wakewords/cutoff")
+      return Route::WAKE_CUTOFF_SET;
+    if (url == "/api/sat1/wakewords/tune")
+      return Route::WAKE_TUNE_SET;
+#endif
+#if defined(USE_MICRO_WAKE_WORD) && !defined(USE_SAT1_MWW_LOADER)
     if (url == "/api/sat1/wakewords")
       return Route::WAKE_WORDS_SET;
 #endif
@@ -192,8 +203,14 @@ bool WebUIHandler::route_streams_(Route route) {
     case Route::MA_REFRESH:
     case Route::MA_SET:
     case Route::SEL_SET:
-#ifdef USE_MICRO_WAKE_WORD
+#if defined(USE_MICRO_WAKE_WORD) && !defined(USE_SAT1_MWW_LOADER)
     case Route::WAKE_WORDS_SET:
+#endif
+#ifdef USE_SAT1_MWW_LOADER
+    // All answer with string literals, like the other writes.
+    case Route::WAKE_SLOT_SET:
+    case Route::WAKE_CUTOFF_SET:
+    case Route::WAKE_TUNE_SET:
 #endif
 #ifdef USE_MEDIA_PLAYER
     // MEDIA is here as well: its whole body fits a stack snprintf, so unlike the other GETs it
@@ -289,8 +306,21 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
     case Route::WAKE_WORDS:
       this->handle_wake_words_(request);
       break;
+#ifndef USE_SAT1_MWW_LOADER
     case Route::WAKE_WORDS_SET:
       this->handle_wake_words_set_(request);
+      break;
+#endif
+#endif
+#ifdef USE_SAT1_MWW_LOADER
+    case Route::WAKE_SLOT_SET:
+      this->handle_wake_slot_set_(request);
+      break;
+    case Route::WAKE_CUTOFF_SET:
+      this->handle_wake_cutoff_set_(request);
+      break;
+    case Route::WAKE_TUNE_SET:
+      this->handle_wake_tune_set_(request);
       break;
 #endif
     case Route::HA:
@@ -499,6 +529,221 @@ static void write_json_string(AsyncResponseStream *stream, const std::string &te
 #endif
 
 #ifdef USE_MICRO_WAKE_WORD
+void WebUIHandler::push_wake_detection(const std::string &word) {
+  LockGuard guard{this->detection_lock_};
+  this->detection_seq_++;
+  this->detections_.push_back(WakeDetection{word, millis()});
+  if (this->detections_.size() > WU_DETECTION_RING)
+    this->detections_.erase(this->detections_.begin());
+}
+
+#ifdef USE_SAT1_MWW_LOADER
+/// The two wake word slots, the built-in models the picker's Included group lists, and the
+/// detection ring - one payload for the Wake Words card, the swap-in-progress poll, the "say it
+/// now" test moment and the Diagnostics history, because all four are facts about the same thing.
+///
+/// Shape:
+///   {"slots":[{"i":0,"m":"<spec>","w":"<phrase>","st":0,"err":0,"cut":0,"rt":0,"dl":0,"tot":0}],
+///    "builtin":[["hey_jarvis","hey jarvis"]],
+///    "det":[<seq>,"<phrase>",<ms ago>],
+///    "hist":[["<phrase>",<ms ago>]]}
+///
+/// `m` is the slot's spec (a built-in id or a manifest URL, "" when the slot is silent), `st` and
+/// `err` are the loader's SlotState/SlotError numbers, `cut` the persisted sensitivity (0 = model
+/// default, else a tuned threshold), and `dl`/`tot` download progress on whichever slot is
+/// mid-swap. `det` is the
+/// newest firing with a monotonically increasing sequence number, so the test moment can tell a
+/// fresh detection from the one it already celebrated.
+void WebUIHandler::handle_wake_words_(AsyncWebServerRequest *request) {
+  if (this->mww_ == nullptr || this->wake_loader_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  mww_runtime_loader::SlotView slots[mww_runtime_loader::WL_SLOTS];
+  uint32_t dl = 0, total = 0;
+  int dl_slot = -1;
+  this->wake_loader_->snapshot(slots, dl, total, dl_slot);
+
+  auto *stream = request->beginResponseStream("application/json");
+  stream->print(R"({"slots":[)");
+  for (uint8_t i = 0; i < mww_runtime_loader::WL_SLOTS; i++) {
+    const auto &s = slots[i];
+    if (i != 0)
+      stream->print(",");
+    stream->printf(R"({"i":%u,"m":)", static_cast<unsigned>(i));
+    write_json_string(stream, s.spec);
+    stream->print(R"(,"w":)");
+    write_json_string(stream, s.word);
+    stream->printf(R"(,"st":%u,"err":%u,"cut":%u,"rt":%u)", s.state, s.error, s.cutoff, s.runtime ? 1 : 0);
+    if (dl_slot == i)
+      stream->printf(",\"dl\":%lu,\"tot\":%lu", static_cast<unsigned long>(dl), static_cast<unsigned long>(total));
+    stream->print("}");
+  }
+
+  stream->print(R"(],"builtin":[)");
+  bool first = true;
+  for (const auto &b : this->wake_loader_->builtins()) {
+    if (!first)
+      stream->print(",");
+    first = false;
+    stream->print("[");
+    write_json_string(stream, b.id);
+    stream->print(",");
+    write_json_string(stream, b.word);
+    stream->print("]");
+  }
+  stream->print("]");
+
+  // The tuner's capability and, while a session is live, its score ring - newest last, as ages, so
+  // the panel can both replay what it missed and draw the freshest attempt.
+  stream->printf(",\"tcap\":%d", mww_runtime_loader::MwwRuntimeLoader::tune_capable() ? 1 : 0);
+  {
+    mww_runtime_loader::TuneView tv;
+    this->wake_loader_->tune_snapshot(tv);
+    if (tv.slot >= 0) {
+      const uint32_t now = millis();
+      stream->printf(",\"tune\":{\"i\":%d,\"seq\":%lu,\"ev\":[", tv.slot, static_cast<unsigned long>(tv.seq));
+      for (size_t k = 0; k < tv.events.size(); k++) {
+        const auto &ev = tv.events[k];
+        if (k != 0)
+          stream->print(",");
+        stream->printf("[%u,%u,%u,%lu]", ev.peak, ev.avg, ev.vad_blocked ? 1 : 0,
+                       static_cast<unsigned long>(now - ev.at_ms));
+      }
+      stream->print("]}");
+    }
+  }
+
+  {
+    LockGuard guard{this->detection_lock_};
+    const uint32_t now = millis();
+    if (!this->detections_.empty()) {
+      const auto &last = this->detections_.back();
+      stream->printf(",\"det\":[%lu,", static_cast<unsigned long>(this->detection_seq_));
+      write_json_string(stream, last.word);
+      stream->printf(",%lu]", static_cast<unsigned long>(now - last.at_ms));
+    }
+    stream->print(R"(,"hist":[)");
+    // Newest first, which is the order both readers show them in.
+    for (size_t k = 0; k < this->detections_.size(); k++) {
+      const auto &d = this->detections_[this->detections_.size() - 1 - k];
+      if (k != 0)
+        stream->print(",");
+      stream->print("[");
+      write_json_string(stream, d.word);
+      stream->printf(",%lu]", static_cast<unsigned long>(now - d.at_ms));
+    }
+    stream->print("]");
+  }
+
+  stream->print("}");
+  stream->addHeader("Cache-Control", CACHE_REVALIDATE);
+  request->send(stream);
+}
+
+/// Points a slot at a wake word: a built-in id, a manifest URL to download, or "none". Queued for
+/// the loader's main-loop pass, like every write in this file; the app polls the GET above while
+/// the swap runs.
+void WebUIHandler::handle_wake_slot_set_(AsyncWebServerRequest *request) {
+  if (this->wake_loader_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  auto *index_param = request->getParam("i");
+  auto *model_param = request->getParam("m");
+  if (index_param == nullptr || model_param == nullptr) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+  const std::string &index_text = index_param->value();
+  char *end = nullptr;
+  const unsigned long parsed = strtoul(index_text.c_str(), &end, 10);
+  if (end == index_text.c_str() || *end != '\0' || parsed >= mww_runtime_loader::WL_SLOTS) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+  if (!this->wake_loader_->queue_slot(static_cast<uint8_t>(parsed), model_param->value())) {
+    // One refusal the caller can act on: everything queue_slot rejects is either malformed (400
+    // territory) or names the word the other slot already holds - and the app prevents the latter,
+    // so a 400 covers what remains.
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+  request->send(200, "application/json", "{\"ok\":1}");
+}
+
+/// A slot's sensitivity: 0 hands the model its own tuning back, anything else is a measured
+/// threshold from the Wake Word Tuner (quantized, 100-254).
+void WebUIHandler::handle_wake_cutoff_set_(AsyncWebServerRequest *request) {
+  if (this->wake_loader_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  auto *index_param = request->getParam("i");
+  auto *value_param = request->getParam("v");
+  if (index_param == nullptr || value_param == nullptr) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+  char *end = nullptr;
+  const unsigned long at = strtoul(index_param->value().c_str(), &end, 10);
+  if (end == index_param->value().c_str() || *end != '\0' || at >= mww_runtime_loader::WL_SLOTS) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+  end = nullptr;
+  const unsigned long value = strtoul(value_param->value().c_str(), &end, 10);
+  if (end == value_param->value().c_str() || *end != '\0' ||
+      (value != 0 && (value < mww_runtime_loader::WL_TUNED_MIN || value > 254))) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+  this->wake_loader_->queue_cutoff(static_cast<uint8_t>(at), static_cast<uint8_t>(value));
+  request->send(200, "application/json", "{\"ok\":1}");
+}
+
+/// Opens, keeps alive (`on=1`) or closes (`on=0`) a Wake Word Tuner session on slot `i`. The
+/// loader owns the probe floor and the score ring; this endpoint additionally holds the wake-test
+/// suppression window open for the session's lifetime, so a detection during tuning is recorded
+/// (the ring the app polls) but starts no assistant and plays no chime. The window clears when the
+/// session closes; if the browser vanishes, the loader's own keepalive expiry restores the cutoff
+/// and the window lapses ~10s later.
+///
+/// The reply carries `cap`: whether this build can score attempts at all (the log-listener channel
+/// needs DEBUG compiled into the logger). The panel shows an honest "cannot score on this build"
+/// instead of an empty meter when it is 0.
+void WebUIHandler::handle_wake_tune_set_(AsyncWebServerRequest *request) {
+  if (this->wake_loader_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  auto *index_param = request->getParam("i");
+  auto *on_param = request->getParam("on");
+  if (index_param == nullptr || on_param == nullptr) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+  char *end = nullptr;
+  const unsigned long at = strtoul(index_param->value().c_str(), &end, 10);
+  if (end == index_param->value().c_str() || *end != '\0' || at >= mww_runtime_loader::WL_SLOTS) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+  const bool on = on_param->value() == "1" || on_param->value() == "true";
+  this->wake_loader_->queue_tune(static_cast<uint8_t>(at), on);
+  if (on) {
+    this->wake_test_until_.store(millis() + mww_runtime_loader::WL_TUNE_TTL_MS + 10000, std::memory_order_relaxed);
+  } else {
+    this->wake_test_until_.store(0, std::memory_order_relaxed);
+  }
+  request->send(200, "application/json",
+                mww_runtime_loader::MwwRuntimeLoader::tune_capable() ? "{\"ok\":1,\"cap\":1}"
+                                                                     : "{\"ok\":1,\"cap\":0}");
+}
+
+#else  // USE_SAT1_MWW_LOADER
+
 /// The wake words this device can listen for, and which are armed.
 ///
 /// Indexed by position, because that is the only key both ends can agree on cheaply and the list is
@@ -598,6 +843,7 @@ void WebUIHandler::handle_wake_words_set_(AsyncWebServerRequest *request) {
   // it has something truthful to show before the next loop iteration.
   request->send(200, "application/json", on ? "{\"ok\":1,\"on\":1}" : "{\"ok\":1,\"on\":0}");
 }
+#endif  // !USE_SAT1_MWW_LOADER
 
 void WebUIHandler::apply_wake_word_requests() {
   const uint32_t mask = this->ww_pending_mask_.exchange(0, std::memory_order_acquire);

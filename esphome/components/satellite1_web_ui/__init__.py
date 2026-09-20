@@ -23,6 +23,13 @@ from esphome.components import (
 )
 from esphome.components.light.types import LightState
 from esphome.components.micro_wake_word import MicroWakeWord
+
+# Optional on purpose: this component must keep validating for a build that does not carry the
+# runtime wake word loader, so the import failing simply removes the option.
+try:
+    from esphome.components.mww_runtime_loader import MwwRuntimeLoader
+except ImportError:
+    MwwRuntimeLoader = None
 from esphome.components.sendspin import (
     SendspinHub,
     request_controller_support,
@@ -61,6 +68,7 @@ CONF_LOGIN_MIC_AVAILABLE = "login_mic_available"
 CONF_ON_LOGIN_WINDOW = "on_login_window"
 CONF_ON_LOGIN_WINDOW_END = "on_login_window_end"
 CONF_MICRO_WAKE_WORD_ID = "micro_wake_word_id"
+CONF_WAKE_LOADER_ID = "wake_loader_id"
 CONF_VOICE_ASSISTANT_ID = "voice_assistant_id"
 CONF_VOICE_PHASE = "voice_phase"
 CONF_MEDIA_PLAYER_ID = "media_player_id"
@@ -167,6 +175,14 @@ CONFIG_SCHEMA = cv.All(
             # models never reach /events or the entity REST API, and the component itself is the only
             # way to see or change which are armed. Optional for the same reason as the two above.
             cv.Optional(CONF_MICRO_WAKE_WORD_ID): cv.use_id(MicroWakeWord),
+            # The runtime wake word loader, which owns the two slots the wake words endpoint speaks
+            # when it is present - and the download/validate/persist machinery behind them. Optional
+            # so a build without it keeps the old per-index toggle endpoint.
+            **(
+                {cv.Optional(CONF_WAKE_LOADER_ID): cv.use_id(MwwRuntimeLoader)}
+                if MwwRuntimeLoader is not None
+                else {}
+            ),
             # Media players are not covered by web_server either - it registers no media_player
             # handler, so they ride neither /events nor the entity REST API. These two back
             # GET/POST /api/sat1/media: the local speaker player, and the Sendspin group player the
@@ -337,6 +353,9 @@ async def to_code(config):
         cg.add(
             var.set_micro_wake_word(await cg.get_variable(config[CONF_MICRO_WAKE_WORD_ID]))
         )
+
+    if CONF_WAKE_LOADER_ID in config:
+        cg.add(var.set_wake_loader(await cg.get_variable(config[CONF_WAKE_LOADER_ID])))
 
     if CONF_MEDIA_PLAYER_ID in config:
         cg.add(

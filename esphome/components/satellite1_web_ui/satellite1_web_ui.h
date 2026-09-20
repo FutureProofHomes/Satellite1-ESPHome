@@ -110,6 +110,18 @@ class Satellite1WebUI : public Component {
     // The offline wake-word challenge exists exactly when the models it is built from do.
     this->gate_.set_seq_available(mww != nullptr);
   }
+
+  /// Called from the on_wake_word_detected automation in common/voice_assistant.yaml - after the
+  /// sign-in gate has had first refusal, so a challenge answer never lands in a readable history.
+  void push_wake_detection(const std::string &word) { this->handler_.push_wake_detection(word); }
+
+  /// Whether the app has a "say it now" test window open - the automation then records the firing
+  /// (above) but skips the chime and the assistant start. See WebUIHandler::wake_test_active.
+  bool wake_test_active() { return this->handler_.wake_test_active(); }
+#endif
+
+#ifdef USE_SAT1_MWW_LOADER
+  void set_wake_loader(mww_runtime_loader::MwwRuntimeLoader *loader) { this->handler_.set_wake_loader(loader); }
 #endif
 
 #ifdef USE_MEDIA_PLAYER

@@ -84,67 +84,92 @@ micro_wake_word:
         condition:
           lambda: return id(timer_ringing).state || !id(web_ui_app)->consume_login_wake(wake_word);
         then:
-          # If the wake word is detected when the device is muted (Possible with the software mute
-          # switch): Do nothing
+          # The detection ring behind the app's "say it now" test moment and the Diagnostics
+          # history. Inside the gate on purpose: a firing the sign-in challenge consumed is an
+          # answer to a secret, and must not land in a history any signed-in browser can read.
+          - lambda: id(web_ui_app)->push_wake_detection(wake_word);
+          # An open test window claims the firing next (owner request, September 2026): the person
+          # is checking whether a freshly downloaded word fires at all, and the ring push above is
+          # the whole answer - starting a conversation on every attempt made testing miserable. A
+          # ringing timer outranks the window for the same reason it outranks the sign-in gate:
+          # an alarm that voice cannot stop because a browser somewhere is testing would be the
+          # worse bug.
           - if:
               condition:
-                switch.is_off: master_mute_switch
+                lambda: return id(timer_ringing).state || !id(web_ui_app)->wake_test_active();
               then:
-                # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
+                # If the wake word is detected when the device is muted (Possible with the software mute
+                # switch): Do nothing
                 - if:
                     condition:
-                      switch.is_on: timer_ringing
+                      switch.is_off: master_mute_switch
                     then:
-                      - switch.turn_off: timer_ringing
-                    # Stop voice assistant if running
-                    else:
+                      # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
                       - if:
                           condition:
-                            voice_assistant.is_running:
+                            switch.is_on: timer_ringing
                           then:
-                            # A response this device routed elsewhere is playing there too, so the local
-                            # stop fans out. The script's own guard makes it free when nothing was routed.
-                            - voice_assistant.stop:
-                            - script.execute: tts_remote_stop
-                          # Stop any other media player announcement
+                            - switch.turn_off: timer_ringing
+                          # Stop voice assistant if running
                           else:
                             - if:
                                 condition:
-                                  media_player.is_announcing:
-                                    id: external_media_player
-
+                                  voice_assistant.is_running:
                                 then:
-                                  # Ahead of the local stop on purpose: the broadcast's guard reads the
-                                  # announcement source's state, and stopping the pipeline is what makes
-                                  # that unreadable. Order is enough - the stop below is a command the
-                                  # media player processes on its own loop, after this guard has run.
-                                  - script.execute: tts_stop_broadcast
-                                  - media_player.stop:
-                                      announcement: true
-                                      id: external_media_player
-                                  # The usual path for "stop" mid-response: the pipeline has ended by the
-                                  # time the audio is still playing, so is_running above is already false.
+                                  # A response this device routed elsewhere is playing there too, so the local
+                                  # stop fans out. The script's own guard makes it free when nothing was routed.
+                                  - voice_assistant.stop:
                                   - script.execute: tts_remote_stop
-                                # Start the voice assistant and play the wake sound, if enabled
+                                # Stop any other media player announcement
                                 else:
-                                  # Ahead of the local chime so the call is out before the 300ms below,
-                                  # and outside the switch beneath it because that one governs this
-                                  # device's speaker alone - each target's own Wake sound decides for
-                                  # itself. Everything that suppresses the local chime still suppresses
-                                  # this: muted microphones, a ringing timer, a running assistant and an
-                                  # announcement already playing are all branches that never reach here.
-                                  - script.execute: remote_wake_chime_send
                                   - if:
                                       condition:
-                                        switch.is_on: wake_sound
+                                        media_player.is_announcing:
+                                          id: external_media_player
+
                                       then:
-                                        - script.execute:
-                                            id: play_sound
-                                            priority: true
-                                            sound_file: "wake_word_triggered_sound"
-                                        - delay: 300ms
-                                  - voice_assistant.start:
-                                      wake_word: !lambda return wake_word;
+                                        # Ahead of the local stop on purpose: the broadcast's guard reads the
+                                        # announcement source's state, and stopping the pipeline is what makes
+                                        # that unreadable. Order is enough - the stop below is a command the
+                                        # media player processes on its own loop, after this guard has run.
+                                        - script.execute: tts_stop_broadcast
+                                        - media_player.stop:
+                                            announcement: true
+                                            id: external_media_player
+                                        # The usual path for "stop" mid-response: the pipeline has ended by the
+                                        # time the audio is still playing, so is_running above is already false.
+                                        - script.execute: tts_remote_stop
+                                      # Start the voice assistant and play the wake sound, if enabled
+                                      else:
+                                        # Ahead of the local chime so the call is out before the 300ms below,
+                                        # and outside the switch beneath it because that one governs this
+                                        # device's speaker alone - each target's own Wake sound decides for
+                                        # itself. Everything that suppresses the local chime still suppresses
+                                        # this: muted microphones, a ringing timer, a running assistant and an
+                                        # announcement already playing are all branches that never reach here.
+                                        - script.execute: remote_wake_chime_send
+                                        - if:
+                                            condition:
+                                              switch.is_on: wake_sound
+                                            then:
+                                              - script.execute:
+                                                  id: play_sound
+                                                  priority: true
+                                                  sound_file: "wake_word_triggered_sound"
+                                              - delay: 300ms
+                                        - voice_assistant.start:
+                                            wake_word: !lambda return wake_word;
+
+# Runtime wake word loading: the device's two wake word slots, which the web app's Primary/Secondary
+# pickers write. A slot holds a built-in model id or a microWakeWord manifest URL; URLs are
+# downloaded into PSRAM over the existing http_request client, validated, and handed to
+# micro_wake_word's runtime model API. The model itself is never stored in flash - the slot
+# remembers the URL and fetches it again on boot (owner decision, September 2026). The component
+# also owns the invariant that a model is enabled exactly when a slot names it, and adopts wake
+# word changes Home Assistant makes through its own select, so the two faces cannot fight.
+mww_runtime_loader:
+  id: mww_loader
+  micro_wake_word_id: mww
 
 voice_assistant:
   id: va
@@ -538,31 +563,8 @@ switch:
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
 
-select:
-  - platform: template
-    id: mww_sensitivity_select
-    name: "Wake word sensitivity"
-    optimistic: true
-    initial_option: Slightly sensitive
-    restore_value: true
-    entity_category: config
-    options:
-      - Slightly sensitive
-      - Moderately sensitive
-      - Very sensitive
-    on_value:
-      # Sets specific wake word probabilities computed for each particular model
-      # Note probability cutoffs are set as a quantized uint8 value, each comment has the corresponding floating point cutoff
-      # False Accepts per Hour values are tested against all units and channels from the Dinner Party Corpus.
-      # These cutoffs apply only to the specific models included in the firmware: okay_nabu@20241226.3, hey_jarvis@v2, hey_mycroft@v2
-      lambda: |-
-        if (x == "Slightly sensitive") {
-          id(okay_nabu).set_probability_cutoff(217);    // 0.85 -> 0.000 FAPH on DipCo (Manifest's default)
-          id(hey_jarvis).set_probability_cutoff(247);   // 0.97 -> 0.563 FAPH on DipCo (Manifest's default)
-        } else if (x == "Moderately sensitive") {
-          id(okay_nabu).set_probability_cutoff(176);    // 0.69 -> 0.376 FAPH on DipCo
-          id(hey_jarvis).set_probability_cutoff(235);   // 0.92 -> 0.939 FAPH on DipCo
-        } else if (x == "Very sensitive") {
-          id(okay_nabu).set_probability_cutoff(143);    // 0.56 -> 0.751 FAPH on DipCo
-          id(hey_jarvis).set_probability_cutoff(212);   // 0.83 -> 1.502 FAPH on DipCo
-        }
+# The "Wake word sensitivity" selects are gone (owner decision, September 20 2026). Sensitivity is
+# the Wake Word Tuner's job now - the web app measures the room and the customer's voice and applies
+# a threshold - and a five-option select cannot express a measured value; a control that can only
+# misrepresent the real one is worse than none. The tuner writes through mww_runtime_loader, which
+# persists per slot and re-applies at boot.
