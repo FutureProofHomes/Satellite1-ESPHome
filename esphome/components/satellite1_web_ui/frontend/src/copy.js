@@ -677,6 +677,10 @@ export const PRESENCE = {
  * said once above these.
  */
 export const WW_ERR = {
+  // 0 is ERR_NONE on the wire, so it only reaches this table when the write itself was refused or
+  // never answered - a link too long for the device's 224-byte slot, or a request lost to the
+  // network. Without this line those failures showed ww_failed with a blank where the reason goes.
+  0: "The device didn't accept the request. The link may be too long.",
   1: "The link couldn't be reached.",
   2: "This link is not a microWakeWord model. This device only runs microWakeWord models.",
   3: "This model's format is a version this firmware doesn't know.",

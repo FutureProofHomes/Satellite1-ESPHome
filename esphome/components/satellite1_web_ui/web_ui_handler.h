@@ -34,6 +34,8 @@
 #endif
 
 #include "esphome/core/entity_base.h"
+// For millis_64() in wake_test_active() - the 64-bit clock every deadline here compares against.
+#include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 
 #include "esphome/components/web_server_base/web_server_base.h"
@@ -431,7 +433,11 @@ class WebUIHandler : public AsyncWebHandler {
   /// works, not to open a conversation (owner request, September 2026). A ringing timer outranks
   /// the window in YAML, exactly as it outranks the sign-in gate, so "stop" still silences an
   /// alarm mid-test.
-  bool wake_test_active() { return millis() < this->wake_test_until_.load(std::memory_order_relaxed); }
+  ///
+  /// millis_64(), never millis(): the 32-bit counter wraps at 49.7 days, and a window set just
+  /// before the wrap read as open for the next 49 - a device that records wake words but answers
+  /// none of them until reboot.
+  bool wake_test_active() { return millis_64() < this->wake_test_until_.load(std::memory_order_relaxed); }
 #endif
 
 #ifdef USE_SAT1_MWW_LOADER
@@ -706,9 +712,11 @@ class WebUIHandler : public AsyncWebHandler {
   uint32_t detection_seq_{0};
   Mutex detection_lock_;
 
-  /// millis() deadline of the open test window, 0 when none. Written from the httpd task (the POST
-  /// that opens it), read from the main loop - an atomic, like the refresh flags.
-  std::atomic<uint32_t> wake_test_until_{0};
+  /// millis_64() deadline of the open test window, 0 when none. Written from the httpd task (the
+  /// POST that opens it), read from the main loop - an atomic, like the refresh flags. 64-bit so a
+  /// stale deadline can never sit on the wrong side of the 32-bit wrap; the atomic is emulated on
+  /// Xtensa, which is fine for this once-per-detection read.
+  std::atomic<uint64_t> wake_test_until_{0};
 #endif
 
 #ifdef USE_SAT1_MWW_LOADER

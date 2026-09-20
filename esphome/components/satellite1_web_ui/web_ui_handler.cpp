@@ -543,14 +543,16 @@ void WebUIHandler::push_wake_detection(const std::string &word) {
 /// now" test moment and the Diagnostics history, because all four are facts about the same thing.
 ///
 /// Shape:
-///   {"slots":[{"i":0,"m":"<spec>","w":"<phrase>","st":0,"err":0,"cut":0,"rt":0,"dl":0,"tot":0}],
+///   {"slots":[{"i":0,"m":"<spec>","w":"<phrase>","st":0,"err":0,"cut":0,"rt":0,"ld":1,"dl":0,"tot":0}],
 ///    "builtin":[["hey_jarvis","hey jarvis"]],
 ///    "det":[<seq>,"<phrase>",<ms ago>],
 ///    "hist":[["<phrase>",<ms ago>]]}
 ///
 /// `m` is the slot's spec (a built-in id or a manifest URL, "" when the slot is silent), `st` and
 /// `err` are the loader's SlotState/SlotError numbers, `cut` the persisted sensitivity (0 = model
-/// default, else a tuned threshold), and `dl`/`tot` download progress on whichever slot is
+/// default, else a tuned threshold), `ld` whether a model is actually loaded and listening - the
+/// fact the tuner row keys on, since a failed swap leaves `st` on ERROR while the previous word
+/// listens on - and `dl`/`tot` download progress on whichever slot is
 /// mid-swap. `det` is the
 /// newest firing with a monotonically increasing sequence number, so the test moment can tell a
 /// fresh detection from the one it already celebrated.
@@ -575,7 +577,8 @@ void WebUIHandler::handle_wake_words_(AsyncWebServerRequest *request) {
     write_json_string(stream, s.spec);
     stream->print(R"(,"w":)");
     write_json_string(stream, s.word);
-    stream->printf(R"(,"st":%u,"err":%u,"cut":%u,"rt":%u)", s.state, s.error, s.cutoff, s.runtime ? 1 : 0);
+    stream->printf(R"(,"st":%u,"err":%u,"cut":%u,"rt":%u,"ld":%u)", s.state, s.error, s.cutoff, s.runtime ? 1 : 0,
+                   s.id.empty() ? 0 : 1);
     if (dl_slot == i)
       stream->printf(",\"dl\":%lu,\"tot\":%lu", static_cast<unsigned long>(dl), static_cast<unsigned long>(total));
     stream->print("}");
@@ -733,7 +736,7 @@ void WebUIHandler::handle_wake_tune_set_(AsyncWebServerRequest *request) {
   const bool on = on_param->value() == "1" || on_param->value() == "true";
   this->wake_loader_->queue_tune(static_cast<uint8_t>(at), on);
   if (on) {
-    this->wake_test_until_.store(millis() + mww_runtime_loader::WL_TUNE_TTL_MS + 10000, std::memory_order_relaxed);
+    this->wake_test_until_.store(millis_64() + mww_runtime_loader::WL_TUNE_TTL_MS + 10000, std::memory_order_relaxed);
   } else {
     this->wake_test_until_.store(0, std::memory_order_relaxed);
   }

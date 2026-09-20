@@ -35,6 +35,12 @@ static constexpr uint32_t WL_TASK_STACK = 10240;
 /// soon, and one whose model URL has genuinely gone away should not hammer it forever.
 static const uint32_t WL_RETRY_MS[] = {10 * 1000, 30 * 1000, 120 * 1000, 600 * 1000};
 
+/// How long a read may go without a single byte before the fetch is declared stalled. read()
+/// returning zero on a sized body gets waited out for transient hiccups - but bounded, because a
+/// server that accepted the connection and then went quiet would otherwise park the download task,
+/// and the single job slot with it, until reboot.
+static constexpr uint32_t WL_STALL_MS = 30 * 1000;
+
 #ifndef VERSION_CODE
 #define VERSION_CODE(major, minor, patch) (((major) << 16) | ((minor) << 8) | (patch))
 #endif
@@ -79,6 +85,16 @@ void MwwRuntimeLoader::setup() {
       // before the tuner replaced the presets, and they read as the model default.
       this->slots_[i].cutoff = d.cutoff >= WL_TUNED_MIN ? d.cutoff : 0;
     }
+  }
+
+  // Two slots persisted the same spec (possible only through an old firmware's races): keep the
+  // first, empty the second. Two slots holding one model breaks the enabled-iff-in-a-slot
+  // invariant every unload and reconcile pass relies on.
+  if (!this->slots_[0].spec.empty() && this->slots_[0].spec == this->slots_[1].spec) {
+    ESP_LOGW(TAG, "Both slots persisted \"%s\"; emptying slot 1", this->slots_[1].spec.c_str());
+    this->slots_[1].spec.clear();
+    this->slots_[1].cutoff = 0;
+    this->save_slot_(1);
   }
 
   if (!have_pref) {
@@ -130,7 +146,10 @@ void MwwRuntimeLoader::setup() {
 
   // Let the boot settle - and Home Assistant's on-connect configuration write land - before the
   // drift adoption runs. Without this, adoption could race the API connection's own replay.
-  this->reconcile_after_ms_ = millis() + 15000;
+  // millis_64() for every deadline in this component: plain millis() wraps at 49.7 days and a
+  // direct comparison against a wrapped counter reads "not yet" for the next 49 - these devices
+  // stay up for months.
+  this->reconcile_after_ms_ = millis_64() + 15000;
   this->publish_view_();
 }
 
@@ -150,7 +169,7 @@ void MwwRuntimeLoader::loop() {
 
   // An expired tune session restores the configured threshold - the browser is gone, and a device
   // left on the probe floor would false-trigger until someone noticed.
-  if (this->tune_slot_.load(std::memory_order_relaxed) >= 0 && millis() > this->tune_deadline_ms_)
+  if (this->tune_slot_.load(std::memory_order_relaxed) >= 0 && millis_64() > this->tune_deadline_ms_)
     this->end_tune_(true);
 
   if (this->job_.active.load(std::memory_order_acquire)) {
@@ -166,9 +185,14 @@ void MwwRuntimeLoader::loop() {
     std::string spec;
     int16_t cutoff = -1;
     uint8_t cutoff_slot = WL_SLOTS;
-    const int8_t tune = this->tune_req_.exchange(-1, std::memory_order_relaxed);
+    int8_t tune = -1;
     {
       LockGuard guard{this->req_lock_};
+      // The tune exchange sits under the same lock the writers take (queue_tune stores under it
+      // too): exchanged outside, a request arriving between the exchange and the req_pending_
+      // recomputation below was overwritten to "nothing pending" and sat unprocessed - a dropped
+      // close left the model on the probe floor for the whole TTL.
+      tune = this->tune_req_.exchange(-1, std::memory_order_relaxed);
       for (uint8_t i = 0; i < WL_SLOTS; i++) {
         if (this->cutoff_req_[i] >= 0) {
           cutoff = this->cutoff_req_[i];
@@ -204,7 +228,7 @@ void MwwRuntimeLoader::loop() {
 
   // Boot re-download: a slot that persisted a URL fetches it again, with backoff, once there is a
   // network to fetch over. One at a time, sharing the single job with everything else.
-  const uint32_t now = millis();
+  const uint64_t now = millis_64();
   for (uint8_t i = 0; i < WL_SLOTS; i++) {
     Slot &s = this->slots_[i];
     const bool retryable = s.state == SLOT_WAITING || (s.state == SLOT_ERROR && s.model_id.empty() && is_url_(s.spec));
@@ -272,7 +296,12 @@ bool MwwRuntimeLoader::queue_cutoff(uint8_t i, uint8_t value) {
 bool MwwRuntimeLoader::queue_tune(uint8_t i, bool on) {
   if (i >= WL_SLOTS)
     return false;
-  this->tune_req_.store(static_cast<int8_t>(i * 2 + (on ? 1 : 0)), std::memory_order_relaxed);
+  {
+    // Under req_lock_ so the drain in loop() - which exchanges this under the same lock - can
+    // never lose a request written between its exchange and its req_pending_ recomputation.
+    LockGuard guard{this->req_lock_};
+    this->tune_req_.store(static_cast<int8_t>(i * 2 + (on ? 1 : 0)), std::memory_order_relaxed);
+  }
   this->req_pending_.store(true, std::memory_order_relaxed);
   return true;
 }
@@ -336,6 +365,23 @@ void MwwRuntimeLoader::apply_request_(uint8_t i, const std::string &spec) {
     return;
   }
 
+  // The duplicate guard again, here on the main loop where it cannot race: queue_slot checks the
+  // published view, but two requests queued back to back both pass that check before either
+  // applies - and two slots holding one model breaks the enabled-iff-in-a-slot invariant (emptying
+  // one slot would disable the model the other still claims, and reconciliation would then empty
+  // that one too). Refused with the error the app already knows how to say.
+  if (!spec.empty()) {
+    const Slot &other = this->slots_[1 - i];
+    const std::string &held = !other.pending.empty() ? other.pending : other.spec;
+    if (held == spec) {
+      s.pending.clear();
+      s.state = SLOT_ERROR;
+      s.error = ERR_REFUSED;
+      this->publish_view_();
+      return;
+    }
+  }
+
   if (spec.empty()) {
     const bool removed_runtime = s.model_id == runtime_id_(i);
     this->unload_slot_(s);
@@ -345,7 +391,7 @@ void MwwRuntimeLoader::apply_request_(uint8_t i, const std::string &spec) {
     s.error = ERR_NONE;
     s.cutoff = 0;
     this->save_slot_(i);
-    this->reconcile_after_ms_ = millis() + 3000;
+    this->reconcile_after_ms_ = millis_64() + 3000;
     if (removed_runtime)
       this->nudge_ha_();
     this->publish_view_();
@@ -367,7 +413,7 @@ void MwwRuntimeLoader::apply_request_(uint8_t i, const std::string &spec) {
     s.error = ERR_NONE;
     s.cutoff = 0;
     this->save_slot_(i);
-    this->reconcile_after_ms_ = millis() + 3000;
+    this->reconcile_after_ms_ = millis_64() + 3000;
     if (removed_runtime)
       this->nudge_ha_();
     this->publish_view_();
@@ -440,14 +486,17 @@ void MwwRuntimeLoader::apply_tune_(uint8_t i, bool on) {
   }
   if (active == static_cast<int8_t>(i)) {
     // Keepalive: the panel is still open.
-    this->tune_deadline_ms_ = millis() + WL_TUNE_TTL_MS;
+    this->tune_deadline_ms_ = millis_64() + WL_TUNE_TTL_MS;
     return;
   }
   if (active >= 0)
     this->end_tune_(false);
 
   Slot &s = this->slots_[i];
-  if (s.model_id.empty() || s.state != SLOT_READY)
+  // A loaded model is what a session needs - not a READY state. A slot whose last swap failed
+  // sits in ERROR while its previous word keeps listening, and that word is as tunable as ever;
+  // requiring READY made one bad URL attempt lock the tuner out until a reboot.
+  if (s.model_id.empty() || s.state == SLOT_DOWNLOADING)
     return;
   auto *model = this->mww_->get_model_by_id(s.model_id);
   if (model == nullptr)
@@ -458,7 +507,7 @@ void MwwRuntimeLoader::apply_tune_(uint8_t i, bool on) {
     this->tune_word_ = s.word;
     this->tune_events_.clear();
   }
-  this->tune_deadline_ms_ = millis() + WL_TUNE_TTL_MS;
+  this->tune_deadline_ms_ = millis_64() + WL_TUNE_TTL_MS;
   this->tune_slot_.store(static_cast<int8_t>(i), std::memory_order_release);
   model->set_probability_cutoff(WL_TUNE_FLOOR);
   ESP_LOGI(TAG, "Tune session opened for \"%s\" (probe floor %u)", s.word.c_str(), WL_TUNE_FLOOR);
@@ -578,14 +627,22 @@ uint8_t MwwRuntimeLoader::fetch_(const std::string &url, std::string &out, size_
   out.clear();
   out.reserve(len > 0 ? static_cast<size_t>(len) : 1024);
   uint8_t buf[1024];
+  uint32_t last_progress = millis();
   while (out.size() < cap) {
     int n = container->read(buf, sizeof(buf));
     if (n < 0) {
       container->end();
       return ERR_FETCH;
     }
-    if (n == 0)
-      break;
+    if (n == 0) {
+      // EOF for an unsized body. For a sized one mid-body it is a hiccup - waited out, but only
+      // to WL_STALL_MS (unsigned subtraction, wrap-safe), so a quiet server cannot hold the task.
+      if (len <= 0 || out.size() >= static_cast<size_t>(len) || millis() - last_progress > WL_STALL_MS)
+        break;
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
+    last_progress = millis();
     out.append(reinterpret_cast<const char *>(buf), static_cast<size_t>(n));
   }
   container->end();
@@ -732,16 +789,22 @@ void MwwRuntimeLoader::run_job_() {
 
   uint8_t *write = data->get_write_pointer();
   size_t off = 0;
+  uint32_t last_progress = millis();
   while (off < static_cast<size_t>(len)) {
     int n = container->read(write + off, std::min<size_t>(4096, static_cast<size_t>(len) - off));
     if (n < 0)
       break;
     if (n == 0) {
       // read() returning zero mid-body is a stall, not EOF for a sized response; give the socket a
-      // moment rather than spinning.
+      // moment rather than spinning - but only WL_STALL_MS of moments (unsigned subtraction,
+      // wrap-safe). Unbounded, a server that accepted the connection and then went quiet parked
+      // this task forever, and with it the single job every swap and boot re-download shares.
+      if (millis() - last_progress > WL_STALL_MS)
+        break;
       vTaskDelay(pdMS_TO_TICKS(50));
       continue;
     }
+    last_progress = millis();
     off += static_cast<size_t>(n);
     j.bytes.store(static_cast<uint32_t>(off), std::memory_order_relaxed);
   }
@@ -772,7 +835,7 @@ void MwwRuntimeLoader::finalize_job_() {
       // The word is gone until a fetch succeeds, so keep trying - backing off to every ten
       // minutes, forever, because the URL may simply be ahead of the household's DNS.
       const uint8_t at = std::min<uint8_t>(s.retries, sizeof(WL_RETRY_MS) / sizeof(WL_RETRY_MS[0]) - 1);
-      s.next_retry_ms = millis() + WL_RETRY_MS[at];
+      s.next_retry_ms = millis_64() + WL_RETRY_MS[at];
       s.retries++;
       s.state = SLOT_ERROR;
     } else {
@@ -834,7 +897,7 @@ void MwwRuntimeLoader::finalize_job_() {
     loaded->set_probability_cutoff(s.cutoff);
   this->save_slot_(j.slot);
   j.data.reset();
-  this->reconcile_after_ms_ = millis() + 3000;
+  this->reconcile_after_ms_ = millis_64() + 3000;
   if (!j.boot)
     this->nudge_ha_();
   ESP_LOGI(TAG, "Wake word \"%s\" loaded into slot %u from %s", s.word.c_str(), j.slot, s.spec.c_str());

@@ -215,7 +215,9 @@ link. The picker never offers what the firmware is certain to refuse: manifests 
 read but that are not version 2 (the ESPHome repository still hosts its old v1 files next to the v2
 ones) are filtered out at enumeration. The reasons are keyed to the firmware's SlotError numbers;
 the one customers will meet most is 2, the not-a-microWakeWord-model line, because the most popular
-wake word collections on GitHub are for a different engine. The apply-to-all-Satellite1s offer was
+wake word collections on GitHub are for a different engine. Key 0 is the fallback for a write the
+device refused outright (a URL past the 224-byte slot limit) or that never got an answer — before
+it existed those failures showed `ww_failed` with a blank where the reason goes. The apply-to-all-Satellite1s offer was
 removed September 20 2026 (owner: a general apply-to-peers mechanism for many controls comes
 later), and so was the post-swap tune invitation — Tune Now on the tuner row is the affordance, and
 a second one nagged.

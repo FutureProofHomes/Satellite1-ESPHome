@@ -456,7 +456,9 @@ function SlotSection({ i, slot, swap, tuning, groups, otherWord, busy, assist, w
   const swapping = swap && swap.phase === "busy";
   const failed = swap && swap.phase === "error";
   const word = swapping ? swap.word : slot?.w || "";
-  const waiting = slot?.st === 3 || (slot?.st === 2 && !slot?.id && isUrl(slot?.m));
+  // `ld` is the payload's "a model is loaded and listening" fact. An errored slot with a loaded
+  // model is a failed swap whose previous word kept working - not a slot the device is retrying.
+  const waiting = slot?.st === 3 || (slot?.st === 2 && !slot?.ld && isUrl(slot?.m));
 
   const pick = (entry) => {
     setOpen(false);
@@ -496,8 +498,9 @@ function SlotSection({ i, slot, swap, tuning, groups, otherWord, busy, assist, w
           which word, how readily it fires, then who answers it. Two buttons rather than a state
           dropdown - Tune Now runs the guided session, Reset Default hands the model its own tuning
           back - and a tuned word shows its measured result in the grey box below, the transcript
-          subcard's neutral shape. */}
-      {word && slot?.st === 0 && !swapping && (
+          subcard's neutral shape. Keyed on `ld` (a model is loaded), not on a READY state: a slot
+          whose last swap failed keeps its previous word listening, and that word stays tunable. */}
+      {word && slot?.ld && !swapping && (
         <>
           <Row label={TEXT.tn_row} hint={HINTS.wake_advanced}>
             <span class="tn-btns-row">
@@ -576,25 +579,43 @@ function WakeCards({ ctx, wake, wakeRead, setSlot, setCutoff, assist, groups }) 
    * select_option call moves it. So this is that call, aimed by what the fresh payload actually
    * says: the select naming the word we replaced, else one holding no_wake_word, else this slot's
    * position.
+   *
+   * Write-and-verify with retries, not one blind write behind a fixed sleep: after a swap the
+   * device drops its Home Assistant connection so the wake word list is re-read (nudge_ha_), and
+   * a select write sent while Home Assistant is reconnecting - or naming an option it has not
+   * re-read yet - is silently lost. Each pass reads the selects fresh, writes only what still
+   * disagrees, refreshes, and checks again; the deadline covers a slow reconnect without hanging
+   * on a Home Assistant that is genuinely gone. Repeating an already-landed write is harmless -
+   * same entity, same option.
    */
   const syncAssist = async (i, prevWord, nextWord) => {
-    const fresh = await requestJson("/api/sat1/ha").catch(() => null);
-    const sel = fresh?.d?.asst?.s;
-    if (!Array.isArray(sel) || !sel.length) return;
-    const named = (w) => sel.findIndex((x) => w && (x[1] || "").toLowerCase() === w.toLowerCase());
-    if (!nextWord) {
-      // The slot emptied: clear whichever select named the removed word, and nothing else.
-      const off = named(prevWord);
-      if (off >= 0) await post(`/api/sat1/ha/select?e=${encodeURIComponent(sel[off][0])}&o=${NO_WAKE_WORD}`);
-      return;
+    const named = (sel, w) => sel.findIndex((x) => w && (x[1] || "").toLowerCase() === w.toLowerCase());
+    const deadline = Date.now() + 30000;
+    for (;;) {
+      const fresh = await requestJson("/api/sat1/ha").catch(() => null);
+      const sel = fresh?.d?.asst?.s;
+      if (!Array.isArray(sel) || !sel.length) return;
+      let entity, option;
+      if (!nextWord) {
+        // The slot emptied: clear whichever select named the removed word, and nothing else.
+        const off = named(sel, prevWord);
+        if (off < 0) return; // nothing names it (any more) - done
+        entity = sel[off][0];
+        option = NO_WAKE_WORD;
+      } else {
+        if (named(sel, nextWord) >= 0) return; // Home Assistant agrees - done
+        let at = named(sel, prevWord);
+        if (at < 0) at = sel.findIndex((x) => x[1] === NO_WAKE_WORD);
+        if (at < 0) at = Math.min(i, sel.length - 1);
+        entity = sel[at][0];
+        option = nextWord;
+      }
+      await post(`/api/sat1/ha/select?e=${encodeURIComponent(entity)}&o=${encodeURIComponent(option)}`).catch(() => {});
+      // The refresh both settles the round trip (~3s of spaced reads) and hands the Voice
+      // Pipeline dropdowns the payload they render from; the next pass verifies against it.
+      await ctx.haRefresh();
+      if (!alive.current || Date.now() > deadline) return;
     }
-    if (named(nextWord) >= 0) return; // Home Assistant already agrees
-    let at = named(prevWord);
-    if (at < 0) at = sel.findIndex((x) => x[1] === NO_WAKE_WORD);
-    if (at < 0) at = Math.min(i, sel.length - 1);
-    await post(`/api/sat1/ha/select?e=${encodeURIComponent(sel[at][0])}&o=${encodeURIComponent(nextWord)}`);
-    // Read back so the Voice Pipeline dropdowns render from what Home Assistant now holds.
-    await ctx.haRefresh();
   };
 
   const choose = async (i, { spec, word }) => {
@@ -618,11 +639,9 @@ function WakeCards({ ctx, wake, wakeRead, setSlot, setCutoff, assist, groups }) 
         const arrived = spec === "none" ? s.m === "" : s.m === spec;
         if (arrived && s.st === 0) {
           setSwaps((prev) => ({ ...prev, [i]: null }));
-          // A downloaded word is not in Home Assistant's cached options yet - the device drops the
-          // API connection a moment after the swap so Home Assistant re-reads the list (which is
-          // how "Hey Alice" reaches the ESPHome UI's wake word field at all). The pairing write
-          // therefore waits out that reconnect before naming the fresh option.
-          if (isUrl(spec)) await sleep(8000);
+          // A downloaded word is not in Home Assistant's cached options until the device drops the
+          // API connection and Home Assistant reconnects onto the fresh list (nudge_ha_). No fixed
+          // sleep here: syncAssist verifies each write and retries through that reconnect window.
           await syncAssist(i, prevWord, spec === "none" ? "" : s.w || word);
           return;
         }

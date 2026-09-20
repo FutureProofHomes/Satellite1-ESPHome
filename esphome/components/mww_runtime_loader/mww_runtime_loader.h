@@ -221,8 +221,9 @@ class MwwRuntimeLoader : public Component {
     uint8_t state{SLOT_READY};
     uint8_t error{ERR_NONE};
     std::string model_id;  // id of the model this slot has loaded/enabled, "" when none
-    // Boot re-download bookkeeping.
-    uint32_t next_retry_ms{0};
+    // Boot re-download bookkeeping. millis_64() so a deadline can never sit on the wrong side of
+    // the 49.7-day millis() wrap - these devices stay up for months.
+    uint64_t next_retry_ms{0};
     uint8_t retries{0};
   };
 
@@ -292,7 +293,8 @@ class MwwRuntimeLoader : public Component {
   // task produced the line (the two lines it parses happen to come from the main loop, but the
   // guard must be safe for every line that merely shares the tag).
   std::atomic<int8_t> tune_slot_{-1};
-  uint32_t tune_deadline_ms_{0};
+  // millis_64(): wrap-proof, like every deadline here.
+  uint64_t tune_deadline_ms_{0};
   // The tuned word and the ring, shared between the log callback's writer and the endpoint's
   // reader. tune_word_ is only written at session open, under the same lock the callback compares
   // it under.
@@ -308,7 +310,8 @@ class MwwRuntimeLoader : public Component {
   Job job_;
   // Set when reconcile_ha_ should hold off for a beat: right after boot (models are still
   // restoring) and right after our own writes (enable() lands on the next inference pass).
-  uint32_t reconcile_after_ms_{0};
+  // millis_64(): wrap-proof, like every deadline here.
+  uint64_t reconcile_after_ms_{0};
   // First-loop re-assertion of built-in cutoff overrides - see loop() for why not setup().
   bool overrides_applied_{false};
 };
