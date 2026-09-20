@@ -59,7 +59,8 @@ substitutions:
   # is never right, but a player silently missing from the list reads as a bug. Measured against a
   # 22-area, 104-media-player installation: 82 bytes per player (85 with the capability int below,
   # 87 with availability), 90 per device, 4.3KB in total - before
-  # the switcher's URL and availability fields, which add roughly 30 bytes per device on top of that.
+  # the switcher's URL and availability fields (roughly 30 bytes per device) and its variant labels
+  # (transport, radar, presence - about ten more).
   #
   # One call returns {"m": 1, "d": "<fragment>"}: `m` is whether another page follows, `d` is this
   # page's slice. Concatenating every `d` in order reproduces the document below byte for byte, so
@@ -75,7 +76,7 @@ substitutions:
   #    "areas": [{"i": "kitchen", "n": "Kitchen", "p": [["media_player.kitchen", "Kitchen Sonos", 3, 1]]}],
   #    "loose": [["media_player.all_sonos", "All Sonos", 1, 1]],
   #    "dev": [["Satellite1", "Ceiling Mount", "Media Room", "3c:0f:02:c5:ac:00", "dev (ESP...)",
-  #             "http://192.168.4.31", 1]],
+  #             "http://192.168.4.31", 1, "s3cret", "e", 2450, 1]],
   #    "asst": {"o": ["Home Assistant Cloud", "OllamaBradStudio"],
   #             "s": [["select.sat1_wake_word", "Hey Jarvis", "select.sat1_assistant", "preferred"],
   #                   ["select.sat1_wake_word_2", "no_wake_word", "select.sat1_assistant_2", "preferred"]]}}
@@ -126,7 +127,8 @@ substitutions:
   # makes recognising another product later a change there rather than here, and means an unknown
   # one appears in the payload the day Home Assistant learns about it.
   #
-  # The last two fields exist for the device switcher, which turns each row into a jump. The URL is
+  # The URL and availability fields exist for the device switcher, which turns each row into a jump.
+  # The URL is
   # `configuration_url` - the address behind Home Assistant's own "Visit device" link, which the
   # ESPHome integration builds from the host and port it actually connects on - because the browser
   # has no other way to an address: mDNS browsing from a page is not a thing, and the payload's MAC
@@ -149,6 +151,23 @@ substitutions:
   # FutureProofHomes device (a Nexus is conversation/ai_task entities, none whitelisted), which is
   # acceptable: the switcher only renders Satellite1 models. An int, never a boolean, for the
   # literal_eval reason above.
+  #
+  # The three fields after the password are the switcher's variant labels (September 2026):
+  # transport, radar model, presence. Transport is 'e'/'w'/'' read off the prefix of the device's
+  # own "Network Status" text sensor ("Eth: ..." / "WiFi: ..." - see common/ethernet.yaml and
+  # common/wifi_improv.yaml), not off which firmware image is installed: the planned unified build
+  # picks its transport at boot, so the sensor's runtime claim is the only one that stays true.
+  # Radar is 2450/2410/0 and has to be read from two places because the builds disagree on where
+  # they say it: the pinned images stamp "+ld2450"/"+ld2410" into the project version (the
+  # sw_version already in this row) and delete the auto-detect sensor, while the auto-detect build
+  # carries a bare version and publishes what it found on the UART as "Radar Detected"
+  # ("LD2450"/"LD2410"/"None"). Both are folded into one lowercase haystack and searched. Presence
+  # is the state of the device's presence binary sensor - "Presence" on pinned builds,
+  # runtime-registered "Room Presence" on auto-detect ones, both matched by a `presence` search over
+  # binary_sensor entities - 1 for on, 0 for off/absent/no radar (the radar field already says which
+  # of those it is). It is a snapshot, not a subscription: the app re-syncs this payload while the
+  # switcher sheet is open, so the label lights within a poll of someone entering the room. Ints and
+  # short strings, never booleans, for the literal_eval reason above; about ten bytes per device.
   #
   # `asst` is which assistant answers which wake word, and it is the one part of this payload that
   # describes settings Home Assistant owns rather than facts it happens to know.
@@ -294,6 +313,16 @@ substitutions:
              already read every device's password from HA itself. An empty string on devices
              running older firmware simply makes the jump land on their normal page. #}
           {% set pw = device_entities(d) | select('search', 'web_ui_password') | first | default('') %}
+          {# The variant labels, per the field comment above: transport off the Network Status
+             prefix, radar from the sw_version suffix or the auto-detect sensor, presence from the
+             presence binary sensor. Each falls to its "unknown" value ('', 0, 0) on a device that
+             does not publish the source - which is every peer on older firmware. #}
+          {% set net = device_entities(d) | select('search', 'network_status') | first | default('') %}
+          {% set nst = states(net) if net else '' %}
+          {% set rdet = device_entities(d) | select('search', 'radar_detected') | first | default('') %}
+          {% set rsig = ((device_attr(d, 'sw_version') or '') ~ ' ' ~ (states(rdet) if rdet else '')) | lower %}
+          {% set pres = device_entities(d) | select('match', 'binary_sensor\.')
+                        | select('search', 'presence') | first | default('') %}
           {% set out.dev = out.dev + [[device_attr(d, 'model'),
                                        device_attr(d, 'name_by_user') or device_attr(d, 'name'),
                                        area_name(a),
@@ -301,7 +330,10 @@ substitutions:
                                        device_attr(d, 'sw_version') or '',
                                        device_attr(d, 'configuration_url') or '',
                                        1 if live | count > 0 else 0,
-                                       states(pw) if pw and states(pw) not in ['unavailable', 'unknown'] else '']] %}
+                                       states(pw) if pw and states(pw) not in ['unavailable', 'unknown'] else '',
+                                       'e' if nst.startswith('Eth') else ('w' if nst.startswith('WiFi') else ''),
+                                       2450 if 'ld2450' in rsig else (2410 if 'ld2410' in rsig else 0),
+                                       1 if pres and states(pres) == 'on' else 0]] %}
         {% endif %}
       {% endfor %}
     {% endfor %}
