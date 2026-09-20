@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { CONFIRM, HINTS, TEXT } from "../copy.js";
 import { logoutAll, qrSignInLink, signInLink } from "../lib/auth.js";
-import { entity, pathFor, post } from "../lib/device.js";
+import { entity, pathFor, post, requestJson } from "../lib/device.js";
 import { qrSvgPath } from "../lib/qr.js";
 import { Btn, Card, Chevron, Confirm, Fact, Missing, N_DIAG, Row, Toggle } from "../ui.jsx";
 
@@ -597,6 +597,66 @@ function Launch({ ctx }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Recent wake detections                                              */
+/* ------------------------------------------------------------------ */
+
+const ago = (ms) => {
+  if (ms < 60000) return "just now";
+  if (ms < 3600000) return `${Math.floor(ms / 60000)} min ago`;
+  return `${Math.floor(ms / 3600000)} hr ago`;
+};
+
+/**
+ * The detection ring, for chasing "it triggered at 3am": which words fired and roughly when, up to
+ * eight, never persisted. The same firmware ring powers the wake word card's "say it now" test
+ * moment - one mechanism, two readers. Polled gently only while this route is mounted; the payload
+ * is a couple hundred bytes.
+ */
+function WakeHistory() {
+  const [hist, setHist] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    let timer = null;
+    const tick = async () => {
+      const d = await requestJson("/api/sat1/wakewords").catch(() => null);
+      if (!live) return;
+      if (d && Array.isArray(d.hist)) setHist(d.hist);
+      timer = setTimeout(tick, 5000);
+    };
+    tick();
+    return () => {
+      live = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+
+  // A build without the loader answers with the legacy shape (or 404s) and the card simply does
+  // not render - same contract as every optional card.
+  if (hist === null) return null;
+
+  return (
+    <Card title={TEXT.det_title} collapsible name="wakehist">
+      {hist.length === 0 ? (
+        <p class="dim sm">{TEXT.det_none}</p>
+      ) : (
+        <>
+          {hist.map(([w, ms], k) => (
+            <div class="ctl" key={k}>
+              <div class="ctl-label">
+                <span>&ldquo;{w}&rdquo;</span>
+              </div>
+              <div class="ctl-body dim sm">{ago(ms)}</div>
+            </div>
+          ))}
+          <p class="dim sm">{TEXT.det_sub}</p>
+        </>
+      )}
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 
 export function Diagnostics({ ctx }) {
   return (
@@ -608,6 +668,7 @@ export function Diagnostics({ ctx }) {
       {/* Buttons moved to the foot of Controls. It is the one card here that answers "does the hardware
           respond to me", which is a question about the thing you are holding rather than about its
           internals - and it belongs beside the volume and mute controls it duplicates in hardware. */}
+      <WakeHistory />
       <Log ctx={ctx} />
       <Maintenance ctx={ctx} />
     </>

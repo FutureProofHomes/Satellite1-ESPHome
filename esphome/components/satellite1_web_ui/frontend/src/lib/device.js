@@ -807,47 +807,48 @@ export function useMaData(enabled) {
 /* ------------------------------------------------------------------ */
 
 /**
- * GET /api/sat1/wakewords, read once, then kept in step locally.
+ * GET /api/sat1/wakewords: the two wake word slots, the built-in models, and the detection ring.
  *
- * Not polled, unlike the voice endpoint above. A wake word changes only when a person changes it, so
- * a poll would ask a question with the same answer every time for the life of the page. The cost is
- * that a change made in Home Assistant while this page is open is not picked up until it is reloaded;
- * that is the same deal every non-entity value on the page gets, and the cheaper trade on a device
- * that is also doing audio.
+ * Read once on mount, then re-read only when the route knows something is moving - a swap in
+ * flight, or the "say it now" test window. A wake word changes only when a person changes it, so a
+ * standing poll would ask a question with the same answer for the life of the page; the route owns
+ * the transient polling because only it knows when a swap started.
  *
- * Writes are optimistic, and honestly so: the device applies the change on its next main-loop
- * iteration rather than inside the request, so there is nothing to re-read that would be newer than
- * what we already know. A failed write puts the switch back.
+ * Writes are fire-and-queue like every device write: the endpoint records the request and the
+ * loader applies it from the main loop, so the poll of this same GET is the only truthful
+ * confirmation - `st` moves through downloading to ready or error, and a failed swap leaves the
+ * previous word in `m`/`w`, which is exactly what the card should fall back to showing.
  */
-export function useWakeWords() {
-  const [words, setWords] = useState(null);
+export function useWakeSlots() {
+  const [wake, setWake] = useState(null);
+
+  const read = async () => {
+    const d = await requestJson("/api/sat1/wakewords").catch(() => null);
+    if (d && Array.isArray(d.slots)) setWake(d);
+    return d && Array.isArray(d.slots) ? d : null;
+  };
 
   useEffect(() => {
     let live = true;
     requestJson("/api/sat1/wakewords")
       .then((d) => {
-        if (live && Array.isArray(d)) setWords(d);
+        if (live && d && Array.isArray(d.slots)) setWake(d);
+        // Anything else is left as null, which the card reads as "this build has no wake word
+        // slots" - a build without the loader answers 404 here and means exactly that.
       })
-      .catch(() => {
-        // Left as null, which the card reads as "this build has no wake words to show" and renders
-        // nothing for. A build without micro_wake_word answers 404 here and means exactly that.
-      });
+      .catch(() => {});
     return () => {
       live = false;
     };
   }, []);
 
-  const set = async (i, on) => {
-    setWords((prev) => prev && prev.map((w) => (w.i === i ? { ...w, on } : w)));
-    try {
-      const r = await post(`/api/sat1/wakewords?i=${i}&on=${on ? 1 : 0}`);
-      if (!r.ok) throw new Error(String(r.status));
-    } catch {
-      setWords((prev) => prev && prev.map((w) => (w.i === i ? { ...w, on: !on } : w)));
-    }
-  };
+  /** Points slot `i` at `spec`: a built-in id, a manifest URL, or "none". */
+  const setSlot = (i, spec) => post(`/api/sat1/wakewords/slot?i=${i}&m=${encodeURIComponent(spec)}`);
 
-  return { words, set };
+  /** Overrides a downloaded model's probability cutoff on slot `i` (0 = the model's own tuning). */
+  const setCutoff = (i, v) => post(`/api/sat1/wakewords/cutoff?i=${i}&v=${v}`);
+
+  return { wake, wakeRead: read, setSlot, setCutoff };
 }
 
 /* ------------------------------------------------------------------ */

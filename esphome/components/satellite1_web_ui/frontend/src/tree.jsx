@@ -38,7 +38,9 @@ import { TEXT } from "./copy.js";
  * Empty outline, filled with a tick, filled with a dash: the shapes people already read as off, all and
  * some. The mark is coloured from CSS rather than a fill attribute so it follows the theme.
  */
-function Check({ state, disabled, onClick, label }) {
+// Exported since the wake word pickers adopted this exact box (owner's rule: one selection-list
+// pattern app-wide, and this is it).
+export function Check({ state, disabled, onClick, label }) {
   const on = state === "on";
   const mixed = state === "mixed";
   return (

@@ -3191,3 +3191,226 @@ polyline.draft {
 .habox p:last-child {
   margin-bottom: 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* Wake word pickers and sources                                       */
+/*                                                                     */
+/* The picker's list is the /audio route's tree, wholesale: .tree,     */
+/* .tree-a/.tree-h/.tree-ps/.tree-p, the drawn .cb checkbox and the    */
+/* .tree-n count pill all come from there (owner's rule: one           */
+/* selection-list pattern app-wide). What follows is only what the     */
+/* tree has no counterpart for.                                        */
+/* ------------------------------------------------------------------ */
+
+/* The wake word card's body is a stack of unlike blocks - the picker control, the tuner row, the
+   tuned-result box, the pipeline row, the swap/download notes - so the slot owns one rhythm for
+   all of them: a flex column with an s-3 gap, the same 12px two adjacent .ctl rows produce
+   elsewhere. The rows inside give up their own vertical padding so the gap is the whole story and
+   nothing double-spaces (hardware screenshot, September 2026: everything sat touching). */
+.ww-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--s-3);
+}
+.ww-slot > .ctl {
+  padding: 0;
+}
+.ww-slot > .ww-note {
+  margin: 0;
+  padding: 0;
+}
+.ww-slot-t {
+  margin-bottom: var(--s-1);
+}
+/* The collapsed control: the slot's current word, full width, dressed like the house <select> so it
+   reads as the input it is. */
+.ww-cur {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  width: 100%;
+  background: var(--fill);
+  color: var(--fg);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  padding: var(--s-2) var(--s-2);
+  font: var(--t-m) inherit;
+  cursor: pointer;
+}
+.ww-cur .ww-word {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The picker is the tree with more rows behind it, so it stands a little taller before scrolling.
+   No margin of its own: the slot's gap owns the rhythm. */
+.ww-pick {
+  max-height: 340px;
+}
+/* The search-and-filter bar the tree never needed: sticky over the groups, on the tree's own sunken
+   background so rows slide under it cleanly. */
+.ww-tools {
+  display: flex;
+  gap: var(--s-1);
+  padding: var(--s-2);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-sunk);
+  border-bottom: 1px solid var(--line);
+}
+.ww-search {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  padding: var(--s-1) var(--s-2);
+  font: var(--t-s) inherit;
+}
+/* The tappable name in a picker row or group header - text, not chrome, exactly like the tree's
+   label spans, but pressable across its whole width. */
+.ww-name {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ww-name:disabled {
+  cursor: default;
+}
+/* The pronunciation preview. Same footprint as the tree's caret button, dimmed until touched. */
+.ww-speak {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: none;
+  color: var(--fg-3);
+  line-height: 0;
+  cursor: pointer;
+}
+.ww-speak svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.ww-note {
+  margin: var(--s-1) 0 0;
+  padding: 0 var(--s-2);
+}
+/* The test moment: the invitation breathes the accent, the confirmation lands solid. */
+.ww-try {
+  color: var(--accent);
+  animation: ww-breathe 2s ease-in-out infinite;
+}
+.ww-heard {
+  color: var(--ok);
+  font-weight: 600;
+}
+@keyframes ww-breathe {
+  50% {
+    opacity: 0.55;
+  }
+}
+/* The tuner row's pair of buttons, and the one control in the app wearing a gradient face: the
+   owner asked for exactly this button ("green with cool gradient", September 2026), a deliberate
+   exception to the no-gradient-on-buttons rule - it marks the card's one guided, do-this action.
+   Reset Default wears the same red as the factory reset button, for the same reason: it throws a
+   measurement away. */
+.tn-btns-row {
+  display: flex;
+  gap: var(--s-2);
+}
+.btn.tn-go {
+  background: linear-gradient(135deg, var(--ok), #00897b);
+  border-color: transparent;
+  color: var(--on-accent);
+}
+/* The tuned-result box: the transcript subcard's neutral grey shape. */
+.tn-box {
+  padding: var(--s-2);
+  background: var(--fill);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  font-size: var(--t-s);
+  color: var(--fg-2);
+}
+
+/* The Wake Word Tuner panel: a sunken box like the picker, holding the session's phases. */
+.tn-panel {
+  padding: var(--s-2);
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+}
+.tn-panel p {
+  margin: 0 0 var(--s-1);
+}
+.tn-panel p:last-child {
+  margin-bottom: 0;
+}
+/* One scored attempt: a track with the brand-gradient fill the sliders wear, the percentage at the
+   end so the bar and the number cannot disagree. */
+.tn-bar {
+  position: relative;
+  height: 16px;
+  margin: var(--s-1) 0;
+  background: var(--fill);
+  border-radius: var(--r-1);
+  overflow: hidden;
+}
+.tn-bar span {
+  display: block;
+  height: 100%;
+  background: var(--grad);
+  border-radius: var(--r-1);
+}
+.tn-bar em {
+  position: absolute;
+  right: var(--s-1);
+  top: 0;
+  line-height: 16px;
+  font-size: var(--t-xs);
+  font-style: normal;
+  color: var(--fg-2);
+}
+.tn-btns {
+  display: flex;
+  gap: var(--s-2);
+  margin-top: var(--s-1);
+}
+
+/* The sources card. */
+.ws-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding: var(--s-1) 0;
+}
+.ws-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ws-add {
+  display: flex;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+}
+.ws-foot {
+  margin-top: var(--s-2);
+}
+.ws-foot a,
+.ws-name a {
+  color: var(--accent);
+}

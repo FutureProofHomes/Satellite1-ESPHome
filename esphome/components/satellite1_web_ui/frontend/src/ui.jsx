@@ -482,9 +482,13 @@ export function Confirm({ label, title, body, confirmLabel, danger, solid, disab
   );
 }
 
-export function Btn({ children, onClick, disabled, danger, solid }) {
+export function Btn({ children, onClick, disabled, danger, solid, cls }) {
   return (
-    <button class={`btn${danger ? " danger" : ""}${solid ? " solid" : ""}`} disabled={disabled} onClick={onClick}>
+    <button
+      class={`btn${danger ? " danger" : ""}${solid ? " solid" : ""}${cls ? ` ${cls}` : ""}`}
+      disabled={disabled}
+      onClick={onClick}
+    >
       {children}
     </button>
   );

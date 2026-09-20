@@ -108,16 +108,28 @@ export const HINTS = {
 
   wake_sound: "Plays a short chime on the speaker the moment the wake word is detected.",
 
-  // One hint for the whole group, on the first row, rather than one per wake word saying the same thing
-  // with a different name in it.
-  //
-  // Covers the whole control, because the control is now one dropdown rather than a switch and a separate
-  // assistant row that each had their own bubble. It also drops an earlier claim - "Home Assistant can
-  // change these too, and both are reading the same setting" - which was true about the stored flag and
-  // misleading about everything else: Home Assistant answers any change to a pairing by pushing the whole
-  // active set back to the device, so switching a wake word off does cost something.
+  // One hint on the first word card's title, rather than the same sentence on both. Two cards
+  // because that is the device: it runs at most two wake words at once, and each pairs with an
+  // assistant of its own in Home Assistant.
   wake_words:
-    "Which wake words this device answers, and which assistant answers each one. Off stops it responding to that word and frees processing for the ones you use. The assistants are your Home Assistant voice pipelines - Preferred follows whichever is marked preferred there. Home Assistant stores the pairing, so it must be reachable to change one.",
+    "This device listens for up to two wake words at once - this card is the first, the card below is the second. Pick each from the list: words beyond the two included ones are downloaded from their source when you choose them, and fetched again at every restart. The assistant under each word is the Home Assistant voice pipeline that answers it; Preferred follows whichever is marked preferred there.",
+
+  // The Voice Pipeline row's tooltip: what a pipeline is and where it lives, because this is the
+  // one dropdown on the card whose contents the device did not make. The docs link renders after
+  // this sentence (TEXT.vp_docs).
+  voice_pipeline:
+    "Voice pipelines decide who answers this wake word: which speech-to-text, which conversation agent, and which voice replies. They are built in Home Assistant under Settings, then Voice assistants - this list is whatever yours offers, and Preferred follows the one marked preferred there.",
+
+  // On every word's tuner row, which owns sensitivity now: no dropdown of guesses, one
+  // measured threshold. The hint explains what Tune actually does, because "the device listens to
+  // your room" is the part nobody expects a settings page to offer.
+  wake_advanced:
+    "How confident the device must be before this word fires. Tune measures it for your room and voice: the device listens to the room's sounds for a moment, then scores you saying the word three times, and sets the threshold between the two - above the noise, below your voice. Re-tune if the room changes, or reset to the tuning the model shipped with.",
+
+  // The Wake Word Sources card title. The trust caveat lives here, once, rather than on every
+  // community row in the picker.
+  wake_sources:
+    "The wake word list is fetched live from these places - nothing is copied to our servers. Anyone can publish a wake word model, and quality varies: the included words are hand-tuned, community ones may fire too eagerly or miss you. Adding a source here only grows the list; a word starts being used when you pick it above.",
 
   // Names the two directions it reaches - answers this device sends elsewhere and answers other
   // devices send here - because the remote half is the invisible one, and names the timer case
@@ -126,8 +138,11 @@ export const HINTS = {
   stop_word:
     'While an answer is playing - this device\u2019s own, or one another Satellite1 routed here - saying "stop" cuts it off everywhere it is playing. A ringing timer can always be silenced this way, whichever way this is set.',
 
-  wake_sensitivity:
-    "How readily the wake word fires. Raise it if the device misses you from across the room; lower it if the television sets it off.",
+  // wake_sensitivity is gone from the app: the shared three-step select confused exactly the
+  // person it needed to help (it silently skipped downloaded words - owner, September 2026), so
+  // sensitivity became each word card's own row. The "Wake word sensitivity" select entity still
+  // exists for Home Assistant; the two write the same cutoffs, last writer wins, and the per-word
+  // override is re-asserted at boot.
 
   // Names the speaker it moves, and names the other slider by its on-screen label and page, because
   // the pair live on different routes again (this one in the home page's Assistant card, the other in
@@ -344,16 +359,114 @@ export const TEXT = {
   media_src_group: "group stream",
   media_src_local: "this speaker",
 
-  // Only when every wake word is off. Phrased as a consequence rather than a warning: it is a reasonable
-  // thing to want, and the way back is the switches directly above it.
+  // Only when both slots are None. Phrased as a consequence rather than a warning: it is a reasonable
+  // thing to want, and the way back is the pickers directly above it.
   no_wake_words: "No wake words are on, so the device will not respond to being spoken to. The mute button and Home Assistant still work.",
 
-  // The first two entries of each wake word's dropdown, both labels for values rather than pipeline names.
-  // `no_wake_word` is what Home Assistant stores in a slot holding nothing, and `preferred` means whichever
-  // pipeline Home Assistant has been told to prefer. Labelled rather than matched by name so that a
-  // customer who calls one of their own pipelines "Preferred" still gets two distinguishable entries.
-  pipeline_off: "Off",
+  // The label for Home Assistant's `preferred` pipeline value, which needs a label rather than a
+  // name so a customer who calls one of their own pipelines "Preferred" still gets two
+  // distinguishable entries. (The old "Off" entry is gone: silencing a slot is the picker's None.)
   pipeline_preferred: "Preferred",
+
+  /* The four cards, in the owner's order, and the massive list inside the pickers. */
+  ww_card1: "Wake Word 1",
+  ww_card2: "Wake Word 2",
+  ww_settings: "Wake Word Settings",
+  ww_search: "Search wake words",
+  ww_included: "Included",
+  // ww_experimental is gone with the experiments folder itself: excluded at enumeration (owner,
+  // September 2026) - their own README says "minimally trained and tested, not supported in any
+  // way", and a word that never fires reads as our bug.
+  //
+  // What the collapsed picker says when the slot holds nothing. The explicit "Disabled" list entry
+  // is gone (owner, September 2026 - it read as one of the words): a slot empties by unchecking
+  // the word it holds, and this line is the state that leaves behind.
+  ww_none: "No wake word selected.",
+  ww_all_langs: "All languages",
+  // The n-more line when a search inside ~800 words still matches a crowd.
+  ww_more: "more match - keep typing",
+  ww_source_loading: "Reading the list\u2026",
+  ww_source_failed: "Couldn't read this source. It may be rate-limited - try again in a minute.",
+  // On an entry whose manifest the browser could not read (big repo without a catalog, or a host
+  // that refuses the browser). The device still verifies everything when the word is picked.
+  ww_unverified: "unchecked until picked",
+
+  /* The voice pipeline row (renamed from Assistant, owner's call - it is Home Assistant's own
+     word for the thing being picked). The hint explains where pipelines come from; the link opens
+     the FutureProofHomes walkthrough for building one. */
+  vp_label: "Voice Pipeline",
+  vp_docs: "Learn how to build one.",
+  vp_docs_url: "https://docs.futureproofhomes.net/satellite1-set-up-voice-control/",
+
+  /* The swap in flight, and its two endings. */
+  ww_downloading: "Downloading\u2026",
+  ww_loading: "Loading\u2026",
+  // A slot that persisted a URL and is between the boot and the fetch. The device retries by
+  // itself, so neither line offers a button.
+  ww_waiting: "Waiting for the network to fetch this word\u2026",
+  ww_retrying: "The device retries on its own.",
+  ww_retry: "Retry",
+  ww_dismiss: "Dismiss",
+  // Prefixes the specific reason from WW_ERR below. The previous word is still listening, which is
+  // worth a clause because a failed swap otherwise reads as a device left deaf.
+  ww_failed: "Couldn't load this wake word - the previous one is still active.",
+
+  // The apply-to-all strings are gone with the feature (owner, September 2026): a general
+  // apply-to-peers mechanism is planned for many controls at once, and this one-off predated it.
+
+  /* The Wake Word Sources card. */
+  ws_title: "Wake Word Sources",
+  ws_add: "Add source",
+  ws_ph: "Paste a GitHub repo or model .json URL",
+  ws_bad_url: "That doesn't look like a GitHub repository or a model .json link.",
+  ws_restore: "Restore default sources",
+  // The footer sentence, split where its two links render: "Don't see your wake word? Request one,
+  // or train your own microWakeWord."
+  ws_footer_q: "Don't see your wake word? ",
+  ws_request: "Request one",
+  ws_or: ", or ",
+  ws_train: "train your own microWakeWord",
+  ws_words: "words",
+  // The remove confirmation's one important fact.
+  ws_remove_t: "Remove this source?",
+  ws_remove_b: "The list above loses its words. A word you already picked keeps working - the device remembers its link, not the source.",
+  ws_remove_c: "Remove",
+
+  /* The sensitivity row and the Wake Word Tuner behind it. The row states what is applied; the
+     panel walks the two phases and speaks in percentages because the scores are percentages. */
+  tn_row: "Wake Word Tuner",
+  tn_tune_now: "Tune Now",
+  tn_reset_default: "Reset Default",
+  // The grey result box under the tuner row, in the transcript subcard's neutral shape: what the
+  // tune concluded, in the same percentage vocabulary the session spoke.
+  tn_box: "Tuned for this room and voice - fires above %s confidence.",
+  // The post-swap invitation, replacing the bare "say it to try it": measuring the fresh word is
+  // the useful first conversation with it.
+  tn_offer: "Tune this word for your room and voice",
+  tn_listen: "Listening to your room\u2026 %ss",
+  tn_listen_sub: "Stay quiet - or let the room be its usual self. The device is measuring what could set this word off by mistake.",
+  tn_noise: "Room noise peak: %s",
+  tn_noise_quiet: "Room noise: quiet",
+  // What the recommendation sentence says when the quiet phase heard nothing above the probe floor.
+  tn_noise_floor: "the room's quiet",
+  tn_speak: 'Now say \u201c%s\u201d - 3 times, from where you normally would.',
+  // A wake model fired but the voice-activity model refused it. The person can fix this one.
+  tn_vad: "That didn't register as speech - move closer or speak up, and try again.",
+  tn_rec: "Recommended: fire above %1 - over the room at %2, under your quietest attempt at %3.",
+  tn_apply: "Apply",
+  tn_confirm: 'Applied. Say \u201c%s\u201d once more to confirm\u2026',
+  tn_heard: "Heard it \u2713",
+  // The honest failure: no threshold separates this word from this room.
+  tn_nogap: "This word can't be told apart from your room right now - its scores overlap the room's noise. Try a quieter moment, or a different wake word.",
+  // The capability fallback: the score channel needs debug logging compiled in (it is, on stock
+  // firmware; a custom build may have turned it off).
+  tn_nocap: "This firmware build can't score attempts, so tuning isn't available. Stock firmware can - this build was compiled without debug logging.",
+  tn_gone: "The tuning session ended. Open it again to start over.",
+
+  /* Diagnostics: the recent detections list. */
+  det_title: "Recent wake detections",
+  det_none: "Nothing detected since the last restart.",
+  det_sub: "Up to eight, newest first, cleared on restart.",
 
   // Shown under the wake words when the assistant selects could not be read and no more specific
   // reason applies (the two below cover blocked actions and an old Home Assistant). Says which half
@@ -368,12 +481,8 @@ export const TEXT = {
   assistant_blocked:
     "Home Assistant is not letting this device perform actions, so the assistants cannot be listed. Wake words switched here still change the device, but Home Assistant may switch them back when it reconnects.",
 
-  // Only with three or more wake words on at once, which needs a build with more models than this product
-  // ships. Home Assistant has two pairings, and sends anything it cannot match to the first one - so the
-  // surplus words work and share an assistant, and their dropdowns show the shared answer rather than
-  // whatever was last picked for them.
-  assistant_slots_full:
-    "Home Assistant can pair only two wake words with an assistant of their own. The rest are answered by the first one's assistant, which is what their dropdowns show.",
+  // assistant_slots_full is gone: the two-slot pickers make three active wake words unrepresentable,
+  // which is better than explaining what happened when there were.
 
   confirm: "Confirm",
   confirm_title: "Are you sure?",
@@ -560,4 +669,23 @@ export const CONFIRM = {
 export const PRESENCE = {
   Approaching: "Closer",
   "Moving Away": "Away",
+};
+
+/**
+ * Why a wake word swap failed, keyed by the loader's SlotError numbers (mww_runtime_loader.h - the
+ * numbers are a contract, appended to and never renumbered). Each line is what the person can act
+ * on, not what the firmware saw; the "previous word still active" reassurance is ww_failed's job,
+ * said once above these.
+ */
+export const WW_ERR = {
+  1: "The link couldn't be reached.",
+  2: "This link is not a microWakeWord model. This device only runs microWakeWord models.",
+  3: "This model's format is a version this firmware doesn't know.",
+  4: "This model was built for a different audio setup and can't run on this device.",
+  5: "This model needs a newer firmware than this device is running. Update the device and try again.",
+  6: "This model is too large for this device.",
+  7: "The download didn't finish. Check the connection and try again.",
+  8: "The downloaded file isn't a usable wake word model.",
+  9: "The device refused the model.",
+  10: "Not enough free memory for this model right now. Restart the device and try again.",
 };
