@@ -244,6 +244,10 @@ class MwwRuntimeLoader : public Component {
   void finalize_job_();
   void apply_request_(uint8_t i, const std::string &spec);
   void apply_cutoff_(uint8_t i, uint8_t value);
+  /// Drops the native API connections a moment from now, so Home Assistant reconnects and
+  /// re-reads the wake word list. Called when the advertised set changes - a downloaded word
+  /// arriving or leaving - never for changes Home Assistant itself originated.
+  void nudge_ha_();
 
   /* ---- the tune session, main loop unless noted ---- */
   void apply_tune_(uint8_t i, bool on);

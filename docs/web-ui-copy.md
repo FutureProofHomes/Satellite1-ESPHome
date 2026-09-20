@@ -174,8 +174,12 @@ where the list comes from.
 
 Sensitivity is the **Wake Word Tuner**'s job (September 20 2026, replacing the five-step presets and
 the two Home Assistant selects of the day before — a dropdown of guesses asked the customer to know
-what this tool measures for them). Each word card's Sensitivity row states what is applied — "Model
-default" or `tn_state_tuned` ("Tuned - fires above 62%") — and **Tune** opens the guided session:
+what this tool measures for them). Each word card's **Wake Word Tuner** row carries two buttons —
+**Tune Now** (the app's one gradient-faced button, the owner's explicit exception to the
+no-gradient rule) and **Reset Default** (factory-reset red: it throws a measurement away, and sits
+disabled until there is one) — with a tuned word's result in the grey `tn_box` beneath, the
+transcript subcard's neutral shape ("Tuned for this room and voice - fires above 62% confidence.").
+Tune Now opens the guided session:
 the device listens to the room for fifteen seconds (`tn_listen`, `tn_listen_sub`), the customer says
 the word three times (`tn_speak`, each attempt a scored bar), and the recommendation (`tn_rec`)
 places the threshold above the room's loudest false score and below the quietest attempt, biased
@@ -183,7 +187,7 @@ toward the noise side. Apply, then one more utterance at the real threshold conf
 `tn_heard`) — which is what replaced the standalone say-it-now test. The honest failures each have a
 line: `tn_nogap` when no threshold separates word from room, `tn_vad` when an attempt did not
 register as speech, `tn_nocap` for a build compiled without the score channel (debug logging), and
-`tn_gone` for an expired session. `tn_reset` hands the model its own tuning back.
+`tn_gone` for an expired session. Reset Default hands the model its own tuning back.
 
 Under the hood the tuner is built entirely on upstream APIs — no fork of `micro_wake_word`: the
 loader subscribes to the logger (the engine logs every detection's probabilities), floors the word's
@@ -196,7 +200,8 @@ re-check them on every bump (the parser site in mww_runtime_loader.cpp says the 
 
 The picker wears the /audio route's tree clothes — the sunken scrolling box, group headers with a
 caret and a count pill, the drawn checkbox — because that is the app's one selection-list pattern.
-Groups are the sources: **Included** first (the two compiled-in words, from the device itself), then
+Groups are the sources: **Built-In wake words** first (the two compiled into the firmware, listed
+by the device itself), then
 one group per source. ESPHome's experiments folder is excluded at enumeration entirely (owner,
 September 2026): its own README says "minimally trained and tested, not supported in any way", and a
 word that never fires reads as our bug. There is no Disabled entry: a slot empties by unchecking
@@ -205,24 +210,29 @@ entities: the list and the swap ride `GET/POST /api/sat1/wakewords` and its `slo
 sub-endpoints, owned by the `mww_runtime_loader` component.
 
 The swap's own line under the picker carries its whole lifecycle: `ww_downloading` with a byte
-count, then `ww_try` — `Ready ✓ - say "…" to try it`, the invitation that doubles as the test
-moment (the line flips to `ww_heard` when the detection ring reports the word fired) — or
-`ww_failed` plus the specific `WW_ERR` reason and a Retry link. During the test window the device
-records the firing but does not start the assistant or play the chime — the test is observation,
-not a conversation (owner, September 2026 hardware pass); a ringing timer still outranks the
-window, so "stop" silences an alarm mid-test. The picker also never offers what the firmware is
-certain to refuse: manifests the browser can read but that are not version 2 (the ESPHome
-repository still hosts its old v1 files next to the v2 ones) are filtered out at enumeration. The reasons are keyed to the
-firmware's SlotError numbers; the one customers will meet most is 2, the not-a-microWakeWord-model
-line, because the most popular wake word collections on GitHub are for a different engine. After a
-successful swap, `ww_apply_q` offers one tap to write the same slots to every other signed-in
-Satellite1, reporting per-device.
+count, then either the ready state or `ww_failed` plus the specific `WW_ERR` reason and a Retry
+link. The picker never offers what the firmware is certain to refuse: manifests the browser can
+read but that are not version 2 (the ESPHome repository still hosts its old v1 files next to the v2
+ones) are filtered out at enumeration. The reasons are keyed to the firmware's SlotError numbers;
+the one customers will meet most is 2, the not-a-microWakeWord-model line, because the most popular
+wake word collections on GitHub are for a different engine. The apply-to-all-Satellite1s offer was
+removed September 20 2026 (owner: a general apply-to-peers mechanism for many controls comes
+later), and so was the post-swap tune invitation — Tune Now on the tuner row is the affordance, and
+a second one nagged.
 
-Home Assistant still owns which assistant answers which word: the Assistant dropdown under each
-picker is `Preferred` plus the customer's pipelines (the old `Off` entry is gone — silencing a slot
-is the picker's None), and the slot-sync keeps Home Assistant's two pairings equal to the two slots.
-A wake word change made from Home Assistant's own select is adopted back into the slots by the
-firmware, which stays the source of truth. With Home Assistant unreachable the dropdown does not
+Home Assistant still owns which pipeline answers which word: the **Voice Pipeline** dropdown
+(renamed from Assistant — it is Home Assistant's own word for the thing being picked) sits last on
+each card, under the tuner, and is `Preferred` plus the customer's pipelines (the old `Off` entry
+is gone — silencing a slot is unchecking its word). Its tooltip (`voice_pipeline`) says pipelines
+are built in Home Assistant under Settings › Voice assistants, ending in the `vp_docs` link to the
+FutureProofHomes walkthrough. The slot-sync keeps Home Assistant's two pairings equal to the two
+slots, and a wake word change made from Home Assistant's own select is adopted back into the slots
+by the firmware, which stays the source of truth. A downloaded word reaches the ESPHome device
+page's wake word field by its real phrase: the firmware prettifies slug phrases from bulk-trained
+manifests ("hey_alice" becomes "Hey Alice") before anything displays them, and since Home Assistant
+only re-reads the wake word list on connect, the loader drops the API connection a moment after the
+advertised set changes - Home Assistant reconnects onto the fresh list, and the app waits out that
+reconnect (and re-reads the payload) before writing the pairing. With Home Assistant unreachable the dropdown does not
 render and one of three lines says what that costs, most specific cause first: `assistant_blocked`
 when the actions checkbox is off (with a **Show fix** link), `ha_too_old` when Home Assistant
 predates 2025.12, and `assistant_needs_ha` for plain unreachable.
@@ -230,8 +240,9 @@ predates 2025.12, and `assistant_needs_ha` for plain unreachable.
 The Wake Word Sources card lists each source with a live word count and a remove ✕ (whose
 confirmation, `ws_remove_b`, owns the one surprising fact: a picked word keeps working, because the
 device remembers its link rather than the source). `ws_ph` invites a GitHub repo or model `.json`
-URL; the foot links `ws_request` — Tater's request-by-issue automation, which trains and publishes
-a word for free — and `ws_train`, the microWakeWord trainer, for the word nobody has made yet.
+URL; the foot reads, verbatim, "Don't see your wake word? Request one, or train your own
+microWakeWord." — the first link landing on the Tater catalog's request-a-wake-word README section
+(the free issue-driven trainer), the second on TaterTotterson/microWakeWord-Trainer-Nvidia-Docker.
 
 Diagnostics gained **Recent wake detections** (`det_title`): the last eight firings with time-ago,
 cleared on restart — the same firmware ring the test moment reads, for chasing "it triggered at

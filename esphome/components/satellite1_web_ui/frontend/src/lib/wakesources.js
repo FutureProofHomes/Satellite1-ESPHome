@@ -78,6 +78,28 @@ const fetchJson = async (url) => {
 const compatible = (m) =>
   m && m.type === "micro" && m.wake_word && m.version === 2 && m.micro && (m.micro.feature_step_size ?? 10) === 10;
 
+/**
+ * Orders a source's words for the picker and marks what needs disambiguating: alphabetical by
+ * phrase (the catalogs arrive grouped by training-generation folder, which scatters the alphabet),
+ * and where the same phrase appears more than once - Tater's collection has 39 such labels, three
+ * "Computer"s among them - each copy gets its `ver` tag shown, the training generation from its
+ * folder (v1..v3 are the original seed batches, v6 the issue-trained additions). A phrase that is
+ * unique keeps a clean row; the tag exists to tell twins apart, not to decorate.
+ */
+function finish(entries) {
+  entries.sort((a, b) => a.word.localeCompare(b.word) || (a.ver || "").localeCompare(b.ver || ""));
+  const seen = new Map();
+  for (const e of entries) seen.set(e.word.toLowerCase(), (seen.get(e.word.toLowerCase()) || 0) + 1);
+  for (const e of entries) e.dup = seen.get(e.word.toLowerCase()) > 1;
+  return entries;
+}
+
+/** The training-generation tag from a catalog folder or path: "microWakeWordsV3/..." -> "v3". */
+const verOf = (text) => {
+  const m = /v(\d+)\//i.exec(`${text}/`);
+  return m ? `v${m[1]}` : "";
+};
+
 /* One enumeration per source per page load. Keyed on the URL; a rejected promise is evicted so a
    rate-limited attempt can be retried by reopening the picker. */
 const cache = new Map();
@@ -127,17 +149,20 @@ async function enumerate_(source) {
       const cat = await fetchJson(raw(branch, "wake_word_manifest.json"));
       const entries = Array.isArray(cat) ? cat : cat.entries;
       if (Array.isArray(entries) && entries.length) {
-        return entries
-          // A catalog entry that declares its manifest version declares it for this filter; one
-          // that does not is left in, and the device's own validation is the gate.
-          .filter((e) => e.version == null || e.version === 2)
-          .map((e) => ({
-            word: e.label || e.name || pretty(e.slug || ""),
-            url: e.url || e.download_url || (e.path ? raw(branch, e.path) : null),
-            langs: e.trained_languages || [],
-            size: e.size || 0,
-          }))
-          .filter((e) => e.word && e.url);
+        return finish(
+          entries
+            // A catalog entry that declares its manifest version declares it for this filter; one
+            // that does not is left in, and the device's own validation is the gate.
+            .filter((e) => e.version == null || e.version === 2)
+            .map((e) => ({
+              word: e.label || e.name || pretty(e.slug || ""),
+              url: e.url || e.download_url || (e.path ? raw(branch, e.path) : null),
+              langs: e.trained_languages || [],
+              size: e.size || 0,
+              ver: verOf(e.source || e.path || ""),
+            }))
+            .filter((e) => e.word && e.url)
+        );
       }
     } catch {
       /* no catalog on this branch; keep going */
@@ -180,6 +205,7 @@ async function enumerate_(source) {
             url: raw(branch, p),
             langs: m.trained_languages || [],
             size: sizes.get(/^https?:/.test(model) ? "" : dir + model) || 0,
+            ver: verOf(p),
           };
         } catch {
           return null;
@@ -188,16 +214,19 @@ async function enumerate_(source) {
     );
     const found = out.filter(Boolean);
     if (!found.length) throw new Error("No wake word models found in this repository");
-    return found;
+    return finish(found);
   }
 
-  return manifests.map((p) => ({
-    word: pretty(p.split("/").pop()),
-    url: raw(branch, p),
-    langs: [],
-    size: 0,
-    unverified: true,
-  }));
+  return finish(
+    manifests.map((p) => ({
+      word: pretty(p.split("/").pop()),
+      url: raw(branch, p),
+      langs: [],
+      size: 0,
+      ver: verOf(p),
+      unverified: true,
+    }))
+  );
 }
 
 /** Speaks the phrase with the browser's own voices - zero firmware bytes. Callers hide the glyph

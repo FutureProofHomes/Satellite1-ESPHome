@@ -13,6 +13,9 @@
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/logger/logger.h"
 #include "esphome/components/network/util.h"
+#ifdef USE_API
+#include "esphome/components/api/api_server.h"
+#endif
 #include "esphome/core/application.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
@@ -334,6 +337,7 @@ void MwwRuntimeLoader::apply_request_(uint8_t i, const std::string &spec) {
   }
 
   if (spec.empty()) {
+    const bool removed_runtime = s.model_id == runtime_id_(i);
     this->unload_slot_(s);
     s.spec.clear();
     s.pending.clear();
@@ -342,6 +346,8 @@ void MwwRuntimeLoader::apply_request_(uint8_t i, const std::string &spec) {
     s.cutoff = 0;
     this->save_slot_(i);
     this->reconcile_after_ms_ = millis() + 3000;
+    if (removed_runtime)
+      this->nudge_ha_();
     this->publish_view_();
     return;
   }
@@ -350,6 +356,7 @@ void MwwRuntimeLoader::apply_request_(uint8_t i, const std::string &spec) {
     auto *model = this->builtin_by_id_(spec);
     if (model == nullptr)
       return;
+    const bool removed_runtime = s.model_id == runtime_id_(i);
     this->unload_slot_(s);
     model->enable();
     s.spec = spec;
@@ -361,6 +368,8 @@ void MwwRuntimeLoader::apply_request_(uint8_t i, const std::string &spec) {
     s.cutoff = 0;
     this->save_slot_(i);
     this->reconcile_after_ms_ = millis() + 3000;
+    if (removed_runtime)
+      this->nudge_ha_();
     this->publish_view_();
     return;
   }
@@ -388,6 +397,29 @@ void MwwRuntimeLoader::apply_cutoff_(uint8_t i, uint8_t value) {
            value == 0 ? " (model default)" : " (tuned)");
   this->save_slot_(i);
   this->publish_view_();
+}
+
+void MwwRuntimeLoader::nudge_ha_() {
+#ifdef USE_API
+  // Home Assistant caches the wake word list it fetched when its API connection came up, and this
+  // generation of the protocol has no configuration-changed push - so a word downloaded after that
+  // is invisible to the ESPHome device page (the "Hey Nexus" the customer just picked shows as
+  // nothing) until Home Assistant asks again. The one lever that exists is the connection itself:
+  // drop it cleanly and Home Assistant reconnects within seconds and re-fetches, and the fresh
+  // list carries the new word's real phrase plus the active set its selects read. Delayed a beat
+  // so the swap's HTTP response and the app's follow-up writes drain first.
+  this->set_timeout("wl_nudge_ha", 2500, []() {
+    if (api::global_api_server == nullptr)
+      return;
+    bool any = false;
+    for (const auto &conn : api::global_api_server->active_clients()) {
+      conn->on_fatal_error();
+      any = true;
+    }
+    if (any)
+      ESP_LOGI(TAG, "Wake word list changed; dropping the API connection so Home Assistant re-reads it");
+  });
+#endif
 }
 
 void MwwRuntimeLoader::apply_configured_cutoff_(Slot &s) {
@@ -613,6 +645,20 @@ void MwwRuntimeLoader::run_job_() {
     j.error = ERR_NOT_MANIFEST;
     return;
   }
+
+  // The phrase is display copy everywhere it goes - this card, Home Assistant's wake word
+  // dropdown, the detections history - and the bulk-trained catalogs write it as a slug:
+  // "hey_alice" where the list the customer picked from said "Hey Alice" (owner hit exactly that).
+  // Underscores become spaces and each word's first letter capitalizes; a manifest that already
+  // says "Hey Jarvis" passes through untouched.
+  bool cap = true;
+  for (auto &ch : j.word) {
+    if (ch == '_')
+      ch = ' ';
+    if (cap && ch >= 'a' && ch <= 'z')
+      ch -= 'a' - 'A';
+    cap = ch == ' ';
+  }
   if (version != 2) {
     j.error = ERR_VERSION;
     return;
@@ -789,6 +835,8 @@ void MwwRuntimeLoader::finalize_job_() {
   this->save_slot_(j.slot);
   j.data.reset();
   this->reconcile_after_ms_ = millis() + 3000;
+  if (!j.boot)
+    this->nudge_ha_();
   ESP_LOGI(TAG, "Wake word \"%s\" loaded into slot %u from %s", s.word.c_str(), j.slot, s.spec.c_str());
   this->publish_view_();
 }

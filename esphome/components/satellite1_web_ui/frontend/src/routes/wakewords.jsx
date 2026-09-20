@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { HINTS, TEXT, WW_ERR } from "../copy.js";
 import {
+  NO_WAKE_WORD,
   PIPELINE_PREFERRED,
   entity,
   haBlocked,
@@ -26,6 +27,7 @@ import {
   haTooOld,
   pathFor,
   post,
+  requestJson,
   useAssist,
   useWakeSlots,
 } from "../lib/device.js";
@@ -110,6 +112,10 @@ function PickRow({ entry, selected, disabled, onPick }) {
         &ldquo;{entry.word}&rdquo;
       </button>
       {meta && <span class="tree-why">{meta}</span>}
+      {/* The training-generation tag, shown only when this phrase has twins in the list - it
+          exists to tell three "Computer"s apart, not to decorate every row. The count pill's
+          clothes, because it is the same kind of small fact. */}
+      {entry.dup && entry.ver && <span class="tree-n">{entry.ver}</span>}
       <SpeakBtn word={entry.word} />
     </div>
   );
@@ -442,7 +448,7 @@ function TunerPanel({ i, word, cut, wakeRead, onClose }) {
 
 /** One wake word card's whole body: the picker, the swap line, the Assistant pairing, and the
  *  tuner-backed sensitivity. The card title carries the slot's name, so there is no label line. */
-function SlotSection({ i, slot, swap, tuning, tuneOffer, groups, otherWord, busy, assist, wakeRead, onPick, onCutoff, onRetry, onTune, onTuneClose }) {
+function SlotSection({ i, slot, swap, tuning, groups, otherWord, busy, assist, wakeRead, onPick, onCutoff, onRetry, onTune, onTuneClose }) {
   const [open, setOpen] = useState(false);
 
   // What the collapsed control says: the swap's optimistic word while one runs, otherwise what the
@@ -484,15 +490,6 @@ function SlotSection({ i, slot, swap, tuning, tuneOffer, groups, otherWord, busy
       )}
       {!swapping && !failed && waiting && (
         <p class="t-warn sm ww-note">{slot.st === 3 ? TEXT.ww_waiting : `${WW_ERR[slot.err] || ""} ${TEXT.ww_retrying}`}</p>
-      )}
-      {/* The freshly downloaded word's next step is measuring it, not a bare "say it" - the tuner's
-          confirm beat is where hearing it proves something. */}
-      {tuneOffer && !tuning && !swapping && !failed && word && (
-        <p class="sm ww-note ww-try">
-          <button class="linkish" onClick={onTune}>
-            {TEXT.tn_offer}
-          </button>
-        </p>
       )}
 
       {/* The tuner first, directly under the word it measures (owner's order, September 2026):
@@ -560,7 +557,6 @@ function WakeCards({ ctx, wake, wakeRead, setSlot, setCutoff, assist, groups }) 
 
   const [swaps, setSwaps] = useState({}); // i -> {phase, word, spec, err, dl, tot}
   const [tuner, setTuner] = useState(null); // the slot with an open tuner panel, one at a time
-  const [tuneOffer, setTuneOffer] = useState(null); // slot offered a tune after a fresh swap
   const alive = useRef(true);
   useEffect(() => () => (alive.current = false), []);
 
@@ -568,17 +564,42 @@ function WakeCards({ ctx, wake, wakeRead, setSlot, setCutoff, assist, groups }) 
   const slotAt = (i) => slots.find((s) => s.i === i);
   const anyBusy = Object.values(swaps).some((s) => s?.phase === "busy");
 
-  const syncAssist = async (prevWord, nextWord) => {
-    if (!assist.ready) return;
-    // Old word out of Home Assistant's pairing first, so the new one has a free slot to take.
-    if (prevWord && prevWord.toLowerCase() !== (nextWord || "").toLowerCase()) await assist.syncSlot(prevWord, false);
-    if (nextWord) await assist.syncSlot(nextWord, true);
+  /**
+   * Writes the swap into Home Assistant's wake word selects, directly and from a fresh payload.
+   *
+   * Not through useAssist's syncSlot, deliberately: its free-slot guard reads the closure this
+   * function captured before the swap, where the old word still looks enabled and so its slot
+   * still looks taken - and the write silently never happened (hardware-found: the device said
+   * "Hey Nexus", Home Assistant's dropdown listed it, and the selection sat on the old word).
+   * Home Assistant's select never self-selects either - reading its source settled that: it keeps
+   * its stored option, only *validates* it against the device's active list, and only a
+   * select_option call moves it. So this is that call, aimed by what the fresh payload actually
+   * says: the select naming the word we replaced, else one holding no_wake_word, else this slot's
+   * position.
+   */
+  const syncAssist = async (i, prevWord, nextWord) => {
+    const fresh = await requestJson("/api/sat1/ha").catch(() => null);
+    const sel = fresh?.d?.asst?.s;
+    if (!Array.isArray(sel) || !sel.length) return;
+    const named = (w) => sel.findIndex((x) => w && (x[1] || "").toLowerCase() === w.toLowerCase());
+    if (!nextWord) {
+      // The slot emptied: clear whichever select named the removed word, and nothing else.
+      const off = named(prevWord);
+      if (off >= 0) await post(`/api/sat1/ha/select?e=${encodeURIComponent(sel[off][0])}&o=${NO_WAKE_WORD}`);
+      return;
+    }
+    if (named(nextWord) >= 0) return; // Home Assistant already agrees
+    let at = named(prevWord);
+    if (at < 0) at = sel.findIndex((x) => x[1] === NO_WAKE_WORD);
+    if (at < 0) at = Math.min(i, sel.length - 1);
+    await post(`/api/sat1/ha/select?e=${encodeURIComponent(sel[at][0])}&o=${encodeURIComponent(nextWord)}`);
+    // Read back so the Voice Pipeline dropdowns render from what Home Assistant now holds.
+    await ctx.haRefresh();
   };
 
   const choose = async (i, { spec, word }) => {
     const prevWord = slotAt(i)?.w || "";
     if (tuner === i) setTuner(null);
-    setTuneOffer((t) => (t === i ? null : t));
     setSwaps((s) => ({ ...s, [i]: { phase: "busy", word, spec } }));
     const r = await setSlot(i, spec).catch(() => ({ ok: false }));
     if (!r.ok) {
@@ -597,8 +618,12 @@ function WakeCards({ ctx, wake, wakeRead, setSlot, setCutoff, assist, groups }) 
         const arrived = spec === "none" ? s.m === "" : s.m === spec;
         if (arrived && s.st === 0) {
           setSwaps((prev) => ({ ...prev, [i]: null }));
-          await syncAssist(prevWord, s.w || word);
-          if (spec !== "none") setTuneOffer(i);
+          // A downloaded word is not in Home Assistant's cached options yet - the device drops the
+          // API connection a moment after the swap so Home Assistant re-reads the list (which is
+          // how "Hey Alice" reaches the ESPHome UI's wake word field at all). The pairing write
+          // therefore waits out that reconnect before naming the fresh option.
+          if (isUrl(spec)) await sleep(8000);
+          await syncAssist(i, prevWord, spec === "none" ? "" : s.w || word);
           return;
         }
         if (s.st === 2 && (arrived || s.err)) {
@@ -641,7 +666,6 @@ function WakeCards({ ctx, wake, wakeRead, setSlot, setCutoff, assist, groups }) 
         slot={slotAt(i)}
         swap={swaps[i]}
         tuning={tuner === i}
-        tuneOffer={tuneOffer === i}
         groups={groups}
         otherWord={slotAt(1 - i)?.w || swaps[1 - i]?.word || ""}
         busy={anyBusy}
@@ -654,10 +678,7 @@ function WakeCards({ ctx, wake, wakeRead, setSlot, setCutoff, assist, groups }) 
           wakeRead();
         }}
         onRetry={() => choose(i, { spec: swaps[i].spec, word: swaps[i].word })}
-        onTune={() => {
-          setTuneOffer((t) => (t === i ? null : t));
-          setTuner(i);
-        }}
+        onTune={() => setTuner(i)}
         onTuneClose={() => {
           setTuner(null);
           wakeRead();

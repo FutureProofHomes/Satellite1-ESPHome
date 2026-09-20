@@ -373,7 +373,9 @@ export const TEXT = {
   ww_card2: "Wake Word 2",
   ww_settings: "Wake Word Settings",
   ww_search: "Search wake words",
-  ww_included: "Included",
+  // "Built-In", not "Included": the owner's word for the two words compiled into the firmware,
+  // and it reads as the guarantee it is - these two exist without any download.
+  ww_included: "Built-In wake words",
   // ww_experimental is gone with the experiments folder itself: excluded at enumeration (owner,
   // September 2026) - their own README says "minimally trained and tested, not supported in any
   // way", and a word that never fires reads as our bug.
@@ -440,9 +442,6 @@ export const TEXT = {
   // The grey result box under the tuner row, in the transcript subcard's neutral shape: what the
   // tune concluded, in the same percentage vocabulary the session spoke.
   tn_box: "Tuned for this room and voice - fires above %s confidence.",
-  // The post-swap invitation, replacing the bare "say it to try it": measuring the fresh word is
-  // the useful first conversation with it.
-  tn_offer: "Tune this word for your room and voice",
   tn_listen: "Listening to your room\u2026 %ss",
   tn_listen_sub: "Stay quiet - or let the room be its usual self. The device is measuring what could set this word off by mistake.",
   tn_noise: "Room noise peak: %s",
