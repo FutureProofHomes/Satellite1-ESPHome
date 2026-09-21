@@ -726,7 +726,13 @@ export function useMedia(enabled) {
  * `maCmd` posts one relayed command - like, join, unjoin, vol, seek - and is fire-and-forget for
  * the reason mediaCmd is: the device queues it, the action call captures no response, and the
  * resync it schedules is the only confirmation that exists. `maRead` is the early re-read a group
- * edit schedules so the change shows before the next full cycle.
+ * edit schedules so the change shows before the next full cycle. `maAsk` is one refresh-and-read
+ * cycle on demand - the question the footer asks when the group stream stops ("paused or ended?")
+ * and repeats slowly while a relay-reported pause is what keeps the paused card up.
+ *
+ * The payload lands with `at`, this browser's clock at the read. The device's `age` says how old
+ * the payload was when served; `at` is what lets a consumer keep counting after that, because a
+ * copy held in state for ten minutes is ten minutes staler than its `age` claims.
  */
 /** How old (seconds) the device's cached Music Assistant payload may be before the badge read
  *  asks for a fresh one. Thirty seconds spans a route change or reload comfortably while staying
@@ -738,7 +744,16 @@ export function useMaData(enabled) {
 
   const read = async () => {
     const json = await requestJson("/api/sat1/ma").catch(() => null);
-    if (json) setMa(json);
+    if (json) setMa({ ...json, at: Date.now() });
+  };
+
+  /** One refresh-and-read cycle, the shape the standing cycle below uses: ask the device to sync,
+   *  give the action call's round trip time to land, read the result back. Independent of
+   *  `enabled` on purpose - its callers are exactly the moments nothing has the panel open. */
+  const ask = async () => {
+    await post("/api/sat1/ma/refresh").catch(() => {});
+    await new Promise((r) => setTimeout(r, 1400));
+    await read();
   };
 
   // The badge read. It starts from the payload the device last landed - but "last landed" can be
@@ -756,8 +771,12 @@ export function useMaData(enabled) {
     (async () => {
       const json = await requestJson("/api/sat1/ma").catch(() => null);
       if (!live) return;
-      if (json) setMa(json);
-      if (json && json.age != null && json.age <= MA_BADGE_STALE_S) return;
+      if (json) setMa({ ...json, at: Date.now() });
+      // HA_NEVER (-1) means the device has landed nothing since boot - the emptiest cache there
+      // is, not the freshest, so it must not pass the <= staleness test below. It did until
+      // September 2026, which left a page loaded right after a reboot never asking at all - and
+      // once the payload carried the MA player's state, that silence hid a resumable pause.
+      if (json && json.age != null && json.age !== HA_NEVER && json.age <= MA_BADGE_STALE_S) return;
       await post("/api/sat1/ma/refresh").catch(() => {});
       await new Promise((r) => setTimeout(r, 1400));
       if (live) await read();
@@ -799,7 +818,7 @@ export function useMaData(enabled) {
     return post(`/api/sat1/ma/${cmd}${qs ? `?${qs}` : ""}`);
   };
 
-  return { ma, maCmd, maRead: read };
+  return { ma, maCmd, maRead: read, maAsk: ask };
 }
 
 /* ------------------------------------------------------------------ */

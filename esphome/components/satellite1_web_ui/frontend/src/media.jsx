@@ -26,13 +26,29 @@
  * player and would report the footer should go idle, stranding the resume it just promised. The
  * footer is the only witness that the group is resumable, so pausing sets `held`, which keeps the
  * paused-group controls up and aims every command at the group player by name (`src=`). Cleared
- * when anything else starts playing, or when the group resumes. A stream paused from Music
- * Assistant's own UI shows idle here, honestly: nothing on this device can tell that apart from a
- * stream that ended.
+ * when anything else starts playing, or when the group resumes.
+ *
+ * A pause made anywhere else - Music Assistant's own UI, another Satellite's footer - used to show
+ * idle here, because nothing on this device can tell it apart from a stream that ended. The upper
+ * tiers can (owner's screenshots, September 2026: MA's bar holding the paused track over this
+ * footer's "Nothing playing"), though not the way one would hope: pausing a Sendspin player stops
+ * the stream, so the MA *player* - and with it the Home Assistant entity - reports idle, never
+ * paused (verified against the integration source and a live pause). What MA's own bar actually
+ * shows is the *queue's* current item, which survives the pause as the resume point. So that is
+ * the signal both tiers now read: the relay payload carries the entity's state and media_title
+ * (`st`/`ti` - Home Assistant mirrors the queue's current item as media_title for every playback
+ * scenario), and the socket reads the queue's current_item directly. "Not playing, but still
+ * holding a track" props the paused-group card up exactly as `held` does - same controls, same
+ * src= aiming, same resume - and the moment the group stream stops, one relayed sync asks the
+ * question the device cannot answer alone: paused or ended? While a relay-reported pause is the
+ * only thing holding the card up, the ask repeats slowly, so a queue cleared from elsewhere goes
+ * dark here within a minute rather than never - the same moment MA's own bar goes dark, which is
+ * the parity this exists for. With no tier to answer, everything degrades to the held-pause
+ * behaviour above, honestly.
  *
  * Track metadata renders only while the group stream owns the footer, because a stopped stream
- * keeps its last track in the device's cache and showing it would caption silence. The held pause
- * keeps it: that track is exactly what resume will continue.
+ * keeps its last track in the device's cache and showing it would caption silence. The held or
+ * reported pause keeps it: that track is exactly what resume will continue.
  */
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 
@@ -42,6 +58,18 @@ import { maSettings, useMaSocket } from "./lib/ma.js";
 import { Chevron, rangeFill, useDrawer, useHeld, useSheetDrag } from "./ui.jsx";
 
 const MEDIA_STATE = { 2: "Playing", 3: "Paused", 4: "Announcing" };
+
+/** How stale, in seconds, the relay payload may grow while its "paused" claim still props the
+ *  paused-group card up. Counted from when Home Assistant rendered it (`age`) plus how long this
+ *  browser has held it (`at`), because both halves go stale independently. Two minutes spans the
+ *  recheck cadence below with room for a slow round trip, and is short enough that a relay that
+ *  stopped answering takes the card down rather than captioning silence indefinitely. */
+const MA_PAUSED_TRUST_S = 120;
+
+/** How often the relay is re-asked while its pause report is the only thing holding the card up.
+ *  One action call a minute, roughly, and only for as long as a paused group is actually showing -
+ *  the price of a queue cleared from elsewhere going dark here within a minute rather than never. */
+const MA_PAUSED_RECHECK_MS = 45000;
 
 /** Bit numbers of the Sendspin controller-command enum, exactly as `sup` carries them. Only the
  *  bits that decide whether a control renders; the rest are commands the footer always offers. */
@@ -220,8 +248,10 @@ function tintStyle(col) {
 /* ------------------------------------------------------------------ */
 
 /** The card's logic, verbatim where it could be: which source owns the footer, the held pause, and
- *  where each command must land. */
-function useMediaModel() {
+ *  where each command must land. `maPaused` is the upper tiers' word that the group is paused (the
+ *  file comment's second pause path); it joins `held` rather than replacing it, because each covers
+ *  the other's blind spot - `held` works with no tier answering, the tiers work across browsers. */
+function useMediaModel(maPaused) {
   const { media, mediaCmd } = useMedia(true);
   const [held, setHeld] = useState(false);
 
@@ -234,7 +264,9 @@ function useMediaModel() {
     if (ssPlaying || (media?.src === "local" && deviceActive)) setHeld(false);
   }, [ssPlaying, media?.src, deviceActive]);
 
-  const groupHeld = held && !deviceActive && media?.ss_state != null;
+  // maPaused needs no clearing of its own: it is derived from the tiers' live view, so the group
+  // resuming or the queue being cleared is what makes it false, wherever that happens.
+  const groupHeld = (held || maPaused) && !deviceActive && media?.ss_state != null;
   const sendspin = groupHeld || media?.src === "sendspin";
   const playing = !groupHeld && media?.state === 2;
   const active = deviceActive || groupHeld;
@@ -322,7 +354,7 @@ function useTiers(ha, mac, wake) {
 
   const disc = ha?.d?.ma;
   const me = disc?.e || "";
-  const { ma, maCmd, maRead } = useMaData(!!me && !wsOn && wake);
+  const { ma, maCmd, maRead, maAsk } = useMaData(!!me && !wsOn && wake);
   const live = ma?.d?.e ? ma.d : null;
 
   // A group edit shows up only after the device's own resync lands (~1s after the action call), so
@@ -404,6 +436,10 @@ function useTiers(ha, mac, wake) {
     disc,
     me,
     maCmd,
+    // The raw relay payload rides out beside `live` because the paused-group logic needs the parts
+    // `live` drops: `age` and `at`, which decide whether a "paused" claim is fresh enough to trust.
+    ma,
+    maAsk,
     live,
     members,
     addables,
@@ -828,11 +864,56 @@ function BarTitle({ text }) {
 }
 
 export function MediaFooter({ ha, mac }) {
-  const model = useMediaModel();
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState(false);
   const tiers = useTiers(ha, mac, open || panel);
+
+  // The upper tiers' word that the group is paused - the file comment's second pause path. Neither
+  // tier ever literally says "paused" for a Sendspin player (the pause stops the stream and the MA
+  // player goes idle), so the test on both is the one MA's own bar uses: not playing, but the
+  // queue still holds a current item - the resume point. The socket reads the queue directly and
+  // is believed outright; the relay reads the Home Assistant entity (whose media_title mirrors the
+  // queue's current item), is believed only while fresh (its `age` when served plus how long this
+  // render has held it), and only when no socket is up to contradict it. Either way the claim
+  // rides into the model as one boolean, where it props the paused-group card up exactly as a held
+  // pause does. The literal "paused" states are still honoured for the day a Sendspin pause stops
+  // meaning "stop": they cost nothing and can only ever agree.
+  const wsQ = tiers.wsOn ? tiers.ws.queue : null;
+  const wsPaused =
+    tiers.wsOn &&
+    (tiers.ws.me?.state === "paused" || (wsQ != null && wsQ.state !== "playing" && wsQ.current_item != null));
+  const maFresh =
+    tiers.ma?.at != null && tiers.ma.age >= 0 && tiers.ma.age + (Date.now() - tiers.ma.at) / 1000 < MA_PAUSED_TRUST_S;
+  const relayPaused =
+    !tiers.wsOn &&
+    maFresh &&
+    (tiers.ma?.d?.st === "paused" || (tiers.ma?.d?.st === "idle" && !!tiers.ma?.d?.ti));
+
+  const model = useMediaModel(wsPaused || relayPaused);
   const tint = tintStyle(useArtColor(model.art));
+
+  // The group stream just stopped, which on this device is one fact wearing two meanings: paused
+  // somewhere, or ended. One relayed sync asks Home Assistant which - the transition is the only
+  // moment the question has a fresh answer, so it is asked exactly then rather than on a poll.
+  const ssState = model.media?.ss_state;
+  const prevSs = useRef(ssState);
+  useEffect(() => {
+    const was = prevSs.current;
+    prevSs.current = ssState;
+    if (was === 2 && ssState != null && ssState !== 2) tiers.maAsk();
+    // maAsk is a stable question, not a dependency; only the transition should re-run this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ssState]);
+
+  // While a relay-reported pause is the only thing holding the card up, re-ask slowly, so the trust
+  // window above keeps being re-earned for as long as the pause is real. The open panels run their
+  // own faster cycle and the socket streams updates unasked, so both cases are excused here.
+  useEffect(() => {
+    if (!relayPaused || open || panel) return undefined;
+    const t = setInterval(() => tiers.maAsk(), MA_PAUSED_RECHECK_MS);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relayPaused, open, panel]);
 
   // Waits for the first poll rather than painting an empty shell, exactly as the card did.
   if (!model.media) return null;

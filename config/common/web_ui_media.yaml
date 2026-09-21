@@ -26,6 +26,17 @@ substitutions:
   # the degenerate group of one explicit rather than special-cased in the app. `sh` and `rp` are
   # shuffle and repeat as Home Assistant sees them - the Sendspin controller state usually agrees,
   # but when only one side is available the app should not have to guess which.
+  #
+  # `st` is the player's state as Home Assistant reports it - "playing", "paused", "idle", "off" -
+  # and `ti` is its media_title attribute, empty when Home Assistant carries none. Together they
+  # answer the one question the Sendspin protocol cannot: its vocabulary is playing or stopped, so
+  # a group stream paused from Music Assistant's own UI looks to the device exactly like one that
+  # ended. Music Assistant itself has the same gap - pausing a Sendspin player stops the stream and
+  # the player reports idle, so `st` alone never says "paused" (verified against the integration
+  # source and a live pause, September 2026). What MA's own bar shows instead is the queue's
+  # current item, which Home Assistant mirrors as the entity's media_title for every playback
+  # scenario - so "idle with a title" is the footer's paused signal, the same one MA's UI uses,
+  # and "idle without one" is a stream that is truly over.
   web_ui_media_jinja: >-
     {% set my = mac | lower | replace(':', '') %}
     {% set sn = namespace(n='') %}
@@ -69,6 +80,8 @@ substitutions:
       {% endfor %}
     {% endif %}
     {{ {'d': ({'e': f.e,
+               'st': states(f.e),
+               'ti': state_attr(f.e, 'media_title') or '',
                'sh': 1 if state_attr(f.e, 'shuffle') else 0,
                'rp': state_attr(f.e, 'repeat') or 'off',
                'g': out.g} if f.e else {'e': ''}) | to_json} | to_json }}
