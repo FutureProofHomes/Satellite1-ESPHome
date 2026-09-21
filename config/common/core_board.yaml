@@ -7,12 +7,54 @@ esp32:
   board: esp32-s3-devkitc-1
   variant: ESP32S3
   flash_size: 16MB
+
+  # Where a crash writes its evidence: ESP-IDF's panic handler stores registers, the faulting PC
+  # and every task's stack into this partition, and crash_report (below) reads it back after the
+  # reboot. 64KB holds this firmware's task set comfortably; a dump that would not fit is truncated
+  # by IDF, not refused.
+  #
+  # Read this before chasing two things nobody should chase again:
+  #
+  # 1) The partition table lives at flash offset 0x8000 and OTA never rewrites it, so a fielded
+  #    device gains this partition only from a USB/serial flash. Until then the panic handler logs
+  #    a harmless "No core dump partition found" at crash time and everything else keeps working -
+  #    the crash_report component's RTC flight recorder and NVS crash ring do not need it.
+  #
+  # 2) That one USB flash also RESETS EVERY STORED SETTING (Wi-Fi provisioning, the generated web
+  #    UI password, routing/ducking selections, wake word slots). Not an esptool quirk: the 16MB
+  #    table was exactly full, so ESPHome pays for this partition by shrinking app0/app1 by 32KB
+  #    each, which moves nvs to a different offset - and NVS data at the old offset is
+  #    unreachable at the new one. A one-time cost per device, paid at the same flash that
+  #    delivers the partition.
+  partitions:
+    - name: coredump
+      type: data
+      subtype: coredump
+      size: 0x10000
+
   framework:
     type: esp-idf
 
     sdkconfig_options:
       CONFIG_SPIRAM_RODATA: "y"
       CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+
+      # Core dump to the partition above, in ELF with a CRC32 - ELF because
+      # esp_core_dump_get_summary() (the on-device "what crashed" readout) only exists for ELF
+      # dumps, CRC32 rather than SHA because the integrity check runs at every crashed boot.
+      # The dedicated 1792-byte dump stack is not optional comfort: the crashing task's stack may
+      # itself be the corruption, and a dump written from it would destroy the evidence it is
+      # collecting. That stack is a static buffer - it is most of what this feature costs in
+      # internal RAM.
+      CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH: "y"
+      CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF: "y"
+      CONFIG_ESP_COREDUMP_CHECKSUM_CRC32: "y"
+      CONFIG_ESP_COREDUMP_STACK_SIZE: "1792"
+
+      # A hardware watchpoint on each task's stack canary: a stack overflow faults at the
+      # overflowing store instead of corrupting the neighbouring TCB and failing somewhere
+      # unrelated later. Zero RAM - the S3 has two watchpoints and FreeRTOS gets this one.
+      CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK: "y"
 
       CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
       CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
@@ -33,6 +75,27 @@ psram:
 # Moves every ESPHome component object (~45KB of main.cpp .bss) from internal DRAM into PSRAM,
 # minus the objects embedding FreeRTOS TCBs. See esphome/components/extram_bss for the audit.
 extram_bss:
+
+# Wall-clock time, which nothing in this config carried before the crash reports needed one. The
+# homeassistant platform rather than sntp, by owner decision (September 21 2026): it rides the
+# native API connection the device already holds, where sntp would spend a UDP socket from the
+# budgeted socket table - and a crash timestamp that is only as good as the last Home Assistant
+# sync is exactly good enough, because crash_report marks time into RTC memory every few seconds
+# and computes the stamp from uptime deltas when the sync is stale.
+time:
+  - platform: homeassistant
+    id: ha_time
+
+# The crash flight recorder: a log tail and a time mark in RTC slow memory (zero internal DRAM,
+# survives every warm reset including panics), harvested at the boot after a crash together with
+# the core dump summary into an NVS ring of the last 8 crashes. The web app's Diagnostics route
+# serves all of it - see satellite1_web_ui's crash endpoints. INFO is the capture floor because
+# DEBUG floods the 4KB ring in seconds on a chatty voice pipeline; raise it to DEBUG on a single
+# unit during an active hunt, not on a fleet.
+crash_report:
+  id: crash_rpt
+  time_id: ha_time
+  capture_level: INFO
 
 i2c:
   - id: i2c_0

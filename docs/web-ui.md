@@ -503,6 +503,81 @@ restored value at boot and the turn action writes a stale state into the store.
 This replaced a comma-separated text entity, and it is a breaking change with renamed and deleted
 entities. [TTS-Routing.md](TTS-Routing.md) has the upgrade notes.
 
+## Crash reports
+
+Built September 2026 (plan file `crash_capture_on_diagnostics_d392c408`), after units in the field
+power-cycled spontaneously and the only evidence afterwards was `Last restart: Panic or exception`
+over an empty log panel. Three capture layers now survive a crash, each answering a question the
+others cannot:
+
+- **Core dump to flash** — *where it crashed*. ESP-IDF's panic handler writes registers, the
+  faulting PC and every task's stack into a dedicated 64KB `coredump` partition
+  (`config/common/core_board.yaml`), in ELF with a CRC32. The `crash_report` component reads the
+  summary back at the next boot: crashed task, exception cause, PC, backtrace addresses, and IDF's
+  own panic text ("LoadProhibited", "assert failed: …").
+- **RTC flight recorder** — *when, and what led up to it*. RTC slow memory survives every warm
+  reset including panics, so `crash_report` keeps two things there: a time mark refreshed every 10
+  seconds (last-known wall time from the `homeassistant` time platform plus uptime, so a crash is
+  stamped even when the last Home Assistant sync is stale), and a 4KB ring of recent log lines fed
+  from the logger's listener hook at an INFO floor (DEBUG would flood 4KB in seconds; raise
+  `capture_level` on a single unit during an active hunt, not on a fleet). Costs zero internal
+  DRAM.
+- **NVS crash ring** — *history that survives power loss*. At the boot after a crash the component
+  appends one compact record (reason, stamp, task, cause, PC, backtrace) to a ring of the last 8
+  in NVS, ~1.4KB living in PSRAM at runtime.
+
+The Diagnostics route's **Crash Reports** card, directly under Device, serves all of it: the
+records newest-first with best-effort timestamps (wall clock when known; "≈ now − uptime" for the
+most recent crash; "2h 14m after power-on · 3 restarts ago" beyond that), the pre-crash log tail
+behind a Show/Hide row, and Crash dump / Crash history rows. Four endpoints back it, all
+session-gated because a dump is raw RAM contents: `GET /api/sat1/crash` (the records as JSON),
+`GET /api/sat1/crash/log` (the tail as text/plain), `GET /api/sat1/crash/dump.bin` (the raw
+partition image), and `POST /api/sat1/crash/erase`. All streaming is chunked from flash through one
+small PSRAM buffer. The state payload carries a `crash` count so the card knows to fetch.
+
+The card saves the dump through an in-page Blob rather than a plain link, the Export Logs recipe,
+and the reason is worth keeping so nobody re-litigates it: Chromium-family browsers interpose a
+"file may have been tampered with" interstitial on any download delivered over plain HTTP - it keys
+on the transport, not the file type, so an on-the-fly zip wrapper that existed for one build solved
+nothing and was reverted. A Blob minted in-page is a local file to the browser and saves silently,
+whatever its extension. (`curl` against the endpoint is unaffected either way. A base64
+view-in-browser variant also existed for one build and was cut at the owner's call - the bytes are
+useless until decoded against the ELF anyway.)
+
+**Decoding a dump.** The summary on the card usually answers "what crashed" by itself. The full
+dump decodes only against the exact ELF of the running build:
+
+```sh
+espcoredump.py --chip esp32s3 info_corefile -t raw -c satellite1-xxxxxx-coredump.bin \
+    config/.esphome/build/satellite1/build/firmware.elf
+```
+
+(`espcoredump.py` ships with ESP-IDF; the ELF path is where a local `esphome compile` leaves it —
+the Device Builder keeps one in its own build directory. `-t raw` because the download is the
+partition's own framing, header and checksum included.) Release artifacts are `.bin`-only today,
+so a dump from a release build cannot be decoded unless CI starts archiving `firmware.elf` — a
+known gap, recorded in the master plan, deliberately not built with this feature. The backtrace
+addresses on the card can also be resolved one at a time with `xtensa-esp32s3-elf-addr2line -e
+firmware.elf <addr>`.
+
+**The two hard caveats.** The partition table only changes over a USB/serial flash, so a fielded
+device gains the dump partition (and full dumps) only after one; until then the panic handler logs
+a harmless error and the other two layers work over OTA. And that same flash resets stored
+settings — the 16MB table was exactly full, so the partition is paid for by shrinking both app
+slots 32KB, which moves `nvs`. Wi-Fi provisioning, the generated web password, selections and wake
+word slots all reset once. Both caveats are also in the comment block in
+`config/common/core_board.yaml`.
+
+Also honest to know: a stale summary is possible in one corner — if a watchdog fired with the
+flash cache disabled, the new dump write can fail while an older image still passes its CRC, and
+the summary then describes the older crash. The record ring's reason field is always the new
+crash's; erase the dump once downloaded and the corner disappears.
+
+**Escalation levers, off by default** (each costs RAM or timing on a product build): light heap
+poisoning (`CONFIG_HEAP_CORRUPTION_DETECTION`) if dumps point at heap corruption, and a DEBUG
+capture floor on a single unit. `CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK` is already on for
+everyone — a hardware watchpoint, zero RAM, it turns silent stack overflows into precise panics.
+
 ## Rebuilding and conventions
 
 All user-facing strings live in `frontend/src/copy.js` and are mirrored into

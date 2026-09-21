@@ -124,6 +124,12 @@ class Satellite1WebUI : public Component {
   void set_wake_loader(mww_runtime_loader::MwwRuntimeLoader *loader) { this->handler_.set_wake_loader(loader); }
 #endif
 
+#ifdef USE_SAT1_CRASH_REPORT
+  /// The crash flight recorder, for the /api/sat1/crash* endpoints. From generated code, so it is
+  /// set long before the listener accepts anything.
+  void set_crash_report(crash_report::CrashReport *cr) { this->handler_.set_crash_report(cr); }
+#endif
+
 #ifdef USE_MEDIA_PLAYER
   void set_media_player(media_player::MediaPlayer *mp) { this->handler_.set_media_player(mp); }
   void set_sendspin_media_player(media_player::MediaPlayer *mp) { this->handler_.set_sendspin_media_player(mp); }

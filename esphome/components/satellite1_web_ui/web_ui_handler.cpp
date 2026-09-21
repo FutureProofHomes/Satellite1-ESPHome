@@ -21,6 +21,10 @@
 #include <esp_psram.h>
 #include <esp_system.h>
 
+#ifdef USE_SAT1_CRASH_REPORT
+#include <esp_partition.h>
+#endif
+
 #ifdef USE_API
 #include "esphome/components/api/api_server.h"
 #endif
@@ -38,8 +42,10 @@ static constexpr int WU_API_VERSION = 1;
 /// 304 with no body for the 99% of loads where the firmware has not moved.
 static const char *const CACHE_REVALIDATE = "no-cache";
 
-static const char *reset_reason_str_() {
-  switch (esp_reset_reason()) {
+/// By value rather than reading esp_reset_reason() itself, because the crash endpoint names past
+/// sessions' reasons from stored records with the same vocabulary.
+static const char *reset_reason_name_(esp_reset_reason_t reason) {
+  switch (reason) {
     case ESP_RST_POWERON:
       return "Power on";
     case ESP_RST_EXT:
@@ -78,6 +84,8 @@ static const char *reset_reason_str_() {
       return "Unknown";
   }
 }
+
+static const char *reset_reason_str_() { return reset_reason_name_(esp_reset_reason()); }
 
 WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
   char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
@@ -118,6 +126,10 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
     // handler parses the tail. url_buf is NUL-terminated by url_to, so strncmp is safe here.
     if (strncmp(url_buf, "/api/sat1/media/", 16) == 0)
       return Route::MEDIA_SET;
+#endif
+#ifdef USE_SAT1_CRASH_REPORT
+    if (url == "/api/sat1/crash/erase")
+      return Route::CRASH_ERASE;
 #endif
     return Route::NONE;
   }
@@ -166,6 +178,18 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
   if (strncmp(url_buf, "/api/sat1/sounds/", 17) == 0)
     return Route::SOUND;
 #endif
+#ifdef USE_SAT1_CRASH_REPORT
+  // All three stay behind the session gate (nothing here joins the gate's exempt list): the dump
+  // is raw RAM contents - every task's stack, whatever secrets sat in them - and the log tail is
+  // whatever the device said in its last seconds. Longest match first, so the bare /api/sat1/crash
+  // never shadows its children.
+  if (url == "/api/sat1/crash/log")
+    return Route::CRASH_LOG;
+  if (url == "/api/sat1/crash/dump.bin")
+    return Route::CRASH_DUMP;
+  if (url == "/api/sat1/crash")
+    return Route::CRASH;
+#endif
 
   return Route::NONE;
 }
@@ -182,6 +206,11 @@ bool WebUIHandler::route_streams_(Route route) {
 #endif
 #ifdef USE_MICRO_WAKE_WORD
     case Route::WAKE_WORDS:
+#endif
+#ifdef USE_SAT1_CRASH_REPORT
+    // The records JSON accumulates in an AsyncResponseStream like STATE's; a few kilobytes at
+    // most, but internal heap all the same.
+    case Route::CRASH:
 #endif
     case Route::SEL:
       return true;
@@ -222,6 +251,13 @@ bool WebUIHandler::route_streams_(Route route) {
     // Sounds are PROGMEM sends like the icons, range slices included - the slice is a pointer
     // offset into flash, not a copy.
     case Route::SOUND:
+#endif
+#ifdef USE_SAT1_CRASH_REPORT
+    // The log tail is sent straight from its PSRAM buffer, the dump is chunked from flash through
+    // a PSRAM scratch block, and the erase answers with a literal - none touch the internal heap.
+    case Route::CRASH_LOG:
+    case Route::CRASH_DUMP:
+    case Route::CRASH_ERASE:
 #endif
       // The bundle is sent from PROGMEM, the Home Assistant payload from PSRAM, and every write
       // answers with a string literal. None of them need heap to reply.
@@ -360,6 +396,20 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
       this->handle_sound_(request);
       break;
 #endif
+#ifdef USE_SAT1_CRASH_REPORT
+    case Route::CRASH:
+      this->handle_crash_(request);
+      break;
+    case Route::CRASH_LOG:
+      this->handle_crash_log_(request);
+      break;
+    case Route::CRASH_DUMP:
+      this->handle_crash_dump_(request);
+      break;
+    case Route::CRASH_ERASE:
+      this->handle_crash_erase_(request);
+      break;
+#endif
     case Route::NONE:
       break;
   }
@@ -487,7 +537,7 @@ void WebUIHandler::handle_sel_set_(AsyncWebServerRequest *request) {
   request->send(200, "application/json", "{\"ok\":1}");
 }
 
-#if defined(USE_VOICE_ASSISTANT) || defined(USE_MICRO_WAKE_WORD)
+#if defined(USE_VOICE_ASSISTANT) || defined(USE_MICRO_WAKE_WORD) || defined(USE_SAT1_CRASH_REPORT)
 /// Escapes the two characters that can break a JSON string, plus control characters.
 ///
 /// Most strings this file emits are device names or versions, which are ours. Its two callers are the
@@ -741,11 +791,10 @@ void WebUIHandler::handle_wake_tune_set_(AsyncWebServerRequest *request) {
     this->wake_test_until_.store(0, std::memory_order_relaxed);
   }
   request->send(200, "application/json",
-                mww_runtime_loader::MwwRuntimeLoader::tune_capable() ? "{\"ok\":1,\"cap\":1}"
-                                                                     : "{\"ok\":1,\"cap\":0}");
+                mww_runtime_loader::MwwRuntimeLoader::tune_capable() ? "{\"ok\":1,\"cap\":1}" : "{\"ok\":1,\"cap\":0}");
 }
 
-#else  // USE_SAT1_MWW_LOADER
+#else   // USE_SAT1_MWW_LOADER
 
 /// The wake words this device can listen for, and which are armed.
 ///
@@ -879,7 +928,8 @@ void WebUIHandler::apply_wake_word_requests() {
 #ifdef USE_MEDIA_PLAYER
 media_player::MediaPlayer *WebUIHandler::active_media_() const {
   using media_player::MediaPlayerState;
-  const auto ss = this->media_sendspin_ != nullptr ? this->media_sendspin_->state : MediaPlayerState::MEDIA_PLAYER_STATE_NONE;
+  const auto ss =
+      this->media_sendspin_ != nullptr ? this->media_sendspin_->state : MediaPlayerState::MEDIA_PLAYER_STATE_NONE;
   const auto lc = this->media_local_ != nullptr ? this->media_local_->state : MediaPlayerState::MEDIA_PLAYER_STATE_NONE;
 
   // The ladder the header explains: a playing group stream wins, then a local player actually making
@@ -920,8 +970,7 @@ void WebUIHandler::handle_media_(AsyncWebServerRequest *request) {
   const int state = static_cast<int>(active->state);
   const int volume = static_cast<int>(std::roundf(active->volume * 100.0f));
   int len = snprintf(body, sizeof(body), R"({"src":"%s","state":%d,"volume":%d,"muted":%d)",
-                     active == this->media_sendspin_ ? "sendspin" : "local", state, volume,
-                     active->is_muted() ? 1 : 0);
+                     active == this->media_sendspin_ ? "sendspin" : "local", state, volume, active->is_muted() ? 1 : 0);
 
   // The group player rides along whenever it exists, under its own keys. The card needs it to keep a
   // paused group stream operable: the Sendspin protocol has no paused state, so a paused group is an
@@ -1214,7 +1263,9 @@ void WebUIHandler::media_set_meta(const char *title, const char *artist, const c
   // streaming provider can be longer, and a truncated URL is worthless where a truncated title is
   // merely short.
   const Field fields[] = {
-      {"\"title\":\"", title, 160}, {"\"artist\":\"", artist, 160}, {"\"album\":\"", album, 160},
+      {"\"title\":\"", title, 160},
+      {"\"artist\":\"", artist, 160},
+      {"\"album\":\"", album, 160},
       {"\"art\":\"", art, 320},
   };
   for (const auto &f : fields) {
@@ -1898,6 +1949,152 @@ void WebUIHandler::handle_sound_(AsyncWebServerRequest *request) {
 
 #endif  // USE_SAT1_WEB_UI_SOUNDS
 
+#ifdef USE_SAT1_CRASH_REPORT
+
+/// The crash history: boot counter, dump presence, and the stored records newest-first.
+///
+/// Shape:
+///   {"boot":N,"part":1,"dump":45056,"log":4096,"records":[
+///     {"boot":12,"epoch":1789000000,"up":3642,"reason":4,"rs":"Panic or exception",
+///      "task":"loopTask","cause":29,"vaddr":"0x0000000c","pc":"0x42012abc","cor":0,
+///      "txt":"StoreProhibited","bt":["0x42012abc","0x420071f2"]},...]}
+///
+/// `epoch` 0 means the flight recorder never knew wall time that session (or RTC memory did not
+/// survive); the app words the moment from `up` and the boot distance instead. PCs travel as hex
+/// strings because that is what espcoredump and addr2line take, and a copy-paste that needs no
+/// reformatting is the whole point of showing them.
+void WebUIHandler::handle_crash_(AsyncWebServerRequest *request) {
+  if (this->crash_report_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  size_t tail_len = 0;
+  this->crash_report_->log_tail(tail_len);
+
+  auto *stream = request->beginResponseStream("application/json");
+  stream->printf(R"({"boot":%lu,"part":%d,"dump":%u,"log":%u,"records":[)",
+                 static_cast<unsigned long>(this->crash_report_->boot_count()),
+                 this->crash_report_->partition_present() ? 1 : 0,
+                 static_cast<unsigned>(this->crash_report_->dump_size()), static_cast<unsigned>(tail_len));
+
+  // Newest first, the order the card shows them in. The count is re-read per index through the
+  // record lock, so an erase racing this loop ends the list early rather than serving garbage.
+  const uint8_t n = this->crash_report_->record_count();
+  bool first = true;
+  for (uint8_t k = 0; k < n; k++) {
+    crash_report::CrashRecord rec;
+    if (!this->crash_report_->get_record(n - 1 - k, rec))
+      break;
+    if (!first)
+      stream->print(",");
+    first = false;
+
+    stream->printf(R"({"boot":%lu,"epoch":%lu,"up":%lu,"reason":%u,"rs":"%s")", static_cast<unsigned long>(rec.boot),
+                   static_cast<unsigned long>(rec.epoch), static_cast<unsigned long>(rec.uptime_s), rec.reason,
+                   reset_reason_name_(static_cast<esp_reset_reason_t>(rec.reason)));
+
+    if (rec.flags & crash_report::CR_F_SUMMARY) {
+      stream->print(R"(,"task":)");
+      write_json_string(stream, rec.task);
+      stream->printf(R"(,"cause":%lu,"vaddr":"0x%08lx","pc":"0x%08lx","cor":%d)",
+                     static_cast<unsigned long>(rec.exc_cause), static_cast<unsigned long>(rec.exc_vaddr),
+                     static_cast<unsigned long>(rec.pc), (rec.flags & crash_report::CR_F_BT_CORRUPT) ? 1 : 0);
+      stream->print(R"(,"bt":[)");
+      for (uint8_t b = 0; b < rec.bt_depth && b < 16; b++)
+        stream->printf(R"(%s"0x%08lx")", b == 0 ? "" : ",", static_cast<unsigned long>(rec.bt[b]));
+      stream->print("]");
+    }
+    if (rec.text[0] != '\0') {
+      stream->print(R"(,"txt":)");
+      write_json_string(stream, rec.text);
+    }
+    stream->print("}");
+  }
+
+  stream->print("]}");
+  stream->addHeader("Cache-Control", CACHE_REVALIDATE);
+  request->send(stream);
+}
+
+/// The pre-crash log tail as it survived, text/plain. Its own route rather than a field of the
+/// JSON above because escaping 4KB of log into a JSON string would double it through an escape
+/// walk on every poll, and the tail is immutable after setup - the raw send costs nothing.
+void WebUIHandler::handle_crash_log_(AsyncWebServerRequest *request) {
+  if (this->crash_report_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  size_t len = 0;
+  const char *tail = this->crash_report_->log_tail(len);
+
+  httpd_resp_set_type(*request, "text/plain");
+  httpd_resp_set_hdr(*request, "Cache-Control", CACHE_REVALIDATE);
+  // By hand on this raw-httpd path - see send_low_memory_.
+  httpd_resp_set_hdr(*request, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(*request, len == 0 ? "" : tail, static_cast<ssize_t>(len));
+}
+
+/// The core dump image - the coredump partition's own framing (header + ELF + checksum), raw. The
+/// decode is `espcoredump.py info_corefile -t raw -c dump.bin firmware.elf` against the exact ELF
+/// of this build. Chunked from flash through one small PSRAM block; the httpd task's 4352-byte
+/// stack never holds any of it.
+///
+/// Served as the bare .bin on purpose, after a zip-wrapper detour taught the real lesson: the
+/// browser interstitial that motivated the zip ("this file may have been tampered with") keys on
+/// the download arriving over plain HTTP, not on the extension, so the wrapper solved nothing.
+/// What solved it is the card fetching the bytes and saving them as an in-page Blob - see
+/// downloadDump in the frontend - which makes the extension a matter of taste, and the honest
+/// name for these bytes is .bin.
+void WebUIHandler::handle_crash_dump_(AsyncWebServerRequest *request) {
+  const size_t size = this->crash_report_ == nullptr ? 0 : this->crash_report_->dump_size();
+  const esp_partition_t *part =
+      esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, nullptr);
+  if (size == 0 || part == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  RAMAllocator<char> alloc(RAMAllocator<char>::ALLOC_EXTERNAL);
+  constexpr size_t CHUNK = 4096;
+  char *buf = alloc.allocate(CHUNK);
+  if (buf == nullptr) {
+    this->send_low_memory_(request);
+    return;
+  }
+
+  // The filename carries the device name so a support inbox with three dumps can tell them apart.
+  // Assembled on this frame, which outlives the sends - httpd_resp_set_hdr stores the pointer.
+  // The card's Blob path names its own save and ignores this; curl -OJ honours it.
+  char disposition[96];
+  snprintf(disposition, sizeof(disposition), "attachment; filename=\"%s-coredump.bin\"", App.get_name().c_str());
+
+  httpd_resp_set_type(*request, "application/octet-stream");
+  httpd_resp_set_hdr(*request, "Content-Disposition", disposition);
+  httpd_resp_set_hdr(*request, "Access-Control-Allow-Origin", "*");
+
+  bool ok = true;
+  for (size_t at = 0; at < size && ok; at += CHUNK) {
+    const size_t n = size - at < CHUNK ? size - at : CHUNK;
+    ok = esp_partition_read(part, at, buf, n) == ESP_OK &&
+         httpd_resp_send_chunk(*request, buf, static_cast<ssize_t>(n)) == ESP_OK;
+  }
+  if (ok)
+    httpd_resp_send_chunk(*request, nullptr, 0);
+  alloc.deallocate(buf, CHUNK);
+}
+
+void WebUIHandler::handle_crash_erase_(AsyncWebServerRequest *request) {
+  if (this->crash_report_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  this->crash_report_->erase_all();
+  request->send(200, "application/json", "{\"ok\":1}");
+}
+
+#endif  // USE_SAT1_CRASH_REPORT
+
 #ifdef USE_VOICE_ASSISTANT
 
 void WebUIHandler::push_utterance(const std::string &text, bool heard) {
@@ -2006,6 +2203,13 @@ void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
   // %u with an explicit cast rather than PRIu32: these are raw string literals, so a PRIu32 in the
   // middle of one is not a macro at all - it is the eleven characters `" PRIu32 "`.
   stream->printf(R"("reset":"%s","uptime":%u,)", reset_reason_str_(), static_cast<unsigned int>(millis_64() / 1000));
+
+#ifdef USE_SAT1_CRASH_REPORT
+  // How many crash records /api/sat1/crash holds, so the card knows to fetch without a poll of its
+  // own - this endpoint is already the page's heartbeat.
+  stream->printf(R"("crash":%u,)",
+                 this->crash_report_ == nullptr ? 0 : static_cast<unsigned>(this->crash_report_->record_count()));
+#endif
 
   // Whether Home Assistant is actually attached, so the UI can say so rather than leaving someone to
   // work out why their media controls are missing. api_connection_count_ != 0, which is the same

@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { CONFIRM, HINTS, TEXT } from "../copy.js";
 import { logoutAll, qrSignInLink, signInLink } from "../lib/auth.js";
-import { entity, pathFor, post, requestJson } from "../lib/device.js";
+import { entity, pathFor, post, request, requestJson } from "../lib/device.js";
 import { qrSvgPath } from "../lib/qr.js";
 import { Btn, Card, Chevron, Confirm, Fact, Missing, N_DIAG, Row, Toggle } from "../ui.jsx";
 
@@ -74,6 +74,156 @@ function Device({ ctx }) {
           }
         />
       </div>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Crash Reports                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The crash history the firmware harvested across reboots: the NVS ring of records, the pre-crash
+ * log tail, and the downloadable core dump. Fetched once on mount and again whenever the state
+ * poll's crash count moves (a new crash can only appear with a reboot, so "moves" is rare), plus
+ * after an erase. The tail is its own lazy fetch behind the Show button - it is 4KB that most
+ * visits never read. Renders nothing on a build without the crash_report component, whose absence
+ * makes the endpoint 404 - the same contract as every optional card.
+ */
+function CrashCard({ ctx }) {
+  const [data, setData] = useState(null);
+  const [tail, setTail] = useState(null);
+  const [showLog, setShowLog] = useState(false);
+  // Which record's backtrace is open, -1 none. One at a time: the addresses are for copying, and
+  // two open walls of hex help nobody.
+  const [openBt, setOpenBt] = useState(-1);
+  const count = ctx.device?.crash;
+
+  const load = () =>
+    requestJson("/api/sat1/crash")
+      .then((d) => d && setData(d))
+      .catch(() => {});
+  useEffect(() => {
+    load();
+  }, [count]);
+
+  if (!data) return null;
+
+  /* When it happened, best first: a real wall-clock stamp when the flight recorder knew the time;
+     a browser-side estimate for the most recent crash (now minus the current uptime is the moment
+     this session began, which is the moment the crash ended); and uptime-plus-distance when the
+     crash is older than the last power cycle. */
+  const when = (r) => {
+    if (r.epoch) return new Date(r.epoch * 1000).toLocaleString();
+    if (data.boot - r.boot === 1 && ctx.device?.uptime)
+      return `\u2248 ${new Date(Date.now() - ctx.device.uptime * 1000).toLocaleString()}`;
+    const n = data.boot - r.boot;
+    const t = n === 1 ? TEXT.crash_restart_ago : TEXT.crash_restarts_ago;
+    return t.replace("%1", uptime(r.up)).replace("%2", String(n));
+  };
+
+  const toggleLog = () => {
+    const next = !showLog;
+    setShowLog(next);
+    if (next && tail === null)
+      request("/api/sat1/crash/log")
+        .then((r) => setTail(r.ok ? r.text : ""))
+        .catch(() => setTail(""));
+  };
+
+  /* Fetched and saved as a Blob rather than navigated to as a link, for the same reason Export
+     Logs works this way: Chromium-family browsers interpose a "this file may have been tampered
+     with" interstitial on any download delivered over plain HTTP, which this device always is. A
+     Blob minted in-page is a local file to the browser, so the save is silent. Raw fetch rather
+     than the request() helper, whose .text would decode the zip's bytes as UTF-8 and corrupt them;
+     the session cookie rides fetch's same-origin default. */
+  const downloadDump = () =>
+    fetch("/api/sat1/crash/dump.bin")
+      .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(String(r.status)))))
+      .then((b) => {
+        const url = URL.createObjectURL(b);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${ctx.device?.name || "satellite1"}-coredump.bin`;
+        a.click();
+        URL.revokeObjectURL(url);
+      })
+      .catch(() => {});
+
+  return (
+    <Card title={TEXT.crash_title} collapsible name="crash" defaultOpen hint={HINTS.crash}>
+      {data.records.length === 0 && <p class="dim sm">{TEXT.crash_none}</p>}
+
+      {/* Each record is a stacked block in the transcript subcard box, not a label/control row: a
+          record has no control to right-align, and the first build that used the row shape sent
+          the date column crawling over the label on a phone. */}
+      {data.records.map((r, k) => (
+        <div class="transcript" key={k}>
+          <div class="row">
+            {/* The panic text ("StoreProhibited", "assert failed: ...") when the dump yielded one,
+                else the reset reason - the same string the Device card's Last Restart shows. */}
+            <span class="strong grow">{r.txt || r.rs}</span>
+            <span class="dim xs">{TEXT.crash_ran.replace("%s", uptime(r.up))}</span>
+          </div>
+          <p class="dim sm">{when(r)}</p>
+          {r.task && (
+            <p class="dim sm num">
+              {r.task} &middot; cause {r.cause} &middot; PC {r.pc}
+              {r.vaddr && r.vaddr !== "0x00000000" ? ` \u00b7 addr ${r.vaddr}` : ""}
+            </p>
+          )}
+          {r.bt && r.bt.length > 0 && (
+            <>
+              <button class="btn sm" aria-expanded={openBt === k} onClick={() => setOpenBt(openBt === k ? -1 : k)}>
+                {r.cor ? TEXT.crash_bt_corrupt : TEXT.crash_bt} <Chevron down={openBt === k} cls="caret-s" />
+              </button>
+              {openBt === k && <p class="dim xs num">{r.bt.join(" ")}</p>}
+            </>
+          )}
+        </div>
+      ))}
+
+      {data.log > 0 && (
+        <>
+          <Row label={TEXT.crash_log_row} hint={HINTS.crash_log}>
+            <button class="btn sm" aria-expanded={showLog} onClick={toggleLog}>
+              {showLog ? TEXT.crash_log_hide : TEXT.crash_log_show} <Chevron down={showLog} cls="caret-s" />
+            </button>
+          </Row>
+          {showLog && (
+            <div class="log" style="white-space:pre-wrap">
+              {tail === null ? "\u2026" : tail || TEXT.crash_log_none}
+            </div>
+          )}
+        </>
+      )}
+
+      {data.dump > 0 && (
+        <Row label={TEXT.crash_dump_row} hint={HINTS.crash_dump}>
+          <Btn onClick={downloadDump}>{TEXT.crash_download}</Btn>
+        </Row>
+      )}
+
+      {(data.dump > 0 || data.records.length > 0) && (
+        <Row label={TEXT.crash_erase_row} hint={HINTS.crash_erase}>
+          <Confirm
+            label={TEXT.crash_erase}
+            title={CONFIRM.crash_erase.t}
+            body={CONFIRM.crash_erase.b}
+            confirmLabel={TEXT.crash_erase}
+            danger
+            onConfirm={() =>
+              post("/api/sat1/crash/erase").then(() => {
+                setTail(null);
+                setShowLog(false);
+                load();
+              })
+            }
+          />
+        </Row>
+      )}
+
+      {!data.part && <p class="dim xs">{TEXT.crash_no_part}</p>}
     </Card>
   );
 }
@@ -663,6 +813,8 @@ export function Diagnostics({ ctx }) {
     <>
       {ctx.device && ctx.device.ha === false && <p class="banner">{TEXT.ha_disconnected_detail}</p>}
       <Device ctx={ctx} />
+      {/* Right under Device, whose Last Restart row is the question this card answers. */}
+      <CrashCard ctx={ctx} />
       <Firmware ctx={ctx} />
       <Launch ctx={ctx} />
       {/* Buttons moved to the foot of Controls. It is the one card here that answers "does the hardware

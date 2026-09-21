@@ -90,6 +90,7 @@ external_components:
       type: local
       path: ../esphome/components
     components:
+      - crash_report
       - extram_bss
       - fusb302b
       - i2s_audio

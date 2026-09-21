@@ -204,6 +204,12 @@ satellite1_web_ui:
   # exist; the loader owns the downloads and the enabled-iff-slotted invariant.
   wake_loader_id: mww_loader
 
+  # The crash flight recorder (common/core_board.yaml), behind the Diagnostics route's Crash
+  # Reports card: GET /api/sat1/crash (the record ring), /api/sat1/crash/log (the pre-crash log
+  # tail), /api/sat1/crash/dump.bin (the raw core dump image) and POST /api/sat1/crash/erase. All
+  # session-gated - the dump is raw RAM contents.
+  crash_report_id: crash_rpt
+
   # The local speaker player, for GET/POST /api/sat1/media - web_server has no media_player handler,
   # so the endpoints are the only way the app sees or moves it. Its Sendspin counterpart is named in
   # common/sendspin.yaml beside the player it points at; the endpoints prefer that one while it is

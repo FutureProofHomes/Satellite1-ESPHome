@@ -124,6 +124,22 @@ looking at a third of them was the more expensive problem.
 | `factory_reset` | Factory reset | Erases every setting stored on the ESP32, including the Wi-Fi credentials, and restarts. You will have to set the device up again from scratch. The audio chip's firmware is not touched. |
 | `beta` | Beta updates | Offers pre-release firmware to the updater. Useful for testing a fix; not what you want on a device you rely on. |
 | `log` | Logs card title | The device's own log, live. This is the first place to look when something misbehaves, and the most useful thing to attach to a support request. |
+| `crash` | Crash Reports card title | What the device remembers about its own crashes: when each one happened, which task died and where, the last log lines before it went down, and a downloadable crash dump for the deepest look. Attach the dump and the log to a support request, or erase them once the cause is found. A crash that cuts power entirely leaves less detail than one the device rebooted itself from. |
+| `crash_log` | Pre-crash log row | The last log lines the device wrote before it went down, recovered across the reboot. The most recent crash only - a newer crash replaces it. |
+| `crash_dump` | Crash dump row | A complete snapshot of what every task was doing at the moment of the most recent crash, analyzed offline against this exact firmware build. It may contain fragments of anything the device held in memory, so share it like a log, not like a screenshot. |
+| `crash_erase` | Crash history row | Deletes the recorded crashes, the pre-crash log and the crash dump. The device keeps working either way; erase once a cause is found, so the next crash is unmistakably new. |
+
+The **Crash Reports** card sits under Device, whose Last Restart row is the question it answers. Its
+standing text: `crash_none` "No crashes recorded." (the empty state, a good day); `crash_ran`
+"ran %s" (how long the crashed session lived); `crash_restart_ago` / `crash_restarts_ago`
+"%1 after power-on · N restart(s) ago" (the wording for a crash the flight recorder could not
+wall-clock-stamp); `crash_bt` "Backtrace" and `crash_bt_corrupt` "Backtrace (corrupted)"; the
+`crash_log_row` "Pre-crash log" row with its Show/Hide toggle and `crash_log_none` "No log survived
+from before the crash."; the `crash_dump_row` "Crash dump" row with `crash_download` "Download";
+the `crash_erase_row` "Crash history" row with `crash_erase` "Erase history"; and
+`crash_no_part` — shown on a device that took this firmware over OTA — "This
+device can list crashes but can't keep full crash dumps: that needs a one-time flash over USB, which
+also resets stored settings. Everything else here works without it."
 
 `launch`'s QR and copyable link deliberately differ: the QR is minted on the device's current IP —
 scanned live off the screen, so the address is fresh by construction, and an IP works on phones that
@@ -555,6 +571,7 @@ back out.
 | `restart` | Restart this device? | It reboots right away and is back in under a minute. All of your settings survive a restart. |
 | `safe_mode` | Restart into safe mode? | The device comes back with only its network connection and update tools running - no assistant, no audio - so a bad update can be recovered. Restarting again returns it to normal. |
 | `factory_reset` | Erase everything? | Every setting stored on this device is wiped, including its Wi-Fi credentials, and it restarts as if new from the box. You will have to set it up again. |
+| `crash_erase` | Erase the crash history? | The recorded crashes, the pre-crash log and the crash dump are deleted from this device. If you are still chasing the cause, download the dump first - there is no way back to it. |
 
 ## Strings that are not in `copy.js`
 

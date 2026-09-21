@@ -67,12 +67,13 @@ writeFileSync(join(dist, "index.html"), html);
 // disagree by a few tens of bytes at the same level on the same input, so treat this as accurate
 // to within about half a percent. The authoritative figure is the one __init__.py logs at compile
 // time, since those are the bytes that go into the image.
-// 50KB, raised from 48KB in September 2026 with the owner's approval when the sign-in work landed
-// (the login screen, the challenge-response crypto and the QR encoder together cost ~7KB, and the
-// unreachable parts - QR versions past 6, the Inkscape-precision logo digits - were already
-// trimmed first). Raised from 40KB before that for the media footer. The number is a self-imposed
+// 52KB, raised from 50KB September 21 2026 with the owner's approval for the Crash Reports card
+// (the previous bundle already sat at 99.6% of 50KB). Raised from 48KB before that for the sign-in
+// work (the login screen, the challenge-response crypto and the QR encoder together cost ~7KB, and
+// the unreachable parts - QR versions past 6, the Inkscape-precision logo digits - were already
+// trimmed first), and from 40KB before that for the media footer. The number is a self-imposed
 // discipline, not a hardware limit - the bundle lives in flash and is served from PSRAM either
 // way.
 const gz = gzipSync(html, { level: 9 }).length;
-const pct = ((gz / 51200) * 100).toFixed(0);
-console.log(`dist/index.html  ${html.length} B raw  ${gz} B gzipped  (${pct}% of the 50KB target)`);
+const pct = ((gz / 53248) * 100).toFixed(0);
+console.log(`dist/index.html  ${html.length} B raw  ${gz} B gzipped  (${pct}% of the 52KB target)`);

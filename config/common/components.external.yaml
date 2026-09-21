@@ -9,6 +9,7 @@ external_components:
       ref: ${ext_comp_repo_ref}
     refresh: 1s
     components:
+      - crash_report
       - ethernet
       - extram_bss
       - fusb302b

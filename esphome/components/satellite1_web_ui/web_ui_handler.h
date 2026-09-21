@@ -33,6 +33,10 @@
 #include "esphome/components/audio/audio.h"
 #endif
 
+#ifdef USE_SAT1_CRASH_REPORT
+#include "esphome/components/crash_report/crash_report.h"
+#endif
+
 #include "esphome/core/entity_base.h"
 // For millis_64() in wake_test_active() - the 64-bit clock every deadline here compares against.
 #include "esphome/core/hal.h"
@@ -447,6 +451,13 @@ class WebUIHandler : public AsyncWebHandler {
   void set_wake_loader(mww_runtime_loader::MwwRuntimeLoader *loader) { this->wake_loader_ = loader; }
 #endif
 
+#ifdef USE_SAT1_CRASH_REPORT
+  /// Set from generated code, before the listener accepts anything. The crash endpoints read the
+  /// records and the harvested log tail through this; the tail is immutable after crash_report's
+  /// setup (priority 600, long before the listener at 249) and the records take their own lock.
+  void set_crash_report(crash_report::CrashReport *cr) { this->crash_report_ = cr; }
+#endif
+
   // NOLINTNEXTLINE(readability-identifier-naming)
   bool canHandle(AsyncWebServerRequest *request) const override;
   // NOLINTNEXTLINE(readability-identifier-naming)
@@ -509,6 +520,12 @@ class WebUIHandler : public AsyncWebHandler {
 #ifdef USE_SAT1_WEB_UI_SOUNDS
     SOUND,
 #endif
+#ifdef USE_SAT1_CRASH_REPORT
+    CRASH,
+    CRASH_LOG,
+    CRASH_DUMP,
+    CRASH_ERASE,
+#endif
   };
 
   static Route match_route_(AsyncWebServerRequest *request);
@@ -563,6 +580,17 @@ class WebUIHandler : public AsyncWebHandler {
   void handle_wake_slot_set_(AsyncWebServerRequest *request);
   void handle_wake_cutoff_set_(AsyncWebServerRequest *request);
   void handle_wake_tune_set_(AsyncWebServerRequest *request);
+#endif
+#ifdef USE_SAT1_CRASH_REPORT
+  /// The crash history and its metadata as JSON; the two big payloads live on routes of their own.
+  void handle_crash_(AsyncWebServerRequest *request);
+  /// The pre-crash log tail, text/plain straight from the PSRAM buffer - no JSON escaping walk.
+  void handle_crash_log_(AsyncWebServerRequest *request);
+  /// The raw core dump image, chunked from flash through one small PSRAM buffer. The card saves it
+  /// through an in-page Blob, which is what keeps the browser's insecure-download interstitial away
+  /// - the extension never mattered; see the handler's comment.
+  void handle_crash_dump_(AsyncWebServerRequest *request);
+  void handle_crash_erase_(AsyncWebServerRequest *request);
 #endif
 #ifdef USE_MEDIA_PLAYER
   void handle_media_(AsyncWebServerRequest *request);
@@ -721,6 +749,10 @@ class WebUIHandler : public AsyncWebHandler {
 
 #ifdef USE_SAT1_MWW_LOADER
   mww_runtime_loader::MwwRuntimeLoader *wake_loader_{nullptr};
+#endif
+
+#ifdef USE_SAT1_CRASH_REPORT
+  crash_report::CrashReport *crash_report_{nullptr};
 #endif
 
 #ifdef USE_VOICE_ASSISTANT

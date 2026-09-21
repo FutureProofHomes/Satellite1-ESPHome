@@ -30,6 +30,13 @@ try:
     from esphome.components.mww_runtime_loader import MwwRuntimeLoader
 except ImportError:
     MwwRuntimeLoader = None
+
+# Optional for the same reason: without crash_report in the build the crash endpoints simply do
+# not exist, and the app's Diagnostics route renders without the card.
+try:
+    from esphome.components.crash_report import CrashReport
+except ImportError:
+    CrashReport = None
 from esphome.components.sendspin import (
     SendspinHub,
     request_controller_support,
@@ -69,6 +76,7 @@ CONF_ON_LOGIN_WINDOW = "on_login_window"
 CONF_ON_LOGIN_WINDOW_END = "on_login_window_end"
 CONF_MICRO_WAKE_WORD_ID = "micro_wake_word_id"
 CONF_WAKE_LOADER_ID = "wake_loader_id"
+CONF_CRASH_REPORT_ID = "crash_report_id"
 CONF_VOICE_ASSISTANT_ID = "voice_assistant_id"
 CONF_VOICE_PHASE = "voice_phase"
 CONF_MEDIA_PLAYER_ID = "media_player_id"
@@ -181,6 +189,15 @@ CONFIG_SCHEMA = cv.All(
             **(
                 {cv.Optional(CONF_WAKE_LOADER_ID): cv.use_id(MwwRuntimeLoader)}
                 if MwwRuntimeLoader is not None
+                else {}
+            ),
+            # The crash flight recorder, which owns the records, the pre-crash log tail and the
+            # core dump image the /api/sat1/crash* endpoints serve. Optional so a build without it
+            # keeps compiling; the endpoints then do not exist at all (the define comes from
+            # crash_report's own to_code).
+            **(
+                {cv.Optional(CONF_CRASH_REPORT_ID): cv.use_id(CrashReport)}
+                if CrashReport is not None
                 else {}
             ),
             # Media players are not covered by web_server either - it registers no media_player
@@ -356,6 +373,9 @@ async def to_code(config):
 
     if CONF_WAKE_LOADER_ID in config:
         cg.add(var.set_wake_loader(await cg.get_variable(config[CONF_WAKE_LOADER_ID])))
+
+    if CONF_CRASH_REPORT_ID in config:
+        cg.add(var.set_crash_report(await cg.get_variable(config[CONF_CRASH_REPORT_ID])))
 
     if CONF_MEDIA_PLAYER_ID in config:
         cg.add(

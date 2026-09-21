@@ -205,6 +205,19 @@ export const HINTS = {
   beta: "Offers pre-release firmware to the updater. Useful for testing a fix; not what you want on a device you rely on.",
 
   log: "The device's own log, live. This is the first place to look when something misbehaves, and the most useful thing to attach to a support request.",
+
+  // The Crash Reports card. The second sentence is the workflow this card exists for; the third
+  // manages the one expectation that surprises people (a full power cut takes the flight recorder's
+  // memory with it, so unplugged crashes carry less detail).
+  crash:
+    "What the device remembers about its own crashes: when each one happened, which task died and where, the last log lines before it went down, and a downloadable crash dump for the deepest look. Attach the dump and the log to a support request, or erase them once the cause is found. A crash that cuts power entirely leaves less detail than one the device rebooted itself from.",
+
+  // The three rows on that card.
+  crash_log: "The last log lines the device wrote before it went down, recovered across the reboot. The most recent crash only - a newer crash replaces it.",
+  crash_dump:
+    "A complete snapshot of what every task was doing at the moment of the most recent crash, analyzed offline against this exact firmware build. It may contain fragments of anything the device held in memory, so share it like a log, not like a screenshot.",
+  crash_erase:
+    "Deletes the recorded crashes, the pre-crash log and the crash dump. The device keeps working either way; erase once a cause is found, so the next crash is unmistakably new.",
 };
 
 export const TEXT = {
@@ -476,6 +489,27 @@ export const TEXT = {
   det_none: "Nothing detected since the last restart.",
   det_sub: "Up to eight, newest first, cleared on restart.",
 
+  /* Diagnostics: the Crash Reports card. The empty state is a good day and reads like one. The
+     no-partition note names the one fix (a USB flash) rather than describing the partition table,
+     which nobody flashing a device needs to picture. */
+  crash_title: "Crash Reports",
+  crash_none: "No crashes recorded.",
+  crash_no_part:
+    "This device can list crashes but can't keep full crash dumps: that needs a one-time flash over USB, which also resets stored settings. Everything else here works without it.",
+  crash_ran: "ran %s",
+  crash_restarts_ago: "%1 after power-on \u00b7 %2 restarts ago",
+  crash_restart_ago: "%1 after power-on \u00b7 1 restart ago",
+  crash_bt: "Backtrace",
+  crash_bt_corrupt: "Backtrace (corrupted)",
+  crash_log_row: "Pre-crash log",
+  crash_log_show: "Show",
+  crash_log_hide: "Hide",
+  crash_log_none: "No log survived from before the crash.",
+  crash_dump_row: "Crash dump",
+  crash_download: "Download",
+  crash_erase_row: "Crash history",
+  crash_erase: "Erase history",
+
   // Shown under the wake words when the assistant selects could not be read and no more specific
   // reason applies (the two below cover blocked actions and an old Home Assistant). Says which half
   // of the card is affected, because whether the device listens is its own to answer and that half
@@ -657,6 +691,10 @@ export const CONFIRM = {
   factory_reset: {
     t: "Erase everything?",
     b: "Every setting stored on this device is wiped, including its Wi-Fi credentials, and it restarts as if new from the box. You will have to set it up again.",
+  },
+  crash_erase: {
+    t: "Erase the crash history?",
+    b: "The recorded crashes, the pre-crash log and the crash dump are deleted from this device. If you are still chasing the cause, download the dump first - there is no way back to it.",
   },
 };
 
