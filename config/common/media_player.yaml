@@ -3,16 +3,27 @@ substitutions:
   jack_disconnected_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/jack_disconnected.flac
   mute_switch_on_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/mute_switch_on.flac
   mute_switch_off_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/mute_switch_off.flac
-  # MP3 rather than FLAC, and local rather than the S3 bucket, for the two sounds that travel: the
-  # timer ring and the wake chime are served to non-Satellite1 routing targets straight off this
-  # device's flash (GET /api/sat1/sounds/<name>.mp3 in satellite1_web_ui), and a Sonos AudioClip
-  # accepts MP3 and WAV only - hand it FLAC and it reports success and plays nothing, the same
-  # silent failure the TTS codec swap in tts_routing.yaml exists to prevent. One embedded copy
-  # serves both local playback (the decoder handles MP3 fine) and remote fetches, so the format
-  # has to be the travelling one. Local files rather than S3 so the bytes a release plays are the
-  # bytes its repository reviewed - the same provenance reasoning as the login clips.
+  # MP3 rather than FLAC, and local rather than the S3 bucket, for the sounds that travel: the
+  # timer ring, the wake chime and the stop clip are served to non-Satellite1 routing targets
+  # straight off this device's flash (GET /api/sat1/sounds/<name>.mp3 in satellite1_web_ui), and a
+  # Sonos AudioClip accepts MP3 and WAV only - hand it FLAC and it reports success and plays
+  # nothing, the same silent failure the TTS codec swap in tts_routing.yaml exists to prevent. One
+  # embedded copy serves both local playback (the decoder handles MP3 fine) and remote fetches, so
+  # the format has to be the travelling one. Local files rather than S3 so the bytes a release
+  # plays are the bytes its repository reviewed - the same provenance reasoning as the login clips.
+  #
+  # All three are STEREO (September 2026): a mono clip lands on a Sonos soundbar's center channel
+  # only and sounds thin; stereo renders across the bar. Joint stereo of a duplicated channel
+  # costs ~2% extra flash. The local mono announcement pipeline plays them unchanged - the decode
+  # chain carries the file's own channel count and the mixer maps it onto its 2-channel output.
   timer_finished_sound_file: sounds/timer_finished.mp3
   wake_word_triggered_sound_file: sounds/wake_word_triggered.mp3
+  # ~0.4s faint fading 550 Hz tone. The Sonos stop preempt in tts_routing.yaml: a playing
+  # AudioClip cannot be cancelled through Home Assistant, but a new LOW-priority clip interrupts
+  # a playing LOW clip at any time, so announcing this IS the stop. Deliberately not digital
+  # silence - a field-tested pure-silence MP3 failed to register as a clip - and quiet enough to
+  # read as an acknowledgment, not an announcement. Nothing plays it locally.
+  stop_clip_sound_file: sounds/stop_clip.mp3
   factory_reset_initiated_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/factory_reset_initiated.mp3
   factory_reset_cancelled_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/factory_reset_cancelled.mp3
   factory_reset_confirmed_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/factory_reset_confirmed.mp3
@@ -40,6 +51,8 @@ audio_file:
     file: ${timer_finished_sound_file}
   - id: wake_word_triggered_sound
     file: ${wake_word_triggered_sound_file}
+  - id: stop_clip_sound
+    file: ${stop_clip_sound_file}
   - id: center_button_press_sound
     file: ${center_button_press_sound_file}
   - id: center_button_double_press_sound

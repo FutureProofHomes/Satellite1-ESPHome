@@ -158,7 +158,7 @@ in a browser and use the **Config** route. Home Assistant keeps one switch for t
 | Entity | Purpose |
 | --- | --- |
 | **Route TTS To All Area Players** | Switch. On sends the response to every media player in this device's area. A projection of the selection, not a value of its own — see below. |
-| **Remote TTS Volume** | The level the response — and the mirrored timer ring — should arrive at on the targets. `0` leaves every target's volume alone. |
+| **Remote TTS Volume** | The level the response — and the mirrored timer ring and remote wake chime — should arrive at on the targets. `0` leaves every target's volume alone. |
 | **Remote Wake Chime** | Switch, off by default. Targets sound the wake chime when this device hears the wake word: a Satellite1 from its own flash, anything else from this device's sounds route. On Sonos and similar the chime can land up to a second late — clip playback has a fixed startup cost. |
 | **Remote Timer Ring** | Switch, on by default. A ringing timer is mirrored to the routing targets until it is stopped. The selection is already the opt-in; this is the opt-out. |
 | **Remote Sync Guard** | Select, default `1s` (options `0.5s`–`2s`). How long the microphone stays closed after a routed response finishes locally, covering the targets' playback skew so the device cannot hear its own response — or its own sign-in code — off a lagging speaker. |
@@ -259,8 +259,8 @@ because an HTTP announcement is what arms a peer's stop word, so "stop" spoken n
 works with no target-side changes. The relay closes at the origin: the **Stop Announcement** button
 now also silences a ringing timer, so a target that hears "stop" (whose broadcast presses every
 FutureProofHomes stop button) ends the ring *everywhere* — the loop stops re-firing, and the ring's
-end fans a stop out to the non-Satellite1 targets. Sonos cannot cancel a clip mid-play, so the
-short re-fired clip **is** the stop story there: the current clip finishes and no more arrive.
+end fans a stop out to the non-Satellite1 targets. On Sonos the stop is the preempt clip (below):
+the playing ring clip is interrupted by a ~0.4 s faint tone, so the tail is under half a second.
 
 **The wake chime**, on non-Satellite1 targets. Satellite1 peers still chime from their own flash
 (`audio-file://`, no audio on the wire); everything else is sent the chime MP3 from the sounds
@@ -284,16 +284,17 @@ Assistant end to end, so one Sonos target forces a fixed floor regardless.
 
 ### The device serves its own sounds
 
-The timer ring and chime MP3s are fetched from the device itself — `GET
-/api/sat1/sounds/timer_finished.mp3` and `wake_word_triggered.mp3`, session-gate exempt, served
-from the same `audio_file` bytes local playback uses, with single-range support because Cast
-refuses media whose origin cannot answer a Range request. Chosen over S3 hosting so a mirrored
-timer ring works with the internet down; the cost is a topology requirement — **the speakers must
-be able to reach the satellite over HTTP**. A home that VLAN-isolates them gets a silent failure,
-because `play_media` reports nothing back. The check: open
+The timer ring, chime and stop-clip MP3s are fetched from the device itself — `GET
+/api/sat1/sounds/timer_finished.mp3`, `wake_word_triggered.mp3` and `stop_clip.mp3`, session-gate
+exempt, served from the same `audio_file` bytes local playback uses, with single-range support
+because Cast refuses media whose origin cannot answer a Range request. Chosen over S3 hosting so a
+mirrored timer ring works with the internet down; the cost is a topology requirement — **the
+speakers must be able to reach the satellite over HTTP**. A home that VLAN-isolates them gets a
+silent failure, because `play_media` reports nothing back. The check: open
 `http://<device-ip>/api/sat1/sounds/timer_finished.mp3` from a device on the speakers' network. If
-it does not play, allow that path in the firewall. Both files are MP3 because a Sonos AudioClip
-accepts MP3 and WAV only — the same codec rule the TTS swap exists for.
+it does not play, allow that path in the firewall. All three files are MP3 because a Sonos
+AudioClip accepts MP3 and WAV only — the same codec rule the TTS swap exists for — and stereo,
+because a mono clip plays center-only on a soundbar.
 
 ## How a routed interaction runs
 
@@ -464,6 +465,33 @@ asked for when the codec actually changes, and a device that boots with routing 
 never reloads at all, because `tts_announce_format_apply` runs at `on_boot` priority `-100` before
 anything connects.
 
+**The travelling MP3s are stereo; the local FLAC stays mono.** A mono clip lands on a Sonos
+soundbar's center channel only and sounds thin; stereo renders across the bar. So the MP3
+announcement format advertises `num_channels = 2` (Home Assistant transcodes the TTS to stereo)
+and the served sounds — the timer ring, the wake chime and the stop clip — are encoded stereo,
+which costs about 2% extra flash at the same bitrate. The device's own announcement pipeline is
+configured mono, but that only shapes the advertised default: the decode chain carries a file's
+own channel count and the mixer maps it onto its 2-channel output, so stereo responses play
+locally unchanged. What stereo cannot do is reach bonded **surrounds** — see Known limits.
+
+**"Stop" reaches a playing Sonos announcement by preempting it with a new clip.** A playing
+AudioClip cannot be cancelled through Home Assistant — `cancelAudioClip` exists but is LAN-only,
+needs the clip id, and nothing retains one — but the clip priority system is the lever: clips are
+LOW priority by default and a LOW clip interrupts a playing LOW clip at any time. So the stop
+fan-outs (`tts_remote_stop`, `timer_remote_ring_stop`) send Sonos targets one more announcement,
+`stop_clip.mp3` — ~0.4 s of a faint fading tone, served from the device like the ring and chime —
+and the response's tail shrinks from the rest of the answer to roughly the clip startup latency.
+The clip is deliberately not digital silence: a field-tested pure-silence MP3 failed to register
+as a clip at all. It reads as a soft acknowledgment that the stop was heard.
+
+**`play_on_bonded: true` travels in `extra` on every routed announcement.** Read by exactly one
+integration — the [`sonos_cloud`](https://github.com/jjlawren/sonos_cloud) custom one, where it
+fans the clip out to every speaker bonded into the room, which is the only path to Sonos
+surrounds (see Known limits). Everyone else ignores unknown `extra` keys, the same reasoning
+`use_pre_announce: false` rides on. The app's tree offers `sonos_cloud` entities for explicit
+selection, but whole-area expansion rejects them exactly as it rejects Music Assistant ids: the
+integration duplicates every Sonos, and a whole-area pick would announce through both twins.
+
 **The device probes the actions checkbox rather than waiting to be noticed.** `ha_action_probe`
 fires one harmless `persistent_notification.dismiss` for an id nothing ever creates, five seconds
 after Home Assistant connects, and reads the answer off whether one comes back at all — with the
@@ -624,8 +652,24 @@ instead used to cut the wake chime off mid-sound, since it shares the announceme
 - **The remote sync guard adds its own length to every follow-up turn** while routing is active —
   the price of never hearing your own answer. Shorten the select if the pause grates and the
   targets are fast.
-- **A Sonos finishes its current ring clip after "stop"** — a clip cannot be cancelled, so the tail
-  is at most one clip (~3 s).
+- **A Sonos bonded set plays announcements on its primary speaker only.** A home-theater room
+  announces through the soundbar and a stereo pair through its left speaker; surrounds and subs
+  never receive the clip. This is the AudioClip API — it targets exactly one player, there is no
+  group form, and no encoding works around it. The escape hatch for surrounds is the
+  [`sonos_cloud`](https://github.com/jjlawren/sonos_cloud) custom integration, **verified working
+  September 2026**: install it via HACS *alongside* the native integration (never instead — ducking,
+  volume snapshots and the stop machinery all need the native entities), rename its duplicate
+  devices so the two sets are tellable apart, and pick the cloud `media_player` in the app's tree
+  with the native twin unticked. The firmware's calls already carry `play_on_bonded: true`, and the
+  response plays through the soundbar and every surround — via near-simultaneous per-player calls,
+  close but not sample-locked. Its costs: a Sonos developer account and OAuth (it is cloud-based,
+  so those announcements need the internet). Its README asks for publicly reachable clip URLs, but
+  in practice the speaker fetches the URL itself — the LAN `tts_proxy` URL played fine on the
+  verifying install; if a cloud entity stays silent while the native one works, URL reachability
+  is the first suspect and Nabu Casa remote URLs the fallback.
+- **A stopped Sonos announcement ends with a soft ~0.4 s tone** — the preempt clip is the only
+  way to interrupt a playing AudioClip, and it must carry real audio to register, so "stop" on a
+  Sonos is followed by a faint fading blip rather than instant silence.
 - **Device-served sounds need speaker-to-satellite HTTP.** A VLAN that blocks it silences the
   remote ring and chime with no error anywhere; see the check above.
 - **The sign-in prompt is not ducked on the targets** — the ducking snapshot rides the pipeline's

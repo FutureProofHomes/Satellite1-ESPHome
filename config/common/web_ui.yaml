@@ -210,14 +210,16 @@ satellite1_web_ui:
   # playing.
   media_player_id: external_media_player
 
-  # The two sounds the routing feature mirrors to third-party speakers, served at
+  # The sounds the routing feature mirrors to third-party speakers, served at
   # GET /api/sat1/sounds/<name> straight from the audio_file bytes in flash (session-gate exempt;
   # the fetcher is a Sonos or Cast with no session). The keys are the URL tails the calls in
-  # tts_routing.yaml render - change one and the other must move with it. Both files are MP3 in
-  # media_player.yaml because a Sonos AudioClip accepts MP3 and WAV only.
+  # tts_routing.yaml render - change one and the other must move with it. All files are MP3 in
+  # media_player.yaml because a Sonos AudioClip accepts MP3 and WAV only. stop_clip is the Sonos
+  # stop preempt: a new clip interrupts a playing one, which is the only stop a clip has.
   sounds:
     timer_finished.mp3: timer_finished_sound
     wake_word_triggered.mp3: wake_word_triggered_sound
+    stop_clip.mp3: stop_clip_sound
 
   # Whether a voice approval could be heard right now, read when a pairing window opens. Only the
   # hardware mute slider counts: it is the one mute software cannot clear, so it alone forces a

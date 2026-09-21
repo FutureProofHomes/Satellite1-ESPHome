@@ -26,6 +26,12 @@ substitutions:
   # the app offers 12 - the other 6 are duplicates that clip on Sonos. Rejecting them here is what
   # stops whole-area mode from quietly reintroducing what the app filtered out.
   #
+  # sonos_cloud entities are rejected from area expansion by the same duplicate logic: that custom
+  # integration creates a second media_player per Sonos speaker, so a whole-area selection would
+  # announce through both and double-fire the primary. An explicitly picked cloud entity is honored -
+  # picking it is how a user opts into its play_on_bonded fan-out (see the extra dict in
+  # tts_route_response), typically carving the native twin out in the same edit.
+  #
   # `excluded` entries carry an `area_id:` prefix for the device's benefit, not Home Assistant's, so
   # the prefix is stripped and the ids rejected globally - an entity belongs to at most one area, so
   # that gives the same answer as rejecting per area.
@@ -48,13 +54,13 @@ substitutions:
   # app's greyed-out rows (web_ui_ha.yaml), so what the tree shows as untickable or offline and
   # what this walk removes agree by construction.
   tts_targets_resolve: >-
-    {% set ma = integration_entities('music_assistant') %}
+    {% set dupes = integration_entities('music_assistant') + integration_entities('sonos_cloud') %}
     {% set cut = sel_cut.split(',') | map('trim') | reject('eq', '')
                  | map('regex_replace', '^[^:]*:', '') | list %}
     {% set res = namespace(t=[]) %}
     {% for a in sel_areas.split(',') | map('trim') | reject('eq', '') %}
       {% set res.t = res.t + (area_entities(a) | select('match', 'media_player\.')
-                              | reject('in', ma) | list) %}
+                              | reject('in', dupes) | list) %}
     {% endfor %}
     {% set res.t = res.t
                    + (sel_extra.split(',') | map('trim') | map('lower') | reject('eq', '') | list) %}
@@ -116,14 +122,18 @@ substitutions:
   # The targets media_player.media_stop is right for, as a list. Expects `targets_list`.
   #
   # Everyone except the two platforms where the generic stop does damage: a Satellite1 gets its
-  # button (above), and Sonos is skipped entirely - its announcement is an audio clip played over
-  # the queue, no Home Assistant action can stop a clip, and media_stop would stop the *queue*,
-  # so saying "stop" would kill the customer's music while the announcement played on. Letting the
-  # clip finish is the lesser wrong. For everything else the announcement is what is playing, so
-  # stop reaches it; whether the target resumes its own media afterwards is the integration's
-  # announce support, exactly as if the announcement had ended by itself.
+  # button (above), and Sonos is skipped - its announcement is an audio clip played over the
+  # queue, and media_stop would stop the *queue*, so saying "stop" would kill the customer's
+  # music while the announcement played on. Sonos gets the preempt clip instead
+  # (tts_stop_sonos_jinja below). sonos_cloud entities are skipped for the same reason, plus a
+  # sharper one: they are clip-only shells, and Home Assistant raises ServiceNotSupported for an
+  # explicitly listed entity missing a service's feature *before calling anything*, so one cloud
+  # entity in this list would kill the stop for every player in the call. For everything else the
+  # announcement is what is playing, so stop reaches it; whether the target resumes its own media
+  # afterwards is the integration's announce support, exactly as if the announcement had ended by
+  # itself.
   tts_stop_players_jinja: >-
-    {% set sonos = integration_entities('sonos') %}
+    {% set sonos = integration_entities('sonos') + integration_entities('sonos_cloud') %}
     {% set pns = namespace(p=[]) %}
     {% for t in targets_list %}
       {% set d = device_id(t) %}
@@ -132,6 +142,28 @@ substitutions:
       {% endif %}
     {% endfor %}
     {{ pns.p }}
+
+  # The Sonos targets, native and sonos_cloud, as a list, for the stop preempt. Expects
+  # `targets_list`.
+  #
+  # These are the players the walk above cannot stop, and the reason it cannot is also the lever:
+  # a playing AudioClip cannot be *cancelled* through Home Assistant (cancelAudioClip is LAN-only
+  # and needs the clip id, which nothing retains), but the clip priority system says a LOW clip
+  # interrupts a playing LOW clip at any time, and every clip Home Assistant sends is LOW. So a
+  # new, short, near-silent announcement IS the stop: it preempts the playing response and ends
+  # ~0.4s later. The clip must carry real audio - a field report (HA community, "Cancel an
+  # announcement") found a pure-silence MP3 did not register - which is why stop_clip.mp3 is a
+  # faint fading tone rather than digital zero. It doubles as an acknowledgment that the stop
+  # was heard.
+  tts_stop_sonos_jinja: >-
+    {% set sonos = integration_entities('sonos') + integration_entities('sonos_cloud') %}
+    {% set qns = namespace(p=[]) %}
+    {% for t in targets_list %}
+      {% if t in sonos %}
+        {% set qns.p = qns.p + [t] %}
+      {% endif %}
+    {% endfor %}
+    {{ qns.p }}
 
   # Every other FutureProofHomes device's Stop Announcement button, as a list, for
   # tts_stop_broadcast below. Expects `mac`. Unlike the two walks above this is not scoped to a
@@ -852,7 +884,14 @@ script:
             media_player::MediaPlayerSupportedFormat fmt;
             fmt.purpose = media_player::MediaPlayerFormatPurpose::PURPOSE_ANNOUNCEMENT;
             fmt.sample_rate = 48000;
-            fmt.num_channels = 1;
+            // Stereo for the travelling MP3, mono for the local FLAC. A mono clip lands on a Sonos
+            // soundbar's center channel only and sounds thin; stereo renders across the bar (it
+            // still cannot reach bonded surrounds - the AudioClip API is per-player, see
+            // docs/TTS-Routing.md). The local pipeline is configured num_channels: 1, but that
+            // only shapes what is advertised - the decode chain carries the file's own channel
+            // count and the mixer maps it onto its 2-channel output, so the stereo response
+            // plays here unchanged (verified against ESPHome 2026.8.1's resampler and mixer).
+            fmt.num_channels = want_mp3 ? 2 : 1;
             fmt.format = want_mp3 ? "mp3" : "flac";
             // Zero for MP3 rather than 2, and not an oversight: speaker_source's own codegen leaves
             // the field out for that codec because Home Assistant's ffmpeg transcode fails when
@@ -920,6 +959,13 @@ script:
             #
             # announce_volume is sent to nobody - native Squeezebox reads it as a 0.0-1.0 float and
             # rejects the call outright above 1. Only Sonos honours a per-call level, via extra.volume.
+            #
+            # play_on_bonded is read by exactly one integration, the sonos_cloud custom one, where
+            # it fans the clip out to every speaker bonded into the room - the only path to Sonos
+            # surrounds, since the AudioClip API is per-player and the native integration only
+            # reaches the bonded set's primary. Everyone else ignores unknown extra keys, the same
+            # reasoning use_pre_announce already rides on, so it is sent unconditionally and costs
+            # a user nothing until they install that integration and pick its entity in the tree.
             - lambda: |-
                 const int vol = (int) id(remote_tts_volume).state;
                 ESP_LOGD("tts_routing", "action: media_player.play_media");
@@ -929,10 +975,11 @@ script:
                 ESP_LOGD("tts_routing", "  media_content_type: music");
                 ESP_LOGD("tts_routing", "  announce: true");
                 if (vol > 0) {
-                  ESP_LOGD("tts_routing", "  extra: {'use_pre_announce': false, 'volume': %d}",
+                  ESP_LOGD("tts_routing",
+                           "  extra: {'use_pre_announce': false, 'play_on_bonded': true, 'volume': %d}",
                            vol);
                 } else {
-                  ESP_LOGD("tts_routing", "  extra: {'use_pre_announce': false}");
+                  ESP_LOGD("tts_routing", "  extra: {'use_pre_announce': false, 'play_on_bonded': true}");
                 }
             - lambda: 'id(tts_announce_pending) = true;'
             - homeassistant.service:
@@ -946,8 +993,8 @@ script:
                     ${tts_targets_jinja}
                   media_content_id: "{{ tts_url }}"
                   extra: >-
-                    {{ {'use_pre_announce': false, 'volume': vol | int}
-                       if vol | int > 0 else {'use_pre_announce': false} }}
+                    {{ {'use_pre_announce': false, 'play_on_bonded': true, 'volume': vol | int}
+                       if vol | int > 0 else {'use_pre_announce': false, 'play_on_bonded': true} }}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
                   sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
@@ -1059,7 +1106,18 @@ script:
                     ${non_sat1_targets_jinja}
                     {{ other_players }}
                   media_content_id: "{{ chime_url }}"
-                  extra: "{{ {'use_pre_announce': false} }}"
+                  # play_on_bonded: the sonos_cloud fan-out to bonded surrounds; everyone else
+                  # ignores it. See tts_route_response for the full reasoning.
+                  #
+                  # volume rides along exactly as it does on the response and the timer ring -
+                  # found missing on hardware September 20 2026, when the response honoured Remote
+                  # TTS Volume and the chime in front of it played at a level of its own. Only
+                  # Sonos (native and cloud) reads it, per clip, so no snapshot is needed and
+                  # nothing has to be put back.
+                  extra: >-
+                    {{ {'use_pre_announce': false, 'play_on_bonded': true, 'volume': vol | int}
+                       if vol | int > 0
+                       else {'use_pre_announce': false, 'play_on_bonded': true} }}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
                   sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
@@ -1068,6 +1126,7 @@ script:
                   chime_url: !lambda |-
                     ${sat1_sounds_url_lambda}
                     return "http://" + sat1_ip + "/api/sat1/sounds/wake_word_triggered.mp3";
+                  vol: !lambda 'return (int) id(remote_tts_volume).state;'
                 on_error:
                   - script.execute:
                       id: remote_wake_chime_error
@@ -1122,9 +1181,13 @@ script:
                     ${self_area_jinja}
                     ${tts_targets_jinja}
                   media_content_id: "{{ ring_url }}"
+                  # play_on_bonded: the sonos_cloud fan-out to bonded surrounds; everyone else
+                  # ignores it. See tts_route_response for the full reasoning.
                   extra: >-
-                    {{ {'use_pre_announce': false, 'bypass_proxy': true, 'volume': vol | int}
-                       if vol | int > 0 else {'use_pre_announce': false, 'bypass_proxy': true} }}
+                    {{ {'use_pre_announce': false, 'bypass_proxy': true, 'play_on_bonded': true,
+                        'volume': vol | int}
+                       if vol | int > 0
+                       else {'use_pre_announce': false, 'bypass_proxy': true, 'play_on_bonded': true} }}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
                   sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
@@ -1141,11 +1204,12 @@ script:
             - delay: ${timer_remote_ring_interval}
 
   # Stops the mirrored ring on the targets when the local one ends, by the same platform split as
-  # tts_remote_stop: Stop Announcement buttons for the Satellite1s, media_stop for the rest, Sonos
-  # skipped by tts_stop_players_jinja because a clip cannot be stopped - its current clip finishes
-  # and no more arrive, which the loop above already guarantees. Gated on the loop having actually
-  # sent something, for the same reason tts_remote_stop gates on tts_remote_sent: media_stop aimed
-  # at a target that never received a ring would stop whatever it was playing instead.
+  # tts_remote_stop: Stop Announcement buttons for the Satellite1s, media_stop for the rest, and
+  # the preempt clip for Sonos - a playing ring clip cannot be cancelled, but a new LOW-priority
+  # clip interrupts it at any time (see tts_stop_sonos_jinja), so the tail shrinks from the rest
+  # of the clip to the preempt's ~0.4s. Gated on the loop having actually sent something, for the
+  # same reason tts_remote_stop gates on tts_remote_sent: a stop aimed at a target that never
+  # received a ring would interrupt whatever it was playing instead.
   - id: timer_remote_ring_stop
     mode: single
     then:
@@ -1189,6 +1253,32 @@ script:
                   - script.execute:
                       id: tts_remote_stop_error
                       reason: !lambda 'return error;'
+            # The Sonos preempt, exactly as tts_remote_stop sends it: a fresh clip interrupts the
+            # ring clip still playing, cutting the tail to ~0.4s.
+            - homeassistant.action:
+                action: media_player.play_media
+                data:
+                  media_content_type: music
+                  announce: "true"
+                data_template:
+                  entity_id: >-
+                    ${self_area_jinja}
+                    ${tts_targets_resolve}
+                    ${tts_stop_sonos_jinja}
+                  media_content_id: "{{ stop_url }}"
+                  extra: "{{ {'use_pre_announce': false, 'bypass_proxy': true, 'play_on_bonded': true} }}"
+                variables:
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  stop_url: !lambda |-
+                    ${sat1_sounds_url_lambda}
+                    return "http://" + sat1_ip + "/api/sat1/sounds/stop_clip.mp3";
+                on_error:
+                  - script.execute:
+                      id: tts_remote_stop_error
+                      reason: !lambda 'return error;'
           else:
             # A loop that never sent has nothing to stop, but the flag must not survive into the
             # next ring.
@@ -1216,9 +1306,11 @@ script:
   # lifetime tracks the remote playback closely enough to gate on. After it clears, a wake word is
   # a new conversation, not an interruption, and stopping targets then could cut off resumed music.
   #
-  # Two calls because the targets split by platform - see tts_stop_buttons_jinja and
-  # tts_stop_players_jinja for the reasoning. Either list can be empty; an empty entity_id is a
-  # no-op, same as the routing call itself.
+  # Three calls because the targets split by platform - see tts_stop_buttons_jinja,
+  # tts_stop_players_jinja and tts_stop_sonos_jinja for the reasoning: buttons for the
+  # Satellite1s, media_stop for the generic players, and the preempt clip for Sonos, whose
+  # playing announcement no stop action can reach but a new LOW-priority clip interrupts at any
+  # time. Any list can be empty; an empty entity_id is a no-op, same as the routing call itself.
   - id: tts_remote_stop
     mode: single
     then:
@@ -1257,6 +1349,36 @@ script:
                   sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
                   sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
                   sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                on_error:
+                  - script.execute:
+                      id: tts_remote_stop_error
+                      reason: !lambda 'return error;'
+            # The Sonos preempt: a fresh announcement interrupts the playing one (LOW interrupts
+            # LOW, see tts_stop_sonos_jinja), so the response's tail becomes stop_clip.mp3's
+            # ~0.4s faint tone instead of the rest of the answer. Device-served like the ring and
+            # chime, so it shares their topology requirement: the speaker must reach the satellite
+            # over HTTP. bypass_proxy for the same reason the ring sends it; play_on_bonded so a
+            # sonos_cloud target's stop reaches every bonded speaker its response did.
+            - homeassistant.action:
+                action: media_player.play_media
+                data:
+                  media_content_type: music
+                  announce: "true"
+                data_template:
+                  entity_id: >-
+                    ${self_area_jinja}
+                    ${tts_targets_resolve}
+                    ${tts_stop_sonos_jinja}
+                  media_content_id: "{{ stop_url }}"
+                  extra: "{{ {'use_pre_announce': false, 'bypass_proxy': true, 'play_on_bonded': true} }}"
+                variables:
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  stop_url: !lambda |-
+                    ${sat1_sounds_url_lambda}
+                    return "http://" + sat1_ip + "/api/sat1/sounds/stop_clip.mp3";
                 on_error:
                   - script.execute:
                       id: tts_remote_stop_error

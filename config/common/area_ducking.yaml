@@ -70,6 +70,8 @@ substitutions:
   # audible ones selected, because an amplifier never reports `playing` while it is the loudest thing
   # in the room, and Music Assistant entities are still rejected outright so a speaker with two entity
   # ids cannot be ducked twice - now doubly necessary, since expanding a whole area returns them.
+  # sonos_cloud entities are rejected with them for the same two-ids-one-speaker reason: the custom
+  # integration duplicates every Sonos as a clip-only shell, and the native twin is the one to duck.
   #
   # `pick` also drops players whose supported_features lacks VOLUME_SET (4), for the reason
   # tts_targets_resolve documents at length: these end up as explicit entity lists on
@@ -84,7 +86,7 @@ substitutions:
   duck_players_jinja: >-
     ${self_area_jinja}
     ${tts_targets_resolve}
-    {% set ma = integration_entities('music_assistant') %}
+    {% set ma = integration_entities('music_assistant') + integration_entities('sonos_cloud') %}
     {% set dcut = duck_cut.split(',') | map('trim') | reject('eq', '')
                   | map('regex_replace', '^[^:]*:', '') | list %}
     {% set chosen = namespace(e=[]) %}
@@ -116,7 +118,8 @@ substitutions:
   # The Remote TTS Targets whose volume has to be set for them, as `vol_players`. Expects `targets`
   # and defines nothing else, so it can be pasted after the walk above.
   #
-  # Only Sonos reads the per-call volume the announcement carries, so it is left out, as is a
+  # Only Sonos reads the per-call volume the announcement carries, so it is left out - sonos_cloud
+  # entities with it, since that integration reads the same extra.volume key per clip - as is a
   # Satellite1 whose own Voice Override is above 0 - but not one at 0, where "no override" means
   # speech follows the media volume and setting that volume is exactly the right lever. Targets with
   # no volume_level are dropped: nothing to snapshot, so nothing this firmware could hand back.
@@ -124,13 +127,14 @@ substitutions:
   # `targets_list` is filtered for play_media, not for this, and one such player in an explicit
   # volume_set list fails the call for all of them.
   tts_volume_targets_jinja: >-
+    {% set percall = integration_entities('sonos') + integration_entities('sonos_cloud') %}
     {% set vns = namespace(v=[]) %}
     {% for t in targets_list %}
       {% set d = device_id(t) %}
       {% set vf = state_attr(t, 'supported_features') %}
       {% set vo = (device_entities(d) | select('search', 'voice_override') | list)
                   if d and device_attr(d, 'manufacturer') == 'FutureProofHomes' else [] %}
-      {% if t not in integration_entities('sonos')
+      {% if t not in percall
             and not (vo | count > 0 and states(vo | first) | float(0) > 0)
             and state_attr(t, 'volume_level') is not none
             and (vf is none or vf | int | bitwise_and(4)) %}
