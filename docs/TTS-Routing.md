@@ -312,11 +312,10 @@ sequenceDiagram
     Sat->>HA: media_player.volume_set (duck level)
     HA->>Room: turn down
     HA->>Tgt: turn down
-    Note over Sat,HA: on_intent_start
-    Sat->>HA: "media_player.volume_set (Remote TTS Volume)"
-    HA->>Tgt: set level
     Note over Sat,HA: "on_intent_progress (~36 ms in, streaming URL)"
     Sat->>HA: "scene.turn_on sat1_ducktts (only if Remote TTS Volume is 0)"
+    Sat->>HA: "media_player.volume_set (Remote TTS Volume), then 250 ms"
+    HA->>Tgt: set level
     Sat->>HA: "media_player.play_media announce:true"
     HA->>Tgt: fetch and play the tts_proxy URL
     Note over Sat: local announcement pipeline plays the same URL
@@ -413,17 +412,22 @@ announcement as `extra.volume`, which is the polite form — the level applies t
 the speaker's standing volume is never touched. In testing only Sonos read it. So above `0` the
 device also snapshots the targets that read no per-call level, issues an ordinary
 `media_player.volume_set`, and hands the old level back afterwards. Two kinds of target are left
-out: **Sonos**, which already read the level, and **a Satellite1 whose own Voice Override is above
-`0`**, which has a level of its own to apply. A Satellite1 at Voice Override `0` is *not* skipped —
-`0` means "no override" and speech follows the media volume there, so it has no level to fall back
-on.
+out: **Sonos**, which already read the level, and **any Satellite1 with a Voice Override entity**.
+A peer whose override is above `0` has a level of its own to apply; a peer at `0` gets its Voice
+Override set to the slider for the call and handed back afterwards, which reaches the announcement
+channel without touching the media one. The at-`0` peer used to take `media_player.volume_set` as
+well, and that pairing was audible: the redundant call moved the peer's *music* from the duck level
+to Remote TTS Volume ahead of the response. Only a peer with no override entity at all — an older
+build — still takes `volume_set`, where it remains the one available lever.
 
-That volume is set at `on_intent_start`, one trigger earlier than the response, and the response is
-held back a further 250 ms whenever the slider is set. Ordering is not the worry — Home Assistant
-dispatches calls in the order the connection delivers them — but dispatch is not application: a
-networked speaker takes a round trip to accept a volume, and a response that starts at the old
-level and jumps partway through is exactly what this prevents. That gap used to be the whole of TTS
-generation, back when the response was sent at `on_tts_end`; it is 36 ms now.
+That volume is set from `tts_route_response`, immediately ahead of the `play_media` call, and the
+response is held back a further 250 ms whenever the slider is set. Ordering is not the worry —
+Home Assistant dispatches calls in the order the connection delivers them — but dispatch is not
+application: a networked speaker takes a round trip to accept a volume, and a response that starts
+at the old level and jumps partway through is exactly what this prevents. It used to fire at
+`on_intent_start`, a whole trigger earlier, and a music-playing generic target then sat at the
+response's level for all of intent processing and TTS generation; firing with the response shrinks
+that window to the 250 ms plus the target's own fetch-and-buffer time.
 
 **A Satellite1 target sets its own level.** No per-call volume can reach the firmware, so
 `audio_gain_reconcile` plays any HTTP announcement at that device's **Voice Override** instead of

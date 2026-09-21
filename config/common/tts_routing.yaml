@@ -939,9 +939,16 @@ script:
             lambda: 'return id(tts_routing_to_remote) && !id(tts_remote_sent);'
           then:
             - lambda: 'id(tts_remote_sent) = true;'
-            # Slack for tts_targets_volume_apply, which fires a trigger earlier. Dispatch order is
-            # not the worry, application is: a networked speaker takes a round trip to accept a
-            # volume, and a response that starts at the old level and jumps is what this prevents.
+            # Lift the targets to Remote TTS Volume now, as late as possible: any earlier trigger
+            # (it used to be on_intent_start, in area_ducking.yaml) leaves a music-playing target
+            # blasting at the response's level for however long generation takes before the response
+            # arrives. The script no-ops at slider 0 and on the sign-in prompt path, where no
+            # snapshot was taken. Defined in area_ducking.yaml, which always merges alongside this
+            # package (satellite1.base.yaml lists both).
+            - script.execute: tts_targets_volume_apply
+            # Slack for that lift. Dispatch order is not the worry, application is: a networked
+            # speaker takes a round trip to accept a volume, and a response that starts at the old
+            # level and jumps is what this prevents.
             - if:
                 condition:
                   lambda: 'return id(remote_tts_volume).state > 0;'
