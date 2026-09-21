@@ -105,6 +105,17 @@ substitutions:
   # trees as "This device" - the call-time walks still reject it through `mine`, so the tag is
   # display-only. An int, never a boolean, for the literal_eval reason above.
   #
+  # Registry ghosts are dropped before any of that: an entity that is in Home Assistant's registry
+  # but that no loaded integration provides gets a stub state with `restored: true` (a stale
+  # registration from renamed or re-registered hardware - found on a live install as
+  # media_player.satellite1_c2faf0, the old name of a device whose real player was right above it).
+  # A real speaker that is merely powered off never carries the attribute - its integration owns the
+  # state - so this cannot hide a working player. It can briefly hide a real one right after a Home
+  # Assistant restart, while that player's integration is still loading; the next sync (every HA
+  # reconnect, every page open) self-heals. Dropped rather than greyed, despite the keep-and-explain
+  # rule below: that rule exists for players someone owns and might look for, and a ghost is not one -
+  # showing it is what read as a bug.
+  #
   # The fourth element is availability: 1 while the player's state is anything real, 0 for
   # `unavailable` or `unknown`. The app greys an offline row and marks it "Offline" without
   # touching its checkbox - the selection persists, so the player resumes routing and ducking the
@@ -273,12 +284,14 @@ substitutions:
       {% set out.rows = [] %}
       {% for e in area_entities(a) | select('match', 'media_player\.')
                   | reject('in', ma) %}
+        {% if not state_attr(e, 'restored') %}
         {% set f = state_attr(e, 'supported_features') %}
         {% set out.rows = out.rows + [[e, state_attr(e, 'friendly_name') or e,
              (4 if e in mine else 0) +
              (3 if f is none else (1 if f | int | bitwise_and(512) else 0)
                                 + (2 if f | int | bitwise_and(4) else 0)),
              0 if states(e) in ['unavailable', 'unknown'] else 1]] %}
+        {% endif %}
       {% endfor %}
       {% if out.rows | count > 0 %}
         {% set out.areas = out.areas + [{'i': a, 'n': area_name(a), 'p': out.rows}] %}
@@ -288,12 +301,14 @@ substitutions:
                       | select('match', 'media_player\.') | list %}
     {% for e in states.media_player | map(attribute='entity_id')
                 | reject('in', ma) | reject('in', assigned) %}
+      {% if not state_attr(e, 'restored') %}
       {% set f = state_attr(e, 'supported_features') %}
       {% set out.loose = out.loose + [[e, state_attr(e, 'friendly_name') or e,
            (4 if e in mine else 0) +
            (3 if f is none else (1 if f | int | bitwise_and(512) else 0)
                               + (2 if f | int | bitwise_and(4) else 0)),
            0 if states(e) in ['unavailable', 'unknown'] else 1]] %}
+      {% endif %}
     {% endfor %}
     {% for a in areas() %}
       {% for d in area_devices(a) %}
