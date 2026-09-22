@@ -11,11 +11,6 @@ globals:
     restore_value: no
     initial_value: 'false'
 
-  - id: factory_reset_requested
-    type: bool
-    restore_value: yes
-    initial_value: 'false'
-
 event:
   # Event entity exposed to the user to automate on complex action button presses.
   # The simple press is not exposed as it is used to control the device itself.
@@ -273,7 +268,4 @@ binary_sensor:
               condition:
                 lambda: return !id(action_button_touched);
               then:
-                - lambda: |-
-                    id(factory_reset_requested) = true;
-                    global_preferences->sync();
-                - memory_flasher.request_full_erase_flash_reboot:
+                - memory_flasher.request_factory_reset_reboot:

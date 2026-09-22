@@ -19,6 +19,9 @@ enum class XmosFlashState : uint8_t {
   RECOVERY_REQUIRED = 2,
   FLASH_REQUESTED = 3,
   FULL_ERASE_FLASH_REQUESTED = 4,
+  FULL_ERASE_RECOVERY_REQUIRED = 5,
+  FACTORY_RESET_FLASH_REQUESTED = 6,
+  FACTORY_RESET_RECOVERY_REQUIRED = 7,
 };
 
 struct XmosFlashRecord {
@@ -45,7 +48,9 @@ class XMOSFlasher : public MemoryFlasher, public Satellite1SPIService {
   void flash_embedded_image() override;
   void request_embedded_flash_reboot() override;
   void request_full_erase_flash_reboot() override;
+  void request_factory_reset_reboot() override;
   bool boot_flash_pending() const { return this->pending_boot_action_; }
+  bool factory_reset_pending() const override { return this->factory_reset_pending_; }
 
   bool flash_accessible() override {
     this->parent_->set_spi_flash_direct_access_mode(true);
@@ -65,7 +70,7 @@ class XMOSFlasher : public MemoryFlasher, public Satellite1SPIService {
   bool wait_while_flash_busy_(uint32_t timeout_ms);
   bool read_page_(uint32_t byte_addr, uint8_t *buffer);
   bool write_page_(uint32_t byte_addr, uint8_t *buffer);
-  bool prepare_flash_transaction_(uint32_t erased_length);
+  bool prepare_flash_transaction_(uint32_t erased_length, XmosFlashState recovery_state);
   void start_record_verification_();
   bool verify_record_step_();
   bool load_record_();
@@ -75,6 +80,7 @@ class XMOSFlasher : public MemoryFlasher, public Satellite1SPIService {
   bool record_matches_embedded_() const;
   bool set_record_md5_(const std::string &md5);
   std::string record_md5_() const;
+  void request_full_erase_flash_reboot_(XmosFlashState request_state);
 
   uint8_t manufacturerID_;
   uint8_t memoryTypeID_;
@@ -112,6 +118,7 @@ class XMOSFlasher : public MemoryFlasher, public Satellite1SPIService {
   md5::MD5Digest md5_verify_;
   bool pending_boot_action_{false};
   bool boot_recovery_active_{false};
+  bool factory_reset_pending_{false};
   FlasherAction pending_boot_action_type_{ACTION_FLASH_EMBEDDED_IMAGE};
 };
 

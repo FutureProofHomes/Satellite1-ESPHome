@@ -18,6 +18,11 @@ constexpr uint32_t FLASH_BOOT_PARTITION_SIZE = 0x100000;
 constexpr uint32_t FLASH_RECORD_MAGIC = 0x58464C54;
 constexpr uint8_t FLASH_JEDEC_ID[] = {0xEF, 0x40, 0x17};
 
+static bool is_recovery_state(XmosFlashState state) {
+  return state == XmosFlashState::RECOVERY_REQUIRED || state == XmosFlashState::FULL_ERASE_RECOVERY_REQUIRED ||
+         state == XmosFlashState::FACTORY_RESET_RECOVERY_REQUIRED;
+}
+
 void XMOSFlasher::setup() {
   this->record_pref_ = global_preferences->make_preference<XmosFlashRecord>(fnv1_hash("sat1.xmos.flash_record"));
   this->load_record_();
@@ -28,21 +33,27 @@ void XMOSFlasher::setup() {
       this->pending_boot_action_type_ = ACTION_FLASH_EMBEDDED_IMAGE;
     } else {
       ESP_LOGE(TAG, "Pending XMOS flash request does not match the embedded image");
-      this->record_.state = XmosFlashState::RECOVERY_REQUIRED;
+      this->set_record_unknown_();
       this->save_record_();
     }
-  } else if (this->record_.state == XmosFlashState::FULL_ERASE_FLASH_REQUESTED) {
+  } else if (this->record_.state == XmosFlashState::FULL_ERASE_FLASH_REQUESTED ||
+             this->record_.state == XmosFlashState::FACTORY_RESET_FLASH_REQUESTED) {
+    this->factory_reset_pending_ = this->record_.state == XmosFlashState::FACTORY_RESET_FLASH_REQUESTED;
     if (this->record_matches_embedded_()) {
       this->pending_boot_action_ = true;
       this->pending_boot_action_type_ = ACTION_FLASH_EMBEDDED_FULL_ERASE;
     } else {
       ESP_LOGE(TAG, "Pending full XMOS erase request does not match the embedded image");
-      this->record_.state = XmosFlashState::RECOVERY_REQUIRED;
+      this->factory_reset_pending_ = false;
+      this->set_record_unknown_();
       this->save_record_();
     }
-  } else if (this->record_.state == XmosFlashState::RECOVERY_REQUIRED && this->record_is_valid_()) {
+  } else if (is_recovery_state(this->record_.state) && this->record_is_valid_()) {
+    this->factory_reset_pending_ = this->record_.state == XmosFlashState::FACTORY_RESET_RECOVERY_REQUIRED;
     this->pending_boot_action_ = true;
-    this->pending_boot_action_type_ = ACTION_FLASH_EMBEDDED_IMAGE;
+    this->pending_boot_action_type_ = this->record_.state == XmosFlashState::RECOVERY_REQUIRED
+                                          ? ACTION_FLASH_EMBEDDED_IMAGE
+                                          : ACTION_FLASH_EMBEDDED_FULL_ERASE;
   }
 
   if (this->pending_boot_action_) {
@@ -212,6 +223,7 @@ void XMOSFlasher::erase_memory() {
     return;
   }
 
+  this->factory_reset_pending_ = false;
   this->requested_action = ACTION_FULL_ERASE;
   this->state = FLASHER_INITIALIZING;
   this->publish();
@@ -222,6 +234,7 @@ void XMOSFlasher::request_embedded_flash_reboot() {
     ESP_LOGE(TAG, "XMOS flash request rejected: flasher busy or no embedded image");
     return;
   }
+  this->factory_reset_pending_ = false;
   memset(&this->record_, 0, sizeof(this->record_));
   this->record_.magic = FLASH_RECORD_MAGIC;
   this->record_.state = XmosFlashState::FLASH_REQUESTED;
@@ -235,17 +248,27 @@ void XMOSFlasher::request_embedded_flash_reboot() {
 }
 
 void XMOSFlasher::request_full_erase_flash_reboot() {
+  this->request_full_erase_flash_reboot_(XmosFlashState::FULL_ERASE_FLASH_REQUESTED);
+}
+
+void XMOSFlasher::request_factory_reset_reboot() {
+  this->request_full_erase_flash_reboot_(XmosFlashState::FACTORY_RESET_FLASH_REQUESTED);
+}
+
+void XMOSFlasher::request_full_erase_flash_reboot_(XmosFlashState request_state) {
   if (this->state != FLASHER_IDLE || this->embedded_image_.length == 0) {
     ESP_LOGE(TAG, "XMOS full erase request rejected: flasher busy or no embedded image");
     return;
   }
+  this->factory_reset_pending_ = request_state == XmosFlashState::FACTORY_RESET_FLASH_REQUESTED;
   memset(&this->record_, 0, sizeof(this->record_));
   this->record_.magic = FLASH_RECORD_MAGIC;
-  this->record_.state = XmosFlashState::FULL_ERASE_FLASH_REQUESTED;
+  this->record_.state = request_state;
   this->record_.image_length = this->embedded_image_.length;
   this->record_.boot_partition_size = FLASH_BOOT_PARTITION_SIZE;
   if (!this->set_record_md5_(this->embedded_image_.md5) || !this->save_record_()) {
     ESP_LOGE(TAG, "Couldn't persist XMOS full erase reboot request");
+    this->factory_reset_pending_ = false;
     return;
   }
   App.safe_reboot();
@@ -273,6 +296,7 @@ void XMOSFlasher::flash_remote_image() {
     return;
   }
 
+  this->factory_reset_pending_ = false;
   this->requested_action = ACTION_FLASH_REMOTE_IMAGE;
   this->state = FLASHER_INITIALIZING;
   this->publish();
@@ -293,6 +317,7 @@ void XMOSFlasher::flash_embedded_image() {
 
   this->flash_attempted_this_boot_ = true;
 
+  this->factory_reset_pending_ = false;
   this->md5_expected_ = this->embedded_image_.md5;
   this->requested_action = ACTION_FLASH_EMBEDDED_IMAGE;
   this->state = FLASHER_INITIALIZING;
@@ -473,7 +498,7 @@ void XMOSFlasher::set_record_unknown_() {
 }
 
 bool XMOSFlasher::record_is_valid_() const {
-  if (this->record_.magic != FLASH_RECORD_MAGIC || this->record_.state != XmosFlashState::RECOVERY_REQUIRED ||
+  if (this->record_.magic != FLASH_RECORD_MAGIC || !is_recovery_state(this->record_.state) ||
       this->record_.image_length == 0 || this->record_.boot_partition_size == 0 ||
       this->record_.boot_partition_size > FLASH_BOOT_PARTITION_SIZE ||
       this->record_.boot_partition_size % FLASH_SECTOR_SIZE != 0) {
@@ -491,7 +516,7 @@ bool XMOSFlasher::record_matches_embedded_() const {
 bool XMOSFlasher::load_record_() {
   XmosFlashRecord loaded{};
   if (!this->record_pref_.load(&loaded) || loaded.magic != FLASH_RECORD_MAGIC ||
-      loaded.state > XmosFlashState::FULL_ERASE_FLASH_REQUESTED) {
+      loaded.state > XmosFlashState::FACTORY_RESET_RECOVERY_REQUIRED) {
     this->set_record_unknown_();
     return false;
   }
@@ -543,14 +568,15 @@ std::string XMOSFlasher::record_md5_() const {
   return md5;
 }
 
-bool XMOSFlasher::prepare_flash_transaction_(uint32_t erased_length) {
+bool XMOSFlasher::prepare_flash_transaction_(uint32_t erased_length, XmosFlashState recovery_state) {
   if (erased_length == 0 || erased_length > FLASH_BOOT_PARTITION_SIZE || erased_length % FLASH_SECTOR_SIZE != 0 ||
-      this->total_number_of_bytes_ == 0 || this->total_number_of_bytes_ > erased_length) {
+      this->total_number_of_bytes_ == 0 || this->total_number_of_bytes_ > erased_length ||
+      !is_recovery_state(recovery_state)) {
     return false;
   }
   memset(&this->record_, 0, sizeof(this->record_));
   this->record_.magic = FLASH_RECORD_MAGIC;
-  this->record_.state = XmosFlashState::RECOVERY_REQUIRED;
+  this->record_.state = recovery_state;
   memcpy(this->record_.unique_id, this->active_unique_id_, sizeof(this->record_.unique_id));
   this->record_.image_length = this->total_number_of_bytes_;
   this->record_.boot_partition_size = erased_length;
@@ -603,6 +629,13 @@ bool XMOSFlasher::verify_record_step_() {
 
 bool XMOSFlasher::init_flashing_() {
   if (!this->init_flasher()) {
+    this->error_code = INIT_FLASH_ERROR;
+    return false;
+  }
+
+  if (this->boot_recovery_active_ && is_recovery_state(this->record_.state) &&
+      memcmp(this->record_.unique_id, this->active_unique_id_, sizeof(this->active_unique_id_)) != 0) {
+    ESP_LOGE(TAG, "XMOS flash UID changed; refusing to resume interrupted recovery");
     this->error_code = INIT_FLASH_ERROR;
     return false;
   }
@@ -672,7 +705,12 @@ bool XMOSFlasher::init_flashing_() {
                                 : this->requested_action == ACTION_FLASH_EMBEDDED_IMAGE
                                     ? FLASH_BOOT_PARTITION_SIZE
                                     : static_cast<uint32_t>(size_in_sectors * FLASH_SECTOR_SIZE);
-  if (!this->prepare_flash_transaction_(FLASH_BOOT_PARTITION_SIZE)) {
+  const XmosFlashState recovery_state = this->requested_action == ACTION_FLASH_EMBEDDED_FULL_ERASE
+                                            ? this->factory_reset_pending_
+                                                  ? XmosFlashState::FACTORY_RESET_RECOVERY_REQUIRED
+                                                  : XmosFlashState::FULL_ERASE_RECOVERY_REQUIRED
+                                            : XmosFlashState::RECOVERY_REQUIRED;
+  if (!this->prepare_flash_transaction_(FLASH_BOOT_PARTITION_SIZE, recovery_state)) {
     ESP_LOGE(TAG, "Couldn't persist XMOS flash transaction before erase");
     this->error_code = INIT_FLASH_ERROR;
     return false;
@@ -783,7 +821,8 @@ int XMOSFlasher::flashing_step_() {
     } else {
       ESP_LOGD(TAG, "MD5 computed: %s - Matches!", this->md5_computed_.c_str());
     }
-    this->record_.state = XmosFlashState::VERIFIED;
+    this->record_.state =
+        this->factory_reset_pending_ ? XmosFlashState::FACTORY_RESET_RECOVERY_REQUIRED : XmosFlashState::VERIFIED;
     if (!this->save_record_()) {
       this->error_code = INIT_FLASH_ERROR;
       return -1;

@@ -50,6 +50,11 @@ class RequestFullEraseFlashRebootAction : public Action<Ts...>, public Parented<
   void play(const Ts &...x) override { this->parent_->request_full_erase_flash_reboot(); }
 };
 
+template<typename... Ts> class RequestFactoryResetRebootAction : public Action<Ts...>, public Parented<MemoryFlasher> {
+ public:
+  void play(const Ts &...x) override { this->parent_->request_factory_reset_reboot(); }
+};
+
 template<FlasherState State> class FlasherStateTrigger : public Trigger<> {
  public:
   explicit FlasherStateTrigger(MemoryFlasher *xflash) {

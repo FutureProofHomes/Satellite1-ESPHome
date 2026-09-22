@@ -281,16 +281,11 @@ memory_flasher:
         - lambda: id(xmos_flashing_state) = 3;
         - script.execute: control_leds
         - lambda: id(xmos_flashing_state) = 0;
-        - if:
-            condition:
-              lambda: return id(factory_reset_requested);
-            then:
-              - button.press: factory_reset_button
 
     on_erasing_done:
       then:
         - if:
             condition:
-              lambda: return id(factory_reset_requested);
+              lambda: return id(xflash).factory_reset_pending();
             then:
               - button.press: factory_reset_button

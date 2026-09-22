@@ -136,8 +136,10 @@ class MemoryFlasher : public Component {
   virtual void flash_embedded_image() {}
   virtual void request_embedded_flash_reboot() {}
   virtual void request_full_erase_flash_reboot() {}
+  virtual void request_factory_reset_reboot() {}
 
   virtual bool flash_accessible() { return false; }
+  virtual bool factory_reset_pending() const { return false; }
   bool has_image_embedded() { return this->embedded_image_.length > 0; }
   bool flash_attempted_this_boot() const { return this->flash_attempted_this_boot_; }
   bool in_progress() const { return this->state != FLASHER_IDLE; }
