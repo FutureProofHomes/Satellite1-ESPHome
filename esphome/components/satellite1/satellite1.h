@@ -9,8 +9,12 @@ namespace satellite1 {
 
 static const uint8_t CONTROL_RESOURCE_CNTRL_ID = 1;
 static const uint8_t CONTROL_CMD_READ_BIT = 0x80;
-
-static const uint8_t RET_STATUS_PAYLOAD_AVAIL = 23;
+static const uint8_t CONTROL_SPECIAL_RESID = 0;
+static const uint8_t CONTROL_GET_VERSION = (0 | CONTROL_CMD_READ_BIT);
+static const uint8_t CONTROL_GET_LAST_COMMAND_STATUS = (1 | CONTROL_CMD_READ_BIT);
+static const uint8_t CONTROL_PROTOCOL_VERSION = 0x11;
+static const uint8_t DEVICE_STATUS_READY_REGISTER_IDX = 0;
+static const uint8_t DEVICE_STATUS_READY_VALUE = 1;
 
 static const uint8_t CONTROL_COMMAND_IGNORED_IN_DEVICE = 7;
 
@@ -44,13 +48,15 @@ enum register_id {
   GPIO_PORT_IN_B = 2,
   GPIO_PORT_OUT_A = 3,
 
-  REGISTER_LEN = 4
+  REGISTER_LEN = 10
 };
 }
 
 namespace DC_DFU_CMD {
 enum dc_dfu_cmd_id {
   GET_VERSION = (88 | CONTROL_CMD_READ_BIT),
+  GET_FLASH_SERIAL = (90 | CONTROL_CMD_READ_BIT),
+  GET_IMAGE_STATUS = (91 | CONTROL_CMD_READ_BIT),
 };
 }
 
@@ -134,25 +140,7 @@ class Satellite1 : public Component,
   /// Returns false until a controller status-register report has been cached.
   /// @param value Non-null output pointer for the cached register value.
   bool get_cached_dc_status(DC_STATUS_REGISTER::register_id reg, uint8_t *value);
-
-  /**
-   * @brief Retrieves the cached value of a specific status register.
-   *
-   * This function returns the current value of a specific status register from the
-   * locally cached `dc_status_register_` buffer. It does not trigger a status
-   * update from the XMOS device controller. To ensure the cached values are up to
-   * date, call `request_status_register_update` before using this function.
-   *
-   * @param reg          The identifier of the status register to query as defined in
-   *                     `DC_STATUS_REGISTER`.
-   *
-   * @return             The cached value of the requested status register as an 8-bit
-   *                     unsigned integer.
-   */
-  uint8_t get_dc_status(DC_STATUS_REGISTER::register_id reg) {
-    assert(reg < DC_STATUS_REGISTER::REGISTER_LEN);
-    return this->dc_status_register_[reg];
-  }
+  std::string get_hat_serial();
 
   void set_spi_flash_direct_access_mode(bool enable);
   bool is_xmos_connected() const { return this->state == SAT_XMOS_CONNECTED_STATE; }
@@ -166,7 +154,13 @@ class Satellite1 : public Component,
 
  protected:
   bool dfu_get_fw_version_();
+  bool dfu_get_flash_serial_();
+  bool dfu_get_image_status_();
+  bool read_control_version_(uint8_t *version);
+  bool is_device_ready_();
   bool check_for_xmos_();
+  bool read_last_command_status_(uint8_t *status);
+  void log_last_command_status_(uint8_t resource_id, uint8_t command, const char *context);
   CallbackManager<void()> state_callback_{};
 
   uint32_t last_attempt_timestamp_{0};
@@ -176,6 +170,9 @@ class Satellite1 : public Component,
   bool status_register_valid_{false};
   bool status_refresh_attempted_{false};
   bool spi_flash_direct_access_enabled_{false};
+  bool status_query_in_progress_{false};
+  uint8_t control_version_{0};
+  std::string hat_serial_{};
 
   GPIOPin *xmos_rst_pin_{nullptr};
 };
