@@ -38,6 +38,10 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: xmos_audio_shutdown_complete
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   - id: audio_output_speaker_requested
     type: bool
     restore_value: no
@@ -125,6 +129,59 @@ status_led:
   pin:
     number: GPIO45
     ignore_strapping_warning: true
+
+script:
+  - id: prepare_xmos_direct_flash
+    mode: single
+    then:
+      - lambda: id(xmos_audio_ready) = false;
+      - lambda: id(xmos_audio_shutdown_complete) = false;
+      # Cancel pending starts before stopping the components that own I2S channels.
+      - script.stop: start_micro_wake_word
+      - script.stop: activate_audio_output
+      - script.stop: refresh_audio_output
+      - script.stop: tas2780_ensure_active
+      - script.stop: activate_stop_word_once
+      - script.stop: activate_stop_word_if_tts_step_is_long
+      - micro_wake_word.stop:
+      - voice_assistant.stop:
+      - media_player.stop:
+          id: external_media_player
+          announcement: true
+      - media_player.stop:
+          id: external_media_player
+          announcement: false
+      # Mute line-out without changing the user's persisted mute preference.
+      - lambda: id(line_out_dac).set_mute_on();
+      - tas2780.deactivate:
+      - lambda: id(tas2780_active) = false;
+      - speaker.stop: i2s_audio_speaker
+      - wait_until:
+          condition:
+            lambda: |-
+              return !id(mww).is_running() && !id(va).is_running() &&
+                     id(sat1_mics).is_stopped() &&
+                     id(i2s_audio_speaker).is_stopped() &&
+                     !id(speaker_dac).is_active() && !id(speaker_dac).is_activation_pending() &&
+                     id(line_out_dac).is_muted() &&
+                     id(external_media_player).state != media_player::MEDIA_PLAYER_STATE_PLAYING &&
+                     id(external_media_player).state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
+          timeout: 5s
+      - if:
+          condition:
+            lambda: |-
+              return !id(mww).is_running() && !id(va).is_running() &&
+                     id(sat1_mics).is_stopped() &&
+                     id(i2s_audio_speaker).is_stopped() &&
+                     !id(speaker_dac).is_active() && !id(speaker_dac).is_activation_pending() &&
+                     id(line_out_dac).is_muted() &&
+                     id(external_media_player).state != media_player::MEDIA_PLAYER_STATE_PLAYING &&
+                     id(external_media_player).state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
+          then:
+            - lambda: id(xmos_audio_shutdown_complete) = true;
+            - logger.log: "Audio shutdown complete; XMOS is ready for direct flashing"
+          else:
+            - logger.log: "XMOS direct-flash preparation timed out; audio remains disabled"
 
 satellite1:
   id: satellite1_id
