@@ -486,9 +486,9 @@ substitutions:
 
   # Writes the page number the next call asks for into the template, in place.
   #
-  # Two characters overwritten rather than the string rebuilt: the Jinja is about 1.7KB, and
-  # assembling a fresh copy per page would put that on the internal heap once per call - the cost
-  # paging exists to avoid. The offset is found once at boot.
+  # Two characters overwritten rather than the string rebuilt: the minified Jinja is about 7.7KB,
+  # and assembling a fresh copy per page would put that on the internal heap once per call - the
+  # cost paging exists to avoid. The offset is found once at boot.
   #
   # Padded with a space, never a zero. Jinja's integer lexer follows Python 3, where a leading zero
   # on a decimal literal is a syntax error, and the template renders with strict=True - so `01`
@@ -503,13 +503,14 @@ substitutions:
     }
 
 globals:
-  # The response template, with this device's MAC already in the text, built once.
+  # The response template, with this device's MAC already in the text and its whitespace minified,
+  # built once.
   #
-  # A global rather than a literal in each rung's lambda: the Jinja above is about 1.6KB, and pasting
-  # it into every rung would put that many copies in flash to no purpose. Built at boot because the
-  # MAC is the only runtime part and it never changes.
+  # A global rather than a literal in each rung's lambda: the minified Jinja is about 7.7KB, and
+  # pasting it into every rung would put that many copies in flash to no purpose. Built at boot
+  # because the MAC is the only runtime part and it never changes.
   #
-  # PSRAM-backed rather than a plain std::string, which would hold those ~1.7KB on the internal
+  # PSRAM-backed rather than a plain std::string, which would hold those ~7.7KB on the internal
   # heap for the life of the process for something read once per sync. RAMAllocator falls back to
   # internal on a PSRAM-less board.
   - id: web_ui_ha_template
@@ -575,14 +576,31 @@ esphome:
             // any of it being escaped for C++. The delimiter has to be something the template cannot
             // contain, which )JINJA" is.
             //
-            // assign/append rather than operator+, which would build the whole ~1.7KB in an
+            // assign/append rather than operator+, which would build the whole template in an
             // internal-heap std::string temporary just to copy it out again.
+            //
+            // The head and the body are separate literals because they get different treatment. The
+            // body goes through append_minified_jinja - the readable YAML source carries about 2.3KB
+            // of indentation and Jinja comments, and every byte of it would otherwise be re-sent to
+            // Home Assistant per page AND pinned for the life of the connection in the API server's
+            // shared write buffer, which grows to the largest message it ever encodes and never
+            // shrinks (measured: 9,937 bytes readable, 7,673 minified). The head is appended
+            // verbatim, because `{% set pg =  0 %}` carries the two-character page slot the seek
+            // lambda overwrites in place - minifying it would collapse the slot.
+            //
+            // The minifier's safety contract (no Jinja string literal with consecutive whitespace,
+            // none containing `{#`) holds for this template and is what a change to the Jinja must
+            // preserve - see append_minified_jinja's comment in satellite1_web_ui.h.
             auto &tpl = id(web_ui_ha_template);
-            static const char JINJA_TAIL[] = R"JINJA(' %}{% set pg =  0 %}${web_ui_ha_jinja})JINJA";
-            tpl.reserve(strlen("{% set mac = '") + 17 + sizeof(JINJA_TAIL));
+            static const char JINJA_HEAD_TAIL[] = R"JINJA(' %}{% set pg =  0 %})JINJA";
+            static const char JINJA_BODY[] = R"JINJA(${web_ui_ha_jinja})JINJA";
+            tpl.reserve(strlen("{% set mac = '") + 17 + sizeof(JINJA_HEAD_TAIL) + sizeof(JINJA_BODY));
             tpl.assign("{% set mac = '");
             tpl.append(esphome::get_mac_address_pretty().c_str());
-            tpl.append(JINJA_TAIL);
+            tpl.append(JINJA_HEAD_TAIL);
+            esphome::satellite1_web_ui::append_minified_jinja(tpl, JINJA_BODY, sizeof(JINJA_BODY) - 1);
+            // The reserve above sized for the unminified body; hand the ~2KB difference back.
+            tpl.shrink_to_fit();
 
             // Where those two digits ended up, so each call can overwrite them without rebuilding
             // the string. Searched rather than computed, because the MAC ahead of them is not a

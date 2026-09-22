@@ -16,17 +16,26 @@ namespace satellite1_web_ui {
 /// other eleven, which is the difference between fitting and not. The measurement that forced this:
 /// eleven entity ids is about 460 characters, and the text entity this used to live in caps at 255.
 ///
+/// The selection's string type: PSRAM-backed, internal fallback on a PSRAM-less board.
+///
+/// These strings live for the life of the process and grow with the installation - eleven entity
+/// ids is about 460 characters, and there are six such fields - which is exactly the profile that
+/// does not belong on the internal heap. Callers that need a std::string (the YAML lambdas handing
+/// these to Home Assistant as Jinja variables) go through .c_str(), paying a transient copy at
+/// call time instead of a resident one forever.
+using SelString = std::basic_string<char, std::char_traits<char>, RAMAllocator<char>>;
+
 /// All three are stored as comma-separated strings rather than vectors. They are handed to Home
 /// Assistant as Jinja variables, which wants exactly that, and it makes the whole struct trivially
 /// serializable for NVS.
 struct SelectionSet {
   /// Area ids taken wholesale. Ids, not names, because `area_entities()` accepts an id directly and
   /// an id cannot change under a rename.
-  std::string areas;
+  SelString areas;
 
   /// Individually chosen entity ids, including players Home Assistant has put in no area at all -
   /// which on a real installation is most of them.
-  std::string extra;
+  SelString extra;
 
   /// Players carved back out of a wholesale area, each stored as `area_id:entity_id`.
   ///
@@ -34,10 +43,27 @@ struct SelectionSet {
   /// can reject these globally and get the same answer. It exists so the *device* can answer "is my
   /// own area selected whole, with nothing carved out of it" without knowing area membership, which
   /// it cannot know unaided. That question is what the derived switch reads.
-  std::string excluded;
+  SelString excluded;
 
   /// Nothing aimed anywhere. This is the gate the firmware uses in place of the old master switch.
   bool empty() const { return this->areas.empty() && this->extra.empty(); }
+
+  /// Field-wise copy through pointer-and-length assign, in place of `operator=`. The synthesized
+  /// assignment would invoke basic_string's copy assignment, whose allocator-propagation branch
+  /// compares allocators with an operator RAMAllocator does not define - a plain `if`, not
+  /// `if constexpr`, so it fails to compile even though the branch can never be taken. The
+  /// (const char *, len) overload has no allocator logic at all.
+  void copy_from(const SelectionSet &other) {
+    this->areas.assign(other.areas.data(), other.areas.size());
+    this->extra.assign(other.extra.data(), other.extra.size());
+    this->excluded.assign(other.excluded.data(), other.excluded.size());
+  }
+
+  void clear() {
+    this->areas.clear();
+    this->extra.clear();
+    this->excluded.clear();
+  }
 };
 
 /// The device's own copy of what the app has chosen, persisted across reboots.
@@ -66,7 +92,7 @@ class Selection {
   /// Persisted because the derived switches have to have an answer before the first sync completes,
   /// and a switch that reads "off" for the first five seconds of every boot would look like a setting
   /// that failed to restore.
-  const std::string &own_area() const { return this->own_area_; }
+  const SelString &own_area() const { return this->own_area_; }
   void set_own_area(const std::string &area_id);
 
   /// "My whole area, with nothing carved out of it" - the state the renamed switches project.
@@ -86,9 +112,9 @@ class Selection {
   /// `on_value` the deleted text entity used to carry.
   void add_on_change_callback(std::function<void()> &&cb) { this->change_callback_.add(std::move(cb)); }
 
-  /// Serializes both selections for the app. Appends to `out` rather than returning, so the endpoint
-  /// can stream it without building a second copy.
-  void to_json(std::string &out) const;
+  /// Serializes both selections for the app, into the selection's own PSRAM string type - the
+  /// endpoint sends straight from it, so the body never exists on the internal heap.
+  void to_json(SelString &out) const;
 
  protected:
   /// The stored form. One blob for everything, so a change is one NVS write rather than six, and so
@@ -103,6 +129,11 @@ class Selection {
     char data[BLOB_MAX];
   } __attribute__((packed));
 
+  /// The staging Blob for load and save, lazily allocated in PSRAM and kept. It used to be a local,
+  /// which put a 1,538-byte spike on the main task's stack every save; PSRAM once beats stack every
+  /// time. Main loop only, like every caller.
+  Blob *blob_scratch_();
+
   bool whole_own_area_(const SelectionSet &set) const;
   void set_whole_own_area_(SelectionSet &set, bool on);
 
@@ -112,7 +143,8 @@ class Selection {
   SelectionSet routing_;
   SelectionSet duck_;
   bool local_speaker_{true};
-  std::string own_area_;
+  SelString own_area_;
+  Blob *blob_{nullptr};
 
   ESPPreferenceObject pref_;
   CallbackManager<void()> change_callback_;
@@ -123,21 +155,22 @@ class Selection {
 /* ------------------------------------------------------------------ */
 
 /// Whether `needle` is one of the comma-separated entries in `csv`. Compares whole entries, so
-/// "kitchen" does not match "kitchen_counter".
-bool csv_contains(const std::string &csv, const std::string &needle);
+/// "kitchen" does not match "kitchen_counter". All five operate on the selection's own PSRAM string
+/// type; they have no other callers.
+bool csv_contains(const SelString &csv, const std::string &needle);
 
 /// Appends `entry` unless it is already present.
-void csv_add(std::string &csv, const std::string &entry);
+void csv_add(SelString &csv, const std::string &entry);
 
 /// Removes `entry` if present.
-void csv_remove(std::string &csv, const std::string &entry);
+void csv_remove(SelString &csv, const std::string &entry);
 
 /// Removes every entry beginning with `prefix`. Used to drop one area's carve-outs and leave the
 /// rest, which is the only reason `excluded` carries an area prefix at all.
-void csv_remove_prefixed(std::string &csv, const std::string &prefix);
+void csv_remove_prefixed(SelString &csv, const std::string &prefix);
 
 /// Whether any entry begins with `prefix`.
-bool csv_has_prefixed(const std::string &csv, const std::string &prefix);
+bool csv_has_prefixed(const SelString &csv, const std::string &prefix);
 
 }  // namespace satellite1_web_ui
 }  // namespace esphome

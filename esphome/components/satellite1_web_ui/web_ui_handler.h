@@ -148,22 +148,6 @@ enum class MediaCmd : uint8_t {
 /// and run to a couple of dozen characters, so this is far from binding in practice.
 static constexpr size_t WU_SELECT_OPTION_MAX = 100;
 
-/// Smallest contiguous internal block this will attempt a streamed response in. Below it the request is
-/// answered 503 rather than allocated for - see the guard in handleRequest.
-///
-/// A floor, not a comfort margin, and the difference is the whole design of it. The first version asked
-/// for 16KB and refused every streamed route on a wifi build, because that is more contiguous internal
-/// memory than this device has - measured at 7,680 bytes largest free block on hardware - so it turned a
-/// device that worked into one with no data in the app at all. A guard that fires in normal operation is
-/// not a guard.
-///
-/// So it is sized to what an allocation actually needs. std::string doubles its buffer as it grows, so the
-/// largest body here - GET /api/sat1/state, about 2KB with the entity table - peaks at a 4KB buffer while
-/// the 2KB one it is copying from is still alive. 6KB clears that and still sits under what the device
-/// has, so the guard only speaks when the request really could not have been served. The payload that
-/// motivated all of this is not in this set: handle_ha_ needs no heap at all now.
-static constexpr size_t WU_STREAM_MIN_BLOCK = 6 * 1024;
-
 /// One row of the key -> "<domain>/<name>" table the frontend reads from GET /api/sat1/state.
 /// `key` and `domain` are string literals from generated code; `entity` is resolved to its name
 /// lazily, because get_name() is only meaningful once the entity has been constructed.
@@ -191,10 +175,10 @@ struct SoundRef {
  * Three constraints from the shared server shaped this file, all of them inherited from Phase 1:
  *
  * The httpd task stack is 4352 bytes and there is no YAML knob for it - AsyncWebServer::begin()
- * hardcodes HTTPD_DEFAULT_CONFIG().stack_size + 256. So every JSON response is streamed into an
- * AsyncResponseStream, which accumulates on the heap, rather than built in a stack buffer. The one
- * exception is handle_ha_: that heap is the internal one, and the payload it serves is far too large to
- * copy into it - see the comment there.
+ * hardcodes HTTPD_DEFAULT_CONFIG().stack_size + 256. So every JSON response goes out through a
+ * small fixed ChunkWriter on that stack (the radar tuner's pattern), never through an
+ * AsyncResponseStream - the stream accumulates the whole body in an internal-heap std::string,
+ * which is the scarcest memory on the device and used to need a low-memory 503 guard of its own.
  *
  * web_server_idf registers exactly three wildcard URI handlers - GET, POST and OPTIONS - so PATCH
  * and DELETE never reach any handler at all. Writes are POST.
@@ -345,11 +329,18 @@ class WebUIHandler : public AsyncWebHandler {
   /// the same split satellite1_radar's engineering-mode gating uses.
   bool take_ha_refresh_request() { return this->ha_refresh_requested_.exchange(false); }
 
-  /// The Music Assistant payload's staging pair, mirroring the Home Assistant one above but
-  /// single-shot: the payload is group members and live state, bounded well under one page, so it
-  /// arrives as one action reply and needs no page loop. Same PSRAM-only discipline, same
-  /// stage-then-swap so a request in flight never reads a half-written payload. Main loop only.
-  char *stage_ma_payload(size_t capacity);
+  /// The Music Assistant payload's staging trio, mirroring the Home Assistant one above. Same
+  /// PSRAM-only discipline, same stage-then-swap so a request in flight never reads a half-written
+  /// payload. Main loop only.
+  ///
+  /// Paged like the HA payload, and for the same buffer: the members list is group members and live
+  /// state - small for most homes, but bounded by how many speakers one installation can group
+  /// rather than by anything this device controls, and the API connection's receive buffer pins at
+  /// the largest single reply it has ever carried. Paging keeps that pin at one page however large
+  /// the group. commit_ma_payload publishes what the pages staged.
+  void begin_ma_pages();
+  char *stage_ma_page(size_t len);
+  void commit_ma_pages();
   void commit_ma_payload(size_t len);
 
   /// A browser asked for an MA resync (footer expanded, or after a relayed command).
@@ -530,11 +521,9 @@ class WebUIHandler : public AsyncWebHandler {
 
   static Route match_route_(AsyncWebServerRequest *request);
 
-  /// True for the routes whose body is built in an AsyncResponseStream, and which therefore cannot be
-  /// answered at all without internal heap. Read by handleRequest's low-memory guard.
-  static bool route_streams_(Route route);
-
-  /// Answers 503 without allocating anything, for a request that arrived with no room to serve it.
+  /// Answers 503 without allocating anything. Every JSON GET writes through a stack ChunkWriter now
+  /// and needs no heap at all, so the only remaining caller is the crash dump's PSRAM-scratch
+  /// failure path - the low-memory route guard this once backed is retired.
   void send_low_memory_(AsyncWebServerRequest *request);
 
   void handle_index_(AsyncWebServerRequest *request);
@@ -691,9 +680,15 @@ class WebUIHandler : public AsyncWebHandler {
   size_t ma_cap_{0};
   char *ma_stage_{nullptr};
   size_t ma_stage_cap_{0};
+  /// Write offset into the MA staging buffer - the ha_stage_len_ of this pair.
+  size_t ma_stage_len_{0};
   uint32_t ma_at_{0};
   Mutex ma_lock_;
   std::atomic<bool> ma_refresh_requested_{false};
+
+  /// Grows the MA staging buffer preserving its contents - ha_stage_grow_'s twin, shared by the
+  /// single-shot and paged paths.
+  char *ma_stage_grow_(size_t capacity);
 
   /// Music Assistant commands queued by a browser, waiting for the main loop - the select queue's
   /// twin. Volume and seek writes coalesce by kind and entity, so a drag ends as one action call.

@@ -646,8 +646,8 @@ text_sensor:
         }
         return n;
       };
-      const int areas = count(sel.areas);
-      const int players = count(sel.extra);
+      const int areas = count(sel.areas.c_str());
+      const int players = count(sel.extra.c_str());
       std::string out("Ready: ");
       if (areas > 0) {
         out += std::to_string(areas) + (areas == 1 ? " area" : " areas");
@@ -798,9 +798,9 @@ script:
                     ${tts_targets_jinja}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
-                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
-                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
-                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
                 # Only the ids the queues came back under matter, so they are rendered on Home
                 # Assistant's side to keep kilobytes off the wire. ESPHome wraps it as {"response":}.
                 response_template: "{{ response.keys() | list | join(', ') }}"
@@ -868,8 +868,8 @@ script:
               start = comma + 1;
             }
           };
-          append(sel.areas, "area:");
-          append(sel.extra, "");
+          append(sel.areas.c_str(), "area:");
+          append(sel.extra.c_str(), "");
           id(tts_targets_literal) = "[" + all + "]";
 
   # MP3 while routing is on, FLAC when it is off. Home Assistant reads this format off ListEntities
@@ -1004,9 +1004,9 @@ script:
                        if vol | int > 0 else {'use_pre_announce': false, 'play_on_bonded': true} }}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
-                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
-                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
-                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
                   tts_url: !lambda 'return url;'
                   vol: !lambda 'return (int) id(remote_tts_volume).state;'
                 on_success:
@@ -1085,9 +1085,9 @@ script:
                   extra: "{{ {'bypass_proxy': true} }}"
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
-                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
-                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
-                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
                 on_error:
                   - script.execute:
                       id: remote_wake_chime_error
@@ -1127,9 +1127,9 @@ script:
                        else {'use_pre_announce': false, 'play_on_bonded': true} }}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
-                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
-                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
-                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
                   chime_url: !lambda |-
                     ${sat1_sounds_url_lambda}
                     return "http://" + sat1_ip + "/api/sat1/sounds/wake_word_triggered.mp3";
@@ -1197,17 +1197,23 @@ script:
                        else {'use_pre_announce': false, 'bypass_proxy': true, 'play_on_bonded': true} }}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
-                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
-                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
-                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
                   ring_url: !lambda |-
                     ${sat1_sounds_url_lambda}
                     return "http://" + sat1_ip + "/api/sat1/sounds/timer_finished.mp3";
                   vol: !lambda 'return (int) id(remote_tts_volume).state;'
-                on_error:
-                  - script.execute:
-                      id: timer_remote_ring_error
-                      reason: !lambda 'return error;'
+            # The call above deliberately carries no on_error, and the absence is load-bearing. An
+            # on_error (or on_success) makes the call register a pending response callback in the
+            # API server, and that vector's entries are only ever erased when Home Assistant
+            # answers - it has no timeout. A silent Home Assistant (the actions checkbox off, or a
+            # pre-2025.12 install that answers no call) therefore leaked one ~100-byte callback per
+            # iteration of this loop, every ${timer_remote_ring_interval}, for as long as a timer
+            # rang - the highest-frequency repeating action call in the firmware, aimed straight at
+            # the internal heap. Fire-and-forget registers nothing. The cost is one WARN per failed
+            # send, which repeated every 3.5s anyway; the response-routing calls still carry
+            # on_error, so a broken installation is still reported where it is actionable.
             - delay: ${timer_remote_ring_interval}
 
   # Stops the mirrored ring on the targets when the local one ends, by the same platform split as
@@ -1237,9 +1243,9 @@ script:
                     ${tts_stop_buttons_jinja}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
-                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
-                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
-                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
                 on_error:
                   - script.execute:
                       id: tts_remote_stop_error
@@ -1253,9 +1259,9 @@ script:
                     ${tts_stop_players_jinja}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
-                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
-                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
-                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
                 on_error:
                   - script.execute:
                       id: tts_remote_stop_error
@@ -1276,9 +1282,9 @@ script:
                   extra: "{{ {'use_pre_announce': false, 'bypass_proxy': true, 'play_on_bonded': true} }}"
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
-                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
-                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
-                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
                   stop_url: !lambda |-
                     ${sat1_sounds_url_lambda}
                     return "http://" + sat1_ip + "/api/sat1/sounds/stop_clip.mp3";
@@ -1290,18 +1296,6 @@ script:
             # A loop that never sent has nothing to stop, but the flag must not survive into the
             # next ring.
             - lambda: 'id(timer_remote_ring_sent) = false;'
-
-  # A ring that did not land, reported to the log and nowhere else - the loop re-fires within
-  # seconds, so a missed cycle costs one quiet gap, and the red flash keeps meaning "the answer
-  # went nowhere". Not tts_call_error, which clears tts_announce_pending; that flag belongs to the
-  # response.
-  - id: timer_remote_ring_error
-    parameters:
-      reason: string
-    then:
-      - lambda: |-
-          id(ha_action_replies_seen) = true;
-          ESP_LOGW("tts_routing", "remote timer ring call failed: %s", reason.c_str());
 
   # Cuts a routed response off on its remote targets. Fired from on_wake_word_detected in
   # voice_assistant.yaml alongside the local stop - by "stop", or by any wake word, since every
@@ -1337,9 +1331,9 @@ script:
                     ${tts_stop_buttons_jinja}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
-                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
-                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
-                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
                 on_error:
                   - script.execute:
                       id: tts_remote_stop_error
@@ -1353,9 +1347,9 @@ script:
                     ${tts_stop_players_jinja}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
-                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
-                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
-                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
                 on_error:
                   - script.execute:
                       id: tts_remote_stop_error
@@ -1380,9 +1374,9 @@ script:
                   extra: "{{ {'use_pre_announce': false, 'bypass_proxy': true, 'play_on_bonded': true} }}"
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
-                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
-                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
-                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
                   stop_url: !lambda |-
                     ${sat1_sounds_url_lambda}
                     return "http://" + sat1_ip + "/api/sat1/sounds/stop_clip.mp3";

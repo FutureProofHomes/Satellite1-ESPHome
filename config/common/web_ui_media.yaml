@@ -13,13 +13,30 @@
 #
 # Everything here rides the same machinery as the big payload, on the same reasoning: an action call
 # with capture_response and a response_template, rendered on whichever rung the ladder in
-# web_ui_ha.yaml proved out, landed in PSRAM, served byte for byte. This payload is group members
-# and three scalars - bounded by how many speakers one home can group, not by how many entities it
-# has - so it arrives in one call with no page loop.
+# web_ui_ha.yaml proved out, landed in PSRAM, served byte for byte - and paged the same way, because
+# the API connection's receive buffer grows to the largest single reply it has ever carried and is
+# released exactly once, early in the connection. This payload is bounded by how many speakers one
+# home can group rather than by anything this device controls, so without pages one large group
+# would re-pin that buffer at its own size for the rest of the boot. Most homes fit in one page and
+# pay no extra round trip; only a group of ten-plus speakers takes a second call.
 
 substitutions:
-  # Expects `mac`, prepended by the boot lambda below exactly as web_ui_ha_template's builder does
-  # and for the same reason. Rendered with strict=True like everything on this path.
+  # One page of the members document, matching web_ui_ha_page_bytes and for the same reason: the
+  # receive-buffer pin is set by the largest reply, so the two syncs should agree on what "largest"
+  # is. Soft, like the HA one - a single member row never splits.
+  web_ui_media_page_bytes: "1024"
+
+  # The bound on the page loop, well past what one home's group can produce (a member row is ~70
+  # bytes, so 8 pages is over a hundred speakers in one group) and inside the two digits the seek
+  # lambda writes.
+  web_ui_media_max_pages: "8"
+  # Expects `mac` and `pg`, prepended by the boot lambda below exactly as web_ui_ha_template's
+  # builder does and for the same reasons. Rendered with strict=True like everything on this path.
+  #
+  # The document is built as a list of pieces - the head with the scalars, one piece per member
+  # row, the closing bracket - and sliced into pages by the same S-namespace walk web_ui_ha_jinja
+  # uses, returning {"m": <another page follows>, "d": "<this page's slice>"}. Concatenating every
+  # `d` in order reproduces the document byte for byte.
   #
   # `g` is one row per group member: entity id, display name, volume as 0-100 or -1 for a player
   # that reports none. group_members on an ungrouped player is empty or absent, so `or [f.e]` makes
@@ -70,59 +87,123 @@ substitutions:
       {% endif %}
     {% endfor %}
     {% set f.e = f.e or f.byname %}
-    {% set out = namespace(g=[]) %}
+    {% set P = namespace(l=[]) %}
     {% if f.e %}
+      {% set P.l = ['{"e":' ~ (f.e | to_json)
+                    ~ ',"st":' ~ (states(f.e) | to_json)
+                    ~ ',"ti":' ~ ((state_attr(f.e, 'media_title') or '') | to_json)
+                    ~ ',"sh":' ~ (1 if state_attr(f.e, 'shuffle') else 0)
+                    ~ ',"rp":' ~ ((state_attr(f.e, 'repeat') or 'off') | to_json)
+                    ~ ',"g":['] %}
       {% for m in state_attr(f.e, 'group_members') or [f.e] %}
         {% set v = state_attr(m, 'volume_level') %}
-        {% set out.g = out.g + [[m,
-                                 state_attr(m, 'friendly_name') or m,
-                                 ((v * 100) | round | int) if v is not none else -1]] %}
+        {% set P.l = P.l + [([m,
+                              state_attr(m, 'friendly_name') or m,
+                              ((v * 100) | round | int) if v is not none else -1] | to_json)
+                            ~ ('' if loop.last else ',')] %}
       {% endfor %}
+      {% set P.l = P.l + [']}'] %}
+    {% else %}
+      {% set P.l = ['{"e":""}'] %}
     {% endif %}
-    {{ {'d': ({'e': f.e,
-               'st': states(f.e),
-               'ti': state_attr(f.e, 'media_title') or '',
-               'sh': 1 if state_attr(f.e, 'shuffle') else 0,
-               'rp': state_attr(f.e, 'repeat') or 'off',
-               'g': out.g} if f.e else {'e': ''}) | to_json} | to_json }}
+    {% set S = namespace(n=0, at=0, buf='', last=0) %}
+    {% for p in P.l %}
+      {% if S.n > 0 and S.n + (p | length) > ${web_ui_media_page_bytes} %}
+        {% set S.at = S.at + 1 %}
+        {% set S.n = 0 %}
+      {% endif %}
+      {% set S.n = S.n + (p | length) %}
+      {% if S.at == pg %}{% set S.buf = S.buf ~ p %}{% endif %}
+      {% set S.last = S.at %}
+    {% endfor %}
+    {{ {'m': 1 if pg < S.last else 0, 'd': S.buf} | to_json }}
 
-  # Stages the one-shot reply into the handler's PSRAM pair. The shape is web_ui_ha_page_lambda's
-  # minus the paging: no `m` flag to read, commit immediately, and a failed stage keeps the previous
-  # payload with its honest age.
-  web_ui_media_land_lambda: >-
+  # Appends one page to the handler's PSRAM staging pair and records whether another follows -
+  # web_ui_ha_page_lambda's exact shape, for the same reasons. A page that does not arrive abandons
+  # the sync rather than committing, and the previous payload keeps being served with its real age.
+  web_ui_media_page_lambda: >-
     auto captured = response["response"];
     auto ma_frag = captured["d"];
     const char *ma_src = ma_frag.is<const char *>() ? ma_frag.as<const char *>() : nullptr;
     if (ma_src == nullptr) {
-      ESP_LOGW("web_ui", "Music Assistant sync carried no fragment; keeping the previous payload");
+      ESP_LOGW("web_ui", "Music Assistant page %d carried no fragment; sync abandoned",
+               id(web_ui_media_page));
+      id(web_ui_media_more) = -1;
     } else {
       size_t ma_len = strlen(ma_src);
-      char *ma_dst = id(web_ui_app)->stage_ma_payload(ma_len + 1);
-      if (ma_dst != nullptr) {
+      char *ma_dst = id(web_ui_app)->stage_ma_page(ma_len);
+      if (ma_dst == nullptr) {
+        id(web_ui_media_more) = -1;
+      } else {
         memcpy(ma_dst, ma_src, ma_len);
-        id(web_ui_app)->commit_ma_payload(ma_len);
+        id(web_ui_media_more) = captured["m"] | 0;
       }
     }
 
+  # Writes the page number the next call asks for into the template, in place - the two-character
+  # overwrite web_ui_ha_seek_lambda explains, space-padded for the same Jinja lexer reason.
+  web_ui_media_seek_lambda: >-
+    auto &tpl = id(web_ui_media_template);
+    int at = id(web_ui_media_page_offset);
+    if (at > 0 && static_cast<size_t>(at) + 1 < tpl.size()) {
+      int tens = (id(web_ui_media_page) / 10) % 10;
+      tpl[at] = tens == 0 ? ' ' : static_cast<char>('0' + tens);
+      tpl[at + 1] = static_cast<char>('0' + id(web_ui_media_page) % 10);
+    }
+
 globals:
-  # The template with this device's MAC already in the text, built once at boot - the small sibling
-  # of web_ui_ha_template, PSRAM-backed for the same reason.
+  # The template with this device's MAC already in the text and its whitespace minified, built once
+  # at boot - the small sibling of web_ui_ha_template, PSRAM-backed for the same reason.
   - id: web_ui_media_template
     type: std::basic_string<char, std::char_traits<char>, esphome::RAMAllocator<char>>
     restore_value: no
+
+  # The page loop's state - web_ui_ha.yaml's trio, same meanings: which page the next call asks
+  # for and where its two digits live in the template, and what the last page said about the one
+  # after it (1 another follows, 0 done, -1 failed partway - commit nothing).
+  - id: web_ui_media_page
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: web_ui_media_page_offset
+    type: int
+    restore_value: no
+    initial_value: '-1'
+
+  - id: web_ui_media_more
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  # Which rung answered page 0, so every page after it goes to the same rung - the within-a-sync
+  # steering web_ui_ha_rung does for the big payload. Separate from that global because the two
+  # syncs can be in flight at once.
+  - id: web_ui_media_rung
+    type: int
+    restore_value: no
+    initial_value: '0'
 
 esphome:
   on_boot:
     - priority: 600.0
       then:
         - lambda: |-
-            // Same raw-literal construction as web_ui_ha_template's builder, same reasons.
+            // Same construction as web_ui_ha_template's builder, same reasons: the head with the
+            // two-character page slot verbatim, the body minified (its comment there explains both).
             auto &tpl = id(web_ui_media_template);
-            static const char JINJA_TAIL[] = R"JINJA(' %}${web_ui_media_jinja})JINJA";
-            tpl.reserve(strlen("{% set mac = '") + 17 + sizeof(JINJA_TAIL));
+            static const char JINJA_HEAD_TAIL[] = R"JINJA(' %}{% set pg =  0 %})JINJA";
+            static const char JINJA_BODY[] = R"JINJA(${web_ui_media_jinja})JINJA";
+            tpl.reserve(strlen("{% set mac = '") + 17 + sizeof(JINJA_HEAD_TAIL) + sizeof(JINJA_BODY));
             tpl.assign("{% set mac = '");
             tpl.append(esphome::get_mac_address_pretty().c_str());
-            tpl.append(JINJA_TAIL);
+            tpl.append(JINJA_HEAD_TAIL);
+            esphome::satellite1_web_ui::append_minified_jinja(tpl, JINJA_BODY, sizeof(JINJA_BODY) - 1);
+            tpl.shrink_to_fit();
+
+            static const char *const PG = "{% set pg = ";
+            size_t at = tpl.find(PG);
+            id(web_ui_media_page_offset) = at == tpl.npos ? -1 : static_cast<int>(at + strlen(PG));
 
 script:
   # The sync. Restart mode and the same two guards as web_ui_ha_sync; a call before Home Assistant
@@ -141,6 +222,10 @@ script:
               - api.connected:
               - lambda: 'return id(ha_supports_action_replies);'
           then:
+            - lambda: |-
+                id(web_ui_app)->begin_ma_pages();
+                id(web_ui_media_page) = 0;
+                id(web_ui_media_more) = 0;
             - if:
                 condition:
                   lambda: 'return id(web_ui_ha_rung) == 2;'
@@ -160,10 +245,37 @@ script:
       - delay: 900ms
       - script.execute: web_ui_media_sync
 
+  # Runs after every page: asks for the next one on whichever rung answered, or commits -
+  # web_ui_ha_advance's shape. Only `m: 0` commits; -1 keeps the previous payload with its real age.
+  - id: web_ui_media_advance
+    then:
+      - if:
+          condition:
+            lambda: 'return id(web_ui_media_more) == 1 && id(web_ui_media_page) + 1 < ${web_ui_media_max_pages};'
+          then:
+            - lambda: 'id(web_ui_media_page) = id(web_ui_media_page) + 1;'
+            - if:
+                condition:
+                  lambda: 'return id(web_ui_media_rung) == 2;'
+                then:
+                  - script.execute: web_ui_media_rung_2
+                else:
+                  - script.execute: web_ui_media_rung_1
+          else:
+            - lambda: |-
+                if (id(web_ui_media_more) == 1) {
+                  ESP_LOGW("web_ui", "Music Assistant payload had not ended after %d pages; discarded",
+                           ${web_ui_media_max_pages});
+                } else if (id(web_ui_media_more) == 0) {
+                  id(web_ui_app)->commit_ma_pages();
+                }
+
   # The rungs, verbatim from web_ui_ha.yaml's pair apart from the template and the landing. See the
   # comments there for why these two calls, in this order, and why the probe data is free.
   - id: web_ui_media_rung_1
     then:
+      - lambda: |-
+          ${web_ui_media_seek_lambda}
       - homeassistant.action:
           action: recorder.get_statistics
           capture_response: true
@@ -176,12 +288,16 @@ script:
             return std::string(id(web_ui_media_template).c_str(), id(web_ui_media_template).size());
           on_success:
             - lambda: |-
-                ${web_ui_media_land_lambda}
+                ${web_ui_media_page_lambda}
+                id(web_ui_media_rung) = 1;
+            - script.execute: web_ui_media_advance
           on_error:
             - script.execute: web_ui_media_rung_2
 
   - id: web_ui_media_rung_2
     then:
+      - lambda: |-
+          ${web_ui_media_seek_lambda}
       - homeassistant.action:
           action: conversation.process
           capture_response: true
@@ -192,7 +308,9 @@ script:
             return std::string(id(web_ui_media_template).c_str(), id(web_ui_media_template).size());
           on_success:
             - lambda: |-
-                ${web_ui_media_land_lambda}
+                ${web_ui_media_page_lambda}
+                id(web_ui_media_rung) = 2;
+            - script.execute: web_ui_media_advance
           on_error:
             - lambda: |-
                 ESP_LOGW("web_ui", "Music Assistant sync got no answer from Home Assistant; "

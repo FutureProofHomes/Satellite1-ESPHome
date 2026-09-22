@@ -216,11 +216,11 @@ substitutions:
   # Three lambdas because the selection is three fields. They replaced duck_skip_targets_lambda, which
   # did the same job for the one string the deleted text entity held.
   duck_skip_areas_lambda: >-
-    return ${duck_routing_on_expr} ? id(web_ui_app)->selection().routing().areas : std::string("");
+    return std::string(${duck_routing_on_expr} ? id(web_ui_app)->selection().routing().areas.c_str() : "");
   duck_skip_extra_lambda: >-
-    return ${duck_routing_on_expr} ? id(web_ui_app)->selection().routing().extra : std::string("");
+    return std::string(${duck_routing_on_expr} ? id(web_ui_app)->selection().routing().extra.c_str() : "");
   duck_skip_cut_lambda: >-
-    return ${duck_routing_on_expr} ? id(web_ui_app)->selection().routing().excluded : std::string("");
+    return std::string(${duck_routing_on_expr} ? id(web_ui_app)->selection().routing().excluded.c_str() : "");
 
   # The room scene as an entity_id list, empty unless it exists. Not defensive padding: the empty
   # case is the common one, since scene.create refuses an empty scene, so every interaction in a
@@ -406,9 +406,9 @@ script:
                   sel_areas: !lambda '${duck_skip_areas_lambda}'
                   sel_extra: !lambda '${duck_skip_extra_lambda}'
                   sel_cut: !lambda '${duck_skip_cut_lambda}'
-                  duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas;'
-                  duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra;'
-                  duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded;'
+                  duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas.c_str();'
+                  duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra.c_str();'
+                  duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded.c_str();'
                 on_error:
                   - script.execute:
                       id: area_duck_call_error
@@ -430,9 +430,9 @@ script:
                   sel_areas: !lambda '${duck_skip_areas_lambda}'
                   sel_extra: !lambda '${duck_skip_extra_lambda}'
                   sel_cut: !lambda '${duck_skip_cut_lambda}'
-                  duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas;'
-                  duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra;'
-                  duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded;'
+                  duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas.c_str();'
+                  duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra.c_str();'
+                  duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded.c_str();'
                 on_error:
                   - script.execute:
                       id: area_duck_call_error
@@ -470,9 +470,9 @@ script:
                   sel_areas: !lambda '${duck_skip_areas_lambda}'
                   sel_extra: !lambda '${duck_skip_extra_lambda}'
                   sel_cut: !lambda '${duck_skip_cut_lambda}'
-                  duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas;'
-                  duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra;'
-                  duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded;'
+                  duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas.c_str();'
+                  duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra.c_str();'
+                  duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded.c_str();'
                 on_error:
                   - script.execute:
                       id: area_duck_call_error
@@ -523,9 +523,9 @@ script:
                   sel_areas: !lambda '${duck_skip_areas_lambda}'
                   sel_extra: !lambda '${duck_skip_extra_lambda}'
                   sel_cut: !lambda '${duck_skip_cut_lambda}'
-                  duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas;'
-                  duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra;'
-                  duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded;'
+                  duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas.c_str();'
+                  duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra.c_str();'
+                  duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded.c_str();'
                   do_duck: !lambda 'return ${duck_active_expr} ? 1 : 0;'
                   do_vol: !lambda 'return id(remote_tts_volume).state > 0 ? 1 : 0;'
                 on_error:
@@ -555,9 +555,9 @@ script:
                         sel_areas: !lambda '${duck_skip_areas_lambda}'
                         sel_extra: !lambda '${duck_skip_extra_lambda}'
                         sel_cut: !lambda '${duck_skip_cut_lambda}'
-                        duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas;'
-                        duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra;'
-                        duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded;'
+                        duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas.c_str();'
+                        duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra.c_str();'
+                        duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded.c_str();'
                       on_error:
                         - script.execute:
                             id: area_duck_call_error
@@ -832,9 +832,9 @@ script:
                   volume_level: "{{ (vol | int) / 100 }}"
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
-                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
-                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
-                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
                   vol: !lambda 'return id(area_duck_tts_volume);'
                 on_error:
                   - script.execute:
@@ -856,9 +856,9 @@ script:
                   value: "{{ vol | int }}"
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
-                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas;'
-                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra;'
-                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded;'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
                   vol: !lambda 'return id(area_duck_tts_volume);'
                 on_error:
                   - script.execute:

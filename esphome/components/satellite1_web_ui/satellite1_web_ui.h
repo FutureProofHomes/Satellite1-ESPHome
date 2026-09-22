@@ -15,6 +15,47 @@
 namespace esphome {
 namespace satellite1_web_ui {
 
+/// Appends `src` to `out` with the whitespace a readable YAML source carries stripped out: Jinja
+/// `{# ... #}` comments are dropped and every run of whitespace collapses to one space.
+///
+/// Exists because the response templates in common/web_ui_ha.yaml and common/web_ui_media.yaml are
+/// re-sent to Home Assistant on every page call, and the API server's shared write buffer grows to
+/// the largest message it ever encodes and never shrinks - so every byte of indentation in the
+/// template is pinned on the internal heap for the life of the connection, plus paid again in the
+/// transient encode copy per call. Measured on the HA template: 9,937 bytes readable, 7,673
+/// minified.
+///
+/// Safe because of two properties of these templates, both checked by the caller's review rather
+/// than at runtime: no Jinja string literal in them contains consecutive whitespace, a tab or a
+/// newline (single spaces survive - only *runs* collapse), and no literal contains `{#`. Whitespace
+/// between tags is rendered output, but the only output these templates produce outside their final
+/// `{{ ... }}` expression is whitespace, which literal_eval on the Home Assistant side ignores.
+///
+/// A template over the string type so the PSRAM-backed basic_string the YAML globals use needs no
+/// conversion through an internal-heap std::string.
+template<typename S> void append_minified_jinja(S &out, const char *src, size_t len) {
+  bool pending_space = false;
+  for (size_t i = 0; i < len; i++) {
+    const char c = src[i];
+    if (c == '{' && i + 1 < len && src[i + 1] == '#') {
+      size_t j = i + 2;
+      while (j + 1 < len && !(src[j] == '#' && src[j + 1] == '}'))
+        j++;
+      i = j + 1;  // Lands on the closing '}'; the loop's increment steps past it.
+      pending_space = true;
+      continue;
+    }
+    if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+      pending_space = true;
+      continue;
+    }
+    if (pending_space && !out.empty())
+      out.push_back(' ');
+    pending_space = false;
+    out.push_back(c);
+  }
+}
+
 /**
  * Serves the on-device web app from PROGMEM as a handler on ESPHome's shared web server.
  *
@@ -197,10 +238,14 @@ class Satellite1WebUI : public Component {
   Trigger<std::string, float> *get_ma_volume_trigger() { return &this->ma_volume_trigger_; }
   Trigger<std::string, float> *get_ma_seek_trigger() { return &this->ma_seek_trigger_; }
 
-  /// The Music Assistant payload's staging pair, called from the sync script's lambda in
-  /// common/web_ui_media.yaml - the single-shot form of the HA pair above, same PSRAM discipline.
-  char *stage_ma_payload(size_t capacity) { return this->handler_.stage_ma_payload(capacity); }
-  void commit_ma_payload(size_t len) { this->handler_.commit_ma_payload(len); }
+  /// The Music Assistant payload's staging trio, called from the sync script's lambdas in
+  /// common/web_ui_media.yaml - the HA trio's shape, same PSRAM discipline. Paged because the
+  /// members payload is bounded by how many speakers one home can group rather than by page size,
+  /// and one oversized reply would re-pin the API's receive buffer at that size for the rest of the
+  /// connection - the exact cost the HA paging exists to avoid.
+  void begin_ma_pages() { this->handler_.begin_ma_pages(); }
+  char *stage_ma_page(size_t len) { return this->handler_.stage_ma_page(len); }
+  void commit_ma_pages() { this->handler_.commit_ma_pages(); }
 
   /// Fired from loop() after the app has written a new selection. tts_routing.yaml hangs its re-check
   /// scripts here, in place of the `on_value` the deleted Remote TTS Targets text entity carried.

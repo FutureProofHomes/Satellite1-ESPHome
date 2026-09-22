@@ -1,6 +1,8 @@
 #include "web_ui_handler.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 
@@ -33,6 +35,89 @@ namespace esphome {
 namespace satellite1_web_ui {
 
 static const char *const TAG_WU = "web_ui";
+
+namespace {
+
+/// Longest single printf fragment any converted handler produces, rounded up generously. This is
+/// the flush threshold, and it carries an invariant: every printf in this file must format to
+/// fewer bytes than this, because a fragment that does not fit the space a flush guarantees is
+/// silently truncated - mid-number, mid-JSON. Anything unbounded (names, transcripts, URLs) must
+/// go through print()/write() or write_json_string, which split at the buffer boundary instead.
+constexpr size_t WU_CHUNK_HEADROOM = 256;
+
+/// A fixed stack buffer that empties itself into the response as chunked-encoding pieces - the
+/// radar tuner's ChunkWriter, carried over with a bigger headroom for this file's longer lines.
+///
+/// Replaces the AsyncResponseStream the JSON GETs used to build their bodies in. That stream
+/// accumulates into a std::string, which doubles on the *internal* heap as it grows - the reason
+/// the low-memory 503 guard existed at all. This writes through 512 bytes of the httpd task's
+/// stack instead and allocates nothing, so the endpoints keep answering however tight the heap is.
+class ChunkWriter {
+ public:
+  explicit ChunkWriter(httpd_req_t *req) : req_(req) {}
+
+  void print(const char *text) { this->write(text, strlen(text)); }
+
+  void printf(const char *fmt, ...) __attribute__((format(printf, 2, 3))) {
+    // Flushed ahead of the format, not after: vsnprintf truncates to the space it is given, so a
+    // fragment that did not fit would go out half-written and cut the JSON mid-number.
+    if (sizeof(this->buf_) - this->len_ < WU_CHUNK_HEADROOM)
+      this->flush_();
+
+    va_list ap;
+    va_start(ap, fmt);
+    const int written = vsnprintf(this->buf_ + this->len_, sizeof(this->buf_) - this->len_, fmt, ap);
+    va_end(ap);
+    if (written > 0)
+      this->len_ += std::min(static_cast<size_t>(written), sizeof(this->buf_) - this->len_ - 1);
+  }
+
+  void write(const char *data, size_t len) {
+    while (len > 0) {
+      if (this->len_ == sizeof(this->buf_) && !this->flush_())
+        return;
+      const size_t take = std::min(len, sizeof(this->buf_) - this->len_);
+      memcpy(this->buf_ + this->len_, data, take);
+      this->len_ += take;
+      data += take;
+      len -= take;
+    }
+  }
+
+  /// Sends what is left and closes the chunked response.
+  void finish() {
+    if (this->flush_())
+      httpd_resp_send_chunk(this->req_, nullptr, 0);
+  }
+
+ private:
+  /// False once a send has failed. esp_http_server has already closed the connection by then, so
+  /// there is nobody left to report to and the rest of the body is dropped rather than retried.
+  bool flush_() {
+    if (!this->ok_ || this->len_ == 0)
+      return this->ok_;
+    this->ok_ = httpd_resp_send_chunk(this->req_, this->buf_, static_cast<ssize_t>(this->len_)) == ESP_OK;
+    this->len_ = 0;
+    return this->ok_;
+  }
+
+  httpd_req_t *req_;
+  size_t len_{0};
+  bool ok_{true};
+  char buf_[512];
+};
+
+/// Starts a chunked JSON response with the three headers every raw-httpd path here must carry by
+/// hand: the content type, revalidate caching, and the CORS header that ESPHome's response API
+/// would otherwise have added - without it a peer Satellite1's page remote-controlling this device
+/// sees a CORS error where its data should be.
+void begin_chunked_json(httpd_req_t *req) {
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+}
+
+}  // namespace
 
 /// The remote-control API contract version - see the comment where handle_state_ serves it.
 static constexpr int WU_API_VERSION = 1;
@@ -196,76 +281,6 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
 
 bool WebUIHandler::canHandle(AsyncWebServerRequest *request) const { return match_route_(request) != Route::NONE; }
 
-bool WebUIHandler::route_streams_(Route route) {
-  // An exhaustive switch rather than a set test, so a route added later has to say here whether it
-  // builds its body on the internal heap instead of quietly skipping the guard in handleRequest.
-  switch (route) {
-    case Route::STATE:
-#ifdef USE_VOICE_ASSISTANT
-    case Route::VOICE:
-#endif
-#ifdef USE_MICRO_WAKE_WORD
-    case Route::WAKE_WORDS:
-#endif
-#ifdef USE_SAT1_CRASH_REPORT
-    // The records JSON accumulates in an AsyncResponseStream like STATE's; a few kilobytes at
-    // most, but internal heap all the same.
-    case Route::CRASH:
-#endif
-    case Route::SEL:
-      return true;
-    case Route::NONE:
-    case Route::INDEX:
-    // The image is PROGMEM like the bundle, so it too answers without heap - and so are the
-    // manifest and the icons.
-    case Route::ASSET_NO_SENSOR:
-    case Route::MANIFEST:
-    case Route::ICON_192:
-    case Route::ICON_512:
-    case Route::ICON_180:
-    case Route::HA:
-    case Route::HA_REFRESH:
-    case Route::HA_SELECT:
-    // The MA payload is served from PSRAM in chunks exactly as HA's is, and the writes answer with
-    // string literals - none of the three needs internal heap.
-    case Route::MA:
-    case Route::MA_REFRESH:
-    case Route::MA_SET:
-    case Route::SEL_SET:
-#if defined(USE_MICRO_WAKE_WORD) && !defined(USE_SAT1_MWW_LOADER)
-    case Route::WAKE_WORDS_SET:
-#endif
-#ifdef USE_SAT1_MWW_LOADER
-    // All answer with string literals, like the other writes.
-    case Route::WAKE_SLOT_SET:
-    case Route::WAKE_CUTOFF_SET:
-    case Route::WAKE_TUNE_SET:
-#endif
-#ifdef USE_MEDIA_PLAYER
-    // MEDIA is here as well: its whole body fits a stack snprintf, so unlike the other GETs it
-    // needs no AsyncResponseStream and works when the heap could not provide one.
-    case Route::MEDIA:
-    case Route::MEDIA_SET:
-#endif
-#ifdef USE_SAT1_WEB_UI_SOUNDS
-    // Sounds are PROGMEM sends like the icons, range slices included - the slice is a pointer
-    // offset into flash, not a copy.
-    case Route::SOUND:
-#endif
-#ifdef USE_SAT1_CRASH_REPORT
-    // The log tail is sent straight from its PSRAM buffer, the dump is chunked from flash through
-    // a PSRAM scratch block, and the erase answers with a literal - none touch the internal heap.
-    case Route::CRASH_LOG:
-    case Route::CRASH_DUMP:
-    case Route::CRASH_ERASE:
-#endif
-      // The bundle is sent from PROGMEM, the Home Assistant payload from PSRAM, and every write
-      // answers with a string literal. None of them need heap to reply.
-      return false;
-  }
-  return false;
-}
-
 void WebUIHandler::send_low_memory_(AsyncWebServerRequest *request) {
   // 503 through the raw httpd API, because init_response_ knows 200, 204, 400, 401, 404, 409 and 422
   // and maps everything else to 500 - and a 500 reads as a bug in this device rather than as "ask me
@@ -288,25 +303,10 @@ void WebUIHandler::send_low_memory_(AsyncWebServerRequest *request) {
 void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
   const Route route = match_route_(request);
 
-  // A response that cannot be allocated must not be attempted. AsyncResponseStream accumulates into a
-  // std::string on the internal heap, and with exceptions off a failed operator new aborts the whole
-  // device - so a Diagnostics poll arriving during a squeeze used to reboot it. Answering 503 instead
-  // costs the app one stale reading: useDeviceState keeps its error state and useHaData keeps the
-  // payload it is holding, which is what they already do for a device that has gone away.
-  //
-  // Largest block rather than total free, because a response needs one contiguous allocation and not a
-  // sum. The threshold is a floor rather than a margin - see WU_STREAM_MIN_BLOCK - and the block that was
-  // actually seen is logged, because a 503 nobody can explain is worse than the reboot it replaced.
-  if (route_streams_(route)) {
-    const size_t block = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (block < WU_STREAM_MIN_BLOCK) {
-      ESP_LOGW(TAG_WU, "Largest free internal block is %u bytes; answering 503 rather than allocating",
-               static_cast<unsigned>(block));
-      this->send_low_memory_(request);
-      return;
-    }
-  }
-
+  // No low-memory guard anymore, because no route needs one: every JSON GET writes through a stack
+  // ChunkWriter, the bundle and assets are PROGMEM sends, the HA/MA payloads are chunked from
+  // PSRAM, and every write answers with a string literal. The guard existed for the
+  // AsyncResponseStream bodies that used to accumulate on the internal heap; those are gone.
   switch (route) {
     case Route::INDEX:
       this->handle_index_(request);
@@ -435,16 +435,18 @@ void WebUIHandler::handleBody(AsyncWebServerRequest *request, uint8_t *data, siz
 }
 
 void WebUIHandler::handle_sel_(AsyncWebServerRequest *request) {
-  auto *stream = request->beginResponseStream("application/json");
   if (this->selection_ == nullptr) {
-    stream->print("{}");
-  } else {
-    std::string json;
-    this->selection_->to_json(json);
-    stream->print(json);
+    request->send(200, "application/json", "{}");
+    return;
   }
-  stream->addHeader("Cache-Control", CACHE_REVALIDATE);
-  request->send(stream);
+  // Serialized into a PSRAM string and sent in one call - the internal heap never carries the body.
+  // Raw httpd, so the CORS header ESPHome's response API would have added rides by hand.
+  SelString json;
+  this->selection_->to_json(json);
+  httpd_resp_set_type(*request, "application/json");
+  httpd_resp_set_hdr(*request, "Cache-Control", CACHE_REVALIDATE);
+  httpd_resp_set_hdr(*request, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(*request, json.c_str(), static_cast<ssize_t>(json.size()));
 }
 
 /// Reads one JSON string array into a comma-separated list, without a JSON parser.
@@ -452,7 +454,9 @@ void WebUIHandler::handle_sel_(AsyncWebServerRequest *request) {
 /// ArduinoJson is only linked in when something in the config uses capture_response, and this endpoint
 /// has to work regardless - so this walks the text instead. The shape is ours on both ends and narrow:
 /// arrays of quoted ids containing no escapes, because area ids and entity ids are slugs.
-static bool json_array_to_csv(const std::string &body, size_t from, size_t to, const char *key, std::string &out) {
+///
+/// `out` is the selection's own PSRAM string type, so the list lands where it will live.
+static bool json_array_to_csv(const std::string &body, size_t from, size_t to, const char *key, SelString &out) {
   out.clear();
   const std::string needle = std::string("\"") + key + "\":[";
   const size_t at = body.find(needle, from);
@@ -472,7 +476,7 @@ static bool json_array_to_csv(const std::string &body, size_t from, size_t to, c
       return false;
     if (!out.empty())
       out += ',';
-    out.append(body, start, i - start);
+    out.append(body.data() + start, i - start);
     i++;
   }
   return i < to;
@@ -545,36 +549,39 @@ void WebUIHandler::handle_sel_set_(AsyncWebServerRequest *request) {
 /// word's name comes from the model manifest fetched at build time. Both are the kind of string where
 /// a quotation mark is plausible, and one unescaped would truncate the response into invalid JSON.
 ///
+/// Splits at the writer's buffer boundary rather than truncating, so it is also the required path
+/// for anything unbounded - see WU_CHUNK_HEADROOM.
+///
 /// Guarded on either caller, so a build with neither does not carry an unused static.
-static void write_json_string(AsyncResponseStream *stream, const std::string &text) {
-  stream->print("\"");
+static void write_json_string(ChunkWriter &w, const std::string &text) {
+  w.print("\"");
   for (const char c : text) {
     switch (c) {
       case '"':
-        stream->print("\\\"");
+        w.print("\\\"");
         break;
       case '\\':
-        stream->print("\\\\");
+        w.print("\\\\");
         break;
       case '\n':
-        stream->print("\\n");
+        w.print("\\n");
         break;
       case '\r':
-        stream->print("\\r");
+        w.print("\\r");
         break;
       case '\t':
-        stream->print("\\t");
+        w.print("\\t");
         break;
       default:
         if (static_cast<unsigned char>(c) < 0x20) {
-          stream->printf("\\u%04x", static_cast<unsigned int>(c));
+          w.printf("\\u%04x", static_cast<unsigned int>(c));
         } else {
-          stream->write(static_cast<uint8_t>(c));
+          w.write(&c, 1);
         }
         break;
     }
   }
-  stream->print("\"");
+  w.print("\"");
 }
 #endif
 
@@ -617,54 +624,55 @@ void WebUIHandler::handle_wake_words_(AsyncWebServerRequest *request) {
   int dl_slot = -1;
   this->wake_loader_->snapshot(slots, dl, total, dl_slot);
 
-  auto *stream = request->beginResponseStream("application/json");
-  stream->print(R"({"slots":[)");
+  begin_chunked_json(*request);
+  ChunkWriter w{*request};
+  w.print(R"({"slots":[)");
   for (uint8_t i = 0; i < mww_runtime_loader::WL_SLOTS; i++) {
     const auto &s = slots[i];
     if (i != 0)
-      stream->print(",");
-    stream->printf(R"({"i":%u,"m":)", static_cast<unsigned>(i));
-    write_json_string(stream, s.spec);
-    stream->print(R"(,"w":)");
-    write_json_string(stream, s.word);
-    stream->printf(R"(,"st":%u,"err":%u,"cut":%u,"rt":%u,"ld":%u)", s.state, s.error, s.cutoff, s.runtime ? 1 : 0,
+      w.print(",");
+    w.printf(R"({"i":%u,"m":)", static_cast<unsigned>(i));
+    write_json_string(w, s.spec);
+    w.print(R"(,"w":)");
+    write_json_string(w, s.word);
+    w.printf(R"(,"st":%u,"err":%u,"cut":%u,"rt":%u,"ld":%u)", s.state, s.error, s.cutoff, s.runtime ? 1 : 0,
                    s.id.empty() ? 0 : 1);
     if (dl_slot == i)
-      stream->printf(",\"dl\":%lu,\"tot\":%lu", static_cast<unsigned long>(dl), static_cast<unsigned long>(total));
-    stream->print("}");
+      w.printf(",\"dl\":%lu,\"tot\":%lu", static_cast<unsigned long>(dl), static_cast<unsigned long>(total));
+    w.print("}");
   }
 
-  stream->print(R"(],"builtin":[)");
+  w.print(R"(],"builtin":[)");
   bool first = true;
   for (const auto &b : this->wake_loader_->builtins()) {
     if (!first)
-      stream->print(",");
+      w.print(",");
     first = false;
-    stream->print("[");
-    write_json_string(stream, b.id);
-    stream->print(",");
-    write_json_string(stream, b.word);
-    stream->print("]");
+    w.print("[");
+    write_json_string(w, b.id);
+    w.print(",");
+    write_json_string(w, b.word);
+    w.print("]");
   }
-  stream->print("]");
+  w.print("]");
 
   // The tuner's capability and, while a session is live, its score ring - newest last, as ages, so
   // the panel can both replay what it missed and draw the freshest attempt.
-  stream->printf(",\"tcap\":%d", mww_runtime_loader::MwwRuntimeLoader::tune_capable() ? 1 : 0);
+  w.printf(",\"tcap\":%d", mww_runtime_loader::MwwRuntimeLoader::tune_capable() ? 1 : 0);
   {
     mww_runtime_loader::TuneView tv;
     this->wake_loader_->tune_snapshot(tv);
     if (tv.slot >= 0) {
       const uint32_t now = millis();
-      stream->printf(",\"tune\":{\"i\":%d,\"seq\":%lu,\"ev\":[", tv.slot, static_cast<unsigned long>(tv.seq));
+      w.printf(",\"tune\":{\"i\":%d,\"seq\":%lu,\"ev\":[", tv.slot, static_cast<unsigned long>(tv.seq));
       for (size_t k = 0; k < tv.events.size(); k++) {
         const auto &ev = tv.events[k];
         if (k != 0)
-          stream->print(",");
-        stream->printf("[%u,%u,%u,%lu]", ev.peak, ev.avg, ev.vad_blocked ? 1 : 0,
+          w.print(",");
+        w.printf("[%u,%u,%u,%lu]", ev.peak, ev.avg, ev.vad_blocked ? 1 : 0,
                        static_cast<unsigned long>(now - ev.at_ms));
       }
-      stream->print("]}");
+      w.print("]}");
     }
   }
 
@@ -673,26 +681,25 @@ void WebUIHandler::handle_wake_words_(AsyncWebServerRequest *request) {
     const uint32_t now = millis();
     if (!this->detections_.empty()) {
       const auto &last = this->detections_.back();
-      stream->printf(",\"det\":[%lu,", static_cast<unsigned long>(this->detection_seq_));
-      write_json_string(stream, last.word);
-      stream->printf(",%lu]", static_cast<unsigned long>(now - last.at_ms));
+      w.printf(",\"det\":[%lu,", static_cast<unsigned long>(this->detection_seq_));
+      write_json_string(w, last.word);
+      w.printf(",%lu]", static_cast<unsigned long>(now - last.at_ms));
     }
-    stream->print(R"(,"hist":[)");
+    w.print(R"(,"hist":[)");
     // Newest first, which is the order both readers show them in.
     for (size_t k = 0; k < this->detections_.size(); k++) {
       const auto &d = this->detections_[this->detections_.size() - 1 - k];
       if (k != 0)
-        stream->print(",");
-      stream->print("[");
-      write_json_string(stream, d.word);
-      stream->printf(",%lu]", static_cast<unsigned long>(now - d.at_ms));
+        w.print(",");
+      w.print("[");
+      write_json_string(w, d.word);
+      w.printf(",%lu]", static_cast<unsigned long>(now - d.at_ms));
     }
-    stream->print("]");
+    w.print("]");
   }
 
-  stream->print("}");
-  stream->addHeader("Cache-Control", CACHE_REVALIDATE);
-  request->send(stream);
+  w.print("}");
+  w.finish();
 }
 
 /// Points a slot at a wake word: a built-in id, a manifest URL to download, or "none". Queued for
@@ -806,8 +813,9 @@ void WebUIHandler::handle_wake_tune_set_(AsyncWebServerRequest *request) {
 /// means the `stop` model: timer.yaml arms it for the duration of a ringing timer and disarms it after,
 /// so a switch for it would be a switch over something that is rewritten from under the reader.
 void WebUIHandler::handle_wake_words_(AsyncWebServerRequest *request) {
-  auto *stream = request->beginResponseStream("application/json");
-  stream->print("[");
+  begin_chunked_json(*request);
+  ChunkWriter w{*request};
+  w.print("[");
 
   if (this->mww_ != nullptr) {
     const uint32_t mask = this->ww_pending_mask_.load(std::memory_order_acquire);
@@ -828,20 +836,19 @@ void WebUIHandler::handle_wake_words_(AsyncWebServerRequest *request) {
         on = (wanted & (1UL << at)) != 0;
 
       if (!first)
-        stream->print(",");
+        w.print(",");
       first = false;
 
-      stream->printf(R"({"i":%u,"id":)", static_cast<unsigned>(at));
-      write_json_string(stream, model->get_id());
-      stream->print(R"(,"w":)");
-      write_json_string(stream, model->get_wake_word());
-      stream->printf(R"(,"on":%s})", on ? "true" : "false");
+      w.printf(R"({"i":%u,"id":)", static_cast<unsigned>(at));
+      write_json_string(w, model->get_id());
+      w.print(R"(,"w":)");
+      write_json_string(w, model->get_wake_word());
+      w.printf(R"(,"on":%s})", on ? "true" : "false");
     }
   }
 
-  stream->print("]");
-  stream->addHeader("Cache-Control", CACHE_REVALIDATE);
-  request->send(stream);
+  w.print("]");
+  w.finish();
 }
 
 /// Arms or disarms one wake word. Query parameters rather than a JSON body, because two short values
@@ -963,9 +970,8 @@ void WebUIHandler::handle_media_(AsyncWebServerRequest *request) {
   // entity REST handlers read entity state from this task the same way. The worst case is a value
   // one main-loop iteration old, which the next poll corrects.
   //
-  // A stack buffer rather than an AsyncResponseStream: the body is bounded at well under 144 bytes,
-  // so unlike the streamed GETs this endpoint keeps answering when the internal heap could not
-  // provide a stream - route_streams_ says false for it, and this is why.
+  // A plain stack buffer, not even a ChunkWriter: the body is bounded at well under 144 bytes, so
+  // one snprintf and one send cover it, whatever state the heap is in.
   char body[144];
   const int state = static_cast<int>(active->state);
   const int volume = static_cast<int>(std::roundf(active->volume * 100.0f));
@@ -1372,11 +1378,11 @@ const char *WebUIHandler::commit_ha_payload(size_t len, int rung) {
 
 /// The cached Home Assistant payload, sent out of PSRAM without ever being copied.
 ///
-/// The one endpoint here that does not use an AsyncResponseStream, and the reason is that the stream
-/// accumulates into a std::string - which, with CONFIG_SPIRAM_USE_CAPS_ALLOC, is the internal heap. So
-/// printing the payload duplicated up to 24KB of PSRAM into the scarce heap, needing a contiguous
-/// block of about twice the payload size while the string grew. On a wifi build the WiFi driver's
-/// buffers leave that heap around 36KB free, the allocation failed, and a failed operator new with
+/// The endpoint that established this file's no-AsyncResponseStream rule: the stream accumulates
+/// into a std::string - which, with CONFIG_SPIRAM_USE_CAPS_ALLOC, is the internal heap. So printing
+/// the payload duplicated up to 24KB of PSRAM into the scarce heap, needing a contiguous block of
+/// about twice the payload size while the string grew. On a wifi build the WiFi driver's buffers
+/// leave that heap around 36KB free, the allocation failed, and a failed operator new with
 /// exceptions off calls abort() - the device rebooted every time the app asked for this.
 ///
 /// Chunked, so the payload goes to the socket straight from the pointer. `httpd_resp_send_chunk` is
@@ -1555,10 +1561,12 @@ bool WebUIHandler::take_select_write(SelectWrite &out) {
  * homeassistant.action calls from the main loop, exactly like the select writes.
  */
 
-char *WebUIHandler::stage_ma_payload(size_t capacity) {
+char *WebUIHandler::ma_stage_grow_(size_t capacity) {
   // Main loop only, like the HA stage; what requests read is ma_buf_, and the two only meet in the
   // commit below.
   if (capacity > this->ma_stage_cap_) {
+    // reallocate rather than allocate, because the paged path grows the buffer between pages and
+    // must not drop the ones already in it.
     char *grown = this->ma_stage_ == nullptr ? this->ha_alloc_.allocate(capacity)
                                              : this->ha_alloc_.reallocate(this->ma_stage_, capacity);
     if (grown == nullptr) {
@@ -1570,6 +1578,26 @@ char *WebUIHandler::stage_ma_payload(size_t capacity) {
     this->ma_stage_cap_ = capacity;
   }
   return this->ma_stage_;
+}
+
+void WebUIHandler::begin_ma_pages() { this->ma_stage_len_ = 0; }
+
+char *WebUIHandler::stage_ma_page(size_t len) {
+  // +1 for the terminator commit_ma_payload writes, since any page can turn out to be the last.
+  char *base = this->ma_stage_grow_(this->ma_stage_len_ + len + 1);
+  if (base == nullptr)
+    return nullptr;
+  char *at = base + this->ma_stage_len_;
+  this->ma_stage_len_ += len;
+  return at;
+}
+
+void WebUIHandler::commit_ma_pages() {
+  if (this->ma_stage_len_ == 0) {
+    ESP_LOGW(TAG_WU, "Music Assistant sync produced no pages; keeping the previous payload");
+    return;
+  }
+  this->commit_ma_payload(this->ma_stage_len_);
 }
 
 void WebUIHandler::commit_ma_payload(size_t len) {
@@ -1972,8 +2000,9 @@ void WebUIHandler::handle_crash_(AsyncWebServerRequest *request) {
   size_t tail_len = 0;
   this->crash_report_->log_tail(tail_len);
 
-  auto *stream = request->beginResponseStream("application/json");
-  stream->printf(R"({"boot":%lu,"part":%d,"dump":%u,"log":%u,"records":[)",
+  begin_chunked_json(*request);
+  ChunkWriter w{*request};
+  w.printf(R"({"boot":%lu,"part":%d,"dump":%u,"log":%u,"records":[)",
                  static_cast<unsigned long>(this->crash_report_->boot_count()),
                  this->crash_report_->partition_present() ? 1 : 0,
                  static_cast<unsigned>(this->crash_report_->dump_size()), static_cast<unsigned>(tail_len));
@@ -1987,34 +2016,33 @@ void WebUIHandler::handle_crash_(AsyncWebServerRequest *request) {
     if (!this->crash_report_->get_record(n - 1 - k, rec))
       break;
     if (!first)
-      stream->print(",");
+      w.print(",");
     first = false;
 
-    stream->printf(R"({"boot":%lu,"epoch":%lu,"up":%lu,"reason":%u,"rs":"%s")", static_cast<unsigned long>(rec.boot),
+    w.printf(R"({"boot":%lu,"epoch":%lu,"up":%lu,"reason":%u,"rs":"%s")", static_cast<unsigned long>(rec.boot),
                    static_cast<unsigned long>(rec.epoch), static_cast<unsigned long>(rec.uptime_s), rec.reason,
                    reset_reason_name_(static_cast<esp_reset_reason_t>(rec.reason)));
 
     if (rec.flags & crash_report::CR_F_SUMMARY) {
-      stream->print(R"(,"task":)");
-      write_json_string(stream, rec.task);
-      stream->printf(R"(,"cause":%lu,"vaddr":"0x%08lx","pc":"0x%08lx","cor":%d)",
+      w.print(R"(,"task":)");
+      write_json_string(w, rec.task);
+      w.printf(R"(,"cause":%lu,"vaddr":"0x%08lx","pc":"0x%08lx","cor":%d)",
                      static_cast<unsigned long>(rec.exc_cause), static_cast<unsigned long>(rec.exc_vaddr),
                      static_cast<unsigned long>(rec.pc), (rec.flags & crash_report::CR_F_BT_CORRUPT) ? 1 : 0);
-      stream->print(R"(,"bt":[)");
+      w.print(R"(,"bt":[)");
       for (uint8_t b = 0; b < rec.bt_depth && b < 16; b++)
-        stream->printf(R"(%s"0x%08lx")", b == 0 ? "" : ",", static_cast<unsigned long>(rec.bt[b]));
-      stream->print("]");
+        w.printf(R"(%s"0x%08lx")", b == 0 ? "" : ",", static_cast<unsigned long>(rec.bt[b]));
+      w.print("]");
     }
     if (rec.text[0] != '\0') {
-      stream->print(R"(,"txt":)");
-      write_json_string(stream, rec.text);
+      w.print(R"(,"txt":)");
+      write_json_string(w, rec.text);
     }
-    stream->print("}");
+    w.print("}");
   }
 
-  stream->print("]}");
-  stream->addHeader("Cache-Control", CACHE_REVALIDATE);
-  request->send(stream);
+  w.print("]}");
+  w.finish();
 }
 
 /// The pre-crash log tail as it survived, text/plain. Its own route rather than a field of the
@@ -2113,48 +2141,50 @@ void WebUIHandler::push_utterance(const std::string &text, bool heard) {
 /// is no REST path or /events id for them. The phase is the `voice_assistant_phase` global that
 /// config/ already maintains.
 void WebUIHandler::handle_voice_(AsyncWebServerRequest *request) {
-  auto *stream = request->beginResponseStream("application/json");
+  begin_chunked_json(*request);
+  ChunkWriter w{*request};
 
   const int phase = this->voice_phase_fn_ ? this->voice_phase_fn_() : 0;
-  stream->printf(R"({"phase":%d,"running":%s,)", phase,
+  w.printf(R"({"phase":%d,"running":%s,)", phase,
                  this->va_ != nullptr && this->va_->is_running() ? "true" : "false");
 
-  stream->print(R"("timers":[)");
+  w.print(R"("timers":[)");
   if (this->va_ != nullptr) {
     bool first = true;
     for (const auto &timer : this->va_->get_timers()) {
-      stream->printf(R"(%s{"id":)", first ? "" : ",");
-      write_json_string(stream, timer.id);
-      stream->print(R"(,"name":)");
-      write_json_string(stream, timer.name);
-      stream->printf(R"(,"total":%u,"left":%u,"active":%s})", static_cast<unsigned int>(timer.total_seconds),
+      w.printf(R"(%s{"id":)", first ? "" : ",");
+      write_json_string(w, timer.id);
+      w.print(R"(,"name":)");
+      write_json_string(w, timer.name);
+      w.printf(R"(,"total":%u,"left":%u,"active":%s})", static_cast<unsigned int>(timer.total_seconds),
                      static_cast<unsigned int>(timer.seconds_left), timer.is_active ? "true" : "false");
       first = false;
     }
   }
-  stream->print("],");
+  w.print("],");
 
-  stream->print(R"("transcript":[)");
+  w.print(R"("transcript":[)");
   {
     LockGuard guard{this->transcript_lock_};
     bool first = true;
     for (const auto &line : this->transcript_) {
-      stream->printf(R"(%s{"heard":%s,"at":%u,"text":)", first ? "" : ",", line.heard ? "true" : "false",
+      w.printf(R"(%s{"heard":%s,"at":%u,"text":)", first ? "" : ",", line.heard ? "true" : "false",
                      static_cast<unsigned int>(line.at_uptime));
-      write_json_string(stream, line.text);
-      stream->print("}");
+      write_json_string(w, line.text);
+      w.print("}");
       first = false;
     }
   }
-  stream->print("]}");
+  w.print("]}");
 
-  request->send(stream);
+  w.finish();
 }
 
 #endif  // USE_VOICE_ASSISTANT
 
 void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
-  auto *stream = request->beginResponseStream("application/json");
+  begin_chunked_json(*request);
+  ChunkWriter w{*request};
 
   char mac_buf[MAC_ADDRESS_PRETTY_BUFFER_SIZE];
   get_mac_address_pretty_into_buffer(mac_buf);
@@ -2182,32 +2212,32 @@ void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
   // the /api/sat1/* shapes, the entity key names, or the auth story; additive changes ride the
   // same number. A peer whose app finds this missing or out of range falls back to plain
   // navigation, so an old device is never driven by an app that misunderstands it.
-  stream->printf(R"({"apiv":%d,)", WU_API_VERSION);
-  stream->printf(R"("name":"%s","friendly_name":"%s","mac":"%s","ip":"%s",)", App.get_name().c_str(),
+  w.printf(R"({"apiv":%d,)", WU_API_VERSION);
+  w.printf(R"("name":"%s","friendly_name":"%s","mac":"%s","ip":"%s",)", App.get_name().c_str(),
                  App.get_friendly_name().c_str(), mac_buf, ip_buf);
 
 #ifdef USE_ETHERNET
-  stream->print(R"("net":"ethernet",)");
+  w.print(R"("net":"ethernet",)");
 #elif defined(USE_WIFI)
-  stream->printf(R"("net":"wifi","rssi":%d,)",
+  w.printf(R"("net":"wifi","rssi":%d,)",
                  wifi::global_wifi_component == nullptr ? 0 : (int) wifi::global_wifi_component->wifi_rssi());
 #else
-  stream->print(R"("net":"none",)");
+  w.print(R"("net":"none",)");
 #endif
 
-  stream->printf(R"("esphome":"%s","built":"%s",)", ESPHOME_VERSION, build_buf);
+  w.printf(R"("esphome":"%s","built":"%s",)", ESPHOME_VERSION, build_buf);
 #ifdef ESPHOME_PROJECT_NAME
-  stream->printf(R"("project":"%s","fw":"%s",)", ESPHOME_PROJECT_NAME, ESPHOME_PROJECT_VERSION);
+  w.printf(R"("project":"%s","fw":"%s",)", ESPHOME_PROJECT_NAME, ESPHOME_PROJECT_VERSION);
 #endif
 
   // %u with an explicit cast rather than PRIu32: these are raw string literals, so a PRIu32 in the
   // middle of one is not a macro at all - it is the eleven characters `" PRIu32 "`.
-  stream->printf(R"("reset":"%s","uptime":%u,)", reset_reason_str_(), static_cast<unsigned int>(millis_64() / 1000));
+  w.printf(R"("reset":"%s","uptime":%u,)", reset_reason_str_(), static_cast<unsigned int>(millis_64() / 1000));
 
 #ifdef USE_SAT1_CRASH_REPORT
   // How many crash records /api/sat1/crash holds, so the card knows to fetch without a poll of its
   // own - this endpoint is already the page's heartbeat.
-  stream->printf(R"("crash":%u,)",
+  w.printf(R"("crash":%u,)",
                  this->crash_report_ == nullptr ? 0 : static_cast<unsigned>(this->crash_report_->record_count()));
 #endif
 
@@ -2215,10 +2245,10 @@ void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
   // work out why their media controls are missing. api_connection_count_ != 0, which is the same
   // condition the LED ring already uses to decide whether the assistant can run at all.
 #ifdef USE_API
-  stream->printf(R"("ha":%s,)",
+  w.printf(R"("ha":%s,)",
                  api::global_api_server != nullptr && api::global_api_server->is_connected() ? "true" : "false");
 #else
-  stream->print(R"("ha":false,)");
+  w.print(R"("ha":false,)");
 #endif
 
   // The sign-in key, for the Diagnostics Launch section's link and QR code. Safe to carry here
@@ -2228,39 +2258,39 @@ void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
   if (this->session_key_fn_) {
     const char *key = this->session_key_fn_();
     if (key != nullptr && key[0] != '\0')
-      stream->printf(R"("key":"%s",)", key);
+      w.printf(R"("key":"%s",)", key);
   }
 
-  stream->printf(R"("heap":{"free":%zu,"total":%zu,"block":%zu},)", internal.total_free_bytes,
+  w.printf(R"("heap":{"free":%zu,"total":%zu,"block":%zu},)", internal.total_free_bytes,
                  internal.total_free_bytes + internal.total_allocated_bytes, internal.largest_free_block);
   // Three numbers rather than two, because free-of-total is ambiguous for PSRAM and the difference
   // is large enough to look like a fault. heap_caps only knows the region it was handed - measured
   // 5.4MB on an 8MB part, the rest going to the SPIRAM cache and to allocations made outside the
   // heap - so "4.4 MB free of 5.4 MB" is the true allocator picture while "installed" is the number
   // on the datasheet that a customer would otherwise think we had lost 2.6MB of.
-  stream->printf(R"("psram":{"free":%zu,"total":%zu,"installed":%zu},)", psram.total_free_bytes,
+  w.printf(R"("psram":{"free":%zu,"total":%zu,"installed":%zu},)", psram.total_free_bytes,
                  psram.total_free_bytes + psram.total_allocated_bytes, esp_psram_get_size());
 
   // Reset on read: the value is "worst loop since you last asked", which is what a diagnostics
   // page refreshing every couple of seconds wants. A never-reset maximum only ever tells you
   // about boot.
   const uint32_t loop_ms = this->max_loop_ms_ == nullptr ? 0 : this->max_loop_ms_->exchange(0);
-  stream->printf(R"("loop_ms":%u,)", static_cast<unsigned int>(loop_ms));
+  w.printf(R"("loop_ms":%u,)", static_cast<unsigned int>(loop_ms));
 
   // The key -> "<domain>/<name>" table. Names are read here rather than cached at setup because a
   // few entities are named from runtime state, and because nothing about this is hot: Diagnostics
   // polls a couple of times a second and the app reads the table once per load.
-  stream->print(R"("e":{)");
+  w.print(R"("e":{)");
   bool first = true;
   for (const auto &ref : this->entities_) {
     if (ref.entity == nullptr)
       continue;
-    stream->printf(R"(%s"%s":"%s/%s")", first ? "" : ",", ref.key, ref.domain, ref.entity->get_name().c_str());
+    w.printf(R"(%s"%s":"%s/%s")", first ? "" : ",", ref.key, ref.domain, ref.entity->get_name().c_str());
     first = false;
   }
-  stream->print("}}");
+  w.print("}}");
 
-  request->send(stream);
+  w.finish();
 }
 
 }  // namespace satellite1_web_ui
