@@ -22,6 +22,7 @@ audio_dac:
   - platform: tas2780
     id: speaker_dac
     address: 0x3F
+    activation_guard: !lambda return id(xmos_audio_ready);
   - platform: satellite1
     id: dac_proxy
     speaker_dac: speaker_dac
@@ -93,6 +94,8 @@ script:
     mode: single
     then:
       - tas2780.activate:
+      - wait_until:
+          lambda: return !id(speaker_dac).is_activation_pending();
       - lambda: id(tas2780_active) = id(speaker_dac).is_active();
 
   # Both DACs require the XMOS-provided I2S clocks before their outputs are selected.

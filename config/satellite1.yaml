@@ -25,8 +25,36 @@ packages:
       on_connect:
         - delay: 5s  # Gives time for improv results to be transmitted
         - ble.disable:
+        - wait_until:
+            not: ble.enabled
+        - delay: 1s  # Allow BLE allocations to be released before starting TLS.
+        - component.update: update_http_request
 
   home-assistant-voice: !include satellite1.base.yaml
+
+button:
+  - platform: template
+    id: flash_xmos_same_boot
+    name: "Flash XMOS Firmware (Same Boot)"
+    entity_category: diagnostic
+    disabled_by_default: true
+    on_press:
+      then:
+        - if:
+            condition:
+              lambda: return id(xflash).has_image_embedded() && !id(xflash).in_progress();
+            then:
+              - script.execute: prepare_xmos_direct_flash
+              - script.wait: prepare_xmos_direct_flash
+              - if:
+                  condition:
+                    lambda: return id(xmos_audio_shutdown_complete) && !id(xflash).in_progress();
+                  then:
+                    - memory_flasher.write_embedded_image:
+                  else:
+                    - logger.log: "XMOS direct flash cancelled because audio shutdown did not complete"
+            else:
+              - logger.log: "XMOS direct flash unavailable because the flasher is busy or no embedded image exists"
 
 esphome:
   project:
@@ -54,6 +82,7 @@ update:
     name: None
     id: update_http_request
     source: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/manifest.json
+    update_interval: never
 
 switch:
   - platform: template

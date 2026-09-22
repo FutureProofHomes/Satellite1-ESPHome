@@ -31,11 +31,13 @@ DeactivateAction = tas2780_ns.class_(
 CONF_VOL_RNG_MIN = "vol_range_min"
 CONF_VOL_RNG_MAX = "vol_range_max"
 CONF_AMP_LEVEL_IDX = "amp_level_idx" 
+CONF_ACTIVATION_GUARD = "activation_guard"
 
 CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(tas2780),
+            cv.Optional(CONF_ACTIVATION_GUARD): cv.lambda_,
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -102,3 +104,8 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
+    if CONF_ACTIVATION_GUARD in config:
+        activation_guard = await cg.process_lambda(
+            config[CONF_ACTIVATION_GUARD], [], return_type=cg.bool_
+        )
+        cg.add(var.set_activation_guard(activation_guard))

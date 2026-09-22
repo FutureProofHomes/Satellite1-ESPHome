@@ -85,7 +85,13 @@ class EmbeddedImageReader : public FlashImageReader {
   size_t read_pos_ = 0;
 };
 
-enum FlasherAction : uint8_t { ACTION_FULL_ERASE, ACTION_FLASH_REMOTE_IMAGE, ACTION_FLASH_EMBEDDED_IMAGE };
+enum FlasherAction : uint8_t {
+  ACTION_FULL_ERASE,
+  ACTION_FLASH_REMOTE_IMAGE,
+  ACTION_FLASH_EMBEDDED_IMAGE,
+  ACTION_FLASH_EMBEDDED_FULL_ERASE,
+  ACTION_VERIFY_RECORD,
+};
 
 enum FlasherError : uint8_t {
   FLASHER_OK,
@@ -107,6 +113,7 @@ enum FlasherState : uint8_t {
   FLASHER_INITIALIZING,
   FLASHER_ERASING,
   FLASHER_FLASHING,
+  FLASHER_VERIFYING,
   FLASHER_SUCCESS_STATE,
   FLASHER_ERROR_STATE
 };
@@ -116,7 +123,7 @@ class MemoryFlasher : public Component {
   uint8_t flashing_progress{0};
   FlasherState state{FLASHER_IDLE};
   FlasherError error_code{FLASHER_OK};
-  FlasherAction requested_action;
+  FlasherAction requested_action{ACTION_FULL_ERASE};
 
   virtual void dump_config() override;
 
@@ -127,8 +134,12 @@ class MemoryFlasher : public Component {
   virtual void erase_memory() {}
   virtual void flash_remote_image() {}
   virtual void flash_embedded_image() {}
+  virtual void request_embedded_flash_reboot() {}
+  virtual void request_full_erase_flash_reboot() {}
+  virtual void request_factory_reset_reboot() {}
 
   virtual bool flash_accessible() { return false; }
+  virtual bool factory_reset_pending() const { return false; }
   bool has_image_embedded() { return this->embedded_image_.length > 0; }
   bool flash_attempted_this_boot() const { return this->flash_attempted_this_boot_; }
   bool in_progress() const { return this->state != FLASHER_IDLE; }

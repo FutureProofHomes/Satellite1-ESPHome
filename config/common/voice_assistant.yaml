@@ -107,7 +107,11 @@ voice_assistant:
   volume_multiplier: 1
   on_client_connected:
     - lambda: id(init_in_progress) = false;
-    - micro_wake_word.start:
+    - if:
+        condition:
+          lambda: return id(xmos_audio_ready);
+        then:
+          - script.execute: start_micro_wake_word
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_client_disconnected:
@@ -204,6 +208,17 @@ voice_assistant:
     - script.execute: control_leds
 
 script:
+  - id: start_micro_wake_word
+    mode: restart
+    then:
+      - wait_until:
+          lambda: return App.is_setup_complete() && id(mww).is_ready() && id(xmos_audio_ready);
+      - if:
+          condition:
+            lambda: return !id(mww).is_running();
+          then:
+            - micro_wake_word.start:
+
   # Script used activate the stop word if the TTS step is long.
   # Why is this wrapped on a script?
   #   Becasue we want to stop the sequence if the TTS step is faster than that.
