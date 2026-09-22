@@ -4,6 +4,9 @@
 #include <functional>
 #include <string>
 
+// For RAMAllocator, the PSRAM-first allocator behind body_.
+#include "esphome/core/helpers.h"
+
 #include "esphome/components/web_server_base/web_server_base.h"
 
 #include "ld2410_handler.h"
@@ -102,7 +105,11 @@ class RadarTunerHandler : public AsyncWebHandler {
 
   /// Accumulated request body. Reset on the chunk at index 0 rather than after use, so a request
   /// that dies mid-body cannot leave a fragment to be prepended to the next one.
-  std::string body_;
+  ///
+  /// PSRAM-backed: a config POST can legally run to MAX_BODY_BYTES (4KB, zone polygons), and the
+  /// internal heap should not carry it even for the request's lifetime. RAMAllocator falls back to
+  /// internal on a PSRAM-less board.
+  std::basic_string<char, std::char_traits<char>, RAMAllocator<char>> body_;
 
   std::atomic<uint32_t> ld2410_live_poll_ms_{0};
 

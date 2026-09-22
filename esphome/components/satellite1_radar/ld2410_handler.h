@@ -14,7 +14,9 @@
 namespace esphome {
 namespace satellite1_radar {
 
-class LD2410Handler {
+// PsramAllocated: the handler is `new`ed at detect time and lives forever - ~3KB (mostly the
+// command queue below) that belongs in PSRAM, not the internal heap. See the mixin's comment.
+class LD2410Handler : public PsramAllocated {
  public:
   explicit LD2410Handler(uart::UARTDevice &uart) : uart_(uart) {}
   static constexpr size_t NUM_GATES = 9;  // g0 through g8
@@ -70,7 +72,10 @@ class LD2410Handler {
 
  protected:
   static constexpr size_t MAX_BUF = 256;
-  std::unique_ptr<uint8_t[]> buf_{};
+  /// Inline rather than heap-allocated: the handler object lives in PSRAM (PsramAllocated), so the
+  /// reassembly buffer rides along for free. Byte-wise UART reads land here from the main loop -
+  /// never DMA - which is what makes PSRAM placement safe.
+  uint8_t buf_[MAX_BUF]{};
   size_t buf_pos_{0};
   uart::UARTDevice &uart_;
 

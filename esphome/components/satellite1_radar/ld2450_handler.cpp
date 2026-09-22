@@ -23,9 +23,6 @@ static inline bool deadline_passed_(uint32_t deadline, uint32_t now) {
 
 void LD2450Handler::setup() {
   ESP_LOGI(TAG_LD2450, "Initializing LD2450 handler");
-  if (!buf_) {
-    buf_ = std::unique_ptr<uint8_t[]>(new uint8_t[MAX_BUF]());
-  }
   fw_version_received_ = false;
   fw_retry_count_ = 0;
   fw_next_retry_ms_ = millis() + 2000;
@@ -138,9 +135,6 @@ void LD2450Handler::create_and_register_entities() {
 }
 
 void LD2450Handler::loop() {
-  if (!buf_)
-    return;
-
   uint32_t now = millis();
 
   // Layout changes land here rather than in set_backend_config because that runs on the httpd
@@ -190,14 +184,14 @@ void LD2450Handler::loop() {
 
     if (buf_pos_ >= 10 && buf_[buf_pos_ - 4] == 0x04 && buf_[buf_pos_ - 3] == 0x03 && buf_[buf_pos_ - 2] == 0x02 &&
         buf_[buf_pos_ - 1] == 0x01) {
-      handle_ack_frame_(buf_.get(), buf_pos_);
+      handle_ack_frame_(buf_, buf_pos_);
       buf_pos_ = 0;
       continue;
     }
 
     if (buf_pos_ >= DATA_FRAME_SIZE && buf_[0] == 0xAA && buf_[1] == 0xFF && buf_[2] == 0x03 && buf_[3] == 0x00 &&
         buf_[28] == 0x55 && buf_[29] == 0xCC) {
-      parse_data_frame_(buf_.get());
+      parse_data_frame_(buf_);
       buf_pos_ = 0;
     }
   }

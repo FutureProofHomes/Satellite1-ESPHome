@@ -6,8 +6,33 @@
 #include "esphome/components/button/button.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 
+#include <esp_heap_caps.h>
+
 namespace esphome {
 namespace satellite1_radar {
+
+/// Places everything this component heap-allocates at detect time in PSRAM.
+///
+/// The radar handlers and their runtime entities are `new`ed once a module answers on the UART and
+/// then live for the life of the device. extram_bss cannot reach them - it only moves the
+/// generated main.cpp statics - so without this they were several KB of internal heap: the LD2410
+/// handler alone is ~3KB (its command queue is 32 x 72 bytes), and each runtime entity object a few
+/// hundred more. Everything that touches these objects runs on the main loop or the httpd task,
+/// with the cache enabled, so PSRAM placement is safe; nothing here is read from an ISR.
+///
+/// An empty mixin base rather than call-site allocators, so `new` and every std::unique_ptr keep
+/// working unchanged: class-scoped operator new is what the language already provides for exactly
+/// this. The internal-heap fallback keeps a PSRAM-less board booting; operator delete uses free(),
+/// which on ESP-IDF routes any pointer back to the heap that owns it.
+struct PsramAllocated {
+  static void *operator new(size_t size) {
+    void *p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p == nullptr)
+      p = ::operator new(size);  // Internal heap; aborts on exhaustion exactly as any other new.
+    return p;
+  }
+  static void operator delete(void *p) { free(p); }
+};
 
 struct DeviceClassMeta {
   uint8_t distance{0};
@@ -54,7 +79,7 @@ inline uint32_t pack_entity_fields(uint8_t device_class_idx, uint8_t uom_idx, ui
 #define SAT1_RADAR_DYNAMIC_VISIBILITY \
   void set_frontend_hidden(bool hidden) { this->flags_.internal = hidden; }
 
-class Satellite1RadarDynamicSensor : public sensor::Sensor {
+class Satellite1RadarDynamicSensor : public sensor::Sensor, public PsramAllocated {
  public:
   SAT1_RADAR_DYNAMIC_VISIBILITY
   void configure_dynamic(const char *name, EntityCategory entity_category = ENTITY_CATEGORY_NONE,
@@ -70,7 +95,7 @@ class Satellite1RadarDynamicSensor : public sensor::Sensor {
   }
 };
 
-class Satellite1RadarDynamicBinarySensor : public binary_sensor::BinarySensor {
+class Satellite1RadarDynamicBinarySensor : public binary_sensor::BinarySensor, public PsramAllocated {
  public:
   void configure_dynamic(const char *name, EntityCategory entity_category = ENTITY_CATEGORY_NONE,
                          bool disabled_by_default = false, uint8_t device_class_idx = 0, uint8_t icon_idx = 0) {
@@ -79,7 +104,7 @@ class Satellite1RadarDynamicBinarySensor : public binary_sensor::BinarySensor {
   }
 };
 
-class Satellite1RadarDynamicTextSensor : public text_sensor::TextSensor {
+class Satellite1RadarDynamicTextSensor : public text_sensor::TextSensor, public PsramAllocated {
  public:
   SAT1_RADAR_DYNAMIC_VISIBILITY
   void configure_dynamic(const char *name, EntityCategory entity_category = ENTITY_CATEGORY_NONE,
@@ -88,7 +113,7 @@ class Satellite1RadarDynamicTextSensor : public text_sensor::TextSensor {
   }
 };
 
-class Satellite1RadarButton : public button::Button, public Component {
+class Satellite1RadarButton : public button::Button, public Component, public PsramAllocated {
  public:
   void setup() override {}
   void dump_config() override {}

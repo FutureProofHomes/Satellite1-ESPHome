@@ -6,6 +6,8 @@
 #include "esphome/core/preferences.h"
 
 #include <cJSON.h>
+#include <esp_heap_caps.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdarg>
@@ -95,8 +97,30 @@ class ChunkWriter {
 /// Ceiling on an accumulated request body. The largest real payload is an LD2450 zone write -
 /// three zones plus an exclusion polygon at eight points each, roughly 700 bytes - so this is
 /// generous. It exists because handleBody streams with no cap of its own, and an accumulating
-/// std::string is a heap growth primitive handed to whoever can reach the endpoint.
+/// string is a heap growth primitive handed to whoever can reach the endpoint.
 static constexpr size_t MAX_BODY_BYTES = 4096;
+
+/// Routes cJSON's allocations to PSRAM, installed once before the first parse.
+///
+/// A config POST's parse tree runs to a few kilobytes of nodes (zone polygons especially), and
+/// cJSON's default hooks are plain malloc - the internal heap. The hooks are process-global, and
+/// that is deliberate rather than accepted: this handler is the only cJSON user in the firmware
+/// image (checked against the build), so nothing else's allocations can be redirected by it. free()
+/// on ESP-IDF routes any pointer back to the heap that owns it, so the fallback branch needs no
+/// bookkeeping.
+static void *cjson_psram_malloc_(size_t size) {
+  void *p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  return p != nullptr ? p : malloc(size);  // NOLINT(cppcoreguidelines-no-malloc)
+}
+
+static void cjson_use_psram_() {
+  static bool installed = false;
+  if (installed)
+    return;
+  installed = true;
+  cJSON_Hooks hooks{cjson_psram_malloc_, free};
+  cJSON_InitHooks(&hooks);
+}
 
 static void send_json_(AsyncWebServerRequest *request, const char *body) {
   request->send(200, "application/json", body);
@@ -271,6 +295,7 @@ void RadarTunerHandler::handle_ld2410_set_config_(AsyncWebServerRequest *request
     return;
   }
 
+  cjson_use_psram_();
   cJSON *root = cJSON_ParseWithLength(body_.c_str(), body_.size());
   if (root == nullptr || !cJSON_IsObject(root)) {
     if (root != nullptr)
@@ -489,6 +514,7 @@ void RadarTunerHandler::handle_ld2450_set_config_(AsyncWebServerRequest *request
     return;
   }
 
+  cjson_use_psram_();
   cJSON *root = cJSON_ParseWithLength(body_.c_str(), body_.size());
   if (root == nullptr || !cJSON_IsObject(root)) {
     if (root != nullptr)

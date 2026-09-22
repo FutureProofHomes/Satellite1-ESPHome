@@ -18,7 +18,9 @@ namespace satellite1_radar {
 
 using TargetUpdateCallback = std::function<void(int target, float x, float y)>;
 
-class LD2450Handler {
+// PsramAllocated: the handler is `new`ed at detect time and lives forever - its command queue,
+// config copies and zone state belong in PSRAM, not the internal heap. See the mixin's comment.
+class LD2450Handler : public PsramAllocated {
  public:
   explicit LD2450Handler(uart::UARTDevice &uart) : uart_(uart) {}
   static constexpr size_t NUM_TARGETS = 3;
@@ -97,7 +99,9 @@ class LD2450Handler {
   static constexpr size_t MAX_CMD_LEN = 16;
   static const int FW_MAX_RETRIES = 5;
   static const int DEFAULT_STABILITY = 5;
-  std::unique_ptr<uint8_t[]> buf_{};
+  /// Inline rather than heap-allocated - see LD2410Handler::buf_ for why this is safe in the
+  /// PSRAM-resident handler object.
+  uint8_t buf_[MAX_BUF]{};
   size_t buf_pos_{0};
   uart::UARTDevice &uart_;
   bool fw_version_received_{false};

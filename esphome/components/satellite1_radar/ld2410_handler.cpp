@@ -16,9 +16,6 @@ static constexpr uint8_t LD2410_NO_BT_MAC[6] = {0x08, 0x05, 0x04, 0x03, 0x02, 0x
 
 void LD2410Handler::setup() {
   ESP_LOGI(TAG_LD2410, "Initializing LD2410 handler");
-  if (!buf_) {
-    buf_ = std::unique_ptr<uint8_t[]>(new uint8_t[MAX_BUF]());
-  }
   config_pref_ = global_preferences->make_preference<LD2410BackendConfig>(fnv1_hash("sat1.ld2410.config"));
   LD2410BackendConfig loaded;
   if (config_pref_.load(&loaded)) {
@@ -135,9 +132,6 @@ void LD2410Handler::create_and_register_entities() {
 }
 
 void LD2410Handler::loop() {
-  if (!buf_)
-    return;
-
   size_t bytes_processed = 0;
   while (uart_.available() && bytes_processed < MAX_UART_BYTES_PER_LOOP) {
     uint8_t byte;
@@ -157,7 +151,7 @@ void LD2410Handler::loop() {
     bool is_cmd = (buf_[0] == 0xFD && buf_[1] == 0xFC && buf_[2] == 0xFB && buf_[3] == 0xFA);
 
     if (!is_data && !is_cmd) {
-      memmove(buf_.get(), buf_.get() + 1, buf_pos_ - 1);
+      memmove(buf_, buf_ + 1, buf_pos_ - 1);
       buf_pos_--;
       continue;
     }
@@ -169,7 +163,7 @@ void LD2410Handler::loop() {
       if (buf_pos_ >= frame_len) {
         if (buf_[frame_len - 4] == 0xF8 && buf_[frame_len - 3] == 0xF7 && buf_[frame_len - 2] == 0xF6 &&
             buf_[frame_len - 1] == 0xF5) {
-          parse_data_frame_(buf_.get(), frame_len);
+          parse_data_frame_(buf_, frame_len);
         }
         buf_pos_ = 0;
         continue;
@@ -183,7 +177,7 @@ void LD2410Handler::loop() {
       if (buf_pos_ >= frame_len) {
         if (buf_[frame_len - 4] == 0x04 && buf_[frame_len - 3] == 0x03 && buf_[frame_len - 2] == 0x02 &&
             buf_[frame_len - 1] == 0x01) {
-          handle_ack_frame_(buf_.get(), frame_len);
+          handle_ack_frame_(buf_, frame_len);
         }
         buf_pos_ = 0;
         continue;
