@@ -94,6 +94,12 @@ struct SlotView {
   bool runtime{false};
 };
 
+/// A transient download body, placed in PSRAM: a manifest can legally run to WL_MANIFEST_MAX (8KB),
+/// which has no business on the internal heap even for the seconds a fetch holds it. RAMAllocator
+/// falls back to internal on a PSRAM-less board, so this is a placement preference, not a
+/// requirement.
+using PsramString = std::basic_string<char, std::char_traits<char>, RAMAllocator<char>>;
+
 /// One scored event during a tune session: a detection's peak and sliding-average probability, or
 /// a VAD rejection (the wake model fired but the voice-activity model did not take it for speech).
 struct TuneEvent {
@@ -236,13 +242,33 @@ class MwwRuntimeLoader : public Component {
     uint8_t used;  // 1 once ever written, so a fresh device is told apart from an emptied slot
   } __attribute__((packed));
 
+  /// The endpoint-facing view's storage: SlotView's shape with fixed char arrays instead of
+  /// std::string, so the persistent copy of two slots' specs lives inside this object - which
+  /// extram_bss places in PSRAM - rather than as internal-heap string bodies. snapshot()
+  /// materializes the std::string SlotView the endpoint reads from these, transiently. The word
+  /// and id widths are display truncations, not limits: the endpoint only tests `id` for
+  /// emptiness, and a phrase past 95 bytes is already not something a picker row can show.
+  struct SlotViewStore {
+    char spec[WL_SPEC_MAX]{};
+    char word[96]{};
+    char id[32]{};
+    uint8_t state{SLOT_READY};
+    uint8_t error{ERR_NONE};
+    uint8_t cutoff{0};
+    bool runtime{false};
+  };
+
   static void job_task(void *param);
   void run_job_();
   /// One HTTP GET into `out`, capped at `cap`. Returns the SlotError verdict.
-  uint8_t fetch_(const std::string &url, std::string &out, size_t cap);
+  uint8_t fetch_(const std::string &url, PsramString &out, size_t cap);
 
   void start_job_(uint8_t slot, bool boot);
   void finalize_job_();
+  /// Hands the internal heap back the job's transient strings (URL, word, languages). Called at
+  /// every finalize exit: the next job rewrites them anyway, but between downloads - which is
+  /// almost always - there is no reason to keep a URL's bytes allocated.
+  void release_job_strings_();
   void apply_request_(uint8_t i, const std::string &spec);
   void apply_cutoff_(uint8_t i, uint8_t value);
   /// Drops the native API connections a moment from now, so Home Assistant reconnects and
@@ -279,10 +305,12 @@ class MwwRuntimeLoader : public Component {
   std::vector<BuiltinInfo> builtins_;
 
   // Requests from the httpd task, coalesced per slot: the newest write wins, which is the right
-  // answer for a picker someone is changing their mind in.
+  // answer for a picker someone is changing their mind in. The spec rides a fixed array (storage
+  // inside this PSRAM-resident object) rather than a std::string whose URL-sized body would land
+  // on the internal heap; queue_slot bounds the length before writing.
   Mutex req_lock_;
   bool slot_req_[WL_SLOTS]{false, false};
-  std::string slot_req_spec_[WL_SLOTS];
+  char slot_req_spec_[WL_SLOTS][WL_SPEC_MAX]{};
   int16_t cutoff_req_[WL_SLOTS]{-1, -1};
   // A queued tune open/keepalive/close: -1 none, otherwise slot * 2 + (on ? 1 : 0).
   std::atomic<int8_t> tune_req_{-1};
@@ -303,9 +331,9 @@ class MwwRuntimeLoader : public Component {
   std::vector<TuneEvent> tune_events_;
   uint32_t tune_seq_{0};
 
-  // The published view the endpoint copies from.
+  // The published view the endpoint copies from - fixed arrays, see SlotViewStore.
   Mutex view_lock_;
-  SlotView view_[WL_SLOTS];
+  SlotViewStore view_[WL_SLOTS];
 
   Job job_;
   // Set when reconcile_ha_ should hold off for a beat: right after boot (models are still

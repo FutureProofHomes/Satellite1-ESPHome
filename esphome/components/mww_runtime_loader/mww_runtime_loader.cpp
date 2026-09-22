@@ -9,6 +9,8 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+// xTaskCreateWithCaps / vTaskDeleteWithCaps, for the PSRAM-stacked download task.
+#include <freertos/idf_additions.h>
 
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/logger/logger.h"
@@ -29,6 +31,13 @@ static const char *const TAG = "mww_runtime_loader";
 /// The download task's stack. TLS buffers live on the heap, not here; this covers esp_http_client,
 /// the JSON parse of a sub-kilobyte manifest, and our own frames. Sized like the other short-lived
 /// network tasks in this firmware rather than measured to the byte.
+///
+/// Allocated in PSRAM (see start_job_), because 10KB of internal DRAM was this component's largest
+/// transient cost, spent at boot - exactly when every URL slot re-downloads and internal RAM is
+/// tightest. That placement is legal because this task never touches flash: it only does HTTP, TLS
+/// and a JSON parse, and every NVS write and micro_wake_word mutation belongs to finalize_job_ on
+/// the main loop. A task whose stack is in PSRAM must never perform a flash operation itself -
+/// keep it that way.
 static constexpr uint32_t WL_TASK_STACK = 10240;
 
 /// Boot re-download backoff, capped: a device that came up before the router did should try again
@@ -45,9 +54,8 @@ static constexpr uint32_t WL_STALL_MS = 30 * 1000;
 #define VERSION_CODE(major, minor, patch) (((major) << 16) | ((minor) << 8) | (patch))
 #endif
 
-static bool is_url_(const std::string &s) {
-  return s.rfind("http://", 0) == 0 || s.rfind("https://", 0) == 0;
-}
+static bool is_url_(const char *s) { return strncmp(s, "http://", 7) == 0 || strncmp(s, "https://", 8) == 0; }
+static bool is_url_(const std::string &s) { return is_url_(s.c_str()); }
 
 std::string MwwRuntimeLoader::runtime_id_(uint8_t slot) {
   // One stable id per slot rather than one per model. The id keys the model's enabled-state
@@ -270,13 +278,15 @@ bool MwwRuntimeLoader::queue_slot(uint8_t i, const std::string &spec) {
     LockGuard guard{this->view_lock_};
     // The other slot already holds (or is fetching) this word - a duplicate would be two models
     // listening for the same phrase, and add_runtime_model would refuse the second anyway.
-    if (!s.empty() && this->view_[1 - i].spec == s)
+    if (!s.empty() && strcmp(this->view_[1 - i].spec, s.c_str()) == 0)
       return false;
   }
   {
     LockGuard guard{this->req_lock_};
     this->slot_req_[i] = true;
-    this->slot_req_spec_[i] = std::move(s);
+    // Bounded above (s.size() < WL_SPEC_MAX) and NUL-free by the character walk, so the copy with
+    // its terminator always fits the fixed array.
+    memcpy(this->slot_req_spec_[i], s.c_str(), s.size() + 1);
   }
   this->req_pending_.store(true, std::memory_order_relaxed);
   return true;
@@ -309,8 +319,18 @@ bool MwwRuntimeLoader::queue_tune(uint8_t i, bool on) {
 void MwwRuntimeLoader::snapshot(SlotView out[WL_SLOTS], uint32_t &dl, uint32_t &total, int &dl_slot) {
   {
     LockGuard guard{this->view_lock_};
-    for (uint8_t i = 0; i < WL_SLOTS; i++)
-      out[i] = this->view_[i];
+    // Materialized field by field: the stored view is fixed char arrays (see SlotViewStore), the
+    // endpoint's copy is std::string - transient for the request, where the store is forever.
+    for (uint8_t i = 0; i < WL_SLOTS; i++) {
+      const SlotViewStore &v = this->view_[i];
+      out[i].spec.assign(v.spec);
+      out[i].word.assign(v.word);
+      out[i].id.assign(v.id);
+      out[i].state = v.state;
+      out[i].error = v.error;
+      out[i].cutoff = v.cutoff;
+      out[i].runtime = v.runtime;
+    }
   }
   if (this->job_.active.load(std::memory_order_acquire)) {
     dl = this->job_.bytes.load(std::memory_order_relaxed);
@@ -518,6 +538,15 @@ void MwwRuntimeLoader::end_tune_(bool expired) {
   if (active < 0)
     return;
   this->apply_configured_cutoff_(this->slots_[active]);
+  {
+    // The ring and the word are session state, and the session is over - hand the heap back rather
+    // than holding two dozen events until the next open clears them. Safe against the log callback:
+    // it tests tune_slot_ (already -1) before ever taking this lock, and the endpoint serves the
+    // tune block only while a session is live.
+    LockGuard guard{this->tune_lock_};
+    std::vector<TuneEvent>().swap(this->tune_events_);
+    std::string().swap(this->tune_word_);
+  }
   ESP_LOGI(TAG, "Tune session for slot %d closed%s", active, expired ? " (expired)" : "");
 }
 
@@ -598,7 +627,14 @@ void MwwRuntimeLoader::start_job_(uint8_t slot, bool boot) {
   s.state = SLOT_DOWNLOADING;
   this->publish_view_();
 
-  if (xTaskCreate(MwwRuntimeLoader::job_task, "wl_download", WL_TASK_STACK, this, 2, nullptr) != pdPASS) {
+  // WithCaps puts the stack in PSRAM and keeps the TCB internal on its own (FreeRTOS requires
+  // that); the internal-caps retry covers a PSRAM-less board through the same call so job_task's
+  // vTaskDeleteWithCaps matches however the task was created. See WL_TASK_STACK for why PSRAM is
+  // safe here and what would make it stop being safe.
+  if (xTaskCreateWithCaps(MwwRuntimeLoader::job_task, "wl_download", WL_TASK_STACK, this, 2, nullptr,
+                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS &&
+      xTaskCreateWithCaps(MwwRuntimeLoader::job_task, "wl_download", WL_TASK_STACK, this, 2, nullptr,
+                          MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) != pdPASS) {
     j.error = ERR_NO_MEMORY;
     j.done.store(true, std::memory_order_release);
   }
@@ -608,10 +644,13 @@ void MwwRuntimeLoader::job_task(void *param) {
   auto *self = static_cast<MwwRuntimeLoader *>(param);
   self->run_job_();
   self->job_.done.store(true, std::memory_order_release);
-  vTaskDelete(nullptr);
+  // The WithCaps pair: a plain vTaskDelete would leak the stack and TCB buffers WithCaps allocated
+  // (they are static allocations as far as FreeRTOS is concerned). Self-delete is supported - IDF
+  // spawns a momentary cleanup task to free the buffers.
+  vTaskDeleteWithCaps(nullptr);
 }
 
-uint8_t MwwRuntimeLoader::fetch_(const std::string &url, std::string &out, size_t cap) {
+uint8_t MwwRuntimeLoader::fetch_(const std::string &url, PsramString &out, size_t cap) {
   auto container = this->http_->get(url);
   if (container == nullptr)
     return ERR_FETCH;
@@ -655,8 +694,9 @@ void MwwRuntimeLoader::run_job_() {
   Job &j = this->job_;
 
   // 1. The manifest. Small JSON; capped hard, so a URL pointing at a .tflite (or a web page) fails
-  //    here as "not a manifest" territory rather than filling memory.
-  std::string manifest;
+  //    here as "not a manifest" territory rather than filling memory. PSRAM, because the cap is
+  //    8KB and the internal heap should never carry a body that size even transiently.
+  PsramString manifest;
   uint8_t verdict = this->fetch_(j.manifest_url, manifest, WL_MANIFEST_MAX);
   if (verdict != ERR_NONE) {
     j.error = verdict == ERR_TOO_BIG ? ERR_NOT_MANIFEST : ERR_FETCH;
@@ -671,7 +711,11 @@ void MwwRuntimeLoader::run_job_() {
   bool has_micro = false;
   std::string type;
 
-  bool parsed = json::parse_json(manifest, [&](JsonObject root) -> bool {
+  // The pointer-and-length overload, because `manifest` is a PSRAM basic_string rather than the
+  // std::string the convenience overload takes - converting would copy the body onto the internal
+  // heap, which is the exact move the PSRAM placement exists to avoid.
+  bool parsed = json::parse_json(reinterpret_cast<const uint8_t *>(manifest.c_str()), manifest.size(),
+                                 [&](JsonObject root) -> bool {
     type = (const char *) (root["type"] | "");
     j.word = (const char *) (root["wake_word"] | "");
     version = root["version"] | 0;
@@ -842,6 +886,7 @@ void MwwRuntimeLoader::finalize_job_() {
       // The previous word never stopped listening; the slot just reports why the swap failed.
       s.state = SLOT_ERROR;
     }
+    this->release_job_strings_();
     this->publish_view_();
     return;
   }
@@ -863,6 +908,7 @@ void MwwRuntimeLoader::finalize_job_() {
     s.pending.clear();
     s.state = SLOT_ERROR;
     s.error = ERR_REFUSED;
+    this->release_job_strings_();
     this->publish_view_();
     return;
   }
@@ -901,7 +947,17 @@ void MwwRuntimeLoader::finalize_job_() {
   if (!j.boot)
     this->nudge_ha_();
   ESP_LOGI(TAG, "Wake word \"%s\" loaded into slot %u from %s", s.word.c_str(), j.slot, s.spec.c_str());
+  this->release_job_strings_();
   this->publish_view_();
+}
+
+void MwwRuntimeLoader::release_job_strings_() {
+  Job &j = this->job_;
+  // swap-with-empty rather than clear(): clear() keeps the capacity, and the whole point here is
+  // handing a URL-sized buffer back to the internal heap between downloads.
+  std::string().swap(j.manifest_url);
+  std::string().swap(j.word);
+  std::vector<std::string>().swap(j.langs);
 }
 
 void MwwRuntimeLoader::reconcile_ha_() {
@@ -993,15 +1049,16 @@ void MwwRuntimeLoader::publish_view_() {
   LockGuard guard{this->view_lock_};
   for (uint8_t i = 0; i < WL_SLOTS; i++) {
     const Slot &s = this->slots_[i];
-    SlotView &v = this->view_[i];
-    v.spec = !s.pending.empty() ? s.pending : s.spec;
-    v.word = s.word;
-    v.id = s.model_id;
+    SlotViewStore &v = this->view_[i];
+    // snprintf rather than strcpy for the two display fields, whose arrays are truncations by
+    // design; the spec always fits, since everything writing a Slot bounds it at WL_SPEC_MAX.
+    snprintf(v.spec, sizeof(v.spec), "%s", !s.pending.empty() ? s.pending.c_str() : s.spec.c_str());
+    snprintf(v.word, sizeof(v.word), "%s", s.word.c_str());
+    snprintf(v.id, sizeof(v.id), "%s", s.model_id.c_str());
     v.state = s.state;
     v.error = s.error;
     v.cutoff = s.cutoff;
     v.runtime = s.model_id == runtime_id_(i) || (s.model_id.empty() && is_url_(v.spec));
-
   }
 }
 

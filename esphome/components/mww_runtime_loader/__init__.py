@@ -8,7 +8,7 @@ persistence (the URL is remembered, the model is re-downloaded at boot - never s
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import logger
+from esphome.components import logger, psram
 from esphome.components.http_request import HttpRequestComponent
 from esphome.components.micro_wake_word import MicroWakeWord
 from esphome.const import CONF_ID
@@ -38,6 +38,12 @@ async def to_code(config):
     # The Wake Word Tuner's score channel: micro_wake_word logs each detection's probabilities, and
     # this compiles in the logger's listener vector so the component can subscribe to those lines.
     logger.request_log_listener()
+
+    # The download task's 10KB stack lives in PSRAM (see WL_TASK_STACK in the .cpp); this sets
+    # CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY so the kernel permits it, exactly as sendspin's
+    # task_stack_in_psram option does. Permission only - no other task moves. The component falls
+    # back to an internal stack at runtime on a board without PSRAM.
+    psram.request_external_task_stack()
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
