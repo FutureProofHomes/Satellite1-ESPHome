@@ -95,12 +95,21 @@ external_components:
       - fusb302b
       - i2s_audio
       - memory_flasher
+      - micro_decoder_override
       - mww_runtime_loader
       - satellite1
       - satellite1_radar
       - satellite1_web_ui
       - ethernet
       - tas2780
+
+# Swaps the registry micro-decoder for our patched fork (the submodule at
+# esphome/idf_components/micro-decoder), closing the lwIP semaphore use-after-free that
+# panicked devices when a streaming TTS response was stopped mid-download. The component's
+# docstring carries the full mechanism; the compile-time "IDF component version conflict"
+# warning it triggers is expected. Remove together with the submodule once the upstream fix
+# ships in a stock ESPHome release.
+micro_decoder_override:
 
 logger:
   deassert_rts_dtr: true

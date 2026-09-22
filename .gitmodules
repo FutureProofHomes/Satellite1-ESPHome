@@ -1,0 +1,3 @@
+[submodule "esphome/idf_components/micro-decoder"]
+	path = esphome/idf_components/micro-decoder
+	url = https://github.com/FutureProofHomes/micro-decoder.git
