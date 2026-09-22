@@ -1,0 +1,3 @@
+packages:
+  satellite1: !include satellite1.yaml
+  xmos_debug: !include common/debug.yaml

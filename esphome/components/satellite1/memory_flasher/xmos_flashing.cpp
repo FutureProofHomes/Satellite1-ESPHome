@@ -68,6 +68,12 @@ void XMOSFlasher::loop() {
   if (this->pending_boot_action_ && this->state == FLASHER_IDLE && App.is_setup_complete()) {
     this->pending_boot_action_ = false;
     if (this->pending_boot_action_type_ == ACTION_FLASH_EMBEDDED_FULL_ERASE) {
+      const bool resuming = is_recovery_state(this->record_.state);
+      if (this->factory_reset_pending_) {
+        ESP_LOGW(TAG, "%s XMOS factory-reset full erase", resuming ? "Resuming interrupted" : "Starting requested");
+      } else {
+        ESP_LOGW(TAG, "%s XMOS full erase", resuming ? "Resuming interrupted" : "Starting requested");
+      }
       this->flash_attempted_this_boot_ = true;
       this->md5_expected_ = this->embedded_image_.md5;
       this->requested_action = ACTION_FLASH_EMBEDDED_FULL_ERASE;
@@ -120,6 +126,7 @@ void XMOSFlasher::loop() {
         this->deinit_flashing_();
         this->state = FLASHER_SUCCESS_STATE;
       } else if (remaining == 0) {
+        ESP_LOGI(TAG, "XMOS erase complete; writing embedded image");
         this->state = FLASHER_FLASHING;
       } else if (remaining < 0) {
         this->deinit_flashing_();
@@ -362,6 +369,8 @@ bool XMOSFlasher::read_flash_identity_() {
       memcmp(first, second, sizeof(first)) != 0) {
     return false;
   }
+  ESP_LOGI(TAG, "XMOS flash UID: %02X%02X%02X%02X%02X%02X%02X%02X", first[0], first[1], first[2], first[3], first[4],
+           first[5], first[6], first[7]);
   memcpy(this->active_unique_id_, first, sizeof(this->active_unique_id_));
   return true;
 }
