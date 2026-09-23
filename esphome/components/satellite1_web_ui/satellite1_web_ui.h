@@ -8,6 +8,10 @@
 #include "session_gate.h"
 #include "web_ui_handler.h"
 
+#ifdef USE_SWITCH
+#include "esphome/components/switch/switch.h"
+#endif
+
 #ifdef USE_SAT1_WEB_UI_SENDSPIN
 #include "esphome/components/sendspin/sendspin_hub.h"
 #endif
@@ -113,6 +117,13 @@ class Satellite1WebUI : public Component {
   /// Whether a voice approval could be heard right now - the mute slider and switch, read at
   /// window-open time. From YAML because only YAML knows which entities mean "muted" on this build.
   void set_login_mic_available(std::function<bool()> fn) { this->gate_.set_mic_available_fn(std::move(fn)); }
+
+#ifdef USE_SWITCH
+  /// The software mute switch the held-mute endpoint drives (mute_switch: in web_ui.yaml -
+  /// master_mute_switch on this product). From generated code; without it POST /api/sat1/mutehold
+  /// answers 404 and the tune-time peer muting simply does not exist on this build.
+  void set_mute_switch(switch_::Switch *sw) { this->mute_switch_ = sw; }
+#endif
 
   /// The action button's approval. Returns true when a pending window was approved, which is the
   /// dispatcher's cue to consume the press instead of running its normal single-press action.
@@ -281,6 +292,24 @@ class Satellite1WebUI : public Component {
   Trigger<std::string, float> ma_seek_trigger_;
   Trigger<> selection_change_trigger_;
   std::atomic<bool> selection_changed_{false};
+
+#ifdef USE_SWITCH
+  /* ---- The tune-time held mute (POST /api/sat1/mutehold; serviced in loop()) ----
+   * A peer's tuner holds this device muted while its session runs. The hold is this device's own
+   * state, deliberately: it remembers the prior mute, restores it on release OR on the TTL below
+   * expiring, and never trusts the browser that asked to come back - the exact self-healing shape
+   * the tune session itself uses. millis_64() for the deadline, like every deadline here. */
+  switch_::Switch *mute_switch_{nullptr};
+  bool mute_hold_{false};
+  bool mute_hold_prior_on_{false};
+  /// Set once the switch has been OBSERVED on while held. The manual-unmute-wins rule (a person at
+  /// the device outranks a remote tune session; owner decision, September 23 2026) reads "held but
+  /// off" as that person's hand - but only after this flag, because turn_on() through the template
+  /// switch is refused while the hardware mute slider is engaged, and treating that unhonored
+  /// request as a manual unmute would cancel the hold it never applied.
+  bool mute_hold_seen_on_{false};
+  uint64_t mute_hold_until_{0};
+#endif
 
   /// The last time the MA refresh trigger fired, for the floor loop() applies: browsers refresh on a
   /// cadence of their own while the footer is expanded, several tabs can do it at once, and each sync

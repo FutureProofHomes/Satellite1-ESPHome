@@ -191,6 +191,8 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
       return Route::MA_SET;
     if (url == "/api/sat1/sel")
       return Route::SEL_SET;
+    if (url == "/api/sat1/mutehold")
+      return Route::MUTE_HOLD;
 #ifdef USE_SAT1_MWW_LOADER
     // Before the bare path below would ever match: these are prefixes of nothing, but the bare
     // /api/sat1/wakewords is a prefix of these, so exact-match order matters to nobody - listed
@@ -388,6 +390,9 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
     case Route::SEL_SET:
       this->handle_sel_set_(request);
       break;
+    case Route::MUTE_HOLD:
+      this->handle_mute_hold_(request);
+      break;
 #ifdef USE_MEDIA_PLAYER
     case Route::MEDIA:
       this->handle_media_(request);
@@ -543,6 +548,30 @@ void WebUIHandler::handle_sel_set_(AsyncWebServerRequest *request) {
   // 200 rather than the 204 this deserves: init_response_ knows 200, 204, 400, 401, 404, 409 and 422,
   // and 204 is in that set - but a body is more useful to the caller than a bare status, and a 204
   // carrying one is malformed.
+  request->send(200, "application/json", "{\"ok\":1}");
+}
+
+/// POST /api/sat1/mutehold?on=1|0 - the tune-time held mute (September 2026, the peer-muting
+/// feature; see tune-time_peer_muting plan). A tuner running in a browser against ANOTHER
+/// Satellite1 in this device's area posts on=1 here (cross-origin, ?key= bearer through the
+/// session gate like every peer write) so this device does not answer the wake word being said
+/// over and over; the same 20s cadence that keeps the tune session alive re-posts it, and on=0
+/// releases. The endpoint only queues - the component's loop owns the hold's whole lifecycle:
+/// prior-state capture, the 60s TTL that survives a vanished browser, manual-unmute-wins, and the
+/// restore. 404 when no mute switch is wired (mute_switch: in YAML), the optional-feature
+/// contract, which is also what lands an old-firmware peer on the tuner's "couldn't mute" list.
+void WebUIHandler::handle_mute_hold_(AsyncWebServerRequest *request) {
+  if (!this->mute_hold_available_) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  auto *on_param = request->getParam("on");
+  if (on_param == nullptr) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+  const bool on = on_param->value() == "1" || on_param->value() == "true";
+  this->mute_hold_req_.store(on ? 1 : 0, std::memory_order_relaxed);
   request->send(200, "application/json", "{\"ok\":1}");
 }
 

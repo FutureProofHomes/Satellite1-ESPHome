@@ -34,6 +34,7 @@ import {
   useAssist,
   useWakeSlots,
 } from "../lib/device.js";
+import { holdPeerMutes, keepPeerMutes, releasePeerMutes } from "../lib/peermute.js";
 import {
   DEFAULT_SOURCES,
   REQUEST_WORD_URL,
@@ -768,7 +769,7 @@ function PipelineRow({ assist, word, disabled }) {
  * knows (the persisted voice stats, the room's smatter, the 24h markers) - no re-recording; the
  * "Redo voice rounds" button beside Apply is the full re-measure.
  */
-function TunerFlow({ i, word, isStop, quick, seed, track, wakeRead, onClose }) {
+function TunerFlow({ ctx, i, word, isStop, quick, seed, track, wakeRead, onClose }) {
   const [st, setSt] = useState(() => ({
     phase: quick ? "place" : "ready",
     attempts: [],
@@ -785,17 +786,33 @@ function TunerFlow({ i, word, isStop, quick, seed, track, wakeRead, onClose }) {
   }));
   const evRef = useRef([]);
 
+  // The same-area peers this session is holding muted (lib/peermute.js) - they must not answer
+  // the word being said over and over. `pm` is the explicit status line (owner decision: name
+  // what got muted and what could not be); heldRef is what the keepalive reminds and the release
+  // frees. Peers self-heal on a 60s TTL, so every release here is best effort by design.
+  const heldRef = useRef([]);
+  const [pm, setPm] = useState(null); // { muted: [names], failed: [names], unknown }
+  const releasePeers = () => {
+    if (heldRef.current.length) releasePeerMutes(heldRef.current);
+    heldRef.current = [];
+  };
+
   // Session lifecycle: opened by Start (the ready gate is the whole point), keepalive while open,
   // closed on unmount whatever phase the panel died in. Quick edit never opens one - placement
-  // against stored data needs no floored model.
+  // against stored data needs no floored model. The peer holds ride the same lifecycle: asked for
+  // at Start, reminded on the same 20s cadence, released wherever the session ends.
   const openRef = useRef(false);
   useEffect(() => {
     const ka = setInterval(() => {
-      if (openRef.current) post(`/api/sat1/wakewords/tune?i=${i}&on=1`).catch(() => {});
+      if (openRef.current) {
+        post(`/api/sat1/wakewords/tune?i=${i}&on=1`).catch(() => {});
+        keepPeerMutes(heldRef.current);
+      }
     }, 20000);
     return () => {
       clearInterval(ka);
       if (openRef.current) post(`/api/sat1/wakewords/tune?i=${i}&on=0`).catch(() => {});
+      releasePeers();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [i]);
@@ -814,8 +831,25 @@ function TunerFlow({ i, word, isStop, quick, seed, track, wakeRead, onClose }) {
     }
     openRef.current = true;
     evRef.current = [];
+    // The peer holds, in parallel with the rounds - nothing here blocks the measurement. Retune
+    // re-enters start() with the holds already placed; asking again would only re-run the
+    // sign-ins, so the ask happens once and the keepalive carries it from there.
+    if (!heldRef.current.length) {
+      holdPeerMutes(ctx?.ha, ctx?.device?.mac).then((res) => {
+        heldRef.current = res.held;
+        if (res.held.length || res.failed.length || res.unknown)
+          setPm({ muted: res.held.map((p) => p.name), failed: res.failed, unknown: res.unknown });
+      });
+    }
     setSt((s) => ({ ...s, phase: cap === 0 ? "nocap" : "voice", attempts: [], vadTries: 0, skipped: false }));
   };
+
+  // A session that died device-side (or a build that cannot score) has no live holds to justify:
+  // the peers go back to their own mute states while the panel shows its message.
+  useEffect(() => {
+    if (st.phase === "gone" || st.phase === "nocap") releasePeers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [st.phase]);
 
   // The poll: the session's event ring drives the voice phase; the payload's day buckets keep the
   // smatter fresh in every phase.
@@ -892,6 +926,7 @@ function TunerFlow({ i, word, isStop, quick, seed, track, wakeRead, onClose }) {
       openRef.current = false;
       await post(`/api/sat1/wakewords/tune?i=${i}&on=0`).catch(() => {});
     }
+    releasePeers();
     await wakeRead();
     onClose();
   };
@@ -921,9 +956,25 @@ function TunerFlow({ i, word, isStop, quick, seed, track, wakeRead, onClose }) {
   const prompt =
     st.attempts.length < 2
       ? TEXT.tn2_near.replace("%s", word)
-        : st.attempts.length < 3
+      : st.attempts.length < 3
         ? TEXT.tn2_far
         : TEXT.tn2_other;
+
+  // The peer-muting status, explicit by owner decision (September 23 2026): who is muted for this
+  // session, who could not be, or that nobody could even be looked for. Silent only when the
+  // roster answered and named no same-area peer - there is nothing to say about an empty room.
+  const pmNote = pm && (
+    <>
+      {pm.muted.length > 0 && (
+        <p class="dim sm">
+          {(pm.muted.length === 1 ? TEXT.tn_pm_one : TEXT.tn_pm_many.replace("%s", String(pm.muted.length))) +
+            ` (${pm.muted.join(", ")})`}
+        </p>
+      )}
+      {pm.failed.length > 0 && <p class="t-warn sm">{TEXT.tn_pm_failed.replace("%s", pm.failed.join(", "))}</p>}
+      {pm.unknown && <p class="t-warn sm">{TEXT.tn_pm_unknown}</p>}
+    </>
+  );
 
   // The live readout under the placement graph: safe names the margin, the edges push back. The
   // persisted voice stats feed it as data even in quick mode - they are never drawn as a band.
@@ -975,6 +1026,7 @@ function TunerFlow({ i, word, isStop, quick, seed, track, wakeRead, onClose }) {
             {prompt} ({Math.min(st.attempts.length, 4)} / 4)
           </p>
           {st.vadTries > 0 && <p class="t-warn sm">{TEXT.tn_vad}</p>}
+          {pmNote}
           <div class="row-actions">
             {st.attempts.length >= 3 && <Btn onClick={skip}>{TEXT.tn2_skip}</Btn>}
             <Btn onClick={onClose}>{TEXT.cancel}</Btn>
@@ -995,6 +1047,7 @@ function TunerFlow({ i, word, isStop, quick, seed, track, wakeRead, onClose }) {
             onCutEnd={() => setSt((s) => ({ ...s, held: false }))}
           />
           <p class={`sm t-${readout().tone}`}>{readout().text}</p>
+          {pmNote}
           {/* Four verbs, one row, this order (owner call): back into the rounds, wipe the 24h
               record, out, commit. Clear history wears the danger red - it erases a measurement -
               and Apply the accent, being the row's whole point. */}
@@ -1469,6 +1522,7 @@ export function WakeWords({ ctx }) {
       {tuning ? (
         <Card title={TEXT.tn_title.replace("%s", showWord(tuning.word))} icon={N_WAKE} hint={HINTS.living_graph}>
           <TunerFlow
+            ctx={ctx}
             i={tuning.i}
             word={tuning.word}
             isStop={tuning.isStop}

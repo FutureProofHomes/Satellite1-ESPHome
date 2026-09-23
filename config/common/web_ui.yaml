@@ -234,6 +234,15 @@ satellite1_web_ui:
   # person asking for voice sign-in has answered the question of whether the device may speak.
   login_mic_available: !lambda "return !id(btn_left).state;"
 
+  # The software mute the tune-time held mute drives (POST /api/sat1/mutehold): while a Wake Word
+  # Tuner runs against ANOTHER Satellite1 in this device's area, that tuner's browser holds this
+  # device muted - the customer is saying the wake word over and over, and the neighbours must not
+  # answer - and the switch is put back the way the hold found it when the session ends, or when
+  # the hold's 60s TTL lapses because the browser vanished. A hand on this device outranks the
+  # hold: unmuting here (or from Home Assistant) mid-session cancels it for good. The hardware
+  # mute slider is unaffected either way - this switch's own turn_on already defers to it.
+  mute_switch: master_mute_switch
+
   # The pairing window opening: LED on, then the mode's announcement. The scripts live in
   # common/web_ui_login.yaml. `mode` is button/code/seq; `secret` is the spoken code's digits, or
   # the challenge sequence as symbol indices ("012" = Hey Jarvis, Okay Nabu, Stop). The secret

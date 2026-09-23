@@ -33,6 +33,12 @@ void Satellite1WebUI::setup() {
   // Factory Reset and XMOS Erase Chip included.
   web_server_base::global_web_server_base->add_handler(&this->handler_);
 
+#ifdef USE_SWITCH
+  // The held-mute endpoint exists exactly when a mute switch is wired. Told to the handler here,
+  // before the listener accepts anything, so the 404-vs-queued answer is fixed for the whole run.
+  this->handler_.set_mute_hold_available(this->mute_switch_ != nullptr);
+#endif
+
 #ifdef USE_SAT1_WEB_UI_SENDSPIN
   if (this->sendspin_hub_ != nullptr) {
     // Every callback below fires on the main loop (the hub's own thread-context comments say so),
@@ -103,6 +109,54 @@ void Satellite1WebUI::loop() {
   SelectWrite pending;
   if (this->handler_.take_select_write(pending))
     this->ha_select_trigger_.trigger(pending.entity, pending.option);
+
+#ifdef USE_SWITCH
+  // The tune-time held mute: a peer's tuner is measuring its wake word a room away and asked this
+  // device not to answer it. The whole lifecycle lives here on the main loop; the endpoint only
+  // queued. Ordered: request first (a release must not be aged out by the expiry check below it),
+  // then the human override, then the TTL.
+  if (this->mute_switch_ != nullptr) {
+    const uint64_t now64 = millis_64();
+    const int8_t req = this->handler_.take_mute_hold_request();
+    if (req == 1) {
+      if (!this->mute_hold_) {
+        // First hold: capture what the person had chosen, then mute. turn_on() may be refused by
+        // the template switch while the hardware slider is engaged - which is fine, the device is
+        // already deaf - and mute_hold_seen_on_ keeps that unhonored request from reading as a
+        // manual unmute below.
+        this->mute_hold_ = true;
+        this->mute_hold_prior_on_ = this->mute_switch_->state;
+        this->mute_hold_seen_on_ = false;
+        if (!this->mute_switch_->state)
+          this->mute_switch_->turn_on();
+        ESP_LOGI(TAG, "Tune-time mute held (was %s)", this->mute_hold_prior_on_ ? "muted" : "unmuted");
+      }
+      // Hold and keepalive are one request: either way the deadline moves. 60s against the
+      // tuner's 20s cadence is three missed keepalives before a vanished browser self-heals.
+      this->mute_hold_until_ = now64 + 60000;
+    }
+    if (this->mute_hold_) {
+      if (this->mute_switch_->state)
+        this->mute_hold_seen_on_ = true;
+      if (req == 0 || (this->mute_hold_seen_on_ && !this->mute_switch_->state) || now64 > this->mute_hold_until_) {
+        this->mute_hold_ = false;
+        if (this->mute_hold_seen_on_ && !this->mute_switch_->state) {
+          // A person unmuted at the device (or through Home Assistant) mid-hold: their hand
+          // outranks the session (owner decision, September 23 2026). No restore, no re-mute.
+          ESP_LOGI(TAG, "Tune-time mute overridden locally; hold cancelled");
+        } else {
+          // Release or expiry: put the switch back the way the hold found it. Restore only the
+          // unmuted case - a device that was muted before the hold stays muted, and the switch is
+          // already on.
+          if (!this->mute_hold_prior_on_ && this->mute_switch_->state)
+            this->mute_switch_->turn_off();
+          ESP_LOGI(TAG, "Tune-time mute %s; %s", req == 0 ? "released" : "expired",
+                   this->mute_hold_prior_on_ ? "staying muted (was muted before)" : "restored to unmuted");
+        }
+      }
+    }
+  }
+#endif
 
   // The Music Assistant refresh, collapsed like the HA one and floored at two seconds besides:
   // browsers poll this on their own cadence while the footer's expanded view is open, several tabs

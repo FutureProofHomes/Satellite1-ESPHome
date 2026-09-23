@@ -372,6 +372,17 @@ class WebUIHandler : public AsyncWebHandler {
   /// Set from the component's setup(), before this handler is registered.
   void set_selection(Selection *selection) { this->selection_ = selection; }
 
+  /// Whether this build wires a mute switch for the held-mute endpoint (see handle_mute_hold_).
+  /// Set from the component's setup(), before the listener accepts anything; without it the route
+  /// answers 404, the same contract as every optional feature.
+  void set_mute_hold_available(bool available) { this->mute_hold_available_ = available; }
+
+  /// Hands back the newest queued mute-hold request and clears it: -1 none, 0 release, 1 hold (or
+  /// keepalive - the two are one request; the component refreshes the TTL either way). Newest-wins
+  /// coalescing is correct here: a release overtaking a stale keepalive is exactly the right
+  /// answer, and a hold overtaking a stale release re-arms cleanly. Runs on the main loop.
+  int8_t take_mute_hold_request() { return this->mute_hold_req_.exchange(-1, std::memory_order_relaxed); }
+
 #ifdef USE_MEDIA_PLAYER
   /// Both set from generated setup code, before the listener accepts anything.
   ///
@@ -498,6 +509,7 @@ class WebUIHandler : public AsyncWebHandler {
     MA_SET,
     SEL,
     SEL_SET,
+    MUTE_HOLD,
 #ifdef USE_MICRO_WAKE_WORD
     WAKE_WORDS,
 #ifndef USE_SAT1_MWW_LOADER
@@ -567,6 +579,9 @@ class WebUIHandler : public AsyncWebHandler {
   bool ma_payload_names_(const std::string &entity);
   void handle_sel_(AsyncWebServerRequest *request);
   void handle_sel_set_(AsyncWebServerRequest *request);
+  /// The tune-time held mute a peer's tuner asks for - see the component's loop() for the hold's
+  /// whole lifecycle (prior-state capture, TTL, manual-unmute-wins, restore).
+  void handle_mute_hold_(AsyncWebServerRequest *request);
 #ifdef USE_MICRO_WAKE_WORD
   void handle_wake_words_(AsyncWebServerRequest *request);
 #ifndef USE_SAT1_MWW_LOADER
@@ -754,6 +769,11 @@ class WebUIHandler : public AsyncWebHandler {
 #ifdef USE_SAT1_MWW_LOADER
   mww_runtime_loader::MwwRuntimeLoader *wake_loader_{nullptr};
 #endif
+
+  /// The held-mute request: -1 none, 0 release, 1 hold/keepalive. Written from the httpd task,
+  /// drained by the component's loop through take_mute_hold_request(). See handle_mute_hold_.
+  std::atomic<int8_t> mute_hold_req_{-1};
+  bool mute_hold_available_{false};
 
 #ifdef USE_SAT1_CRASH_REPORT
   crash_report::CrashReport *crash_report_{nullptr};

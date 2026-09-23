@@ -72,6 +72,7 @@ CONF_ICON_512_ID = "icon_512_id"
 CONF_ICON_180_ID = "icon_180_id"
 CONF_ENTITIES = "entities"
 CONF_LOGIN_MIC_AVAILABLE = "login_mic_available"
+CONF_MUTE_SWITCH = "mute_switch"
 CONF_ON_LOGIN_WINDOW = "on_login_window"
 CONF_ON_LOGIN_WINDOW_END = "on_login_window_end"
 CONF_MICRO_WAKE_WORD_ID = "micro_wake_word_id"
@@ -167,6 +168,11 @@ CONFIG_SCHEMA = cv.All(
             # window opens. From YAML because only YAML knows which entities mean "muted" on this
             # build; without it every window opens button-only.
             cv.Optional(CONF_LOGIN_MIC_AVAILABLE): cv.returning_lambda,
+            # The software mute switch the tune-time held mute drives (POST /api/sat1/mutehold):
+            # a peer's Wake Word Tuner mutes this device for its session's lifetime and the switch
+            # is restored on release or TTL expiry. Optional - without it the route answers 404
+            # and the feature does not exist on this build.
+            cv.Optional(CONF_MUTE_SWITCH): cv.use_id(switch.Switch),
             # The pairing window's lifecycle, for the announcement, the LED breathe and the model
             # arming. Open fires with (mode, secret); end fires with (result). Both optional so a
             # build without the YAML wiring still compiles - windows then open and close silently,
@@ -328,6 +334,9 @@ async def to_code(config):
             config[CONF_LOGIN_MIC_AVAILABLE], [], return_type=cg.bool_
         )
         cg.add(var.set_login_mic_available(mic))
+
+    if CONF_MUTE_SWITCH in config:
+        cg.add(var.set_mute_switch(await cg.get_variable(config[CONF_MUTE_SWITCH])))
 
     if CONF_ON_LOGIN_WINDOW in config:
         await automation.build_automation(

@@ -538,6 +538,20 @@ export const TEXT = {
   tn_nocap: "This firmware build can't score attempts, so tuning isn't available. Stock firmware can - this build was compiled without debug logging.",
   tn_gone: "The tuning session ended. Open it again to start over.",
 
+  /* Tune-time peer muting (September 2026): same-area Satellite1s are held muted for the session
+     so they don't answer the word being said over and over, each restoring its own prior mute
+     state when the session ends. Explicit by owner decision - the line names who is muted and who
+     could not be, rather than muting what it can in silence. The names in parentheses are the
+     roster's own device names. */
+  tn_pm_one: "Muted 1 nearby satellite for this session",
+  tn_pm_many: "Muted %s nearby satellites for this session",
+  // Old firmware without the endpoint, a stale password, a dead peer - the tuner cannot tell
+  // which, and the person only needs to know that device may answer mid-tune.
+  tn_pm_failed: "Couldn't mute %s - it may answer while you tune.",
+  // The roster itself was absent: nothing could even be looked for. Worded as a limit, not an
+  // error - tuning works fine, the neighbours just aren't covered.
+  tn_pm_unknown: "Can't check for nearby satellites - Home Assistant is unreachable.",
+
   /* The dots' popover vocabulary (the retired detections card's exact-time story, told in place). */
   det_just_now: "just now",
 

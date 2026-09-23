@@ -236,6 +236,17 @@ band — with **Redo voice rounds** (`tn2_redo`) beside Apply for the full re-me
 is gone. The no-gap failure stays diagnosed by side (`tn_nogap_room` vs `tn_nogap_voice`);
 `tn_nocap` and `tn_gone` keep their jobs.
 
+While a session runs, the same-area Satellite1s are **held muted** so they don't answer the word
+being said over and over (tune-time peer muting, September 2026 — each peer restores its own prior
+mute state when the session ends or its 60s TTL lapses, and a hand unmuting at the peer itself
+outranks the session for good). The status is explicit by owner decision, a line under the phase
+copy: `tn_pm_one` / `tn_pm_many` ("Muted 2 nearby satellites for this session") with the roster
+names in parentheses, `tn_pm_failed` ("Couldn't mute Kitchen - it may answer while you tune",
+amber — old firmware, a stale password and a dead peer are indistinguishable and the person only
+needs the consequence), and `tn_pm_unknown` ("Can't check for nearby satellites - Home Assistant
+is unreachable", worded as a limit rather than an error). Silence only when the roster answered
+and named no same-area peer — nothing to say about an empty room.
+
 Under the hood everything rides the one vendored addition this repo carries: the **high-water
 register** in `micro_wake_word`'s `streaming_model` (see
 `esphome/components/micro_wake_word/FPH_VENDOR.md` — byte-identical to the pinned ESPHome release
