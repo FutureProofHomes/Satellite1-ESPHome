@@ -15,6 +15,8 @@ external_components:
       - fusb302b
       - i2s_audio
       - memory_flasher
+      # Vendored (see esphome/components/micro_wake_word/FPH_VENDOR.md).
+      - micro_wake_word
       - mww_runtime_loader
       - satellite1
       - satellite1_radar

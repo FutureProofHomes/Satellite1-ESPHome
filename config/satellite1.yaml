@@ -96,6 +96,10 @@ external_components:
       - i2s_audio
       - memory_flasher
       - micro_decoder_override
+      # Vendored from the pinned ESPHome release for one ~10-line addition (the high-water
+      # register the wake word margin telemetry rides). See its FPH_VENDOR.md for the re-sync
+      # procedure and the upstream exit plan.
+      - micro_wake_word
       - mww_runtime_loader
       - satellite1
       - satellite1_radar

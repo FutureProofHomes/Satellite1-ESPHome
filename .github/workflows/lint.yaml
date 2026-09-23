@@ -36,6 +36,31 @@ jobs:
       - name: Run yamllint
         run: yamllint config/
 
+  vendored-micro-wake-word:
+    name: vendored micro_wake_word
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Just the pinned esphome, not the whole build environment: the check only needs the
+      # upstream component sources to diff against.
+      - name: Install the pinned ESPHome
+        run: pip install "$(grep -i '^esphome==' requirements.txt)"
+
+      # The vendor's contract, made executable: upstream byte-identical plus FPH-marked lines
+      # only, and the two detection log lines mww_runtime_loader parses still present verbatim.
+      # See esphome/components/micro_wake_word/FPH_VENDOR.md.
+      - name: Verify the vendored copy
+        run: |
+          site=$(python -c "import esphome, os; print(os.path.join(os.path.dirname(esphome.__file__), 'components', 'micro_wake_word'))")
+          scripts/check_vendored_mww.sh "$site"
+
   web-ui-bundle:
     name: web UI bundle
     runs-on: ubuntu-latest
