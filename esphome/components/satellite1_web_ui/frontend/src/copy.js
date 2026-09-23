@@ -78,6 +78,12 @@ export const HINTS = {
   // this sensor, and the generic hint cannot name it.
   temp: "Reads high by design - the sensor sits inside a warm enclosure, next to the board. Calibrate against a thermometer in the same room.",
 
+  /* The unit toggle in the temperature editor. What needs saying is the boundary: this converts what
+     the app shows, and nothing else - Home Assistant does its own unit conversion and the stored
+     calibration never leaves Celsius, so flipping this can never drift it. */
+  temp_unit:
+    "Shows temperatures in Fahrenheit throughout this app. The device stores and reports Celsius either way, so Home Assistant and the saved calibration are unaffected.",
+
   humidity:
     "Measured at the board, so it drifts with the enclosure temperature. Calibrate against a hygrometer in the same room.",
 
@@ -181,7 +187,7 @@ export const HINTS = {
   loop: "The longest single pass through the main loop since the last reading. Tens of milliseconds is normal; sustained hundreds means something is blocking, and audio will stutter first.",
 
   esp_temp:
-    "The ESP32 chip's own temperature, not the room's. It reads well above ambient inside the sealed case, so warm is normal; sustained readings above 80 \u00b0C are worth investigating. The room's temperature is on the home page.",
+    "The ESP32 chip's own temperature, not the room's. It reads well above ambient inside the sealed case, so warm is normal; sustained readings above 80 \u00b0C / 176 \u00b0F are worth investigating. The room's temperature is on the home page.",
   reset: "Why the device last restarted. 'USB peripheral' means it was flashed. 'Power glitch' or 'Brownout' points at the power supply rather than at the firmware.",
 
   xmos: "The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's.",

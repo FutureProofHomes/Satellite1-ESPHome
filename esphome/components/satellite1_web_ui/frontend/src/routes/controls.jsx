@@ -9,36 +9,28 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { HINTS, PRESENCE, TEXT } from "../copy.js";
 import { entity, pathFor, PHASE, post, useVoice } from "../lib/device.js";
-import { Arrow, Card, Chevron, Empty, Hint, Missing, N_CHAT, Row, Slider, Toggle } from "../ui.jsx";
+import { Arrow, Card, Empty, Hint, Missing, N_CHAT, Pill, Row, Slider, Toggle } from "../ui.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Sensor pills, with calibration on the pill itself                   */
 /* ------------------------------------------------------------------ */
+
+/* The Pill chip itself lives in ui.jsx now - the Presence route's Distance pill wears the same
+   chip, and two copies would drift. */
 
 /**
  * The offset entity publishes the correction, and the sensor publishes the already-corrected value,
  * because the offset is a filter on the sensor. So the raw reading the editor shows is a subtraction.
  * (The editor used to also show the corrected result on a "shows" row of its own; it went, per the
  * owner, because the pill right above the editor is that number, live, as the offset moves.)
+ *
+ * `raw` and `unit` arrive already in display units. `offset` stays in the entity's native unit -
+ * the ± buttons write it back, and what is stored must remain a clean multiple of the entity's
+ * step - so when the display unit differs, `dispOffset` carries the converted delta to show
+ * (a delta converts by scale alone: °F = °C × 1.8, no +32). `extra` renders after the offset row -
+ * the temperature editor hangs its unit toggle there.
  */
-function Pill({ id, open, setOpen, label, value }) {
-  const on = open === id;
-  return (
-    <button class={`pill${on ? " on" : ""}`} onClick={() => setOpen(on ? null : id)}>
-      <span class="pill-v">{value}</span>
-      <span class="pill-l">{label}</span>
-      {/* Under the label, not beside it. This was a pencil next to the words, and spelled out
-          "Temperature ✎" wants 66px against the 60px a quarter of a 360px screen gives it - so the glyph
-          wrapped to its own line on three chips of four and stayed inline on the fourth, which read as a
-          rendering fault rather than as an affordance. On its own line it cannot do that at any width.
-          Points down at the editor it opens and flips up while it is open, so the chip says which of the
-          four is responsible for the box underneath. */}
-      <Chevron down={!on} up={on} cls="pill-c" />
-    </button>
-  );
-}
-
-function Editor({ title, hint, raw, unit, digits, step, offset, offsetPath, onClose }) {
+function Editor({ title, hint, raw, unit, digits, step, offset, offsetPath, onClose, dispOffset, extra }) {
   const box = useRef(null);
 
   const bump = (delta) => {
@@ -90,12 +82,13 @@ function Editor({ title, hint, raw, unit, digits, step, offset, offsetPath, onCl
         </button>
         <span class="num w44">
           {offset > 0 ? "+" : ""}
-          {offset.toFixed(digits)}
+          {(dispOffset ?? offset).toFixed(digits)}
         </span>
         <button class="btn sq" onClick={() => bump(step)}>
           +
         </button>
       </div>
+      {extra}
     </div>
   );
 }
@@ -132,6 +125,15 @@ function SensorPills({ ctx }) {
     return { ...s, value: Number(sensor.value), offset, offsetPath: pathFor(ctx, s.offsetKey, "set") };
   }).filter(Boolean);
 
+  // The temperature unit preference: an internal ESPHome switch rather than browser storage, so a
+  // wall tablet and a phone agree. Display-only - the sensor publishes °C and the offset stores °C
+  // whatever this says, so flipping it back and forth can never drift the stored calibration.
+  // Absent on older firmware, in which case no toggle renders and everything stays °C.
+  const unitF = entity(ctx, "temp_unit_f");
+  const isF = !!unitF && (unitF.value === true || unitF.state === "ON");
+  const c2f = (c) => (c * 9) / 5 + 32;
+  const show = (r) => (r.id === "temp" && isF ? `${c2f(r.value).toFixed(r.digits)}\u00B0F` : `${r.value.toFixed(r.digits)}${r.unit}`);
+
   // Referenced by id rather than through the entity map, and deliberately so. satellite1_radar
   // registers this at runtime from a C++ string literal that both the LD2450 and LD2410 handlers
   // share, so the name is owned by code rather than by anyone's YAML - which is the thing the map
@@ -139,6 +141,10 @@ function SensorPills({ ctx }) {
   const presence = ctx.states["text_sensor/Radar Target"];
   const module = entity(ctx, "radar_module");
   const openRow = rows.find((r) => r.id === open);
+  // The open editor's display conversions. The raw reading is absolute (×9/5 +32); the offset is a
+  // delta and converts by scale alone (×1.8) - converting a delta with the absolute formula is the
+  // classic bug here. The ± buttons keep stepping the stored °C entity by its own 0.1 step.
+  const tempF = isF && openRow?.id === "temp";
 
   return (
     <div>
@@ -150,7 +156,7 @@ function SensorPills({ ctx }) {
             open={r.offset === null ? null : open}
             setOpen={r.offset === null ? () => {} : setOpen}
             label={r.label}
-            value={`${r.value.toFixed(r.digits)}${r.unit}`}
+            value={show(r)}
           />
         ))}
         {presence && (
@@ -178,13 +184,24 @@ function SensorPills({ ctx }) {
         <Editor
           title={openRow.title}
           hint={openRow.hint}
-          raw={openRow.value - openRow.offset}
-          unit={openRow.unit}
+          raw={tempF ? c2f(openRow.value - openRow.offset) : openRow.value - openRow.offset}
+          unit={tempF ? "\u00B0F" : openRow.unit}
           digits={openRow.digits}
           step={openRow.step}
           offset={openRow.offset}
+          dispOffset={tempF ? openRow.offset * 1.8 : undefined}
           offsetPath={openRow.offsetPath}
           onClose={() => setOpen(null)}
+          extra={
+            openRow.id === "temp" && unitF ? (
+              <div class="row sm">
+                <span class="dim">Fahrenheit</span>
+                <Hint text={HINTS.temp_unit} />
+                <span class="grow" />
+                <Toggle checked={isF} onChange={(v) => post(pathFor(ctx, "temp_unit_f", v ? "turn_on" : "turn_off"))} />
+              </div>
+            ) : null
+          }
         />
       )}
 

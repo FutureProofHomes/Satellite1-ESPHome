@@ -451,6 +451,9 @@ satellite1_web_ui:
       remote_wake_chime: remote_wake_chime
       remote_timer_ring: remote_timer_ring
       duck_area: duck_area_players
+      # The app's temperature display unit, internal (hidden from Home Assistant - it is a web-UI
+      # display choice, and the sensor and offset stay °C regardless).
+      temp_unit_f: temp_display_fahrenheit
 
     selects:
       speaker_channel: tas_mode_select

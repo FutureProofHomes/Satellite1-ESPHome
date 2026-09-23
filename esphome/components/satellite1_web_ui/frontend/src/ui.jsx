@@ -286,6 +286,29 @@ export function Card({ title, icon, hint, right, children, collapsible, name, de
   );
 }
 
+/**
+ * The collapsible chip: value over label, chevron under both. Lifted from routes/controls.jsx when
+ * the Presence route's Distance pill grew the same expand/collapse behaviour - two copies of the
+ * same chevron chip would drift.
+ *
+ * The chevron sits under the label, not beside it. It was a pencil next to the words, and spelled
+ * out "Temperature ✎" wants 66px against the 60px a quarter of a 360px screen gives it - so the
+ * glyph wrapped to its own line on three chips of four and stayed inline on the fourth, which read
+ * as a rendering fault rather than as an affordance. On its own line it cannot do that at any
+ * width. Points down at the editor it opens and flips up while it is open, so the chip says which
+ * of its row is responsible for the box underneath.
+ */
+export function Pill({ id, open, setOpen, label, value }) {
+  const on = open === id;
+  return (
+    <button class={`pill${on ? " on" : ""}`} onClick={() => setOpen(on ? null : id)}>
+      <span class="pill-v">{value}</span>
+      <span class="pill-l">{label}</span>
+      <Chevron down={!on} up={on} cls="pill-c" />
+    </button>
+  );
+}
+
 export function Row({ label, hint, children, sub }) {
   return (
     <div class="ctl">

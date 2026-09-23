@@ -35,6 +35,10 @@ const uptime = (s) => {
 function Device({ ctx }) {
   const d = ctx.device;
   const espTemp = entity(ctx, "esp_temp");
+  // Follows the home page's temperature unit toggle, so the app never shows mixed units. The tone
+  // thresholds stay computed on the °C value the entity publishes.
+  const unitF = entity(ctx, "temp_unit_f");
+  const isF = !!unitF && (unitF.value === true || unitF.state === "ON");
   if (!d) return <Card title="Device" icon={N_DIAG}>{ctx.deviceError ? <p class="t-err sm">{ctx.deviceError}</p> : <p class="dim sm">Reading&hellip;</p>}</Card>;
 
   // Internal RAM is what runs out first, so it gets the warning colours; PSRAM is plentiful enough
@@ -54,8 +58,8 @@ function Device({ ctx }) {
         {espTemp?.value != null && (
           <Fact
             label="ESP32 Temp"
-            value={Number(espTemp.value).toFixed(1)}
-            unit=" °C"
+            value={(isF ? (Number(espTemp.value) * 9) / 5 + 32 : Number(espTemp.value)).toFixed(1)}
+            unit={isF ? " °F" : " °C"}
             hint={HINTS.esp_temp}
             tone={Number(espTemp.value) > 80 ? "err" : Number(espTemp.value) > 70 ? "warn" : null}
           />

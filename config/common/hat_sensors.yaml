@@ -118,3 +118,18 @@ number:
     entity_category: config
     on_value:
       - lambda: 'id(aht20_temp_hum_sensor).update();'
+
+switch:
+  # The web app's temperature unit preference, and nothing more: no logic hangs off it. The sensor
+  # keeps publishing °C (so Home Assistant history and its own unit conversion are untouched) and
+  # the offset above keeps storing °C; the app converts for display only. internal because it is a
+  # display preference of the web UI, not a fact about the device - web_server's include_internal
+  # still carries it to the app over /events and the REST endpoints.
+  - platform: template
+    id: temp_display_fahrenheit
+    name: "Temperature in Fahrenheit"
+    icon: "mdi:temperature-fahrenheit"
+    internal: true
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
