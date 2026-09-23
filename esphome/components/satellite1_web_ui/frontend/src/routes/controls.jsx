@@ -8,8 +8,8 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
 import { HINTS, PRESENCE, TEXT } from "../copy.js";
-import { entity, pathFor, PHASE, post, useVoice } from "../lib/device.js";
-import { Arrow, Card, Empty, Hint, Missing, N_CHAT, Pill, Row, Slider, Toggle } from "../ui.jsx";
+import { entity, haBlocked, haSyncOnce, haTooOld, pathFor, PHASE, post, useVoice } from "../lib/device.js";
+import { Arrow, Card, Empty, Hint, Missing, N_CHAT, Pill, Row, Select, Slider, Toggle } from "../ui.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Sensor pills, with calibration on the pill itself                   */
@@ -395,6 +395,36 @@ function VoiceStatus({ ctx, voice }) {
   const mute = entity(ctx, "mute_mics");
   const vol = entity(ctx, "voice_override");
 
+  // "Finished speaking detection" is Home Assistant's select, not the device's: HA's ESPHome
+  // integration creates it per satellite and its value tunes HA's own pipeline VAD (how much
+  // trailing silence ends your turn). It rides the HA payload as `fsd` = [entity_id, state], found
+  // by its internal option value `aggressive` the way the assistant selects are found by
+  // `preferred`. This page promises everything visible works without Home Assistant, so the row is
+  // hidden entirely - not disabled - when HA is absent, blocked or too old.
+  const fsdRaw = ctx.ha?.d?.fsd;
+  const fsd = !haBlocked(ctx.ha) && !haTooOld(ctx.ha) && Array.isArray(fsdRaw) && fsdRaw.length === 2 ? fsdRaw : null;
+  // Optimistic hold while the write and the payload re-read are in flight - two round trips, same
+  // reasoning as useAssist.send. Dropped when the resync lands: agreement changes nothing on
+  // screen, refusal snaps back, which is the truth.
+  const [fsdLocal, setFsdLocal] = useState(null);
+  const setFsd = async (o) => {
+    setFsdLocal(o);
+    try {
+      // The endpoint queues the write and returns; the device relays it as select.select_option
+      // from its main loop.
+      await post(`/api/sat1/ha/select?e=${encodeURIComponent(fsd[0])}&o=${encodeURIComponent(o)}`);
+      await ctx.haRefresh();
+    } finally {
+      setFsdLocal(null);
+    }
+  };
+  // The home route did not previously trigger the once-per-load HA sync (config and wakewords do);
+  // without it this card would only learn about the select after visiting another route.
+  useEffect(() => {
+    if (ctx.haRefresh) haSyncOnce(ctx.haRefresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // One transcript tab per wake word (owner request, September 2026): each line arrives tagged
   // with the word that initiated its exchange (`w`, new firmware; untagged lines show under every
   // tab so old firmware loses nothing). The last-uttered word is the active tab - and *stays*
@@ -478,6 +508,20 @@ function VoiceStatus({ ctx, voice }) {
             step={Number(vol.step ?? 1)}
             format={(v) => (v === 0 ? "follow media" : `${v}%`)}
             onCommit={(v) => post(`${pathFor(ctx, "voice_override", "set")}?value=${v}`)}
+          />
+        </Row>
+      )}
+
+      {fsd && (
+        <Row label="Finished speaking detection" hint={HINTS.finished_speaking}>
+          <Select
+            value={fsdLocal ?? fsd[1]}
+            options={[
+              ["aggressive", "Aggressive"],
+              ["default", "Default"],
+              ["relaxed", "Relaxed"],
+            ]}
+            onChange={setFsd}
           />
         </Row>
       )}

@@ -166,6 +166,12 @@ export const HINTS = {
   voice_override:
     "How loud this device speaks when the assistant replies, separate from media volume. Zero follows the media volume instead. Speakers you route answers to have their own level - Remote TTS volume, on the Audio page.",
 
+  /* The Assistant card's VAD-sensitivity select, under the slider above. Two things need saying:
+     what the three options trade against each other, and that the setting is Home Assistant's -
+     which is also why the row vanishes when Home Assistant is away. */
+  finished_speaking:
+    "How long the assistant waits after you stop talking before it answers. Aggressive answers fastest; Relaxed tolerates longer mid-sentence pauses. This is a Home Assistant setting - the same control as on its device page - so it only appears while Home Assistant is connected.",
+
   speaker_channel:
     "Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want.",
 

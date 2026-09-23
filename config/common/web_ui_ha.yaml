@@ -212,6 +212,13 @@ substitutions:
   # `satellite1_master_bedroom_wake_word_2`, because the second slot's entities were created after the
   # device was renamed - so anything keyed on a common prefix would already be broken.
   #
+  # `fsd` is the fifth select of the same family: Home Assistant's "Finished speaking detection",
+  # which tunes how much trailing silence its pipeline VAD wants before deciding the speaker is done.
+  # Found the same way, by the internal option value `aggressive` - unique among this device's
+  # selects today - and sent as [entity_id, state] only when exactly one select matches, else an
+  # empty list and the app hides the control (the same guessing-is-worse-than-not-offering rule as
+  # `asst`). The option list is not sent: the three values are HA constants the app labels itself.
+  #
   # `o` is the customer's own pipelines, which Home Assistant rebuilds from its pipeline store whenever
   # one is added or renamed, so nothing here is fixed at build time. `preferred` is dropped from the
   # list because the frontend has to give it a label of its own anyway.
@@ -386,11 +393,12 @@ substitutions:
         {% endif %}
       {% endif %}
     {% endif %}
-    {% set sl = namespace(p=[], w=[]) %}
+    {% set sl = namespace(p=[], w=[], f=[]) %}
     {% for e in mine | select('match', 'select\.') %}
       {% set o = state_attr(e, 'options') or [] %}
       {% if 'preferred' in o %}{% set sl.p = sl.p + [e] %}{% endif %}
       {% if 'no_wake_word' in o %}{% set sl.w = sl.w + [e] %}{% endif %}
+      {% if 'aggressive' in o %}{% set sl.f = sl.f + [e] %}{% endif %}
     {% endfor %}
     {% set p1 = sl.p | reject('search', '_2$') | list %}
     {% set p2 = sl.p | select('search', '_2$') | list %}
@@ -402,8 +410,10 @@ substitutions:
                          [w2 | first, states(w2 | first), p2 | first, states(p2 | first)]]}
                   if p1 | count == 1 and p2 | count == 1 and w1 | count == 1 and w2 | count == 1
                   else {} %}
+    {% set fsd = [sl.f | first, states(sl.f | first)] if sl.f | count == 1 else [] %}
     {% set lim = 24000 - (out.dev | to_json | length) - (out.loose | to_json | length)
-                       - (asst | to_json | length) - (out.cand | to_json | length) %}
+                       - (asst | to_json | length) - (fsd | to_json | length)
+                       - (out.cand | to_json | length) %}
     {% set keep = namespace(a=[], n=0) %}
     {% for ar in out.areas %}
       {% set sz = (ar | to_json | length) + 1 %}
@@ -416,6 +426,7 @@ substitutions:
                             ~ ',"aid":' ~ ((ns.area if ns.area else '') | to_json)
                             ~ ',"t":' ~ (1 if keep.a | count < out.areas | count else 0)
                             ~ ',"asst":' ~ (asst | to_json)
+                            ~ ',"fsd":' ~ (fsd | to_json)
                             ~ ',"dev":[']) %}
     {% for d in out.dev %}
       {% set P.l = P.l + [(d | to_json) ~ ('' if loop.last else ',')] %}

@@ -34,6 +34,7 @@ labelled User and Assist rather than heard and said).
 | --- | --- | --- |
 | `mute` | Assistant card, Mute microphones | Cuts the microphones in hardware, not software - wake word detection stops with them. The mute button on the device does the same thing. |
 | `voice_override` | Assistant card, Voice Volume Override | How loud this device speaks when the assistant replies, separate from media volume. Zero follows the media volume instead. Speakers you route answers to have their own level - Remote TTS volume, on the Audio page. |
+| `finished_speaking` | Assistant card, Finished speaking detection | How long the assistant waits after you stop talking before it answers. Aggressive answers fastest; Relaxed tolerates longer mid-sentence pauses. This is a Home Assistant setting - the same control as on its device page - so it only appears while Home Assistant is connected. |
 | `temp` | Calibration editor, title row | Reads high by design - the sensor sits inside a warm enclosure, next to the board. Calibrate against a thermometer in the same room. |
 | `temp_unit` | Temperature editor, Fahrenheit row | Shows temperatures in Fahrenheit throughout this app. The device stores and reports Celsius either way, so Home Assistant and the saved calibration are unaffected. |
 | `humidity` | Calibration editor, title row | Measured at the board, so it drifts with the enclosure temperature. Calibrate against a hygrometer in the same room. |
