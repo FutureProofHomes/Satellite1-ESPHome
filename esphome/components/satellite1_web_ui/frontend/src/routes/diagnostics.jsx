@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { CONFIRM, HINTS, TEXT } from "../copy.js";
 import { logoutAll, mdnsLooksBroken, qrSignInLink, signInLink } from "../lib/auth.js";
-import { entity, pathFor, post, request, requestJson } from "../lib/device.js";
+import { entity, entityPath, pathFor, post, request, requestJson } from "../lib/device.js";
 import { qrSvgPath } from "../lib/qr.js";
 import { takeIntent } from "../lib/toast.js";
 import { Btn, Card, Chevron, Confirm, Fact, Missing, N_DIAG, Row, Toggle } from "../ui.jsx";
@@ -611,6 +611,46 @@ function Log({ ctx, intent }) {
 /* Maintenance                                                        */
 /* ------------------------------------------------------------------ */
 
+/**
+ * The radar module's own recovery card, between the XMOS and ESP32 ones - same "part + what the
+ * card does to it" naming, titled for whichever module is actually fitted.
+ *
+ * Gated on the radar_module text sensor, which satellite1_radar only sets once detection succeeds -
+ * the same moment its handlers register the "Radar Restart" / "Radar Factory Reset" buttons, so the
+ * gate and the endpoints agree by construction. Those buttons are runtime entities created from C++
+ * literals shared by both handlers (no YAML id, so nothing for the entity map to point at); they
+ * are addressed by their literal names through entityPath, exactly as the Firmware card reads
+ * "text_sensor/Radar Firmware". Absent on the stock-component ld2410/ld2450 variant builds, where
+ * radar_detected_text is removed - the card simply never renders there.
+ */
+function RadarRecovery({ ctx }) {
+  const mod = entity(ctx, "radar_module")?.value;
+  if (mod !== "LD2410" && mod !== "LD2450") return null;
+  return (
+    <Card title={`${mod} Recovery`} collapsible name="radar-rec" hint={HINTS.radar_recovery}>
+      <Row label="Restart radar">
+        <Confirm
+          label="Restart"
+          title={CONFIRM.radar_restart.t}
+          body={CONFIRM.radar_restart.b}
+          confirmLabel="Restart radar"
+          onConfirm={() => post(entityPath("button/Radar Restart", "press"))}
+        />
+      </Row>
+      <Row label="Factory reset radar">
+        <Confirm
+          label="Factory reset"
+          title={CONFIRM.radar_factory.t}
+          body={CONFIRM.radar_factory.b}
+          confirmLabel="Reset the radar"
+          danger
+          onConfirm={() => post(entityPath("button/Radar Factory Reset", "press"))}
+        />
+      </Row>
+    </Card>
+  );
+}
+
 function Maintenance({ ctx }) {
   const restart = pathFor(ctx, "restart", "press");
   const safe = pathFor(ctx, "safe_mode", "press");
@@ -661,6 +701,8 @@ function Maintenance({ ctx }) {
               a step anyone needed. The ESPHome button still exists for a bench recovery over the API. */}
         </Card>
       )}
+
+      <RadarRecovery ctx={ctx} />
 
       {/* "ESP32 Recovery", the owner's pick, and the one that finally pairs with XMOS Recovery above:
           the two cards do the same job for the two chips. (Previously "Sat1 Device", which described

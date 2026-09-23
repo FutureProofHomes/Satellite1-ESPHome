@@ -211,6 +211,12 @@ export const HINTS = {
   // which takes the microphones, the speaker and the wake word with it, and the only way back is the
   // Reflash row - which needs the chip it just erased to be talking. Reflash overwrites anyway.
 
+  /* The LD2410/LD2450 Recovery card's title. The distinction that needs drawing is against the ESP32
+     card two rows down: this factory reset erases settings stored on the radar module itself - the
+     tuning the Presence page edits - not the device's. */
+  radar_recovery:
+    "The radar module's own recovery actions. Restart just power-cycles the module. Factory reset erases the settings stored on the module itself - detection range, gate thresholds, zones, everything tuned on the Presence page - and does not touch this device's settings.",
+
   // On the ESP32 Recovery card's title. The card was "Sat1 Device", which described the page rather
   // than the card; the ⓘ says what actually unites the rows, and calms the two scary ones.
   maintenance:
@@ -843,6 +849,14 @@ export const CONFIRM = {
   restart: {
     t: "Restart this device?",
     b: "It reboots right away and is back in under a minute. All of your settings survive a restart.",
+  },
+  radar_restart: {
+    t: "Restart the radar module?",
+    b: "Presence detection drops out for a few seconds while the module comes back. Nothing is erased and no settings change.",
+  },
+  radar_factory: {
+    t: "Reset the radar to factory defaults?",
+    b: "Erases the settings stored on the radar module itself - detection range, gate thresholds and zones, everything tuned on the Presence page - and restarts it. This device's own settings are not touched, but the radar tuning cannot be brought back.",
   },
   safe_mode: {
     t: "Restart into safe mode?",
