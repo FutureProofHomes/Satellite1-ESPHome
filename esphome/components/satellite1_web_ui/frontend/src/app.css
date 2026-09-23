@@ -963,9 +963,17 @@ textarea {
 /* The page, frozen while any drawer stands (ui.jsx's useDrawer counts them in and out). On both
    roots because iOS needs the document itself pinned, and overscroll-behavior besides, or the
    rubber-band fires where overflow: hidden alone would have held. */
-html.held,
-html.held body {
+html.held {
   overflow: hidden;
+  overscroll-behavior: none;
+}
+/* clip, not hidden: overflow: clip forbids all scrolling but - unlike hidden - does NOT turn body
+   into a scroll container. With hidden, body became .stickhead's nearest scrollport (scrollTop 0),
+   so on a scrolled page the sticky header computed against the document top and vanished the
+   moment a drawer opened. html keeps hidden above - that is what actually freezes page scroll and
+   preserves the offset. */
+html.held body {
+  overflow: clip;
   overscroll-behavior: none;
 }
 
