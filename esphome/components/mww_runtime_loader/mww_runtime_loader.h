@@ -30,6 +30,18 @@ namespace mww_runtime_loader {
 /// assistant of their own, and the web app's whole layout is a Primary and a Secondary picker.
 static constexpr uint8_t WL_SLOTS = 2;
 
+/// The stop word's pseudo-slot: one past the real slots, accepted by queue_tune and queue_cutoff
+/// only. It resolves to the internal `stop` model directly rather than through a slot - the stop
+/// word is not swappable, not in the picker, and never advertised to Home Assistant - but its
+/// sensitivity is as tunable as any word's (owner request, September 2026), and the tuner's whole
+/// session machinery works unchanged once the target model is found.
+static constexpr uint8_t WL_STOP = WL_SLOTS;
+
+/// The internal stop model's id, pinned by voice_assistant.yaml (`id: stop`, `internal: true`).
+/// Found by id because micro_wake_word's get_wake_words() deliberately excludes internal models;
+/// get_model_by_id() does not. A build without the model simply answers "no stop word" everywhere.
+static constexpr const char *WL_STOP_ID = "stop";
+
 /// Longest slot spec (a manifest URL, or a built-in model id). Sized to fit the preference struct
 /// comfortably; GitHub raw URLs to deeply nested models run ~120 characters, so 224 is headroom,
 /// not a squeeze.
@@ -55,16 +67,16 @@ enum SlotState : uint8_t {
 /// these numbers are the contract. Renumbering them breaks every shipped web app, so append only.
 enum SlotError : uint8_t {
   ERR_NONE = 0,
-  ERR_FETCH = 1,        // manifest URL unreachable or non-200
-  ERR_NOT_MANIFEST = 2, // body is not a microWakeWord manifest (bad JSON, wrong type, no micro block)
-  ERR_VERSION = 3,      // manifest version != 2
-  ERR_STEP = 4,         // feature_step_size does not match the compiled frontend
-  ERR_TOO_NEW = 5,      // minimum_esphome_version is newer than this firmware
-  ERR_TOO_BIG = 6,      // model or tensor arena over the caps above
-  ERR_DOWNLOAD = 7,     // model fetch failed or arrived truncated
-  ERR_INVALID = 8,      // bytes are not a usable TFLite model
-  ERR_REFUSED = 9,      // micro_wake_word refused the model (duplicate id, task not pausable)
-  ERR_NO_MEMORY = 10,   // could not allocate the model buffer
+  ERR_FETCH = 1,         // manifest URL unreachable or non-200
+  ERR_NOT_MANIFEST = 2,  // body is not a microWakeWord manifest (bad JSON, wrong type, no micro block)
+  ERR_VERSION = 3,       // manifest version != 2
+  ERR_STEP = 4,          // feature_step_size does not match the compiled frontend
+  ERR_TOO_NEW = 5,       // minimum_esphome_version is newer than this firmware
+  ERR_TOO_BIG = 6,       // model or tensor arena over the caps above
+  ERR_DOWNLOAD = 7,      // model fetch failed or arrived truncated
+  ERR_INVALID = 8,       // bytes are not a usable TFLite model
+  ERR_REFUSED = 9,       // micro_wake_word refused the model (duplicate id, task not pausable)
+  ERR_NO_MEMORY = 10,    // could not allocate the model buffer
 };
 
 /// What the wake words endpoint serves per slot, copied out under the view lock so the httpd task
@@ -85,13 +97,27 @@ static constexpr uint8_t WL_TUNE_FLOOR = 107;
 static constexpr uint32_t WL_TUNE_TTL_MS = 120 * 1000;
 
 struct SlotView {
-  std::string spec;   // "" empty, built-in id, or manifest URL
-  std::string word;   // resolved phrase, "" until known
-  std::string id;     // loaded model id, "" until loaded
+  std::string spec;  // "" empty, built-in id, or manifest URL
+  std::string word;  // resolved phrase, "" until known
+  std::string id;    // loaded model id, "" until loaded
   uint8_t state{SLOT_READY};
   uint8_t error{ERR_NONE};
-  uint8_t cutoff{0};  // persisted sensitivity: 0 = model default, >= WL_TUNED_MIN = tuned threshold
+  uint8_t cutoff{0};    // persisted sensitivity: 0 = model default, >= WL_TUNED_MIN = tuned threshold
+  uint8_t tn_noise{0};  // last tune's room-noise ceiling (0 = never measured), quantized 0-255
+  uint8_t tn_floor{0};  // last tune's quietest attempt (0 = never measured), quantized 0-255
+  uint8_t tn_hi{0};     // last tune's loudest attempt, same lifecycle
   bool runtime{false};
+};
+
+/// The stop word's endpoint-facing state: its tuned sensitivity and last-tune stats. Enabled/off is
+/// deliberately absent - that is the existing `stop_word` switch entity's job, which the app already
+/// reads over /events.
+struct StopView {
+  bool present{false};  // the internal model exists in this build
+  uint8_t cutoff{0};
+  uint8_t tn_noise{0};
+  uint8_t tn_floor{0};
+  uint8_t tn_hi{0};
 };
 
 /// A transient download body, placed in PSRAM: a manifest can legally run to WL_MANIFEST_MAX (8KB),
@@ -102,23 +128,80 @@ using PsramString = std::basic_string<char, std::char_traits<char>, RAMAllocator
 
 /// One scored event during a tune session: a detection's peak and sliding-average probability, or
 /// a VAD rejection (the wake model fired but the voice-activity model did not take it for speech).
+/// `mm` is the utterance's max windowed mean, raised by register samples for ~1.5s after the event
+/// lands - the exact quantity determine_detected() compares against the cutoff, and therefore the
+/// number the tuner's recommendation math should reason about. Starts at the event's own avg.
 struct TuneEvent {
   uint8_t peak;
   uint8_t avg;
+  uint8_t mm;
   bool vad_blocked;
   uint32_t at_ms;
 };
 
-/// What the wake words endpoint serves while a session is live.
+/// What the wake words endpoint serves while a session is live. `room` is the register's own
+/// reading of the room: the max windowed mean of everything that did NOT become an event -
+/// sub-floor sounds included, which the event ring structurally cannot see (hardware finding,
+/// September 22 2026: blaring music read as "quiet" because it never crossed the probe floor,
+/// while the register had been measuring it all along).
 struct TuneView {
   int8_t slot{-1};  // -1 when no session is active
   uint32_t seq{0};  // total events ever recorded, so the app can spot new ones across polls
+  uint8_t room{0};
   std::vector<TuneEvent> events;
 };
 
 /// How many scored events a session keeps. A tune is a quiet phase plus a handful of utterances;
 /// two dozen covers a noisy room's spurious hits without growing into a recording.
 static constexpr size_t WL_TUNE_RING = 24;
+
+/// One close call: something scored near a word's cutoff and was ignored (owner request, September
+/// 2026 - the visible evidence behind both "it almost false-woke" and "it ignored me"). Two
+/// sources share the ring: register samples inside the close-call band below the cutoff (scored),
+/// and VAD-refused detections from the log listener (vad=1, score 0 - their log line carries no
+/// number, and they exist on debug builds only).
+struct NearRec {
+  std::string word;
+  uint8_t score;  // quantized max window mean, 0 for VAD-refused entries
+  bool vad;
+  uint32_t at_ms;
+};
+
+/// How far below a track's active cutoff a sample still counts as a close call: ~5% of the scale.
+/// Wider would fill the ring with the room's ordinary chatter; narrower would miss the near-fires
+/// the record exists to show.
+static constexpr uint8_t WL_NEAR_BAND = 12;
+
+/// Eight, like the detection ring and for the same reason: recent evidence, not a history. RAM
+/// only, cleared on restart.
+static constexpr size_t WL_NEAR_RING = 8;
+
+/// One remembered graph event: a real firing (kind 0) or a scored close call (kind 1), with the
+/// confidence the register measured. Track-scoped rather than word-scoped so it survives reboots
+/// and word swaps without carrying strings through NVS. `id` is a monotonically issued tag whose
+/// only job is stability: the UI keys each dot's vertical jitter on it, so a new dot landing can
+/// never move the old ones (owner's report, September 22 2026 - index-keyed jitter reshuffled the
+/// whole graph on every firing). `at_ms` is signed against millis_64, so an entry restored from
+/// flash can honestly sit "before boot".
+struct TeleRec {
+  uint8_t track;
+  uint8_t kind;  // 0 = firing, 1 = close call
+  uint8_t score;
+  uint16_t id;
+  int64_t at_ms;
+};
+
+/// What tele_snapshot serves per entry: the age already computed, ready for the payload.
+struct TeleOut {
+  uint32_t ms_ago;
+  uint8_t score;
+  uint8_t kind;
+  uint16_t id;
+};
+
+/// The merged ring's cap, all tracks together. Two words plus Stop share it; 32 covers a lively
+/// day of firings and close calls inside the 24h window the UI draws.
+static constexpr size_t WL_TELE_RING = 32;
 
 /// One compiled-in model, mirrored at setup so the endpoint can list the picker's "Included" group
 /// without touching micro_wake_word from the httpd task.
@@ -151,6 +234,9 @@ class MwwRuntimeLoader : public Component {
   void setup() override;
   void loop() override;
   void dump_config() override;
+  /// One last telemetry save, so a clean reboot (OTA, restart button) loses at most the minutes
+  /// since the previous save rather than the day.
+  void on_shutdown() override { this->save_tele_(); }
   // After micro_wake_word (AFTER_CONNECTION = -100? no: LATE). Default priority is fine: models are
   // constructed in generated code before any setup() runs, so setup order does not matter here.
 
@@ -165,14 +251,47 @@ class MwwRuntimeLoader : public Component {
   bool queue_slot(uint8_t i, const std::string &spec);
 
   /// Asks for slot `i`'s sensitivity: 0 for the model's own tuning, or a measured threshold from
-  /// the tuner (WL_TUNED_MIN..254). Anything else is refused.
-  bool queue_cutoff(uint8_t i, uint8_t value);
+  /// the tuner (WL_TUNED_MIN..254). `i` may be WL_STOP for the stop word's pseudo-slot. `noise`
+  /// and `floor` are the tune session's measured stats (room ceiling, quietest attempt), persisted
+  /// alongside the cutoff so the margin bar survives reloads; both 0 when unknown, and cleared
+  /// whenever the cutoff resets to 0. Anything else is refused.
+  bool queue_cutoff(uint8_t i, uint8_t value, uint8_t noise = 0, uint8_t floor = 0, uint8_t hi = 0);
 
-  /// Opens or keeps alive (`on`) / closes (`!on`) a tune session on slot `i`. While a session is
-  /// live the slot's model runs at WL_TUNE_FLOOR and every detection's scores land in the tune
-  /// ring; closing - or the keepalive expiring - restores the configured cutoff. One session at a
-  /// time; opening on another slot moves it.
+  /// Opens or keeps alive (`on`) / closes (`!on`) a tune session on slot `i` (WL_STOP for the stop
+  /// word). While a session is live the target model runs at WL_TUNE_FLOOR and every detection's
+  /// scores land in the tune ring; closing - or the keepalive expiring - restores the configured
+  /// cutoff. One session at a time; opening on another slot moves it.
   bool queue_tune(uint8_t i, bool on);
+
+  /// Asks for track `i`'s remembered 24h telemetry - the graph's dots and its hourly smatter - to
+  /// be erased (the tuner's Clear history button). Applied from loop(), where the persisted blob
+  /// is rewritten; the erase itself is idempotent, so coalescing to the newest request is fine.
+  bool queue_clear_history(uint8_t i) {
+    if (i > WL_STOP)
+      return false;
+    this->tele_clear_req_.store(static_cast<int8_t>(i), std::memory_order_relaxed);
+    return true;
+  }
+
+  /// A wake word fired for real (any word, the stop word included). Called from the YAML
+  /// on_wake_word_detected lambda on the main loop - the same place the web UI's detection ring is
+  /// fed - so the telemetry can exclude the firing's own scores from "room pressure" without
+  /// depending on log lines or build level.
+  void notify_detection(const std::string &word);
+
+  /// The score the last real firing drained out of the register (its max window mean - the exact
+  /// quantity determine_detected() compared against the cutoff), then 0 until the next firing.
+  /// An exchange, so one firing is read once. Called by the web UI's push_wake_detection later in
+  /// the same on_wake_word_detected automation, which is what puts a confidence on every dot the
+  /// Living Graph draws (v2 owner decision, September 2026) - on every build, not just debug: the
+  /// register is the one channel that carries scores without the log listener.
+  ///
+  /// This drain is also what commits the firing to the persisted 24h ring - deliberately here and
+  /// not in notify_detection, because push_wake_detection sits INSIDE the sign-in gate: a firing
+  /// consumed as an offline sign-in symbol is an answer to a secret, and it must not land on the
+  /// Living Graph any more than in the detection history (the dots carry the same track, time and
+  /// confidence the gate exists to hide). Main loop only, like its caller.
+  uint8_t take_detection_score();
 
   /// Whether this build can score attempts at all: the log-listener hook is compiled in and the
   /// detection lines exist (DEBUG compiled into the logger). False means the tuner UI should say
@@ -190,6 +309,27 @@ class MwwRuntimeLoader : public Component {
 
   /// Copies the current slot views. `dl`/`total` report the in-flight download, slot in `dl_slot`.
   void snapshot(SlotView out[WL_SLOTS], uint32_t &dl, uint32_t &total, int &dl_slot);
+
+  /// Each track's live room pressure: the max high-water sample over the trailing 24 hours, for
+  /// slots 0..WL_SLOTS-1 and the stop word at [WL_STOP]. Safe from the httpd task (plain byte
+  /// reads of values the main loop maintains; a torn read is impossible on a byte).
+  void hw_snapshot(uint8_t out[WL_SLOTS + 1]);
+
+  /// The same buckets raw, newest hour first (index 0 = the hour in progress, 23 = a day ago), for
+  /// the tuner's "wake history" smatter - the v2 tuner draws the room as its actual hourly data
+  /// rather than an aggregate (owner decision, September 2026). Safe from the httpd task for the
+  /// reason hw_snapshot is.
+  void hw_day_snapshot(uint8_t out[WL_SLOTS + 1][24]);
+
+  /// One track's remembered graph events (firings and scored close calls), oldest first, ages
+  /// precomputed; entries past the 24h window are omitted. Safe from the httpd task (tele_lock_).
+  void tele_snapshot(uint8_t track, std::vector<TeleOut> &out);
+
+  /// The stop word's endpoint-facing state. Safe from the httpd task (view lock).
+  void stop_snapshot(StopView &out);
+
+  /// Copies the close-call ring, newest last. Safe from the httpd task (its own lock).
+  void near_snapshot(std::vector<NearRec> &out);
 
   /// The compiled-in models, fixed after setup, so the endpoint can serve the "Included" group.
   const std::vector<BuiltinInfo> &builtins() const { return this->builtins_; }
@@ -222,8 +362,11 @@ class MwwRuntimeLoader : public Component {
     /// A URL being fetched for this slot. Non-empty only mid-swap: the old spec/model stay live
     /// until the download succeeds, which is what lets a failed swap keep the previous word.
     std::string pending;
-    std::string word;      // the loaded word's phrase, for the view and the logs
-    uint8_t cutoff{0};     // 0 = the model's own tuning, >= WL_TUNED_MIN = tuned threshold
+    std::string word;     // the loaded word's phrase, for the view and the logs
+    uint8_t cutoff{0};    // 0 = the model's own tuning, >= WL_TUNED_MIN = tuned threshold
+    uint8_t tn_noise{0};  // last tune's room ceiling, 0 = never measured; lives and dies with cutoff
+    uint8_t tn_floor{0};  // last tune's quietest attempt, same lifecycle
+    uint8_t tn_hi{0};     // last tune's loudest attempt, same lifecycle
     uint8_t state{SLOT_READY};
     uint8_t error{ERR_NONE};
     std::string model_id;  // id of the model this slot has loaded/enabled, "" when none
@@ -242,6 +385,39 @@ class MwwRuntimeLoader : public Component {
     uint8_t used;  // 1 once ever written, so a fresh device is told apart from an emptied slot
   } __attribute__((packed));
 
+  /// The 24h telemetry the Living Graphs draw, persisted so a reboot does not blank every graph
+  /// (owner request, September 22 2026). One blob: the hourly high-water buckets and the merged
+  /// firing/close-call ring, entries as ages in minutes - the device has no wall clock, so on
+  /// restore they simply resume that old, plus whatever the downtime added unseen. Saved on every
+  /// real firing, on each hourly wheel advance, and at shutdown: a handful of NVS writes a day.
+  struct TeleData {
+    uint8_t buckets[WL_SLOTS + 1][24];
+    uint8_t hour_at;
+    uint8_t n;
+    struct {
+      uint16_t min_ago;
+      uint8_t score;
+      uint8_t tk;  // track in the low nibble, kind in the high
+      uint16_t id;
+    } __attribute__((packed)) e[WL_TELE_RING];
+    uint16_t next_id;
+    uint8_t used;
+  } __attribute__((packed));
+
+  /// The tune session's measured stats, persisted so the margin bar survives reloads. A separate
+  /// preference per slot rather than new SlotPrefData fields, deliberately: ESPPreferences keys on
+  /// the struct size, so growing SlotPrefData would orphan every shipped device's slot data on
+  /// upgrade. This struct also serves the stop word (its own hash), whose cutoff rides along
+  /// because the stop word has no SlotPrefData at all.
+  struct TuneStatsData {
+    uint8_t cutoff;  // meaningful for the stop pref only; slots keep theirs in SlotPrefData
+    uint8_t noise;
+    uint8_t floor;  // the quietest attempt - the "you" band's low edge
+    uint8_t hi;     // the loudest attempt - its high edge (hardware finding, September 22 2026:
+                    // without it the bar's "you" band had to borrow the noise ceiling and lied)
+    uint8_t used;
+  } __attribute__((packed));
+
   /// The endpoint-facing view's storage: SlotView's shape with fixed char arrays instead of
   /// std::string, so the persistent copy of two slots' specs lives inside this object - which
   /// extram_bss places in PSRAM - rather than as internal-heap string bodies. snapshot()
@@ -255,6 +431,9 @@ class MwwRuntimeLoader : public Component {
     uint8_t state{SLOT_READY};
     uint8_t error{ERR_NONE};
     uint8_t cutoff{0};
+    uint8_t tn_noise{0};
+    uint8_t tn_floor{0};
+    uint8_t tn_hi{0};
     bool runtime{false};
   };
 
@@ -270,7 +449,7 @@ class MwwRuntimeLoader : public Component {
   /// almost always - there is no reason to keep a URL's bytes allocated.
   void release_job_strings_();
   void apply_request_(uint8_t i, const std::string &spec);
-  void apply_cutoff_(uint8_t i, uint8_t value);
+  void apply_cutoff_(uint8_t i, uint8_t value, uint8_t noise, uint8_t floor, uint8_t hi);
   /// Drops the native API connections a moment from now, so Home Assistant reconnects and
   /// re-reads the wake word list. Called when the advertised set changes - a downloaded word
   /// arriving or leaving - never for changes Home Assistant itself originated.
@@ -281,6 +460,17 @@ class MwwRuntimeLoader : public Component {
   void end_tune_(bool expired);
   /// Puts a slot's model back on its configured threshold: the tuned value, or the model default.
   void apply_configured_cutoff_(Slot &s);
+  /// The internal stop model, or nullptr on a build without one. Main loop only.
+  micro_wake_word::WakeWordModel *stop_model_();
+  /// Puts the stop model back on its configured threshold.
+  void apply_stop_cutoff_();
+  void save_stop_();
+  void save_tune_stats_(uint8_t i);
+  /// The register drain: samples every track's high water, feeds the hourly buckets, the close-call
+  /// ring and a live tune event's `mm`, honoring the exclusion windows. Main loop, ~every 250ms.
+  void sample_high_water_();
+  /// Records a close call, coalescing with the newest entry for the same word within 2s.
+  void push_near_(const std::string &word, uint8_t score, bool vad);
   /// The logger hook (any task). Cheap tag test first; parses the two pinned detection lines and
   /// feeds the tune ring only while a session is live.
   static void log_callback_(void *self, uint8_t level, const char *tag, const char *message, size_t len);
@@ -302,7 +492,76 @@ class MwwRuntimeLoader : public Component {
 
   Slot slots_[WL_SLOTS];
   ESPPreferenceObject prefs_[WL_SLOTS];
+  /// Tune stats per slot, plus the stop word's own state at [WL_STOP] (its cutoff rides the same
+  /// struct - see TuneStatsData).
+  ESPPreferenceObject tn_prefs_[WL_SLOTS + 1];
+  /// The stop word's runtime state, main loop only; published into stop_view_ under view_lock_.
+  uint8_t stop_cutoff_{0};
+  uint8_t stop_tn_noise_{0};
+  uint8_t stop_tn_floor_{0};
+  uint8_t stop_tn_hi_{0};
+  /// Whether the stop model was enabled before a stop tune session force-enabled it. The scripts
+  /// only enable the stop word while something plays, so a session opened in silence would find a
+  /// disabled (unloaded) model and measure nothing (hardware finding, September 22 2026); the
+  /// session enables it for its own lifetime and puts the prior state back at close.
+  bool stop_tune_enabled_it_{false};
   std::vector<BuiltinInfo> builtins_;
+
+  /* ---- register telemetry, main loop only unless noted ---- */
+  /// Hourly high-water buckets per track (slots 0..1, stop at WL_STOP): [track][hour-of-day-ish].
+  /// The published value is the max over all 24, i.e. "the loudest the room got in the last day".
+  /// Plain bytes read by hw_snapshot from the httpd task - byte reads cannot tear.
+  uint8_t hw_buckets_[WL_SLOTS + 1][24]{};
+  uint8_t hour_at_{0};        // which bucket is "now", advanced (and the new bucket cleared) hourly
+  uint64_t hour_started_{0};  // millis_64() when the current bucket opened
+  uint64_t next_sample_ms_{0};
+  /// Exclusion deadlines per track: samples drained-and-discarded until then. Set +/-2s around a
+  /// real detection (notify_detection) so a legitimate wake never reads as room pressure.
+  uint64_t hw_suppress_until_[WL_SLOTS + 1]{};
+  /// Samples on probation before they may become room pressure, one per track - the standing
+  /// twin of tune_pend_ (same bug, same fix; owner's report, September 23 2026: a word said once
+  /// before its first tune painted an 87% hourly bucket, which then failed the placement). A
+  /// firing inside the window proves the sample was the word's own onset and voids it; ~1.6
+  /// eventless seconds commit it to the bucket, the close-call band and the persisted ring.
+  uint8_t hw_pend_[WL_SLOTS + 1]{};
+  uint64_t hw_pend_at_[WL_SLOTS + 1]{};
+  /// Until when reconcile_ha_ RE-ASSERTS the slots over Home Assistant instead of adopting its
+  /// flips: set whenever our own advertised set changes. The nudge makes Home Assistant reconnect,
+  /// and on reconnect it re-asserts its PRE-change selects - racing the app's pairing write - and
+  /// adopting that stale set emptied a slot and freed the very model the write was about to name
+  /// (owner's report, September 23 2026: the downloaded word's neighbour vanished).
+  uint64_t assert_until_ms_{0};
+  /// The last real firing's drained register value and its track - see take_detection_score().
+  /// Both are cleared at the top of every notify_detection, so a firing whose drain never came
+  /// (the sign-in gate consumed it, or the score never stored) cannot be misattributed to the
+  /// next firing's dot. Atomic out of caution only: both writer (notify_detection) and reader
+  /// (push_wake_detection via the web handler) run on the main loop today, but nothing in this
+  /// class should trust that forever.
+  std::atomic<uint8_t> last_det_score_{0};
+  std::atomic<int8_t> last_det_track_{-1};
+
+  Mutex near_lock_;
+  std::vector<NearRec> near_;
+
+  /* ---- the persisted 24h telemetry ring (see TeleData) ---- */
+  /// Pushes one event, drops what has aged out of the window, and issues its stable id. `save`
+  /// writes the blob too - firings save (they are rare and the dot matters); close calls ride the
+  /// hourly save instead (they can be frequent and the hour's loss is survivable). Main loop only.
+  void push_tele_(uint8_t track, uint8_t kind, uint8_t score, bool save);
+  void save_tele_();
+  void load_tele_();
+  /// Erases track `t`'s remembered events, hourly smatter and pending sample, persisting the
+  /// erasure. Called by the Clear history button - and by every word change on a slot, because the
+  /// telemetry is track-scoped and a newcomer must not inherit its predecessor's history (owner's
+  /// report, September 23 2026: a freshly downloaded word opened its first tune wearing an 87%
+  /// amber dot it had never earned).
+  void clear_track_tele_(uint8_t t);
+  Mutex tele_lock_;
+  std::vector<TeleRec> tele_;
+  uint16_t tele_id_{1};
+  ESPPreferenceObject tele_pref_;
+  /// A queued Clear history: the track to erase, -1 none. Written from the httpd task.
+  std::atomic<int8_t> tele_clear_req_{-1};
 
   // Requests from the httpd task, coalesced per slot: the newest write wins, which is the right
   // answer for a picker someone is changing their mind in. The spec rides a fixed array (storage
@@ -311,7 +570,11 @@ class MwwRuntimeLoader : public Component {
   Mutex req_lock_;
   bool slot_req_[WL_SLOTS]{false, false};
   char slot_req_spec_[WL_SLOTS][WL_SPEC_MAX]{};
-  int16_t cutoff_req_[WL_SLOTS]{-1, -1};
+  // One extra element for the stop pseudo-slot, whose cutoff/tune ride the same coalescing queue.
+  int16_t cutoff_req_[WL_SLOTS + 1]{-1, -1, -1};
+  uint8_t cutoff_req_n_[WL_SLOTS + 1]{};
+  uint8_t cutoff_req_f_[WL_SLOTS + 1]{};
+  uint8_t cutoff_req_h_[WL_SLOTS + 1]{};
   // A queued tune open/keepalive/close: -1 none, otherwise slot * 2 + (on ? 1 : 0).
   std::atomic<int8_t> tune_req_{-1};
   std::atomic<bool> req_pending_{false};
@@ -321,6 +584,18 @@ class MwwRuntimeLoader : public Component {
   // task produced the line (the two lines it parses happen to come from the main loop, but the
   // guard must be safe for every line that merely shares the tag).
   std::atomic<int8_t> tune_slot_{-1};
+  /// The session's register-measured room ceiling (see TuneView::room). Atomic: written by the
+  /// sampling loop on the main task, read by tune_snapshot from the httpd task.
+  std::atomic<uint8_t> tune_room_{0};
+  /// A session room sample on probation before it may become tune_room_. A wake word's own onset
+  /// drains in the sample just BEFORE its detection event exists (the event only lands once the
+  /// mean crosses the probe floor), and booking that as "room" painted an amber dot in the same
+  /// beat as the attempt's blue one (owner's report, September 22 2026). So a sub-floor sample
+  /// waits ~1.6s: an event arriving inside the window proves it was the utterance and drops it;
+  /// a window that stays eventless commits it. millis() clock, like the event timestamps it is
+  /// compared against. Main loop only.
+  uint8_t tune_pend_{0};
+  uint32_t tune_pend_at_{0};
   // millis_64(): wrap-proof, like every deadline here.
   uint64_t tune_deadline_ms_{0};
   // The tuned word and the ring, shared between the log callback's writer and the endpoint's
@@ -334,6 +609,7 @@ class MwwRuntimeLoader : public Component {
   // The published view the endpoint copies from - fixed arrays, see SlotViewStore.
   Mutex view_lock_;
   SlotViewStore view_[WL_SLOTS];
+  StopView stop_view_;
 
   Job job_;
   // Set when reconcile_ha_ should hold off for a beat: right after boot (models are still

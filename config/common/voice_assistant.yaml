@@ -72,6 +72,15 @@ micro_wake_word:
     gain_factor: 6
   stop_after_detection: false
   on_wake_word_detected:
+    # Ahead of every gate on purpose: whatever this firing becomes - a conversation, a consumed
+    # sign-in symbol, a silenced alarm - the model just scored its own wake word, and those scores
+    # must not read as "room pressure" in the loader's high-water telemetry. This only opens a 2s
+    # exclusion window and parks the score; it records nothing a gate below would want hidden.
+    # The recording happens at the drain: push_wake_detection (inside the sign-in gate, below)
+    # collects the parked score via take_detection_score, and THAT is what commits the firing to
+    # the persisted Living Graph ring - so a firing consumed as a sign-in symbol never becomes a
+    # dot any signed-in browser could read the challenge off of.
+    - lambda: id(mww_loader)->notify_detection(wake_word);
     # An open offline-mode sign-in window claims every firing: the wake words are the challenge's
     # alphabet, and consume_login_wake records this one as a symbol instead of letting it start
     # the assistant. One thing outranks it - a ringing timer. "Stop" must silence the alarm even

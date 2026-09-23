@@ -6,6 +6,7 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cstring>
+#include <strings.h>  // strcasecmp, for the phrase-level duplicate guard in finalize_job_
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -95,6 +96,36 @@ void MwwRuntimeLoader::setup() {
     }
   }
 
+  // The 24h telemetry: hourly buckets and the firing/close-call ring, restored so a reboot does
+  // not blank every Living Graph (owner request, September 22 2026).
+  this->tele_pref_ = global_preferences->make_preference<TeleData>(fnv1_hash("wl_tele"));
+  this->load_tele_();
+
+  // The tune stats (and the stop word's whole persisted state, which rides the same struct at
+  // [WL_STOP]). Loaded after the slot prefs because a slot's stats only mean anything while its
+  // tuned cutoff stands - an untuned slot reads 0s whatever an older session left behind.
+  for (uint8_t i = 0; i <= WL_SLOTS; i++) {
+    const std::string key = i < WL_SLOTS ? runtime_id_(i) + "_tune" : std::string("wl_stop_tune");
+    this->tn_prefs_[i] = global_preferences->make_preference<TuneStatsData>(fnv1_hash(key));
+    TuneStatsData t{};
+    if (!this->tn_prefs_[i].load(&t) || !t.used)
+      continue;
+    if (i < WL_SLOTS) {
+      if (this->slots_[i].cutoff != 0) {
+        this->slots_[i].tn_noise = t.noise;
+        this->slots_[i].tn_floor = t.floor;
+        this->slots_[i].tn_hi = t.hi;
+      }
+    } else {
+      this->stop_cutoff_ = t.cutoff >= WL_TUNED_MIN ? t.cutoff : 0;
+      if (this->stop_cutoff_ != 0) {
+        this->stop_tn_noise_ = t.noise;
+        this->stop_tn_floor_ = t.floor;
+        this->stop_tn_hi_ = t.hi;
+      }
+    }
+  }
+
   // Two slots persisted the same spec (possible only through an old firmware's races): keep the
   // first, empty the second. Two slots holding one model breaks the enabled-iff-in-a-slot
   // invariant every unload and reconcile pass relies on.
@@ -173,6 +204,22 @@ void MwwRuntimeLoader::loop() {
         continue;
       this->apply_configured_cutoff_(s);
     }
+    // The stop word's persisted tuning, same timing and same reason. Also the first honest moment
+    // to publish whether this build carries a stop model at all.
+    if (this->stop_cutoff_ != 0)
+      this->apply_stop_cutoff_();
+    this->publish_view_();
+  }
+
+  // The register drain: telemetry, close calls, and a live tune event's max-mean, ~every 250ms.
+  this->sample_high_water_();
+
+  // A queued Clear history: erase the track's remembered events and its hourly smatter, and
+  // rewrite the persisted blob so the erasure survives the next reboot too.
+  const int8_t clr = this->tele_clear_req_.exchange(-1, std::memory_order_relaxed);
+  if (clr >= 0 && clr <= static_cast<int8_t>(WL_STOP)) {
+    this->clear_track_tele_(static_cast<uint8_t>(clr));
+    ESP_LOGI(TAG, "Cleared 24h telemetry for track %d", clr);
   }
 
   // An expired tune session restores the configured threshold - the browser is gone, and a device
@@ -192,7 +239,10 @@ void MwwRuntimeLoader::loop() {
     uint8_t slot = WL_SLOTS;
     std::string spec;
     int16_t cutoff = -1;
-    uint8_t cutoff_slot = WL_SLOTS;
+    uint8_t cutoff_slot = WL_SLOTS + 1;  // sentinel past the stop pseudo-slot
+    uint8_t cutoff_noise = 0;
+    uint8_t cutoff_floor = 0;
+    uint8_t cutoff_hi = 0;
     int8_t tune = -1;
     {
       LockGuard guard{this->req_lock_};
@@ -201,15 +251,18 @@ void MwwRuntimeLoader::loop() {
       // recomputation below was overwritten to "nothing pending" and sat unprocessed - a dropped
       // close left the model on the probe floor for the whole TTL.
       tune = this->tune_req_.exchange(-1, std::memory_order_relaxed);
-      for (uint8_t i = 0; i < WL_SLOTS; i++) {
+      for (uint8_t i = 0; i <= WL_SLOTS; i++) {
         if (this->cutoff_req_[i] >= 0) {
           cutoff = this->cutoff_req_[i];
           cutoff_slot = i;
+          cutoff_noise = this->cutoff_req_n_[i];
+          cutoff_floor = this->cutoff_req_f_[i];
+          cutoff_hi = this->cutoff_req_h_[i];
           this->cutoff_req_[i] = -1;
           break;
         }
       }
-      if (cutoff_slot == WL_SLOTS) {
+      if (cutoff_slot > WL_SLOTS) {
         for (uint8_t i = 0; i < WL_SLOTS; i++) {
           if (this->slot_req_[i]) {
             slot = i;
@@ -221,13 +274,15 @@ void MwwRuntimeLoader::loop() {
       }
       bool more = false;
       for (uint8_t i = 0; i < WL_SLOTS; i++)
-        more |= this->slot_req_[i] || this->cutoff_req_[i] >= 0;
+        more |= this->slot_req_[i];
+      for (uint8_t i = 0; i <= WL_SLOTS; i++)
+        more |= this->cutoff_req_[i] >= 0;
       this->req_pending_.store(more, std::memory_order_relaxed);
     }
     if (tune >= 0)
       this->apply_tune_(static_cast<uint8_t>(tune / 2), (tune & 1) != 0);
-    if (cutoff_slot < WL_SLOTS) {
-      this->apply_cutoff_(cutoff_slot, static_cast<uint8_t>(cutoff));
+    if (cutoff_slot <= WL_SLOTS) {
+      this->apply_cutoff_(cutoff_slot, static_cast<uint8_t>(cutoff), cutoff_noise, cutoff_floor, cutoff_hi);
     } else if (slot < WL_SLOTS) {
       this->apply_request_(slot, spec);
     }
@@ -292,19 +347,23 @@ bool MwwRuntimeLoader::queue_slot(uint8_t i, const std::string &spec) {
   return true;
 }
 
-bool MwwRuntimeLoader::queue_cutoff(uint8_t i, uint8_t value) {
-  if (i >= WL_SLOTS || (value != 0 && (value < WL_TUNED_MIN || value > 254)))
+bool MwwRuntimeLoader::queue_cutoff(uint8_t i, uint8_t value, uint8_t noise, uint8_t floor, uint8_t hi) {
+  if (i > WL_STOP || (value != 0 && (value < WL_TUNED_MIN || value > 254)))
     return false;
   {
     LockGuard guard{this->req_lock_};
     this->cutoff_req_[i] = value;
+    // Stats mean nothing without a tuned cutoff to anchor them; a reset clears them with it.
+    this->cutoff_req_n_[i] = value != 0 ? std::min<uint8_t>(noise, 254) : 0;
+    this->cutoff_req_f_[i] = value != 0 ? std::min<uint8_t>(floor, 254) : 0;
+    this->cutoff_req_h_[i] = value != 0 ? std::min<uint8_t>(hi, 254) : 0;
   }
   this->req_pending_.store(true, std::memory_order_relaxed);
   return true;
 }
 
 bool MwwRuntimeLoader::queue_tune(uint8_t i, bool on) {
-  if (i >= WL_SLOTS)
+  if (i > WL_STOP)
     return false;
   {
     // Under req_lock_ so the drain in loop() - which exchanges this under the same lock - can
@@ -329,6 +388,9 @@ void MwwRuntimeLoader::snapshot(SlotView out[WL_SLOTS], uint32_t &dl, uint32_t &
       out[i].state = v.state;
       out[i].error = v.error;
       out[i].cutoff = v.cutoff;
+      out[i].tn_noise = v.tn_noise;
+      out[i].tn_floor = v.tn_floor;
+      out[i].tn_hi = v.tn_hi;
       out[i].runtime = v.runtime;
     }
   }
@@ -410,8 +472,15 @@ void MwwRuntimeLoader::apply_request_(uint8_t i, const std::string &spec) {
     s.state = SLOT_READY;
     s.error = ERR_NONE;
     s.cutoff = 0;
+    s.tn_noise = s.tn_floor = s.tn_hi = 0;
     this->save_slot_(i);
+    this->save_tune_stats_(i);
+    // The word left; its history leaves with it (see clear_track_tele_).
+    this->clear_track_tele_(i);
     this->reconcile_after_ms_ = millis_64() + 3000;
+    // The stale-reassert window (see reconcile_ha_): our set just changed, and Home Assistant's
+    // catch-up - reconnect, refetch, the app's pairing write - takes seconds it must not win.
+    this->assert_until_ms_ = millis_64() + 45000;
     if (removed_runtime)
       this->nudge_ha_();
     this->publish_view_();
@@ -423,6 +492,7 @@ void MwwRuntimeLoader::apply_request_(uint8_t i, const std::string &spec) {
     if (model == nullptr)
       return;
     const bool removed_runtime = s.model_id == runtime_id_(i);
+    const bool word_changed = s.word != model->get_wake_word();
     this->unload_slot_(s);
     model->enable();
     s.spec = spec;
@@ -432,8 +502,14 @@ void MwwRuntimeLoader::apply_request_(uint8_t i, const std::string &spec) {
     s.state = SLOT_READY;
     s.error = ERR_NONE;
     s.cutoff = 0;
+    s.tn_noise = s.tn_floor = s.tn_hi = 0;
     this->save_slot_(i);
+    this->save_tune_stats_(i);
+    // A different word on this track must not inherit its predecessor's history.
+    if (word_changed)
+      this->clear_track_tele_(i);
     this->reconcile_after_ms_ = millis_64() + 3000;
+    this->assert_until_ms_ = millis_64() + 45000;
     if (removed_runtime)
       this->nudge_ha_();
     this->publish_view_();
@@ -448,7 +524,23 @@ void MwwRuntimeLoader::apply_request_(uint8_t i, const std::string &spec) {
   this->start_job_(i, false);
 }
 
-void MwwRuntimeLoader::apply_cutoff_(uint8_t i, uint8_t value) {
+void MwwRuntimeLoader::apply_cutoff_(uint8_t i, uint8_t value, uint8_t noise, uint8_t floor, uint8_t hi) {
+  if (i == WL_STOP) {
+    auto *model = this->stop_model_();
+    if (model == nullptr)
+      return;
+    this->stop_cutoff_ = value;
+    this->stop_tn_noise_ = value != 0 ? noise : 0;
+    this->stop_tn_floor_ = value != 0 ? floor : 0;
+    this->stop_tn_hi_ = value != 0 ? hi : 0;
+    // Deliberately also while a stop tune session is live - same reason as the slots below.
+    model->set_probability_cutoff(value != 0 ? value : model->get_default_probability_cutoff());
+    ESP_LOGI(TAG, "Sensitivity for \"%s\": cutoff %u%s", model->get_wake_word().c_str(),
+             model->get_probability_cutoff(), value == 0 ? " (model default)" : " (tuned)");
+    this->save_stop_();
+    this->publish_view_();
+    return;
+  }
   Slot &s = this->slots_[i];
   if (s.model_id.empty())
     return;
@@ -456,13 +548,53 @@ void MwwRuntimeLoader::apply_cutoff_(uint8_t i, uint8_t value) {
   if (model == nullptr)
     return;
   s.cutoff = value;
+  s.tn_noise = value != 0 ? noise : 0;
+  s.tn_floor = value != 0 ? floor : 0;
+  s.tn_hi = value != 0 ? hi : 0;
   // Deliberately also while this slot's tune session is live: applying the recommendation is the
   // session's confirm step, and the floor has to yield to the real threshold for it.
   model->set_probability_cutoff(value != 0 ? value : model->get_default_probability_cutoff());
   ESP_LOGI(TAG, "Sensitivity for \"%s\": cutoff %u%s", s.word.c_str(), model->get_probability_cutoff(),
            value == 0 ? " (model default)" : " (tuned)");
   this->save_slot_(i);
+  this->save_tune_stats_(i);
   this->publish_view_();
+}
+
+micro_wake_word::WakeWordModel *MwwRuntimeLoader::stop_model_() {
+  auto *model = this->mww_->get_model_by_id(WL_STOP_ID);
+  // Only the internal stop model qualifies: a runtime slot can never claim this id (runtime ids
+  // are wl_slot_a/b), but be explicit about what this pseudo-slot is for.
+  if (model == nullptr || !model->get_internal_only())
+    return nullptr;
+  return model;
+}
+
+void MwwRuntimeLoader::apply_stop_cutoff_() {
+  auto *model = this->stop_model_();
+  if (model == nullptr)
+    return;
+  model->set_probability_cutoff(this->stop_cutoff_ != 0 ? this->stop_cutoff_ : model->get_default_probability_cutoff());
+}
+
+void MwwRuntimeLoader::save_stop_() {
+  TuneStatsData t{};
+  t.cutoff = this->stop_cutoff_;
+  t.noise = this->stop_tn_noise_;
+  t.floor = this->stop_tn_floor_;
+  t.hi = this->stop_tn_hi_;
+  t.used = 1;
+  this->tn_prefs_[WL_STOP].save(&t);
+}
+
+void MwwRuntimeLoader::save_tune_stats_(uint8_t i) {
+  TuneStatsData t{};
+  t.cutoff = 0;  // a slot's cutoff lives in SlotPrefData; this byte is the stop pref's alone
+  t.noise = this->slots_[i].tn_noise;
+  t.floor = this->slots_[i].tn_floor;
+  t.hi = this->slots_[i].tn_hi;
+  t.used = 1;
+  this->tn_prefs_[i].save(&t);
 }
 
 void MwwRuntimeLoader::nudge_ha_() {
@@ -512,32 +644,76 @@ void MwwRuntimeLoader::apply_tune_(uint8_t i, bool on) {
   if (active >= 0)
     this->end_tune_(false);
 
-  Slot &s = this->slots_[i];
-  // A loaded model is what a session needs - not a READY state. A slot whose last swap failed
-  // sits in ERROR while its previous word keeps listening, and that word is as tunable as ever;
-  // requiring READY made one bad URL attempt lock the tuner out until a reboot.
-  if (s.model_id.empty() || s.state == SLOT_DOWNLOADING)
-    return;
-  auto *model = this->mww_->get_model_by_id(s.model_id);
-  if (model == nullptr)
-    return;
+  micro_wake_word::WakeWordModel *model = nullptr;
+  if (i == WL_STOP) {
+    // The stop pseudo-slot: the internal model directly, no slot bookkeeping to check. The scripts
+    // only enable the stop word while something plays, so a session opened in silence would find a
+    // disabled (unloaded) model and score nothing - the panel read "session ended" on the spot
+    // (hardware finding, September 22 2026). The session enables it for its own lifetime; end_tune_
+    // puts the prior state back. Nothing persists: enable() skips the preference for internal
+    // models by design.
+    model = this->stop_model_();
+    if (model == nullptr)
+      return;
+    this->stop_tune_enabled_it_ = !model->is_enabled();
+    if (this->stop_tune_enabled_it_)
+      model->enable();
+  } else {
+    Slot &s = this->slots_[i];
+    // A loaded model is what a session needs - not a READY state. A slot whose last swap failed
+    // sits in ERROR while its previous word keeps listening, and that word is as tunable as ever;
+    // requiring READY made one bad URL attempt lock the tuner out until a reboot.
+    if (s.model_id.empty() || s.state == SLOT_DOWNLOADING)
+      return;
+    model = this->mww_->get_model_by_id(s.model_id);
+    if (model == nullptr)
+      return;
+  }
 
   {
     LockGuard guard{this->tune_lock_};
-    this->tune_word_ = s.word;
+    this->tune_word_ = model->get_wake_word();
     this->tune_events_.clear();
   }
+  this->tune_room_.store(0, std::memory_order_relaxed);
+  this->tune_pend_ = 0;
+  this->tune_pend_at_ = 0;
+  // Whatever the register accumulated before this moment belongs to the pre-session room, not to
+  // this measurement.
+  model->take_high_water();
   this->tune_deadline_ms_ = millis_64() + WL_TUNE_TTL_MS;
   this->tune_slot_.store(static_cast<int8_t>(i), std::memory_order_release);
   model->set_probability_cutoff(WL_TUNE_FLOOR);
-  ESP_LOGI(TAG, "Tune session opened for \"%s\" (probe floor %u)", s.word.c_str(), WL_TUNE_FLOOR);
+  ESP_LOGI(TAG, "Tune session opened for \"%s\" (probe floor %u)", model->get_wake_word().c_str(), WL_TUNE_FLOOR);
 }
 
 void MwwRuntimeLoader::end_tune_(bool expired) {
   const int8_t active = this->tune_slot_.exchange(-1, std::memory_order_acq_rel);
   if (active < 0)
     return;
-  this->apply_configured_cutoff_(this->slots_[active]);
+  this->tune_pend_ = 0;
+  this->tune_pend_at_ = 0;
+  micro_wake_word::WakeWordModel *model = nullptr;
+  if (active == static_cast<int8_t>(WL_STOP)) {
+    this->apply_stop_cutoff_();
+    model = this->stop_model_();
+    // Put the enable state back the way the session found it (see apply_tune_).
+    if (model != nullptr && this->stop_tune_enabled_it_) {
+      model->disable();
+      this->stop_tune_enabled_it_ = false;
+    }
+  } else {
+    this->apply_configured_cutoff_(this->slots_[active]);
+    if (!this->slots_[active].model_id.empty())
+      model = this->mww_->get_model_by_id(this->slots_[active].model_id);
+  }
+  // Drain the session's residue out of the register and hold the track for a beat: the attempts'
+  // own high scores were still sitting there, and the next telemetry sample booked them as "room
+  // pressure" - a freshly tuned word showed a room ceiling above its own cutoff (hardware finding,
+  // September 22 2026, Dev12: "room -> 89%" over a 77% notch).
+  if (model != nullptr)
+    model->take_high_water();
+  this->hw_suppress_until_[active] = millis_64() + 2000;
   {
     // The ring and the word are session state, and the session is over - hand the heap back rather
     // than holding two dozen events until the next open clears them. Safe against the log callback:
@@ -552,6 +728,7 @@ void MwwRuntimeLoader::end_tune_(bool expired) {
 
 void MwwRuntimeLoader::tune_snapshot(TuneView &out) {
   out.slot = this->tune_slot_.load(std::memory_order_acquire);
+  out.room = this->tune_room_.load(std::memory_order_relaxed);
   LockGuard guard{this->tune_lock_};
   out.seq = this->tune_seq_;
   out.events = this->tune_events_;
@@ -560,8 +737,9 @@ void MwwRuntimeLoader::tune_snapshot(TuneView &out) {
 #ifdef USE_LOG_LISTENERS
 void MwwRuntimeLoader::log_callback_(void *self, uint8_t level, const char *tag, const char *message, size_t len) {
   auto *loader = static_cast<MwwRuntimeLoader *>(self);
-  if (loader->tune_slot_.load(std::memory_order_relaxed) < 0)
-    return;
+  // Tag test only - no session gate any more, because VAD-refused detections feed the close-call
+  // ring around the clock (owner request, September 2026: "ignored detections" are evidence). The
+  // cost outside a session is one strcmp per log line plus, for mww lines only, two strstr misses.
   if (strcmp(tag, "micro_wake_word") != 0)
     return;
   loader->on_mww_log_(message);
@@ -583,9 +761,8 @@ void MwwRuntimeLoader::on_mww_log_(const char *message) {
   float avg = 0.0f, peak = 0.0f;
   bool vad = false;
   const char *at = strstr(message, "Detected '");
-  if (at != nullptr &&
-      sscanf(at, "Detected '%63[^']' with sliding average probability is %f and max probability is %f", word, &avg,
-             &peak) == 3) {
+  if (at != nullptr && sscanf(at, "Detected '%63[^']' with sliding average probability is %f and max probability is %f",
+                              word, &avg, &peak) == 3) {
     // fall through to record
   } else if ((at = strstr(message, "Wake word model predicts '")) != nullptr &&
              sscanf(at, "Wake word model predicts '%63[^']'", word) == 1) {
@@ -594,20 +771,352 @@ void MwwRuntimeLoader::on_mww_log_(const char *message) {
     return;
   }
 
-  LockGuard guard{this->tune_lock_};
-  if (this->tune_word_ != word)
-    return;
-  TuneEvent ev;
-  ev.peak = static_cast<uint8_t>(std::max(0.0f, std::min(1.0f, peak)) * 255.0f);
-  ev.avg = static_cast<uint8_t>(std::max(0.0f, std::min(1.0f, avg)) * 255.0f);
-  ev.vad_blocked = vad;
-  ev.at_ms = millis();
-  this->tune_events_.push_back(ev);
-  if (this->tune_events_.size() > WL_TUNE_RING)
-    this->tune_events_.erase(this->tune_events_.begin());
-  this->tune_seq_++;
+  {
+    LockGuard guard{this->tune_lock_};
+    if (this->tune_slot_.load(std::memory_order_relaxed) >= 0 && this->tune_word_ == word) {
+      TuneEvent ev;
+      ev.peak = static_cast<uint8_t>(std::max(0.0f, std::min(1.0f, peak)) * 255.0f);
+      ev.avg = static_cast<uint8_t>(std::max(0.0f, std::min(1.0f, avg)) * 255.0f);
+      // The max-mean starts at the crossing's own mean; register samples raise it for the next
+      // ~1.5s (see sample_high_water_). A VAD-refused event has no numbers to start from.
+      ev.mm = ev.avg;
+      ev.vad_blocked = vad;
+      ev.at_ms = millis();
+      this->tune_events_.push_back(ev);
+      if (this->tune_events_.size() > WL_TUNE_RING)
+        this->tune_events_.erase(this->tune_events_.begin());
+      this->tune_seq_++;
+      return;
+    }
+  }
+  // Outside any session (or for another word): a VAD-refused detection is a close call - the wake
+  // model fired at its real cutoff and the voice gate threw it away. Scored detections outside a
+  // session are not recorded here; the detection ring already tells that story.
+  if (vad)
+    this->push_near_(word, 0, true);
 }
 #endif  // USE_LOG_LISTENERS
+
+void MwwRuntimeLoader::notify_detection(const std::string &word) {
+  // A real firing: its own climb to the cutoff is sitting in the register and must not read as
+  // room pressure. Drain and discard now, and keep discarding for 2s of tail.
+  const uint64_t until = millis_64() + 2000;
+  // Whatever the previous firing parked is dead now: if push_wake_detection never drained it (the
+  // sign-in gate consumed that firing), its score must not ride along and be pinned on THIS
+  // firing's dot by the next drain.
+  this->last_det_score_.store(0, std::memory_order_relaxed);
+  this->last_det_track_.store(-1, std::memory_order_relaxed);
+  for (uint8_t t = 0; t <= WL_SLOTS; t++) {
+    micro_wake_word::WakeWordModel *model = nullptr;
+    if (t < WL_SLOTS) {
+      if (this->slots_[t].word != word || this->slots_[t].model_id.empty())
+        continue;
+      model = this->mww_->get_model_by_id(this->slots_[t].model_id);
+    } else {
+      model = this->stop_model_();
+      if (model != nullptr && model->get_wake_word() != word)
+        continue;
+    }
+    if (model == nullptr)
+      continue;
+    // The drained value IS the firing's score: the register holds the max window mean since its
+    // last drain, and at this moment that is the mean that just beat the cutoff. It used to be
+    // discarded here; the Living Graph's dots are placed by it now (v2, September 2026), so it is
+    // parked for push_wake_detection to collect a few actions later in the same automation. Zero
+    // stays "unknown" - a sample drain could in principle have landed first - and the UI treats it
+    // as such rather than drawing a dot at 0%.
+    //
+    // EXCEPT during this track's own tune session: the model runs at the probe floor there, so
+    // every training utterance "fires" the moment its mean crosses ~42% - a floored artifact, not
+    // a measurement. Recording those put four ~50% "firings" on a word whose attempts had scored
+    // 98% (owner's report, September 23 2026). The session's event ring owns that story; the
+    // firing history stays real firings at real thresholds only.
+    const bool in_session = this->tune_slot_.load(std::memory_order_relaxed) == static_cast<int8_t>(t);
+    const uint8_t fired = model->take_high_water();
+    if (fired != 0 && !in_session) {
+      // Parked only - the persisted 24h ring is fed by take_detection_score(), which the web UI
+      // calls from INSIDE the sign-in gate. A firing the gate consumes as a sign-in symbol is
+      // never drained, so it never becomes a dot (the dots carry the same track/time/confidence
+      // facts the gate hides from the detection history; see take_detection_score's declaration).
+      this->last_det_score_.store(fired, std::memory_order_relaxed);
+      this->last_det_track_.store(static_cast<int8_t>(t), std::memory_order_relaxed);
+    }
+    this->hw_suppress_until_[t] = until;
+  }
+}
+
+uint8_t MwwRuntimeLoader::take_detection_score() {
+  const uint8_t score = this->last_det_score_.exchange(0, std::memory_order_relaxed);
+  const int8_t track = this->last_det_track_.exchange(-1, std::memory_order_relaxed);
+  // The drain is the commit: this only runs for firings the sign-in gate let through, which is
+  // exactly the set the Living Graph may remember. Saved immediately - a firing is the dot the
+  // whole graph exists for, and firings are rare enough that the NVS write is nothing.
+  if (score != 0 && track >= 0 && track <= static_cast<int8_t>(WL_STOP))
+    this->push_tele_(static_cast<uint8_t>(track), 0, score, true);
+  return score;
+}
+
+void MwwRuntimeLoader::sample_high_water_() {
+  const uint64_t now = millis_64();
+  if (now < this->next_sample_ms_)
+    return;
+  this->next_sample_ms_ = now + 250;
+
+  // The hourly bucket wheel. Not wall-clock hours - just 24 one-hour windows, which is all "the
+  // loudest the room got in the last day" needs. The new bucket clears as the wheel advances.
+  if (this->hour_started_ == 0)
+    this->hour_started_ = now;
+  bool hour_turned = false;
+  while (now - this->hour_started_ >= 3600ULL * 1000ULL) {
+    this->hour_started_ += 3600ULL * 1000ULL;
+    this->hour_at_ = static_cast<uint8_t>((this->hour_at_ + 1) % 24);
+    for (uint8_t t = 0; t <= WL_SLOTS; t++)
+      this->hw_buckets_[t][this->hour_at_] = 0;
+    hour_turned = true;
+  }
+  // The hourly telemetry save: buckets and whatever close calls landed since the last one.
+  if (hour_turned)
+    this->save_tele_();
+
+  const int8_t tuning = this->tune_slot_.load(std::memory_order_relaxed);
+  for (uint8_t t = 0; t <= WL_SLOTS; t++) {
+    micro_wake_word::WakeWordModel *model = nullptr;
+    const std::string *word = nullptr;
+    if (t < WL_SLOTS) {
+      Slot &s = this->slots_[t];
+      if (s.model_id.empty())
+        continue;
+      model = this->mww_->get_model_by_id(s.model_id);
+      word = &s.word;
+    } else {
+      model = this->stop_model_();
+      if (model != nullptr)
+        word = &model->get_wake_word();
+    }
+    if (model == nullptr)
+      continue;
+    // NOTE: a zero sample still runs the probation bookkeeping below - a pending sample must be
+    // able to commit (or be voided) during the quiet that follows it.
+    const uint8_t sample = model->take_high_water();
+
+    // A live session on this track: never room *pressure* (the floored cutoff would poison the
+    // 24h buckets), but the sample is measurement either way. Within 1.5s of an event it is the
+    // utterance's own tail and raises that event's max-mean; otherwise it is the room itself -
+    // sub-floor sounds the event ring structurally cannot see - and feeds the session's room
+    // ceiling, which is the honest noise reading the placement math wants (hardware finding,
+    // September 22 2026: blaring music read as "quiet").
+    if (tuning == static_cast<int8_t>(t)) {
+      bool was_event_tail = false;
+      uint32_t last_ev_ms = 0;
+      {
+        LockGuard guard{this->tune_lock_};
+        if (!this->tune_events_.empty()) {
+          TuneEvent &last = this->tune_events_.back();
+          last_ev_ms = last.at_ms;
+          if (millis() - last.at_ms < 1500) {
+            was_event_tail = true;
+            if (sample > last.mm) {
+              last.mm = sample;
+              this->tune_seq_++;  // a raise is news the polling panel should see
+            }
+          }
+        }
+      }
+      // Not an event's tail - but not necessarily the room either: a wake word's own onset drains
+      // in the sample just BEFORE its detection event exists, and booking it as room painted an
+      // amber dot in the same beat as the attempt's blue one (owner's report, September 22 2026).
+      // So the sample goes on probation (see tune_pend_ in the header): an event landing inside
+      // the window proves it was the utterance and drops it; ~1.6 eventless seconds commit it.
+      const uint32_t now32 = millis();
+      if (!was_event_tail && sample != 0) {
+        if (this->tune_pend_ == 0)
+          this->tune_pend_at_ = now32;
+        if (sample > this->tune_pend_)
+          this->tune_pend_ = sample;
+      }
+      if (this->tune_pend_ != 0) {
+        if (last_ev_ms != 0 && static_cast<int32_t>(last_ev_ms - this->tune_pend_at_) >= 0) {
+          // An event landed after the pending sample drained: that climb was the utterance.
+          this->tune_pend_ = 0;
+        } else if (now32 - this->tune_pend_at_ >= 1600) {
+          if (this->tune_pend_ > this->tune_room_.load(std::memory_order_relaxed))
+            this->tune_room_.store(this->tune_pend_, std::memory_order_relaxed);
+          this->tune_pend_ = 0;
+        }
+      }
+      continue;
+    }
+
+    // The standing branch runs the same probation (owner's report, September 23 2026: a word said
+    // once before its first tune drained its own onset into the hourly bucket as an 87% "room"
+    // reading, which then failed the placement). A firing voids whatever was pending just before
+    // it; ~1.6 eventless seconds commit the pending sample to the bucket, the close-call band and
+    // the persisted ring.
+    const uint64_t fire_at = this->hw_suppress_until_[t] == 0 ? 0 : this->hw_suppress_until_[t] - 2000;
+    if (this->hw_pend_[t] != 0 && fire_at != 0 && fire_at + 300 >= this->hw_pend_at_[t]) {
+      this->hw_pend_[t] = 0;
+    } else if (this->hw_pend_[t] != 0 && now - this->hw_pend_at_[t] >= 1600) {
+      const uint8_t v = this->hw_pend_[t];
+      this->hw_pend_[t] = 0;
+      uint8_t &bucket = this->hw_buckets_[t][this->hour_at_];
+      if (v > bucket)
+        bucket = v;
+      // The close-call band, against the model's *active* cutoff: near enough to have almost fired.
+      const uint8_t cut = model->get_probability_cutoff();
+      if (cut > WL_NEAR_BAND && v < cut && v >= static_cast<uint8_t>(cut - WL_NEAR_BAND)) {
+        this->push_near_(*word, v, false);
+        // Into the persisted ring too, but without its own NVS write - close calls can be
+        // frequent in a bold room, and the hourly save catches them soon enough.
+        this->push_tele_(t, 1, v, false);
+      }
+    }
+    // A real firing's own scores, still draining through the 2s tail: discarded.
+    if (now < this->hw_suppress_until_[t] || sample == 0)
+      continue;
+    if (this->hw_pend_[t] == 0)
+      this->hw_pend_at_[t] = now;
+    if (sample > this->hw_pend_[t])
+      this->hw_pend_[t] = sample;
+  }
+}
+
+void MwwRuntimeLoader::push_near_(const std::string &word, uint8_t score, bool vad) {
+  const uint32_t now = millis();
+  LockGuard guard{this->near_lock_};
+  if (!this->near_.empty()) {
+    NearRec &last = this->near_.back();
+    // One utterance, one entry: consecutive in-band samples coalesce, keeping the loudest.
+    if (last.word == word && last.vad == vad && now - last.at_ms < 2000) {
+      if (score > last.score)
+        last.score = score;
+      last.at_ms = now;
+      return;
+    }
+  }
+  this->near_.push_back(NearRec{word, score, vad, now});
+  if (this->near_.size() > WL_NEAR_RING)
+    this->near_.erase(this->near_.begin());
+}
+
+void MwwRuntimeLoader::hw_day_snapshot(uint8_t out[WL_SLOTS + 1][24]) {
+  for (uint8_t t = 0; t <= WL_SLOTS; t++) {
+    for (uint8_t k = 0; k < 24; k++)
+      out[t][k] = this->hw_buckets_[t][(this->hour_at_ + 24 - k) % 24];
+  }
+}
+
+void MwwRuntimeLoader::clear_track_tele_(uint8_t t) {
+  if (t > WL_STOP)
+    return;
+  {
+    LockGuard guard{this->tele_lock_};
+    for (auto it = this->tele_.begin(); it != this->tele_.end();) {
+      if (it->track == t)
+        it = this->tele_.erase(it);
+      else
+        ++it;
+    }
+  }
+  for (uint8_t h = 0; h < 24; h++)
+    this->hw_buckets_[t][h] = 0;
+  this->hw_pend_[t] = 0;
+  this->save_tele_();
+}
+
+void MwwRuntimeLoader::push_tele_(uint8_t track, uint8_t kind, uint8_t score, bool save) {
+  const int64_t now = static_cast<int64_t>(millis_64());
+  {
+    LockGuard guard{this->tele_lock_};
+    // Entries past the window leave as new ones arrive - the ring only ever holds the day the
+    // graphs draw, so the cap is about a lively day, not history.
+    while (!this->tele_.empty() && now - this->tele_.front().at_ms > 24LL * 3600 * 1000)
+      this->tele_.erase(this->tele_.begin());
+    this->tele_.push_back(TeleRec{track, kind, score, this->tele_id_++, now});
+    if (this->tele_.size() > WL_TELE_RING)
+      this->tele_.erase(this->tele_.begin());
+  }
+  if (save)
+    this->save_tele_();
+}
+
+void MwwRuntimeLoader::save_tele_() {
+  TeleData d{};
+  const int64_t now = static_cast<int64_t>(millis_64());
+  for (uint8_t t = 0; t <= WL_SLOTS; t++)
+    for (uint8_t h = 0; h < 24; h++)
+      d.buckets[t][h] = this->hw_buckets_[t][h];
+  d.hour_at = this->hour_at_;
+  {
+    LockGuard guard{this->tele_lock_};
+    for (const auto &r : this->tele_) {
+      const int64_t age = now - r.at_ms;
+      if (age < 0 || age > 24LL * 3600 * 1000 || d.n >= WL_TELE_RING)
+        continue;
+      d.e[d.n].min_ago = static_cast<uint16_t>(age / 60000);
+      d.e[d.n].score = r.score;
+      d.e[d.n].tk = static_cast<uint8_t>((r.track & 0x0f) | (r.kind << 4));
+      d.e[d.n].id = r.id;
+      d.n++;
+    }
+    d.next_id = this->tele_id_;
+  }
+  d.used = 1;
+  this->tele_pref_.save(&d);
+}
+
+void MwwRuntimeLoader::load_tele_() {
+  TeleData d{};
+  if (!this->tele_pref_.load(&d) || !d.used)
+    return;
+  for (uint8_t t = 0; t <= WL_SLOTS; t++)
+    for (uint8_t h = 0; h < 24; h++)
+      this->hw_buckets_[t][h] = d.buckets[t][h];
+  this->hour_at_ = d.hour_at % 24;
+  const int64_t now = static_cast<int64_t>(millis_64());
+  LockGuard guard{this->tele_lock_};
+  this->tele_id_ = d.next_id == 0 ? 1 : d.next_id;
+  const uint8_t n = d.n > WL_TELE_RING ? WL_TELE_RING : d.n;
+  for (uint8_t k = 0; k < n; k++) {
+    // Restored ages resume where they left off. The downtime itself goes uncounted - the device
+    // has no wall clock - so entries come back slightly younger than the truth and age out a
+    // little late, which is the honest direction to err for a fading record.
+    const int64_t at = now - static_cast<int64_t>(d.e[k].min_ago) * 60000;
+    this->tele_.push_back(TeleRec{static_cast<uint8_t>(d.e[k].tk & 0x0f), static_cast<uint8_t>(d.e[k].tk >> 4),
+                                  d.e[k].score, d.e[k].id, at});
+  }
+}
+
+void MwwRuntimeLoader::tele_snapshot(uint8_t track, std::vector<TeleOut> &out) {
+  const int64_t now = static_cast<int64_t>(millis_64());
+  LockGuard guard{this->tele_lock_};
+  for (const auto &r : this->tele_) {
+    if (r.track != track)
+      continue;
+    const int64_t age = now - r.at_ms;
+    if (age < 0 || age > 24LL * 3600 * 1000)
+      continue;
+    out.push_back(TeleOut{static_cast<uint32_t>(age), r.score, r.kind, r.id});
+  }
+}
+
+void MwwRuntimeLoader::hw_snapshot(uint8_t out[WL_SLOTS + 1]) {
+  for (uint8_t t = 0; t <= WL_SLOTS; t++) {
+    uint8_t max = 0;
+    for (uint8_t h = 0; h < 24; h++)
+      max = std::max(max, this->hw_buckets_[t][h]);
+    out[t] = max;
+  }
+}
+
+void MwwRuntimeLoader::stop_snapshot(StopView &out) {
+  LockGuard guard{this->view_lock_};
+  out = this->stop_view_;
+}
+
+void MwwRuntimeLoader::near_snapshot(std::vector<NearRec> &out) {
+  LockGuard guard{this->near_lock_};
+  out = this->near_;
+}
 
 void MwwRuntimeLoader::start_job_(uint8_t slot, bool boot) {
   Slot &s = this->slots_[slot];
@@ -668,7 +1177,9 @@ uint8_t MwwRuntimeLoader::fetch_(const std::string &url, PsramString &out, size_
   uint8_t buf[1024];
   uint32_t last_progress = millis();
   while (out.size() < cap) {
-    int n = container->read(buf, sizeof(buf));
+    // Never read past the cap: an unsized (chunked) body could otherwise overshoot it by up to a
+    // full buffer on the final read, and the cap should mean what it says.
+    int n = container->read(buf, std::min(sizeof(buf), cap - out.size()));
     if (n < 0) {
       container->end();
       return ERR_FETCH;
@@ -716,31 +1227,32 @@ void MwwRuntimeLoader::run_job_() {
   // heap, which is the exact move the PSRAM placement exists to avoid.
   bool parsed = json::parse_json(reinterpret_cast<const uint8_t *>(manifest.c_str()), manifest.size(),
                                  [&](JsonObject root) -> bool {
-    type = (const char *) (root["type"] | "");
-    j.word = (const char *) (root["wake_word"] | "");
-    version = root["version"] | 0;
-    model_rel = (const char *) (root["model"] | "");
-    if (root["trained_languages"].is<JsonArray>()) {
-      for (JsonVariant v : root["trained_languages"].as<JsonArray>()) {
-        const char *lang = v.as<const char *>();
-        if (lang != nullptr)
-          j.langs.emplace_back(lang);
-      }
-    }
-    if (root["micro"].is<JsonObject>()) {
-      has_micro = true;
-      JsonObject micro = root["micro"];
-      cutoff_f = micro["probability_cutoff"] | 0.97f;
-      j.window = micro["sliding_window_size"] | 5;
-      step = micro["feature_step_size"] | 10;
-      j.arena = micro["tensor_arena_size"] | 30000;
-      const char *minv = micro["minimum_esphome_version"] | "";
-      // Accepts "2024.7" and "2024.7.0" alike; a manifest with garbage here reads as 0.0.0, which
-      // every firmware satisfies - the tflite validation downstream is the gate that matters.
-      sscanf(minv, "%" PRIu32 ".%" PRIu32 ".%" PRIu32, &min_ma, &min_mi, &min_pa);
-    }
-    return true;
-  });
+                                   type = (const char *) (root["type"] | "");
+                                   j.word = (const char *) (root["wake_word"] | "");
+                                   version = root["version"] | 0;
+                                   model_rel = (const char *) (root["model"] | "");
+                                   if (root["trained_languages"].is<JsonArray>()) {
+                                     for (JsonVariant v : root["trained_languages"].as<JsonArray>()) {
+                                       const char *lang = v.as<const char *>();
+                                       if (lang != nullptr)
+                                         j.langs.emplace_back(lang);
+                                     }
+                                   }
+                                   if (root["micro"].is<JsonObject>()) {
+                                     has_micro = true;
+                                     JsonObject micro = root["micro"];
+                                     cutoff_f = micro["probability_cutoff"] | 0.97f;
+                                     j.window = micro["sliding_window_size"] | 5;
+                                     step = micro["feature_step_size"] | 10;
+                                     j.arena = micro["tensor_arena_size"] | 30000;
+                                     const char *minv = micro["minimum_esphome_version"] | "";
+                                     // Accepts "2024.7" and "2024.7.0" alike; a manifest with garbage here reads as
+                                     // 0.0.0, which every firmware satisfies - the tflite validation downstream is the
+                                     // gate that matters.
+                                     sscanf(minv, "%" PRIu32 ".%" PRIu32 ".%" PRIu32, &min_ma, &min_mi, &min_pa);
+                                   }
+                                   return true;
+                                 });
 
   if (!parsed || type != "micro" || !has_micro || j.word.empty() || model_rel.empty()) {
     j.error = ERR_NOT_MANIFEST;
@@ -894,6 +1406,27 @@ void MwwRuntimeLoader::finalize_job_() {
   const std::string id = runtime_id_(j.slot);
   const std::string old_model = s.model_id;
 
+  // The duplicate guard's phrase-level rung, which only the download can check: queue_slot and
+  // apply_request_ compare specs, but two different manifest URLs can carry one phrase, and two
+  // models listening for the same word is the same broken picture whatever their specs say. The
+  // device is the validator - the picker's own phrase check is a courtesy, not the boundary.
+  // Checked BEFORE this slot's old model is touched, so a refusal leaves the previous word
+  // listening, like every other failed swap.
+  {
+    const Slot &other = this->slots_[1 - j.slot];
+    if (!other.word.empty() && strcasecmp(other.word.c_str(), j.word.c_str()) == 0) {
+      ESP_LOGW(TAG, "Slot %u's download resolved to \"%s\", which slot %u already holds; refusing", j.slot,
+               j.word.c_str(), 1 - j.slot);
+      j.data.reset();
+      s.pending.clear();
+      s.state = SLOT_ERROR;
+      s.error = ERR_REFUSED;
+      this->release_job_strings_();
+      this->publish_view_();
+      return;
+    }
+  }
+
   // A re-download into the same slot (boot, or a retry) must clear the previous instance of its
   // own id before add_runtime_model sees a duplicate.
   if (old_model == id) {
@@ -901,8 +1434,7 @@ void MwwRuntimeLoader::finalize_job_() {
     s.model_id.clear();
   }
 
-  auto model = make_unique<micro_wake_word::WakeWordModel>(id, j.data, j.cutoff, j.window, j.word, j.langs,
-                                                           j.arena);
+  auto model = make_unique<micro_wake_word::WakeWordModel>(id, j.data, j.cutoff, j.window, j.word, j.langs, j.arena);
   if (!this->mww_->add_runtime_model(std::move(model))) {
     j.data.reset();
     s.pending.clear();
@@ -937,13 +1469,22 @@ void MwwRuntimeLoader::finalize_job_() {
   s.state = SLOT_READY;
   s.error = ERR_NONE;
   s.retries = 0;
-  if (!same_word)
+  if (!same_word) {
     s.cutoff = 0;
+    s.tn_noise = s.tn_floor = s.tn_hi = 0;
+    this->save_tune_stats_(j.slot);
+    // A different word on this track must not inherit its predecessor's history (owner's report,
+    // September 23 2026: a fresh download opened its first tune wearing the old word's amber dot).
+    this->clear_track_tele_(j.slot);
+  }
   if (s.cutoff != 0 && loaded != nullptr)
     loaded->set_probability_cutoff(s.cutoff);
   this->save_slot_(j.slot);
   j.data.reset();
   this->reconcile_after_ms_ = millis_64() + 3000;
+  // The stale-reassert window (see reconcile_ha_): the nudge below reconnects Home Assistant,
+  // whose first push carries its pre-download selects - they must not be adopted as intent.
+  this->assert_until_ms_ = millis_64() + 45000;
   if (!j.boot)
     this->nudge_ha_();
   ESP_LOGI(TAG, "Wake word \"%s\" loaded into slot %u from %s", s.word.c_str(), j.slot, s.spec.c_str());
@@ -988,6 +1529,30 @@ void MwwRuntimeLoader::reconcile_ha_() {
   if (!drift)
     return;
 
+  // Just after OUR OWN advertised set changed, drift is presumed stale rather than intentional:
+  // the nudge makes Home Assistant reconnect, and on reconnect it re-asserts its PRE-change
+  // selects while the app's pairing write is still in flight - adopting that emptied a slot and
+  // freed the very model the write was about to name (owner's report, September 23 2026). Until
+  // the window closes the slots re-assert themselves instead; once Home Assistant's selects catch
+  // up, the drift dissolves and adoption below never runs.
+  if (millis_64() < this->assert_until_ms_) {
+    for (auto &s : this->slots_) {
+      if (s.model_id.empty())
+        continue;
+      auto *model = this->mww_->get_model_by_id(s.model_id);
+      if (model != nullptr && !model->is_enabled()) {
+        ESP_LOGI(TAG, "Re-asserting \"%s\" over Home Assistant's stale set", s.word.c_str());
+        model->enable();
+      }
+    }
+    for (auto *model : this->mww_->get_wake_words()) {
+      if (model->is_enabled() && !in_slot(model->get_id()))
+        model->disable();
+    }
+    this->reconcile_after_ms_ = millis_64() + 3000;
+    return;
+  }
+
   for (uint8_t i = 0; i < WL_SLOTS; i++) {
     Slot &s = this->slots_[i];
     if (s.model_id.empty())
@@ -1002,7 +1567,10 @@ void MwwRuntimeLoader::reconcile_ha_() {
       s.state = SLOT_READY;
       s.error = ERR_NONE;
       s.cutoff = 0;
+      s.tn_noise = s.tn_floor = s.tn_hi = 0;
       this->save_slot_(i);
+      this->save_tune_stats_(i);
+      this->clear_track_tele_(i);
     }
   }
 
@@ -1046,6 +1614,9 @@ void MwwRuntimeLoader::save_slot_(uint8_t i) {
 }
 
 void MwwRuntimeLoader::publish_view_() {
+  // Resolved outside the lock: get_model_by_id walks micro_wake_word's vector, which is main-loop
+  // territory and has no business inside the httpd-shared view lock.
+  const bool stop_present = this->stop_model_() != nullptr;
   LockGuard guard{this->view_lock_};
   for (uint8_t i = 0; i < WL_SLOTS; i++) {
     const Slot &s = this->slots_[i];
@@ -1058,8 +1629,16 @@ void MwwRuntimeLoader::publish_view_() {
     v.state = s.state;
     v.error = s.error;
     v.cutoff = s.cutoff;
+    v.tn_noise = s.tn_noise;
+    v.tn_floor = s.tn_floor;
+    v.tn_hi = s.tn_hi;
     v.runtime = s.model_id == runtime_id_(i) || (s.model_id.empty() && is_url_(v.spec));
   }
+  this->stop_view_.present = stop_present;
+  this->stop_view_.cutoff = this->stop_cutoff_;
+  this->stop_view_.tn_noise = this->stop_tn_noise_;
+  this->stop_view_.tn_floor = this->stop_tn_floor_;
+  this->stop_view_.tn_hi = this->stop_tn_hi_;
 }
 
 void MwwRuntimeLoader::dump_config() {
