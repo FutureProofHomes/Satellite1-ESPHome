@@ -178,13 +178,40 @@ browser UA simply forgoes digest and uses the cookie or `?key=` flow like a brow
   nonce and the browser answers `HMAC-SHA256(SHA-256(password), nonce)` — so the password itself
   never crosses the wire, the one property Basic auth lacked. (`crypto.subtle` is unavailable on
   insecure origins, so the app carries its own small SHA-256; see `frontend/src/lib/auth.js`.)
-- **On the device.** "Sign in on this device" opens a 60-second pairing window and the device
-  approves it by physical presence, so nothing is typed. When Home Assistant is connected the device
-  speaks a random four-digit code and opens its mic — say the code back. When it is not, the device
-  speaks a challenge built from its own wake words ("Hey Jarvis, Hey Jarvis, Stop") and you repeat
-  them in order; this path is fully offline. Either way a press of the **action button** approves the
-  window instead. Muted microphones fall back to the button alone, and the login page says which
-  applies. This is the flow for a ceiling-mounted device nobody can reach to type on.
+- **On the device.** "Sign in on this device" opens a 30-second pairing window and the device
+  approves it by physical presence, so nothing is typed. When Home Assistant is connected *and
+  allowed to perform actions* (the checkbox on the device's HA page — the gate reads the probe
+  verdict from `tts_routing.yaml` at window-open time), the device speaks a random four-digit code
+  and opens its mic — say the code back. Otherwise the device plays one embedded prompt ("To sign
+  in, press the action button, or say the wake words on your screen") and the challenge — a random
+  six-symbol sequence over its three wake words, 729 combinations against the voice lockout —
+  appears only on the login page, as ordered chips that un-bold as the device hears each one back
+  (the poll's matched-prefix count), with the ring blipping green per correct word; this path is
+  fully offline. The device does not recite the words itself, and a perfect answer approves the
+  moment its final word lands. Either way a press of the **action button**
+  approves the window instead. Muted microphones fall back to the button alone, and the login page
+  says which applies. This is the flow for a ceiling-mounted device nobody can reach to type on.
+
+  Two nets keep the code path from failing silently. First, the mode selection above: with the
+  actions checkbox off, HA drops `assist_satellite.start_conversation` *without an error*, so a
+  connection alone must not pick code mode (a real customer waited out a silent window, then
+  pressed the button after expiry — where it falls through to the assistant). Second, a watchdog in
+  `login_code_converse`: if no announcement has started on the local media player within seven
+  seconds of the call, the gate downgrades the window to the wake-word challenge (button-only when
+  the models are unavailable), resets the deadline, and the page's copy flips to say Home Assistant
+  may not speak yet. While any window is open the wake-word loader's drift reconciler is held off
+  (`hold_reconcile`), because the challenge temporarily enables the compiled models whatever the
+  two slots hold — without the hold, a customised device would see the reconciler adopt or disable
+  the challenge models mid-answer.
+
+  Displaying the challenge words is a deliberate trade, documented at `SessionGate::open_window_`:
+  the spoken code stays audio-only (proof you can *hear* the device), but the wake-word challenge
+  rides the start/poll responses to the window's owner so the page can show it — relaxing that
+  window's proof to "can produce audio in the room". The words are wake words, so the page also
+  asks you to mute other Satellite1 devices in earshot first; the tuner's peer-mute cannot run
+  pre-login (the roster and the peer passwords sit behind the session, and the roster itself needs
+  HA actions — the exact things missing when the challenge runs). Device-driven peer holds from a
+  flash-cached roster are a known future design, not built.
 - **Sign-in link and QR.** Diagnostics → Launch shows a tokenized URL and a QR carrying the same
   key. Scan the QR with a phone and it lands signed in with no typing; paste the link into a Home
   Assistant dashboard button and it becomes a true launch button. The two are built on different
@@ -192,9 +219,13 @@ browser UA simply forgoes digest and uses the cookie or `?key=` flow like a brow
   live off the screen (the address is fresh by construction) and an IP works on every phone where a
   `.local` QR is a dead end for mDNS-less ones — phones that *can* resolve mDNS still end up on
   `.local`, since the smart redirect carries `?key=` along. The copyable link uses the permanent
-  `.local` name, which survives DHCP churn — the right form for anything long-lived. If a dashboard
-  button must use an IP (say, for a browser that cannot resolve `.local`), give the device a DHCP
-  reservation first, or the button dies with the device's next lease. The link is a bearer
+  `.local` name, which survives DHCP churn — the right form for anything long-lived — except on a
+  network this browser has proven cannot resolve `.local` (the redirect probe's day-long memory,
+  `sat1.mdns_fail`): there the card switches the link to the device's IP, since a `.local` link
+  pasted on that network is a guaranteed dead end, and a hint under it says to give the device a
+  DHCP reservation so the address-based link survives lease churn. The same reasoning applies if
+  you build an IP link by hand for an mDNS-less browser: reserve the address first, or the button
+  dies with the device's next lease. The link is a bearer
   credential — anyone who has it can sign in — so treat it like the password, and use "Sign out
   everywhere" to revoke it. If you paste it into a dashboard, the key then lives in that dashboard's
   configuration, readable by anyone who can edit dashboards.
@@ -209,9 +240,10 @@ Chrome proper and share its cookies, so they are signed in immediately.
 Two channels, and they are not the same. The native API to Home Assistant is Noise-encrypted
 (`api: encryption:` in `common/home_assistant.yaml`), so everything the device exchanges with Home
 Assistant is protected. The web server is plain HTTP — ESPHome offers no TLS there — and this design
-works within that: the password never crosses the wire, and the presence sign-ins never transmit a
-secret at all, but the session cookie and the sign-in key are bearer tokens a LAN sniffer could
-replay. That is unfixable without TLS. On-device HTTPS is deliberately not attempted: no public CA
+works within that: the password never crosses the wire, and the spoken-code sign-in never transmits
+its secret at all (the wake-word challenge does ride the poll to its own window's owner — the
+displayed-chips trade described above), but the session cookie and the sign-in key are bearer
+tokens a LAN sniffer could replay. That is unfixable without TLS. On-device HTTPS is deliberately not attempted: no public CA
 issues certificates for private IPs or `.local` names, so it would be self-signed — a permanent,
 scarier browser warning than the cross-subnet Private Relay interstitial (see the interstitial note
 near the top) — and it would cost TLS handshake memory on a chip already running audio pipelines.
@@ -371,7 +403,12 @@ The device rows carry the switcher's variant labels alongside the jump fields (S
 device's transport (`e`/`w`, read from its own Network Status sensor's `Eth:`/`WiFi:` prefix — runtime
 truth, so a future unified firmware needs nothing new), its radar model (2450/2410/0, from the
 firmware version's `+ld2450`/`+ld2410` suffix on pinned builds or the auto-detect build's "Radar
-Detected" sensor), and its presence state (the `Presence`/`Room Presence` binary sensor). The
+Detected" sensor), and its presence state (the `Presence`/`Room Presence` binary sensor). The rows
+also carry the peer's current IP, parsed off the same Network Status sensor: `configuration_url` is
+only as routable as the host Home Assistant connects on, and a peer added to HA by its `.local`
+hostname carried a `.local` URL that killed the switcher's jump and the tuner's peer-mute on
+mDNS-broken networks — `peerOrigin` in `lib/device.js` substitutes the IP whenever the URL's host is
+not an IP literal, and peers on older firmware (no IP field) behave exactly as before. The
 switcher renders these as right-edge pills on every row, with the radar pill doubling as a presence
 light. Presence is the one fact in the payload that is genuinely live-ish: while the switcher sheet
 is open the app re-runs the sync every 5 seconds (rung 1 installations only — the fallback rung is

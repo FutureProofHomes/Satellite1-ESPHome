@@ -22,6 +22,7 @@
  */
 
 import { peerLogin } from "./auth.js";
+import { peerOrigin } from "./device.js";
 
 const OPTS = { mode: "cors", credentials: "omit", cache: "no-store" };
 
@@ -81,7 +82,10 @@ export async function holdPeerMutes(ha, selfMac) {
   await Promise.all(
     peers.map(async (d) => {
       const name = String(d?.[1] || d?.[3] || "?");
-      const origin = d?.[5] ? String(d[5]).replace(/\/+$/, "") : "";
+      // peerOrigin, not d[5] raw: a peer added to Home Assistant by its .local hostname carries a
+      // .local configuration_url, which dies on an mDNS-broken network - the roster's live IP
+      // (d[11]) substitutes when the row has one. Same helper the switcher's jump uses.
+      const origin = peerOrigin(d);
       const pw = d?.[7];
       try {
         if (!origin || !pw) throw new Error("no address");

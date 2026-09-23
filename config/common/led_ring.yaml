@@ -498,11 +498,24 @@ script:
             id(control_leds_warning).execute();
           } else if (id(timer_ringing).state) {
             id(control_leds_timer_ringing).execute();
-          } else if (id(login_window_active)) {
+          } else if (id(login_success_flash)) {
+            // The just-approved sign-in's green sweep, pinned by a global rather than issued as a
+            // bare turn_on from the close handler: the voice pipeline that carried the spoken code
+            // is tearing down in these same milliseconds, and its phase changes re-run this script
+            // - an unpinned flash gets repainted mid-celebration. The handler in common/web_ui.yaml
+            // raises the flag for 1.5s and clears it.
+            id(control_leds_login_success).execute();
+          } else if (id(login_window_active) &&
+                     id(voice_assistant_phase) != ${voice_assist_waiting_for_command_phase_id} &&
+                     id(voice_assistant_phase) != ${voice_assist_listening_for_command_phase_id} &&
+                     id(voice_assistant_phase) != ${voice_assist_thinking_phase_id}) {
             // A web sign-in is waiting for its button press or voice answer. Below mute, timers
             // and the warning states, which all say something more urgent than "someone is
-            // logging in" - and above the assistant phases, so the breathe holds steady through
-            // the spoken-code pipeline instead of flickering between animations mid-answer.
+            // logging in". The breathe yields to the mic-open and processing phases on purpose
+            // (owner request, September 23 2026): when the spoken-code turn opens the mic, the
+            // ring runs its usual listening spin - the cue to say the code now - and the thinking
+            // pattern covers the transcription wait. Everything else in the window keeps the
+            // breathe, the prompt itself included (its phase is "replying").
             id(control_leds_login_window).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_waiting_for_command_phase_id}) {
             id(control_leds_voice_assistant_waiting_for_command_phase).execute();
@@ -716,6 +729,16 @@ script:
           blue: 96%
           id: voice_assistant_leds
           effect: "Breathe"
+
+  # The approved sign-in's green sweep, held for as long as login_success_flash is up (1.5s, raised
+  # and cleared by the close handler in common/web_ui.yaml). A script of its own so the chain above
+  # can re-assert it against the pipeline-teardown repaints.
+  - id: control_leds_login_success
+    then:
+      - light.turn_on:
+          id: voice_assistant_leds
+          brightness: 66%
+          effect: "Success"
 
   # Script executed when the center button is touched
   # The complete LED ring turns on

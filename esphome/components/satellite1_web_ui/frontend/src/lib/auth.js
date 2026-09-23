@@ -123,14 +123,28 @@ export async function loginKey(key) {
   return { ok: res.ok && body.ok === 1, key: body.key || key, locked: body.locked === 1, retry: body.retry || 0 };
 }
 
-/** Opens the pairing window. `pending` is someone else's window - the confused-deputy copy's cue. */
+/** Opens the pairing window. `pending` is someone else's window - the confused-deputy copy's cue.
+ *  `hab` says voice-via-Home-Assistant was unavailable (the actions checkbox), `seq` is the offline
+ *  challenge as symbol digits ("012") for the on-screen chips - both only ever served to this
+ *  window's owner. */
 export async function pairStart() {
   const res = await f("/api/sat1/login/start", form({}));
   const body = await res.json().catch(() => ({}));
-  return { ok: res.ok && body.ok === 1, mode: body.mode, left: body.left, pending: body.pending === 1, retry: body.retry || 0 };
+  return {
+    ok: res.ok && body.ok === 1,
+    mode: body.mode,
+    left: body.left,
+    hw: body.hw,
+    hab: body.hab === 1,
+    seq: body.seq || null,
+    pending: body.pending === 1,
+    retry: body.retry || 0,
+  };
 }
 
-/** One poll: {s: "pending"|"ok"|"expired"|"denied"|"busy"|"none", mode, left, key, hw}. */
+/** One poll: {s: "pending"|"ok"|"expired"|"denied"|"busy"|"none", mode, left, key, hw, hab, seq, p}.
+ *  `p` is the matched-prefix count for a seq window - how many challenge words the device has heard
+ *  back correctly so far - which drives the chips' bold-to-plain progress. */
 export async function pairPoll() {
   const res = await f("/api/sat1/login/poll");
   return await res.json().catch(() => ({ s: "none" }));
@@ -201,6 +215,21 @@ const portSuffix = () => (location.port ? `:${location.port}` : "");
  */
 const MDNS_FAIL_KEY = "sat1.mdns_fail";
 const MDNS_FAIL_TTL = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether this browser recently proved it cannot resolve the device's .local name - the redirect
+ * probe's own memory, read by the Launch card so the copyable sign-in link can switch to the IP
+ * (a .local link pasted on this network would be a dead end). False on a .local origin (being here
+ * is proof mDNS works) and false when nothing is known, so the .local form stays the default.
+ */
+export function mdnsLooksBroken() {
+  if (!isIpHost(location.hostname)) return false;
+  try {
+    return Date.now() - (+localStorage.getItem(MDNS_FAIL_KEY) || 0) < MDNS_FAIL_TTL;
+  } catch {
+    return false;
+  }
+}
 
 export async function maybeRedirectLocal() {
   if (!isIpHost(location.hostname)) return false;

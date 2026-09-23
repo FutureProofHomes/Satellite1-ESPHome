@@ -14,19 +14,33 @@
 # reaches the conversation agent, and the utterance never reaches the app's Voice card.
 #
 # Offline (mode "seq"): no Home Assistant means no TTS and no STT, so the challenge is built from
-# what the firmware can say and hear on its own. The three compiled wake models - Hey Jarvis, Okay
-# Nabu and the internal "stop" - are a three-symbol alphabet; the gate picks a random three-symbol
-# sequence and this file speaks it from clips embedded at build time (config/sounds/, synthesized
-# text-to-speech). The models stay disabled while the clips play, so the device cannot hear its own
-# challenge and approve itself; they arm afterwards, and every firing during the window is consumed
-# as a symbol by the hook in voice_assistant.yaml instead of starting the assistant. The gate
-# judges the answer only after eight seconds of silence, as an exact sequence where overshooting
-# fails - which is what makes counting upward through the answer worthless.
+# what the firmware can hear on its own. The three compiled wake models - Hey Jarvis, Okay Nabu
+# and the internal "stop" - are a three-symbol alphabet; the gate picks a random six-symbol
+# sequence (SG_SEQ_LEN - 729 combinations), the login page displays it as ordered chips that
+# un-bold as each word lands (the ring blips green in step), and this file plays one embedded prompt
+# ("To sign in, press the action button, or say the wake words on your screen") pointing the
+# person at them. The device no longer recites the words themselves (owner decision, September 23
+# 2026 - the on-screen chips carry the sequence, and the per-word clips both played jittery and
+# were redundant once displayed). The models arm after the prompt drains, and every firing during
+# the window is consumed as a symbol by the hook in voice_assistant.yaml instead of starting the
+# assistant. A perfect answer approves the moment its third word lands; anything short of perfect
+# is judged only after eight seconds of silence, in one verdict, so a wrong guess's timing never
+# reveals which symbol missed. The match is anchored to the first three symbols heard, which is
+# what makes counting upward through the answer worthless either way.
 
 globals:
   # What the LED chain reads: true from window open to window close, driving the breathe effect in
   # common/led_ring.yaml at a priority below mute, timers and the ring's warning states.
   - id: login_window_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  # Pins the approval's green sweep in the LED chain for its 1.5 seconds: the voice pipeline that
+  # carried the spoken code tears down right as the window closes, and its phase changes re-run
+  # control_leds - a flash issued as a bare turn_on was repainted mid-celebration. Raised and
+  # cleared by the close handler in common/web_ui.yaml; read by the chain in common/led_ring.yaml.
+  - id: login_success_flash
     type: bool
     restore_value: no
     initial_value: 'false'
@@ -77,31 +91,26 @@ globals:
     restore_value: no
     initial_value: 'false'
 
-# The offline challenge's voice, embedded at build time like every other device sound. Local files
-# rather than the S3 bucket the other sounds use, because the challenge words and the wake models
-# they must match are pinned by this repository, not by an asset server - a re-recorded "Hey Jarvis"
-# that the hey_jarvis model no longer parses would be a silent regression nobody could bisect.
-# 16kHz mono WAV, ~150KB of flash for all four.
+# The offline challenge's one prompt ("To sign in, press the action button, or say the wake words
+# on your screen"), embedded at build time like every other device sound. Encoded exactly like the
+# sounds that play smoothly - 48kHz stereo MP3 at 128kbps, loudness-normalized - because its
+# predecessor, a 16kHz mono WAV, played back jittery on hardware (owner report, September 23 2026).
+# The old per-word clips (login_word_*.wav) are gone with the recital they served; the login page's
+# chips carry the sequence now. ~96KB of flash.
 audio_file:
-  - id: login_challenge_intro_sound
-    file: sounds/login_challenge_intro.wav
-  - id: login_word_jarvis_sound
-    file: sounds/login_word_jarvis.wav
-  - id: login_word_nabu_sound
-    file: sounds/login_word_nabu.wav
-  - id: login_word_stop_sound
-    file: sounds/login_word_stop.wav
+  - id: login_seq_prompt_sound
+    file: sounds/login_seq_prompt.mp3
 
 script:
   # Online mode: announce the code, then open the mic.
   #
-  # The announcement rides assist_satellite.announce on this device's own satellite entity, resolved
-  # by MAC the same way area_ducking.yaml resolves the device - the entity id is Home Assistant's to
-  # mint and cannot be hardcoded. The waits below are the completion signal remote TTS does not
-  # have: watch the announcement start on the local media player, watch it end, then listen. If the
-  # action fails (actions checkbox unticked, no satellite entity), the waits fall through on their
-  # timeouts and the window keeps working by button and password - the poll already told the page
-  # which modes exist, and the docs cover the checkbox.
+  # The announcement rides this device's own assist_satellite entity, resolved by MAC the same way
+  # area_ducking.yaml resolves the device - the entity id is Home Assistant's to mint and cannot be
+  # hardcoded. If the action fails (actions checkbox unticked mid-probe, no satellite entity, an HA
+  # hiccup), the watchdog at the bottom of the script notices no announcement ever started and
+  # downgrades the window to the offline challenge, which announces from the embedded clips - the
+  # gate's mode selection already avoids code mode when the actions probe says blocked, so this is
+  # the second net, not the first.
   # Speak the code and listen for the reply, as one coordinated turn.
   #
   # assist_satellite.start_conversation, not assist_satellite.announce plus voice_assistant.start.
@@ -164,6 +173,32 @@ script:
             # The reason has been spoken; the next prompt is a welcome again unless another
             # mismatch says otherwise.
             - lambda: 'id(login_code_retry) = false;'
+            # The announcement watchdog. on_error above only fires when Home Assistant *reports* an
+            # error - and the failure that matters most (the actions checkbox off) is a silent
+            # drop: no response, no error, no announcement. So watch for the effect instead: the
+            # conversation's prompt plays through this device's own media player as an
+            # announcement, and if none has started within the timeout, the call is judged lost and
+            # the gate downgrades the window to the offline challenge (or button-only), resets the
+            # deadline and re-fires the open event - which re-enters the dispatch in
+            # common/web_ui.yaml and announces the new challenge from the embedded clips. Guarded
+            # on login_voice_pending so a window that was approved, cancelled or expired while we
+            # waited stays untouched; the downgrade itself fires at most once per window because
+            # the mode leaves "code" with it. Seven seconds covers a slow pipeline's TTS
+            # generation; a false trip costs a working local challenge, not a dead end.
+            - wait_until:
+                condition:
+                  media_player.is_announcing:
+                    id: external_media_player
+                timeout: 7s
+            - if:
+                condition:
+                  and:
+                    - lambda: 'return id(web_ui_app)->login_voice_pending();'
+                    - not:
+                        media_player.is_announcing:
+                          id: external_media_player
+                then:
+                  - lambda: 'id(web_ui_app)->downgrade_login_window();'
 
   # Another turn, after a mismatch (from on_stt_end) or a silent listen that timed out (from the
   # voice assistant's on_end). The delay lets the previous run fully end before the guard in
@@ -175,17 +210,18 @@ script:
       - delay: 1200ms
       - script.execute: login_code_converse
 
-  # Offline mode: speak the challenge from the embedded clips, then arm the models and listen.
+  # Offline mode: play the embedded prompt, then arm the models and listen. The sequence itself is
+  # never spoken - the login page shows it as ordered chips (the gate serves it to the window's
+  # owner), and the prompt just points the person at their screen.
   #
-  # Model handling is the delicate part. All three challenge models are disabled before the first
-  # clip plays - the device must not hear its own voice say "Hey Jarvis" and record a symbol against
-  # its own challenge - and enabled together once the last clip ends. Prior states are saved first
-  # and handed back by login_models_restore when the window closes. Enables and disables are gated
-  # on is_enabled() because each write costs an NVS save, per the component's own discipline.
+  # Model handling: prior states are saved first and handed back by login_models_restore when the
+  # window closes. The disable-during-playback that guarded the old word clips (the device must not
+  # hear itself say "Hey Jarvis") is kept even though the new prompt contains no wake words - it
+  # costs nothing when the states already match, and it keeps the invariant local to this script
+  # rather than to the current recording's wording. Enables and disables are gated on is_enabled()
+  # because each write costs an NVS save, per the component's own discipline.
   - id: login_announce_seq
     mode: restart
-    parameters:
-      seq: string
     then:
       - lambda: |-
           id(login_prior_jarvis) = id(hey_jarvis).is_enabled();
@@ -198,26 +234,14 @@ script:
       - script.execute:
           id: play_sound
           priority: true
-          sound_file: "login_challenge_intro_sound"
+          sound_file: "login_seq_prompt_sound"
       - delay: 300ms
       - wait_until:
           condition:
             not:
               media_player.is_announcing:
                 id: external_media_player
-          timeout: 8s
-      - script.execute:
-          id: login_say_symbol
-          sym: !lambda "return seq.size() > 0 ? seq[0] - '0' : 0;"
-      - script.wait: login_say_symbol
-      - script.execute:
-          id: login_say_symbol
-          sym: !lambda "return seq.size() > 1 ? seq[1] - '0' : 0;"
-      - script.wait: login_say_symbol
-      - script.execute:
-          id: login_say_symbol
-          sym: !lambda "return seq.size() > 2 ? seq[2] - '0' : 0;"
-      - script.wait: login_say_symbol
+          timeout: 10s
       # Listening phase. micro_wake_word.start is for the device that has never seen Home
       # Assistant - on_client_connected is what normally starts the detector, and a never-connected
       # device would otherwise have nothing running to hear the answer. Idempotent when it already
@@ -228,25 +252,24 @@ script:
           if (!id(okay_nabu).is_enabled()) id(okay_nabu).enable();
           if (!id(stop).is_enabled()) id(stop).enable();
 
-  # One challenge word: 0 = Hey Jarvis, 1 = Okay Nabu, 2 = Stop. A beat of silence ahead of each so
-  # the words read as a list, then wait for the clip to drain so the next call cannot start over it.
-  - id: login_say_symbol
-    parameters:
-      sym: int
+  # One correct challenge word: a short green blip over the breathe (owner request, September 23
+  # 2026), the in-room twin of the page's un-bolding chips. Fired from on_wake_word_detected in
+  # common/voice_assistant.yaml when the gate says the symbol kept the answer on track. restart so
+  # words said in quick succession each restart the blip; the control_leds at the end hands the
+  # ring back to whatever the chain says now - the breathe mid-answer, or the pinned success sweep
+  # when the blip's word was the last one.
+  - id: login_symbol_flash
+    mode: restart
     then:
+      - light.turn_on:
+          id: voice_assistant_leds
+          brightness: 66%
+          red: 0%
+          green: 100%
+          blue: 15%
+          effect: none
       - delay: 400ms
-      - lambda: |-
-          const char *file = sym == 0   ? "login_word_jarvis_sound"
-                             : sym == 1 ? "login_word_nabu_sound"
-                                        : "login_word_stop_sound";
-          id(play_sound)->execute(true, file);
-      - delay: 300ms
-      - wait_until:
-          condition:
-            not:
-              media_player.is_announcing:
-                id: external_media_player
-          timeout: 5s
+      - script.execute: control_leds
 
   # Hands the wake models back to whatever the window found. One deliberate exception: the stop
   # model is armed by a ringing timer independently (see timer.yaml), so if a timer began ringing

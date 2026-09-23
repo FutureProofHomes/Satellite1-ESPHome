@@ -92,6 +92,16 @@ micro_wake_word:
     - if:
         condition:
           lambda: return id(timer_ringing).state || !id(web_ui_app)->consume_login_wake(wake_word);
+        else:
+          # A consumed challenge symbol. When the gate says it kept the answer on track, blip the
+          # ring green (common/web_ui_login.yaml) - the in-room twin of the login page's
+          # un-bolding chips. A wrong symbol blips nothing; the single quiet-period verdict still
+          # owns saying so.
+          - if:
+              condition:
+                lambda: return id(web_ui_app)->take_login_symbol_ok();
+              then:
+                - script.execute: login_symbol_flash
         then:
           # The detection ring behind the app's "say it now" test moment and the Diagnostics
           # history. Inside the gate on purpose: a firing the sign-in challenge consumed is an

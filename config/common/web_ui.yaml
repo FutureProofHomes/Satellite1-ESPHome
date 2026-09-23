@@ -245,11 +245,21 @@ satellite1_web_ui:
 
   # The pairing window opening: LED on, then the mode's announcement. The scripts live in
   # common/web_ui_login.yaml. `mode` is button/code/seq; `secret` is the spoken code's digits, or
-  # the challenge sequence as symbol indices ("012" = Hey Jarvis, Okay Nabu, Stop). The secret
+  # the challenge sequence as symbol indices ("012" = Hey Jarvis, Okay Nabu, Stop). The spoken code
   # exists only here and as audio in the room - the browser that asked never sees it, which is what
-  # makes saying it back proof of presence.
+  # makes saying it back proof of hearing the device. The seq challenge is also shown on the login
+  # page (owner decision, September 2026; the tradeoff is documented at SessionGate::open_window_),
+  # so its proof is producing audio in the room rather than hearing it.
   on_login_window:
     - lambda: id(login_window_active) = true;
+    # Park the wake word loader's drift reconciler for the window. The offline challenge enables
+    # the compiled hey_jarvis/okay_nabu models whatever the slots hold (login_announce_seq), and
+    # without this the reconciler would read those enables as drift within one loop pass - adopting
+    # a challenge model into a slot or disabling it mid-challenge on any device whose slots were
+    # customised. Held on every mode because a code window can downgrade to seq mid-flight (the
+    # announcement watchdog in web_ui_login.yaml); released in the close handler below, with the
+    # loader's own 90s ceiling as the crash backstop.
+    - lambda: id(mww_loader).hold_reconcile(true);
     - script.execute: control_leds
     # A software mute would swallow the announcement and the reply alike. Lift it for voice
     # windows - and remember that we did, because the close handler below puts it back. The mute
@@ -276,9 +286,10 @@ satellite1_web_ui:
         condition:
           lambda: return mode == "seq";
         then:
-          - script.execute:
-              id: login_announce_seq
-              seq: !lambda return secret;
+          # No `seq` parameter anymore: the device plays one fixed prompt pointing at the screen,
+          # and the sequence reaches the person through the login page's chips (the gate serves it
+          # to the window's owner on start/poll).
+          - script.execute: login_announce_seq
 
   # The window closing, whatever closed it. Stop whatever stage the announcement machinery was in,
   # hand the wake models back (see login_models_restore for the ringing-timer edge), and say how it
@@ -290,6 +301,10 @@ satellite1_web_ui:
     - script.stop: login_announce_seq
     - script.stop: login_code_relisten
     - script.execute: login_models_restore
+    # After the restore, so the reconciler never sees the challenge's temporary enables: by the
+    # time it runs again the models are back to their slot-consistent states and there is no drift
+    # to misread.
+    - lambda: id(mww_loader).hold_reconcile(false);
     # The software mute goes back exactly as the open handler found it. Whatever ended the window
     # - approval included - the mute predates the sign-in and outlives it; the signed-in user can
     # unmute from the app, with a session to their name.
@@ -299,19 +314,63 @@ satellite1_web_ui:
         then:
           - lambda: 'id(login_lifted_mute) = false;'
           - switch.turn_on: master_mute_switch
+    # Approval and cancel both silence the sign-in's own audio, immediately and everywhere (owner
+    # requests, September 23 2026: the prompt kept reciting the code after the button press, and
+    # the start_conversation turn then opened its listen phase - which reads as the press having
+    # summoned the assistant; cancel got the same treatment because a window its owner just closed
+    # must not keep talking or listening either). Same three moves as the stop wake word, in the
+    # same order: end the conversation turn first so nothing re-opens the mic, stop the local
+    # announcement channel (the queued sync-guard silence goes with it), then fan the stop out to
+    # the routed targets - tts_remote_stop's own guard makes it free when nothing was routed.
+    # Stopping the assistant matches the button's normal semantics, and yes: cancelling a
+    # button-mode window mid-conversation stops that conversation too - the owner's call. The
+    # spoken-code approval passes through here as a no-op; on_stt_end already stopped its pipeline.
+    - if:
+        condition:
+          lambda: return result == "approved" || result == "cancelled";
+        then:
+          - if:
+              condition:
+                voice_assistant.is_running:
+              then:
+                - voice_assistant.stop:
+          - if:
+              condition:
+                media_player.is_announcing:
+                  id: external_media_player
+              then:
+                - media_player.stop:
+                    announcement: true
+                    id: external_media_player
+          - script.execute: tts_remote_stop
     - if:
         condition:
           lambda: return result == "approved";
         then:
+          # The success chime, after the announcement channel has actually drained: a chime queued
+          # in the same breath as the stop above rides the very pipeline being torn down and can be
+          # swallowed with it. The wait is instant when nothing was playing (a button-mode window),
+          # and the timeout keeps a wedged pipeline from eating the confirmation outright - the
+          # chime is the one signal that says the press worked (owner request, September 23 2026).
+          - wait_until:
+              condition:
+                not:
+                  media_player.is_announcing:
+                    id: external_media_player
+              timeout: 2s
+          - delay: 150ms
           - script.execute:
               id: play_sound
               priority: true
               sound_file: "center_button_press_sound"
-          - light.turn_on:
-              id: voice_assistant_leds
-              brightness: 66%
-              effect: "Success"
+          # The green flash, through the chain rather than a bare turn_on: the pipeline teardown's
+          # phase changes re-run control_leds during these 1.5 seconds, and only a branch of the
+          # chain's own survives the repaints - which is what makes the flash show for every
+          # approval path, button, spoken code and wake sequence alike.
+          - lambda: id(login_success_flash) = true;
+          - script.execute: control_leds
           - delay: 1500ms
+          - lambda: id(login_success_flash) = false;
           - script.execute: control_leds
         else:
           - if:

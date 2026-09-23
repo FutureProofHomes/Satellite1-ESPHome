@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
 import { CONFIRM, HINTS, TEXT } from "../copy.js";
-import { logoutAll, qrSignInLink, signInLink } from "../lib/auth.js";
+import { logoutAll, mdnsLooksBroken, qrSignInLink, signInLink } from "../lib/auth.js";
 import { entity, pathFor, post, request, requestJson } from "../lib/device.js";
 import { qrSvgPath } from "../lib/qr.js";
 import { takeIntent } from "../lib/toast.js";
@@ -734,8 +734,15 @@ function Launch({ ctx }) {
   const [copied, setCopied] = useState(false);
   if (!d?.key) return null;
 
-  const link = signInLink(d.name, d.key);
-  const qr = qrSvgPath(qrSignInLink(d.ip, d.key) || link);
+  // The copyable link prefers .local for its DHCP-proof lifetime - except on a network this
+  // browser has proven cannot resolve it (the redirect probe's day-long memory), where a .local
+  // link pasted into a dashboard is a guaranteed dead end and the IP form, fragile as it is, at
+  // least works. The hint below the link says what that trade costs and names the fix (a DHCP
+  // reservation).
+  const noMdns = mdnsLooksBroken();
+  const ipLink = qrSignInLink(d.ip, d.key);
+  const link = noMdns && ipLink ? ipLink : signInLink(d.name, d.key);
+  const qr = qrSvgPath(ipLink || link);
 
   const copy = () => {
     try {
@@ -769,6 +776,7 @@ function Launch({ ctx }) {
         )}
         <div class="launch-side">
           <div class="launch-link num">{link}</div>
+          {noMdns && ipLink && <p class="dim sm">{TEXT.launch_mdns_hint}</p>}
           <div class="launch-actions">
             <Btn onClick={copy}>{copied ? TEXT.launch_copied : TEXT.launch_copy}</Btn>
             <Confirm

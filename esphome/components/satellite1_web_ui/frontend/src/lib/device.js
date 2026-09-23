@@ -282,6 +282,33 @@ export function deviceIdentity(device, ha) {
 }
 
 /**
+ * A roster row's reachable origin, for the switcher's jump and the tuner's peer-mute.
+ *
+ * The row carries two addresses: configuration_url (d[5], the host Home Assistant connects on) and
+ * the peer's current IP (d[11], parsed off its Network Status sensor; empty on older peer
+ * firmware). configuration_url is preferred exactly as long as its host is an IP literal - which
+ * it normally is. But a peer added to Home Assistant by its .local hostname carries a .local URL,
+ * and on a network that does not resolve mDNS every request against it dies; when the row also
+ * carries the IP, the IP replaces the hostname (same scheme, same port). A row with an IP but no
+ * URL at all still gets an origin, on this page's port - peers run the same firmware.
+ */
+const IP_HOST_RE = /^\d+\.\d+\.\d+\.\d+$/;
+export function peerOrigin(d) {
+  const url = d?.[5] ? String(d[5]).replace(/\/+$/, "") : "";
+  const ip = d?.[11] && IP_HOST_RE.test(String(d[11])) ? String(d[11]) : "";
+  if (!url) return ip ? `http://${ip}${location.port ? `:${location.port}` : ""}` : "";
+  if (!ip) return url;
+  try {
+    const u = new URL(url);
+    if (IP_HOST_RE.test(u.hostname) || u.hostname.includes(":")) return url;
+    u.hostname = ip;
+    return u.toString().replace(/\/+$/, "");
+  } catch {
+    return url;
+  }
+}
+
+/**
  * GET /api/sat1/ha: the area, player and device tree Home Assistant rendered.
  *
  * The browser cannot ask Home Assistant itself - it has no token, and requiring one to open a

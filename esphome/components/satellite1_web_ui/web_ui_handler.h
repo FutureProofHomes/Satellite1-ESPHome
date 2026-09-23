@@ -331,6 +331,10 @@ class WebUIHandler : public AsyncWebHandler {
   /// refresh flag above.
   void set_ha_actions(int verdict) { this->ha_actions_.store(verdict); }
 
+  /// The verdict back out, for the session gate's window-mode selection (the spoken code needs
+  /// actions to run; see SessionGate::set_ha_actions_fn). Safe from any task - one atomic load.
+  int ha_actions() const { return this->ha_actions_.load(); }
+
   /// True once, if a browser has asked for a resync since the last call. An atomic exchange rather
   /// than a scheduler call, because this is set from the httpd task and read from the main loop -
   /// the same split satellite1_radar's engineering-mode gating uses.

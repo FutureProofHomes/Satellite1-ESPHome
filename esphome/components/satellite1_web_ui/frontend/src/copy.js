@@ -241,16 +241,39 @@ export const TEXT = {
   // instruction, plus the one thing only the person in the room can fix.
   login_mode_button_hw:
     "Press the action button on top of your Satellite1 - the ring is breathing while it waits. (Voice sign-in is off while the hardware mute switch is on - slide it off and try again to sign in by voice.)",
-  login_mode_code: "Listen: your Satellite1 is saying a code. Say the code back, or press the action button.",
+  login_mode_code: "Press the action button, or say the code.",
+  // Matches what the device now says aloud ("To sign in, press the action button, or say the wake
+  // words on your screen") - the chips below the line are the screen it means. The device no
+  // longer recites the words itself, and the challenge is six words (owner decision, September 23
+  // 2026 - 729 combinations against the voice lockout, where three gave 27).
   login_mode_seq:
-    "Listen: your Satellite1 will say three wake words. Repeat them back in the same order, or press the action button.",
+    "Say the six wake words below, in order - or press the action button on top of your Satellite1.",
+  // The hab variant (Home Assistant connected but not allowed to perform actions) says the same
+  // thing the device's own prompt says, no explanation - owner's wording, September 23 2026; the
+  // post-login splash owns explaining the checkbox.
+  login_mode_seq_hab: "Press the action button or say the wake words on your screen.",
+  login_mode_button_hab:
+    "Home Assistant isn't allowed to speak for this device yet, so sign in by pressing the action button on top of your Satellite1 - the ring is breathing while it waits.",
+  // The challenge words by symbol index (0/1/2), matching the models pinned in
+  // common/voice_assistant.yaml and the clips in config/sounds/. Shown as ordered chips that
+  // un-bold as the device hears each one back (the poll's `p` matched-prefix count) - the security
+  // tradeoff of displaying the sequence at all is documented at SessionGate::open_window_.
+  login_seq_words: ["Hey Jarvis", "Okay Nabu", "Stop"],
+  // Under the chips: the words are wake words, and every other Satellite1 in earshot will answer
+  // them. Peer-muting cannot run pre-login (the roster and its passwords sit behind the session),
+  // so the page asks the person instead.
+  login_seq_peers_hint:
+    "If other Satellite1 devices are within earshot, mute them first so they don't answer the challenge.",
   login_cancel: "Cancel",
   // The confused-deputy warning, and the one string here that is doing security work: the action
   // button approves whoever asked first, so a person "helping" a stuck screen by pressing it could
   // be letting someone else in.
   login_busy:
     "Another sign-in is already waiting on this device. If that isn't you, don't press the button - wait for the light to stop.",
-  login_expired: "Nothing answered in time, so the sign-in closed.",
+  // Says how to recover, not just what happened: the action button only approves while the
+  // countdown runs, and a press after expiry falls through to the assistant - "nothing happened"
+  // in a real customer's words (support case, September 2026).
+  login_expired: "Nothing answered in time, so the sign-in closed. Start again, then press the button or answer while the countdown runs.",
   login_denied: "The spoken answer didn't match, so the sign-in closed.",
   login_start_failed: "Couldn't reach the device to start. Check the connection and try again.",
   login_retry: "Try again",
@@ -270,6 +293,11 @@ export const TEXT = {
   /* The Launch section on Diagnostics. */
   launch_copy: "Copy link",
   launch_copied: "Copied",
+  // Shown when this browser's .local probe failed (lib/auth.js remembers it for a day): the
+  // copyable link switches to the device's IP - the .local form is a dead end here - and this line
+  // says what that trade costs and how to make it safe.
+  launch_mdns_hint:
+    "Your network doesn't resolve .local names, so this link uses the device's IP address. It stops working if your router hands the device a new address - give it a DHCP reservation to make the link permanent.",
   launch_regen: "Sign out everywhere",
   launch_regen_title: "Sign out everywhere?",
   launch_regen_body:

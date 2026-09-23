@@ -23,12 +23,28 @@ import { Logo } from "./ui.jsx";
 const clock = (s) => `${Math.floor(s / 60)}:${String(Math.max(0, s) % 60).padStart(2, "0")}`;
 
 /** hw rides the poll: a button-only window forced by the hardware mute slider gets the copy that
- *  says how to get voice sign-in back. */
-const modeText = (mode, hw) =>
+ *  says how to get voice sign-in back. hab rides it too: a voice window that fell back from the
+ *  spoken code because Home Assistant may not perform actions gets the copy that says why, so the
+ *  wake-word challenge reads as a fallback rather than a malfunction. */
+const modeText = (mode, hw, hab) =>
   mode === "code" ? TEXT.login_mode_code
-  : mode === "seq" ? TEXT.login_mode_seq
+  : mode === "seq" ? (hab ? TEXT.login_mode_seq_hab : TEXT.login_mode_seq)
+  : hab ? TEXT.login_mode_button_hab
   : hw ? TEXT.login_mode_button_hw
   : TEXT.login_mode_button;
+
+/** The challenge words as ordered chips, bold until the device hears each one back (`done` = the
+ *  poll's matched-prefix count reached it) - the moving-forward cue for the person mid-answer.
+ *  `seq` is symbol digits ("012") mapped through login_seq_words. */
+const SeqChips = ({ seq, p }) => (
+  <div class="login-seq" role="list" aria-label="Challenge words, in order">
+    {[...seq].map((c, i) => (
+      <span key={i} role="listitem" class={`login-chip${i < (p || 0) ? " done" : ""}`}>
+        {TEXT.login_seq_words[+c] || "?"}
+      </span>
+    ))}
+  </div>
+);
 
 export function LoginScreen({ onSignedIn }) {
   // null = idle; otherwise {s, mode, left} mirroring the poll, plus the local "error" state.
@@ -80,7 +96,7 @@ export function LoginScreen({ onSignedIn }) {
       setPair({ s: "error" });
       return;
     }
-    setPair({ s: "pending", mode: opened.mode, left: opened.left, hw: opened.hw });
+    setPair({ s: "pending", mode: opened.mode, left: opened.left, hw: opened.hw, hab: opened.hab, seq: opened.seq, p: 0 });
 
     const tick = async () => {
       let p;
@@ -95,8 +111,11 @@ export function LoginScreen({ onSignedIn }) {
         return;
       }
       if (p && p.s === "pending") {
-        setPair({ s: "pending", mode: p.mode, left: p.left, hw: p.hw });
-        pollTimer.current = setTimeout(tick, 1200);
+        setPair({ s: "pending", mode: p.mode, left: p.left, hw: p.hw, hab: p.hab === 1, seq: p.seq || null, p: p.p || 0 });
+        // Faster while a seq window listens: the chips' un-bolding is the feedback that the device
+        // heard a word, and 1.2s behind the utterance reads as "it missed me". Elsewhere the
+        // gentler cadence stands - nothing on screen moves per-word.
+        pollTimer.current = setTimeout(tick, p.mode === "seq" ? 500 : 1200);
         return;
       }
       if (p && (p.s === "expired" || p.s === "denied" || p.s === "busy")) {
@@ -163,9 +182,19 @@ export function LoginScreen({ onSignedIn }) {
 
         {pending && (
           <div class="login-pending" role="status">
-            <span class="login-pulse" aria-hidden="true" />
-            <div class="login-mode">{modeText(pair.mode, pair.hw)}</div>
-            <div class="login-left">{clock(pair.left ?? 0)}</div>
+            <div class="login-mode">{modeText(pair.mode, pair.hw, pair.hab)}</div>
+            {pair.mode === "seq" && pair.seq && (
+              <>
+                <SeqChips seq={pair.seq} p={pair.p} />
+                <div class="login-peers-hint">{TEXT.login_seq_peers_hint}</div>
+              </>
+            )}
+            {/* The pulse rides beside the countdown (owner request, September 2026): the two say
+                one thing together - the device is waiting, and for this much longer. */}
+            <div class="login-left-row">
+              <span class="login-pulse" aria-hidden="true" />
+              <div class="login-left">{clock(pair.left ?? 0)}</div>
+            </div>
             <button class="btn ghost sm" onClick={cancelPair}>
               {TEXT.login_cancel}
             </button>

@@ -1484,8 +1484,14 @@ voice_assistant:
   # someone aimed at only this device silently following the routing selection would surprise its
   # sender. The mirrored prompt does mean a lagging target can still be reciting the code when
   # start_conversation opens the mic here - the device could approve its own sign-in off that
-  # audio - and the remote sync guard in on_end below is what closes it, by holding the mic shut
-  # past the skew.
+  # audio - and the sign-in arm of on_tts_end below is what closes it, by enqueueing the sync-guard
+  # silence behind the prompt so the mic stays shut past the skew. NOT the guard in on_end, which
+  # cannot do this job for a conversation the prompt *starts*: start_conversation's pipeline runs
+  # announce -> mic -> STT in one turn, so on_end fires only after the listen already happened -
+  # and the pipeline's own on_start, firing between the announce and the listen, resets
+  # tts_remote_sent besides, so the on_end enqueue would be skipped anyway. Found on hardware
+  # (owner's report, September 23 2026): the device transcribed "5, 9575." - its own code off a
+  # lagging target - and burned a sign-in attempt on it.
   on_tts_start:
     - if:
         condition:
@@ -1512,6 +1518,45 @@ voice_assistant:
           - script.execute:
               id: tts_route_response
               url: !lambda 'return x;'
+    # The sign-in prompt's sync guard (see the on_tts_start comment for why on_end's guard cannot
+    # cover this). The prompt was just routed; the local copy is about to start playing, and the
+    # mic opens the moment the announcement pipeline drains. So: wait for the local player to be
+    # ANNOUNCING - the enqueue must land BEHIND the playing prompt, and enqueueing before the
+    # component's own play call would be cleared by it - then append one 0.5s silence clip per
+    # step of the Remote Sync Guard select, exactly the on_end guard's arithmetic. The mic then
+    # opens after prompt + guard, past the lagging targets' recital of the code. Runs once per
+    # prompt, re-prompts included, because each turn's announce passes through here. The prompt is
+    # ~8s of audio, so the ANNOUNCING wait cannot miss it; login_voice_pending in the condition
+    # keeps every non-sign-in announce out of this arm.
+    - if:
+        condition:
+          lambda: 'return id(web_ui_app)->login_voice_pending() && id(tts_routing_to_remote) && id(tts_remote_sent);'
+        then:
+          - wait_until:
+              condition:
+                media_player.is_announcing: external_media_player
+              timeout: 5s
+          - if:
+              condition:
+                media_player.is_announcing: external_media_player
+              then:
+                - lambda: |-
+                    // The options are ordered 0.5s/1s/1.5s/2s, so index+1 is the number of 0.5s
+                    // clips - the same mapping the on_end guard uses.
+                    int n = 2;  // 1s, the default and the fallback for an unrestored select
+                    const auto guard_idx = id(remote_sync_guard).active_index();
+                    if (guard_idx.has_value()) {
+                      n = static_cast<int>(guard_idx.value()) + 1;
+                    }
+                    for (int i = 0; i < n; i++) {
+                      id(external_media_player)
+                          ->make_call()
+                          .set_command(media_player::MEDIA_PLAYER_COMMAND_ENQUEUE)
+                          .set_media_url("audio-file://routing_guard_silence_sound")
+                          .set_announcement(true)
+                          .perform();
+                    }
+                    ESP_LOGD("tts_routing", "sign-in sync guard: %d x 0.5s silence enqueued behind the prompt", n);
 
   on_end:
     - if:
@@ -1521,9 +1566,11 @@ voice_assistant:
           # The remote sync guard: 0.5s of embedded silence enqueued once per step of the Remote
           # Sync Guard select (see the select above for the whole design), so the announcement
           # pipeline stays in ANNOUNCING past the targets' playback skew. The continued-conversation
-          # listen, the sign-in mic, the un-duck and the stop windows all gate on that state, so
-          # this one enqueue delays them together - the lead device can no longer hear its own
-          # response, or its own sign-in code, off a lagging target.
+          # listen, the un-duck and the stop windows all gate on that state, so this one enqueue
+          # delays them together - the lead device can no longer hear its own response off a
+          # lagging target. The sign-in prompt's mic is NOT covered here - start_conversation
+          # listens before this fires, and its pipeline's on_start resets tts_remote_sent besides -
+          # its guard is the sign-in arm of on_tts_end above.
           #
           # At on_end rather than alongside the routing call, because ordering is the point: by
           # on_end the component has queued the response URL for sure, so the silence lands BEHIND

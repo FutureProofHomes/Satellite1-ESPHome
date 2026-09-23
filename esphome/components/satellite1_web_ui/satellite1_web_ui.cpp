@@ -19,6 +19,11 @@ void Satellite1WebUI::setup() {
   // token.
   this->gate_.setup();
   this->handler_.set_session_key_fn([this]() { return this->gate_.session_key(); });
+  // The actions-checkbox verdict, read at window-open time so the spoken-code mode is only picked
+  // when Home Assistant will actually speak it. The handler holds the verdict (tts_routing's probe
+  // pushes it there for /api/sat1/ha); reading it back is one atomic load, safe from the httpd task
+  // where open_window_ runs.
+  this->gate_.set_ha_actions_fn([this]() { return this->handler_.ha_actions(); });
 
   // Before the handler is registered, so a request arriving immediately cannot read an empty
   // selection and report that nothing is configured.

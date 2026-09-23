@@ -76,7 +76,7 @@ substitutions:
   #    "areas": [{"i": "kitchen", "n": "Kitchen", "p": [["media_player.kitchen", "Kitchen Sonos", 3, 1]]}],
   #    "loose": [["media_player.all_sonos", "All Sonos", 1, 1]],
   #    "dev": [["Satellite1", "Ceiling Mount", "Media Room", "3c:0f:02:c5:ac:00", "dev (ESP...)",
-  #             "http://192.168.4.31", 1, "s3cret", "e", 2450, 1]],
+  #             "http://192.168.4.31", 1, "s3cret", "e", 2450, 1, "192.168.4.31"]],
   #    "asst": {"o": ["Home Assistant Cloud", "OllamaBradStudio"],
   #             "s": [["select.sat1_wake_word", "Hey Jarvis", "select.sat1_assistant", "preferred"],
   #                   ["select.sat1_wake_word_2", "no_wake_word", "select.sat1_assistant_2", "preferred"]]}}
@@ -179,6 +179,15 @@ substitutions:
   # of those it is). It is a snapshot, not a subscription: the app re-syncs this payload while the
   # switcher sheet is open, so the label lights within a poll of someone entering the room. Ints and
   # short strings, never booleans, for the literal_eval reason above; about ten bytes per device.
+  #
+  # The last field is the peer's current IP, parsed off the same "Network Status" sensor the
+  # transport letter reads ("WiFi: 192.168.4.31" / "Eth: 192.168.4.31" + a second line). It exists
+  # because configuration_url is only as routable as the host Home Assistant connects on: a peer
+  # added to HA by its .local hostname carries a .local configuration_url, which is a dead end for
+  # every browser on a network that does not resolve mDNS - the switcher's jump and the tuner's
+  # peer-mute both died against it. With the IP in the row, the frontend substitutes it whenever
+  # the URL's host is not an IP literal (lib/device.js peerOrigin). Empty when the sensor is absent
+  # (older peer firmware) or disconnected, and the frontend then behaves exactly as before.
   #
   # `asst` is which assistant answers which wake word, and it is the one part of this payload that
   # describes settings Home Assistant owns rather than facts it happens to know.
@@ -348,7 +357,8 @@ substitutions:
                                        states(pw) if pw and states(pw) not in ['unavailable', 'unknown'] else '',
                                        'e' if nst.startswith('Eth') else ('w' if nst.startswith('WiFi') else ''),
                                        2450 if 'ld2450' in rsig else (2410 if 'ld2410' in rsig else 0),
-                                       1 if pres and states(pres) == 'on' else 0]] %}
+                                       1 if pres and states(pres) == 'on' else 0,
+                                       (nst.split(': ', 1)[1].split() | first | default('')) if ': ' in nst else '']] %}
         {% endif %}
       {% endfor %}
     {% endfor %}

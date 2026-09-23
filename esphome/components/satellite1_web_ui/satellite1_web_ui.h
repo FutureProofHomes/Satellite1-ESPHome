@@ -129,11 +129,20 @@ class Satellite1WebUI : public Component {
   /// dispatcher's cue to consume the press instead of running its normal single-press action.
   bool approve_pending_login() { return this->gate_.approve_pending_login(); }
 
+  /// The announcement watchdog's fallback, called from the login scripts in
+  /// common/web_ui_login.yaml when a spoken-code window's announcement never started playing.
+  /// See SessionGate::downgrade_login_window.
+  bool downgrade_login_window() { return this->gate_.downgrade_login_window(); }
+
   /// The voice approvals, called from the on_stt_end and on_wake_word_detected hooks in
   /// common/voice_assistant.yaml. True means consumed: suppress the transcript ring / skip the
   /// assistant start, because the utterance was an answer to the pairing window.
   bool consume_login_transcript(const std::string &text) { return this->gate_.consume_login_transcript(text); }
   bool consume_login_wake(const std::string &phrase) { return this->gate_.consume_login_wake(phrase); }
+
+  /// Whether the symbol consume_login_wake just recorded kept the answer on track - the cue for
+  /// the per-word green blip in common/voice_assistant.yaml. Read-and-clear, main loop only.
+  bool take_login_symbol_ok() { return this->gate_.take_login_symbol_ok(); }
 
   /// Window state reads for the YAML scripts: whether any window is pending (the LED breathe), and
   /// whether an online-mode window is still waiting for a code (the re-listen loop).

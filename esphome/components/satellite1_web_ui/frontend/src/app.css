@@ -3283,6 +3283,40 @@ polyline.draft {
   color: var(--fg-2);
   max-width: 34ch;
 }
+/* The offline challenge's words, in order. Bold is "still owed"; a chip the device has heard back
+   drops to plain grey wearing a green border (owner's design, September 23 2026) - the same word,
+   visibly done, with the green agreeing with the ring's per-word blip. */
+.login-seq {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.login-chip {
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--fg);
+  transition: color 0.3s ease, border-color 0.3s ease, font-weight 0.3s ease;
+}
+.login-chip.done {
+  font-weight: 400;
+  color: var(--fg-4);
+  border-color: var(--ok);
+}
+.login-peers-hint {
+  color: var(--fg-4);
+  font-size: 0.78rem;
+  max-width: 38ch;
+}
+/* The pulse and the countdown, one row: the device is waiting, and for this much longer. */
+.login-left-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .login-left {
   font-variant-numeric: tabular-nums;
   color: var(--fg-3);

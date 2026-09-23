@@ -309,7 +309,10 @@ void MwwRuntimeLoader::loop() {
     }
   }
 
-  if (now >= this->reconcile_after_ms_)
+  // The second test is the web sign-in's hold (hold_reconcile): the offline challenge is running
+  // with the compiled models temporarily enabled, and reading those enables as drift would adopt
+  // or disable them mid-challenge.
+  if (now >= this->reconcile_after_ms_ && now >= this->reconcile_hold_until_)
     this->reconcile_ha_();
 }
 

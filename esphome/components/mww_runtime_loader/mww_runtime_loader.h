@@ -334,6 +334,17 @@ class MwwRuntimeLoader : public Component {
   /// The compiled-in models, fixed after setup, so the endpoint can serve the "Included" group.
   const std::vector<BuiltinInfo> &builtins() const { return this->builtins_; }
 
+  /// Pauses (`on`) / resumes (`!on`) the drift reconciler, for the web sign-in's offline challenge
+  /// (common/web_ui_login.yaml). The challenge temporarily enables the compiled hey_jarvis /
+  /// okay_nabu models whatever the slots hold, and without this hold reconcile_ha_() would read
+  /// those enables as drift within one loop pass - either adopting a challenge model into a slot
+  /// (persisting a wake word the customer never chose) or disabling it mid-challenge. The stop
+  /// model needs no such cover: it is internal, and get_wake_words() never shows it to the
+  /// reconciler. Main loop only, like the login triggers that call it. The 90s ceiling outlives
+  /// the longest window (60s, plus one watchdog downgrade's reset) and backstops a hold whose
+  /// release was lost to a crashed script - reconciliation resumes on its own.
+  void hold_reconcile(bool on) { this->reconcile_hold_until_ = on ? millis_64() + 90000 : 0; }
+
  protected:
   /// One download, inputs written by the main loop before the task starts, outputs written by the
   /// task and read by the main loop only after `done` - so no field needs a lock, only the flags
@@ -616,6 +627,9 @@ class MwwRuntimeLoader : public Component {
   // restoring) and right after our own writes (enable() lands on the next inference pass).
   // millis_64(): wrap-proof, like every deadline here.
   uint64_t reconcile_after_ms_{0};
+  // The web sign-in's hold - see hold_reconcile(). Zero when released; otherwise the ceiling past
+  // which a lost release stops mattering.
+  uint64_t reconcile_hold_until_{0};
   // First-loop re-assertion of built-in cutoff overrides - see loop() for why not setup().
   bool overrides_applied_{false};
 };

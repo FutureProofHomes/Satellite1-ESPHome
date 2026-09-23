@@ -19,17 +19,26 @@ namespace satellite1_web_ui {
 
 /// How long a pairing window stays open, and how long its outcome stays readable afterwards.
 ///
-/// 60 seconds is the whole budget for walking to the device or hearing the spoken code out; the
-/// grace periods exist because the browser polls every second or two, so an approval or a failure
-/// must outlive the moment it happened by at least a few polls or the page would show "expired"
-/// for a sign-in that actually succeeded.
-static constexpr uint32_t SG_WINDOW_MS = 60000;
-static constexpr uint32_t SG_APPROVED_GRACE_MS = 45000;
+/// 30 seconds (owner decision, September 23 2026, down from 60) is the whole budget for walking to
+/// the device or hearing the spoken code out - a watchdog downgrade resets it, so a fallback still
+/// gets a full window. The grace periods exist because the browser polls every half-second to
+/// second, so an approval or a failure must outlive the moment it happened by at least a few polls
+/// or the page would show "expired" for a sign-in that actually succeeded.
+static constexpr uint32_t SG_WINDOW_MS = 30000;
+static constexpr uint32_t SG_APPROVED_GRACE_MS = 30000;
 static constexpr uint32_t SG_ENDED_GRACE_MS = 15000;
 
-/// The quiet period that closes an offline wake-word answer. Judging only after silence is what
-/// defeats the count-up attack: saying symbols one more at a time passes *through* the right
-/// sequence but never ends on it, and overshooting fails.
+/// The offline challenge's length, in wake-word symbols over the three-model alphabet. Six (owner
+/// decision, September 23 2026, up from three): 3^6 = 729 combinations per window, against the
+/// voice lockout's exponential backoff. The page shows the words as chips, so a longer answer
+/// costs the honest user seconds, not memory.
+static constexpr uint8_t SG_SEQ_LEN = 6;
+
+/// The quiet period that closes an offline wake-word answer that is anything short of perfect. A
+/// perfect answer approves the moment its final symbol lands (consume_login_wake) - the match is
+/// anchored to the first SG_SEQ_LEN symbols heard, so that is one judgment either way and a
+/// count-up gains nothing. This period judges the rest: wrong or short answers wait it out and are
+/// denied in one verdict, so their timing never reveals which symbol missed.
 static constexpr uint32_t SG_SEQ_QUIET_MS = 8000;
 
 /// Password-login rate limit: this many consecutive failures lock the password path for the
@@ -40,7 +49,7 @@ static constexpr uint32_t SG_PW_LOCKOUT_MS = 60000;
 
 /// Voice-approval lockout: after this many failed voice windows the voice paths close and new
 /// windows open button-only, for a period that doubles per failure up to the cap. The offline
-/// challenge is a 1-in-27 guess per window; the backoff is what turns that into hours per try.
+/// challenge is a 1-in-729 guess per window; the backoff is what turns that into hours per try.
 static constexpr uint8_t SG_VOICE_FAILS = 3;
 static constexpr uint32_t SG_VOICE_LOCKOUT_BASE_MS = 60000;
 static constexpr uint32_t SG_VOICE_LOCKOUT_MAX_MS = 3600000;
@@ -111,6 +120,14 @@ class SessionGate : public AsyncWebHandler {
   /// Whether this build compiled the wake-word models the offline challenge is made of.
   void set_seq_available(bool available) { this->seq_available_ = available; }
 
+  /// The actions-checkbox verdict tts_routing's probe stores on the handler (0 unknown, 1 allowed,
+  /// 2 blocked, 3 Home Assistant too old to say). Read at window-open time: an API connection alone
+  /// used to be enough to pick the spoken code, but with the checkbox off Home Assistant drops
+  /// assist_satellite.start_conversation without an error - the user waits for a code that never
+  /// plays, the window expires, and their button press falls through to the assistant. Verdicts 0
+  /// and 2 therefore route to the offline challenge instead.
+  void set_ha_actions_fn(std::function<int()> fn) { this->ha_actions_fn_ = std::move(fn); }
+
   /// The session token as the sign-in link carries it. Read by the /api/sat1/state handler so the
   /// Diagnostics Launch section can render the link and its QR code - behind the gate, so only an
   /// already-authenticated browser ever sees it.
@@ -126,6 +143,15 @@ class SessionGate : public AsyncWebHandler {
   /// - which is the caller's signal to consume the press instead of running its normal action.
   bool approve_pending_login();
 
+  /// The announcement watchdog's fallback, called from YAML when a spoken-code window's
+  /// announcement never started playing (the actions checkbox off mid-probe, a missing
+  /// assist_satellite entity, a Home Assistant hiccup - all of which drop the call without an
+  /// error). Switches a pending CODE window to the offline challenge (or button-only when the
+  /// models are unavailable), resets the deadline so the user gets a full window after the local
+  /// announcement, and re-queues the open event so YAML announces the new challenge. Returns true
+  /// when a downgrade happened.
+  bool downgrade_login_window();
+
   /// A finished STT transcript, offered to a pending online-mode window. Returns true when the
   /// text was consumed - match or mismatch - so the caller suppresses the transcript ring and
   /// stops the pipeline; the code must never reach the conversation agent as a nonsense query.
@@ -134,6 +160,13 @@ class SessionGate : public AsyncWebHandler {
   /// A wake-word firing, offered to a pending offline-mode window as one challenge symbol.
   /// Returns true when consumed, so the caller records a symbol instead of starting the assistant.
   bool consume_login_wake(const std::string &phrase);
+
+  /// Whether the last consumed symbol kept the answer on track (the whole prefix heard so far
+  /// matches the challenge). Read-and-clear, from the same on_wake_word_detected automation that
+  /// called consume_login_wake - YAML blips the ring green on it, the in-room twin of the page's
+  /// un-bolding chips. Progress it reveals to a bystander is progress the blip is *for*: the
+  /// symbols just spoken aloud were right, which the speaker knows.
+  bool take_login_symbol_ok() { return this->ev_symbol_ok_.exchange(false); }
 
   /// Whether a window is pending at all, and pending in code mode specifically - the second is
   /// what the YAML re-listen loop tests before reopening the mic for another attempt.
@@ -253,6 +286,7 @@ class SessionGate : public AsyncWebHandler {
   std::string username_;
   std::string password_;
   std::function<bool()> mic_available_fn_;
+  std::function<int()> ha_actions_fn_;
   bool seq_available_{false};
 
   /// The salt and generation, together in one blob so they can never restore out of step.
@@ -295,10 +329,14 @@ class SessionGate : public AsyncWebHandler {
     /// Button-only because the hardware mute slider is on - reported through the poll so the login
     /// page can say "slide the mute off for voice sign-in" instead of leaving the silence a mystery.
     bool hw_muted{false};
+    /// The spoken code was unavailable (or failed mid-window) because Home Assistant is connected
+    /// but not allowed to perform actions - reported through the poll so the login page can explain
+    /// why it is hearing the wake-word challenge instead of a code.
+    bool hab{false};
     char nonce[33]{};
     char code[5]{};
-    uint8_t seq[3]{};
-    uint8_t heard[8]{};
+    uint8_t seq[SG_SEQ_LEN]{};
+    uint8_t heard[SG_SEQ_LEN + 6]{};
     uint8_t heard_len{0};
     uint8_t attempts{0};
     uint32_t deadline{0};
@@ -313,8 +351,10 @@ class SessionGate : public AsyncWebHandler {
   /// between the two. Payloads guarded by win_lock_; the flags say whether a payload is waiting.
   std::atomic<bool> ev_open_{false};
   std::atomic<bool> ev_close_{false};
+  /// One correct-so-far challenge symbol, for the green blip - see take_login_symbol_ok.
+  std::atomic<bool> ev_symbol_ok_{false};
   char ev_mode_[8]{};
-  char ev_secret_[12]{};
+  char ev_secret_[SG_SEQ_LEN + 2]{};
   char ev_result_[12]{};
 
   /// Stable storage for the headers send_json_ sets - see its comment. One request at a time on

@@ -14,6 +14,7 @@ import {
   haBlocked,
   onLogAlert,
   onWriteError,
+  peerOrigin,
   setRemoteTarget,
   useDeviceState,
   useEvents,
@@ -400,7 +401,9 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, remote, loca
   const isHome = (d) => !!remote && !!localMac && (d?.[3] || "").toLowerCase() === localMac;
 
   const peerRow = (d) => {
-    const url = d[5] ? String(d[5]) : "";
+    // peerOrigin, not d[5] raw: a .local configuration_url is swapped for the row's live IP when
+    // the roster carries one, so the jump works on networks where mDNS does not (see device.js).
+    const url = peerOrigin(d);
     const up = isUp(d);
     const home = isHome(d);
     const dotText = up ? TEXT.peer_up : TEXT.peer_down;

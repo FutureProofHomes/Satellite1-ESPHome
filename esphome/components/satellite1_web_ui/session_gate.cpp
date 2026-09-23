@@ -618,8 +618,9 @@ void SessionGate::handle_logout_all_(AsyncWebServerRequest *request) {
 
 void SessionGate::open_window_(uint32_t now) {
   // Mode selection: voice needs a live microphone and no active lockout; the spoken code
-  // additionally needs Home Assistant for TTS and STT; the wake-word sequence needs the compiled
-  // models. Anything less falls back to the button, and the login page's copy explains which.
+  // additionally needs Home Assistant able to *speak* - connected AND allowed to perform actions;
+  // the wake-word sequence needs the compiled models. Anything less falls back to the button, and
+  // the login page's copy explains which.
   const bool mic = this->mic_available_fn_ ? this->mic_available_fn_() : false;
   if (this->voice_locked_ && static_cast<int32_t>(this->voice_lock_until_ - now) <= 0)
     this->voice_locked_ = false;
@@ -629,17 +630,27 @@ void SessionGate::open_window_(uint32_t now) {
 #else
   const bool ha = false;
 #endif
+  // The actions verdict, because a connection alone is not enough: with the "Allow the device to
+  // perform Home Assistant actions" checkbox off, HA drops assist_satellite.start_conversation
+  // without an error - the user would wait out a silent window. Verdict 1 is allowed; 3 is an HA
+  // too old to answer the probe, whose calls still execute; 0 (probe unresolved) and 2 (blocked)
+  // both route to the offline challenge, which announces from embedded clips instead.
+  const int actions = this->ha_actions_fn_ ? this->ha_actions_fn_() : 0;
+  const bool ha_speaks = ha && (actions == 1 || actions == 3);
 
   this->win_ = Window{};
   this->win_.state = 1;
   this->win_.deadline = now + SG_WINDOW_MS;
   this->win_.state_at = now;
+  // hab explains a downgrade the user would otherwise read as a broken device: HA is right there,
+  // but it may not speak. Only meaningful on the modes that exist *because* of that.
+  this->win_.hab = ha && !ha_speaks && voice_ok;
 
   uint8_t raw[16];
   esp_fill_random(raw, sizeof(raw));
   to_hex_(raw, sizeof(raw), this->win_.nonce);
 
-  if (voice_ok && ha) {
+  if (voice_ok && ha_speaks) {
     this->win_.mode = LoginMode::CODE;
     uint32_t rnd = esp_random();
     for (int i = 0; i < 4; i++) {
@@ -649,9 +660,10 @@ void SessionGate::open_window_(uint32_t now) {
     this->win_.code[4] = '\0';
   } else if (voice_ok && this->seq_available_) {
     this->win_.mode = LoginMode::SEQ;
-    const uint32_t rnd = esp_random();
-    for (int i = 0; i < 3; i++)
-      this->win_.seq[i] = static_cast<uint8_t>((rnd >> (i * 8)) % 3);
+    uint8_t raw_seq[SG_SEQ_LEN];
+    esp_fill_random(raw_seq, sizeof(raw_seq));
+    for (int i = 0; i < SG_SEQ_LEN; i++)
+      this->win_.seq[i] = raw_seq[i] % 3;
   } else {
     this->win_.mode = LoginMode::BUTTON;
     // mic_available_fn_ reports the hardware mute slider, the one obstacle software cannot clear.
@@ -660,8 +672,18 @@ void SessionGate::open_window_(uint32_t now) {
   }
 
   // Queue the open event for loop(): mode name plus the secret, which YAML turns into the
-  // announcement. The secret exists only as audio in the room and in this struct - the poll never
-  // carries it, which is the entire point.
+  // announcement.
+  //
+  // Who sees the secret, and why (owner decision, September 2026). The spoken code exists only as
+  // audio in the room and in this struct - saying it back proves the caller HEARD the device, and
+  // the poll never carries it. The offline challenge is different: its words ride the start/poll
+  // responses to the window's owner (and only the owner - both check the pair nonce), so the page
+  // can display them. That relaxes the proof from "can hear the device" to "can produce audio in
+  // the room": a LAN attacker who opens a window, reads the words and plays them through an
+  // unauthenticated castable speaker in the same room could approve their own window. Accepted
+  // because the attack is loud (the device announces the challenge and the ring breathes first),
+  // needs a LAN foothold plus a co-located open speaker, and the voice lockout still rate-limits
+  // it - while the display fixes the real failure of users not parsing unfamiliar words by ear.
   const char *mode_name = this->win_.mode == LoginMode::CODE  ? "code"
                           : this->win_.mode == LoginMode::SEQ ? "seq"
                                                               : "button";
@@ -669,8 +691,9 @@ void SessionGate::open_window_(uint32_t now) {
   if (this->win_.mode == LoginMode::CODE) {
     snprintf(this->ev_secret_, sizeof(this->ev_secret_), "%s", this->win_.code);
   } else if (this->win_.mode == LoginMode::SEQ) {
-    snprintf(this->ev_secret_, sizeof(this->ev_secret_), "%c%c%c", '0' + this->win_.seq[0], '0' + this->win_.seq[1],
-             '0' + this->win_.seq[2]);
+    for (int i = 0; i < SG_SEQ_LEN; i++)
+      this->ev_secret_[i] = static_cast<char>('0' + this->win_.seq[i]);
+    this->ev_secret_[SG_SEQ_LEN] = '\0';
   } else {
     this->ev_secret_[0] = '\0';
   }
@@ -763,9 +786,22 @@ void SessionGate::handle_start_(AsyncWebServerRequest *request) {
 
   this->open_window_(now);
 
-  char body[80];
-  snprintf(body, sizeof(body), R"({"ok":1,"mode":"%s","left":%u,"hw":%d})", this->ev_mode_,
-           static_cast<unsigned>(SG_WINDOW_MS / 1000), this->win_.hw_muted ? 1 : 0);
+  // The offline challenge rides the response as symbol digits so the page can display the words
+  // (owner decision, September 2026 - the tradeoff is documented at open_window_). Only this
+  // caller ever sees it: the response also sets the pair cookie that marks the window's owner.
+  // The spoken code stays audio-only - CODE mode exists exactly when Home Assistant can speak it,
+  // and a displayed code would weaken the presence proof for no comprehension gain.
+  char seq_field[24] = "";
+  if (this->win_.mode == LoginMode::SEQ) {
+    char seq_str[SG_SEQ_LEN + 1];
+    for (int i = 0; i < SG_SEQ_LEN; i++)
+      seq_str[i] = static_cast<char>('0' + this->win_.seq[i]);
+    seq_str[SG_SEQ_LEN] = '\0';
+    snprintf(seq_field, sizeof(seq_field), R"(,"seq":"%s")", seq_str);
+  }
+  char body[128];
+  snprintf(body, sizeof(body), R"({"ok":1,"mode":"%s","left":%u,"hw":%d,"hab":%d%s})", this->ev_mode_,
+           static_cast<unsigned>(SG_WINDOW_MS / 1000), this->win_.hw_muted ? 1 : 0, this->win_.hab ? 1 : 0, seq_field);
   this->send_json_(request, "200 OK", body, false, false, this->win_.nonce);
 }
 
@@ -819,14 +855,29 @@ void SessionGate::handle_poll_(AsyncWebServerRequest *request) {
 
   switch (this->win_.state) {
     case 1: {
-      char body[80];
       const int32_t left_ms = static_cast<int32_t>(this->win_.deadline - now);
       const uint32_t left = left_ms > 0 ? static_cast<uint32_t>(left_ms) / 1000 : 0;
       const char *mode = this->win_.mode == LoginMode::CODE  ? "code"
                          : this->win_.mode == LoginMode::SEQ ? "seq"
                                                              : "button";
-      snprintf(body, sizeof(body), R"({"s":"pending","mode":"%s","left":%u,"hw":%d})", mode,
-               static_cast<unsigned>(left), this->win_.hw_muted ? 1 : 0);
+      // The offline challenge and its live progress, for the owner alone (the nonce check above).
+      // `p` is the matched-prefix length - how many leading symbols heard so far equal the
+      // challenge - which is what the page un-bolds as the customer speaks. A wrong symbol simply
+      // stops the count advancing; the quiet-period judgement in tick() is unchanged.
+      char seq_field[32] = "";
+      if (this->win_.mode == LoginMode::SEQ) {
+        uint8_t p = 0;
+        while (p < this->win_.heard_len && p < SG_SEQ_LEN && this->win_.heard[p] == this->win_.seq[p])
+          p++;
+        char seq_str[SG_SEQ_LEN + 1];
+        for (int i = 0; i < SG_SEQ_LEN; i++)
+          seq_str[i] = static_cast<char>('0' + this->win_.seq[i]);
+        seq_str[SG_SEQ_LEN] = '\0';
+        snprintf(seq_field, sizeof(seq_field), R"(,"seq":"%s","p":%u)", seq_str, p);
+      }
+      char body[144];
+      snprintf(body, sizeof(body), R"({"s":"pending","mode":"%s","left":%u,"hw":%d,"hab":%d%s})", mode,
+               static_cast<unsigned>(left), this->win_.hw_muted ? 1 : 0, this->win_.hab ? 1 : 0, seq_field);
       this->send_json_(request, "200 OK", body, false, false, nullptr);
       return;
     }
@@ -856,6 +907,47 @@ bool SessionGate::approve_pending_login() {
   if (this->win_.state != 1)
     return false;
   this->close_window_(LoginResult::APPROVED, millis());
+  return true;
+}
+
+bool SessionGate::downgrade_login_window() {
+  LockGuard guard{this->win_lock_};
+  if (this->win_.state != 1 || this->win_.mode != LoginMode::CODE)
+    return false;
+
+  const uint32_t now = millis();
+  // Whatever swallowed the announcement, the page must explain the switch the same way it explains
+  // a window that opened downgraded: Home Assistant is there but may not speak.
+  this->win_.hab = true;
+  this->win_.heard_len = 0;
+  this->win_.attempts = 0;
+  // A fresh deadline: the user spent the first stretch waiting on a code that never played, and
+  // the local announcement is about to take a few seconds more. The watchdog fires once per
+  // window (the mode leaves CODE here), so this cannot be ridden to hold the window open forever.
+  this->win_.deadline = now + SG_WINDOW_MS;
+
+  if (this->seq_available_) {
+    this->win_.mode = LoginMode::SEQ;
+    uint8_t raw_seq[SG_SEQ_LEN];
+    esp_fill_random(raw_seq, sizeof(raw_seq));
+    for (int i = 0; i < SG_SEQ_LEN; i++)
+      this->win_.seq[i] = raw_seq[i] % 3;
+    snprintf(this->ev_mode_, sizeof(this->ev_mode_), "seq");
+    for (int i = 0; i < SG_SEQ_LEN; i++)
+      this->ev_secret_[i] = static_cast<char>('0' + this->win_.seq[i]);
+    this->ev_secret_[SG_SEQ_LEN] = '\0';
+  } else {
+    this->win_.mode = LoginMode::BUTTON;
+    snprintf(this->ev_mode_, sizeof(this->ev_mode_), "button");
+    this->ev_secret_[0] = '\0';
+  }
+  // Re-queue the open event: YAML re-runs its dispatch and announces the new challenge locally.
+  // Safe to reuse the slot - the original open was drained by loop() long before any watchdog
+  // could conclude the announcement never started.
+  this->ev_open_.store(true);
+
+  ESP_LOGW(TAG_SG, "Spoken code never played (actions blocked or no satellite entity); window downgraded to %s",
+           this->ev_mode_);
   return true;
 }
 
@@ -906,6 +998,23 @@ bool SessionGate::consume_login_wake(const std::string &phrase) {
     this->win_.heard[this->win_.heard_len++] = static_cast<uint8_t>(symbol);
     this->win_.last_symbol = millis();
     ESP_LOGD(TAG_SG, "Challenge symbol %d heard (%u so far)", symbol, this->win_.heard_len);
+    // Whether the answer is still on track: every symbol heard so far matches the challenge's
+    // prefix. Queued for YAML's green blip (take_login_symbol_ok), the in-room twin of the page's
+    // un-bolding chips.
+    const bool on_track = this->win_.heard_len <= SG_SEQ_LEN &&
+                          memcmp(this->win_.heard, this->win_.seq, this->win_.heard_len) == 0;
+    if (on_track)
+      this->ev_symbol_ok_.store(true);
+    // The exact answer, the moment it completes: approve now instead of after the quiet period
+    // (owner report, September 23 2026 - the old wait read as ~15s of nothing after the last
+    // word). Safe because the match is anchored to the FIRST SG_SEQ_LEN symbols heard, not a
+    // sliding window, so this is the same single 1-in-729 judgment the quiet period delivered - a
+    // count-up cannot pass through it, only end on it, which is one guess either way. Everything
+    // short of a perfect answer still waits out SG_SEQ_QUIET_MS in tick() and is judged there, so
+    // a wrong guess's timing never says which symbol missed to someone who cannot see the screen.
+    if (on_track && this->win_.heard_len == SG_SEQ_LEN) {
+      this->close_window_(LoginResult::APPROVED, millis());
+    }
   }
   return true;
 }
@@ -937,11 +1046,14 @@ void SessionGate::tick(uint32_t now) {
         }
         return;
       }
-      // The quiet-period judgement: exact sequence, judged only once the speaker has finished.
-      // Overshooting fails, which is what makes counting upward through the answer worthless.
+      // The quiet-period judgement, for answers that did not already approve themselves at their
+      // final symbol (consume_login_wake): wrong or short, judged in one verdict once the speaker
+      // has finished. The match test is kept for completeness, but a perfect answer normally
+      // never reaches here.
       if (this->win_.mode == LoginMode::SEQ && this->win_.heard_len > 0 &&
           now - this->win_.last_symbol >= SG_SEQ_QUIET_MS) {
-        const bool match = this->win_.heard_len == 3 && memcmp(this->win_.heard, this->win_.seq, 3) == 0;
+        const bool match =
+            this->win_.heard_len == SG_SEQ_LEN && memcmp(this->win_.heard, this->win_.seq, SG_SEQ_LEN) == 0;
         if (match) {
           this->close_window_(LoginResult::APPROVED, now);
         } else {
