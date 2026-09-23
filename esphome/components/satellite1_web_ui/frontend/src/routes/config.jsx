@@ -2,7 +2,7 @@
  * The Audio route (route id "audio"; this file keeps its historical name from when it was Config):
  * where this device's sound goes - remote routing, area ducking, and the speaker's own wiring at the
  * bottom. The September 2026 information-architecture pass emptied the rest out: Mute microphones and
- * Assistant volume went to the home page's Assistant card, and the wake words card became the Wake
+ * Voice Volume Override went to the home page's Assistant card, and the wake words card became the Wake
  * Word route (routes/wakewords.jsx).
  *
  * Two kinds of control live here and they are stored differently, which is worth knowing before
@@ -58,7 +58,7 @@ function writeNumber(ctx, key, value) {
 /**
  * This device's own speaker: how it is wired.
  *
- * Assistant volume moved to the home page's Assistant card in the September 2026 rename pass - the
+ * Voice Volume Override moved to the home page's Assistant card in the September 2026 rename pass - the
  * owner wants it under the transcript it sets the level for. That re-separates it from Remote
  * routing's "Remote TTS volume" (the pair the plan says must never be confused for each other), so
  * the hints carry the whole burden of telling them apart: each says which speakers it moves.
@@ -217,7 +217,7 @@ function RemoteRouting({ ctx, ha, sel, write }) {
             step={vol.e?.step ?? 1}
             disabled={!active}
             // Zero really does mean hands-off here - tts_routing.yaml: 0 is "leave every target's
-            // volume alone" - so it reads as what it does, like Assistant volume's "follow media".
+            // volume alone" - so it reads as what it does, like Voice Volume Override's "follow media".
             format={(v) => (v === 0 ? "follow device" : `${Math.round(v)}%`)}
             onCommit={(v) => writeNumber(ctx, "remote_tts_volume", v)}
           />

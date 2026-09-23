@@ -33,7 +33,7 @@ labelled User and Assist rather than heard and said).
 | Key | Where | Text |
 | --- | --- | --- |
 | `mute` | Assistant card, Mute microphones | Cuts the microphones in hardware, not software - wake word detection stops with them. The mute button on the device does the same thing. |
-| `voice_override` | Assistant card, Assistant volume | How loud this device speaks when the assistant replies, separate from media volume. Zero follows the media volume instead. Speakers you route answers to have their own level - Remote TTS volume, on the Audio page. |
+| `voice_override` | Assistant card, Voice Volume Override | How loud this device speaks when the assistant replies, separate from media volume. Zero follows the media volume instead. Speakers you route answers to have their own level - Remote TTS volume, on the Audio page. |
 | `temp` | Calibration editor, title row | Reads high by design - the sensor sits inside a warm enclosure, next to the board. Calibrate against a thermometer in the same room. |
 | `humidity` | Calibration editor, title row | Measured at the board, so it drifts with the enclosure temperature. Calibrate against a hygrometer in the same room. |
 | `lux` | Calibration editor, title row | Ambient light at the front face. Useful for dimming the LED ring automatically from Home Assistant, or for a light-level trigger. |
@@ -331,13 +331,13 @@ that selection has.
 | `speaker_channel` | Audio Output, Channel | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
 | `remote_routing` | Audio routing card title | Plays this device's audio on other speakers as well as this one: the assistant's spoken answers, sign-in prompts, ringing timers, and the wake chime if you turn that on below. Tick a room to include every player in it, or open the room and pick players. Local Speaker is this device's own speaker - untick it and answers play only where you have chosen. |
 | `area_ducking` | Area ducking card title | Turns other speakers down while the assistant listens and answers, then puts them back where they were. Tick a room to cover every player in it. |
-| `remote_tts_volume` | Remote TTS volume | How loud answers are on the remote speakers. This device's own level is Assistant volume, on the home page. Sonos reads the level from the announcement itself; anything else has its volume set for the answer and put back afterwards. |
+| `remote_tts_volume` | Remote TTS volume | How loud answers are on the remote speakers. This device's own level is Voice Volume Override, on the home page. Sonos reads the level from the announcement itself; anything else has its volume set for the answer and put back afterwards. |
 | `remote_wake_chime` | Remote wake chime | Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to. On Sonos and similar speakers the chime can land up to a second late - their clip playback has a fixed startup cost the device cannot remove. |
 | `remote_timer_ring` | Remote timer ring | Rings a finished timer on the target speakers too, until the alarm is stopped. Saying "stop" at any speaker silences it everywhere. |
 | `remote_sync_guard` | Remote sync guard | How long this device keeps its microphone closed after a routed answer, so it cannot hear its own answer from a speaker running slightly behind and mistake it for you. |
 | `duck_volume` | Duck volume | The level they drop to. Players already quieter than this are left alone, so a whole-house group does not get turned up. |
 
-`voice_override` and `remote_tts_volume` are the pair most easily confused, and with Assistant volume
+`voice_override` and `remote_tts_volume` are the pair most easily confused, and with Voice Volume Override
 back on the home page they are on separate routes again. Each hint therefore names the speakers it
 moves and points at the other by its on-screen label and page, because the hints are now the only
 thing keeping the pair apart.
@@ -703,7 +703,7 @@ edit:
   that order — which are the same strings as the routes themselves. The drawer has no heading; the
   device name is in the bar above it.
 - `Connected` and `Nothing plugged in` on Audio Output's Line out row, and the three volume sliders'
-  zero readouts: `follow media` on Assistant volume, `follow device` on Remote TTS volume (zero means
+  zero readouts: `follow media` on Voice Volume Override, `follow device` on Remote TTS volume (zero means
   "leave every target's volume alone", per tts_routing.yaml), and `mute` on Duck volume — deliberately
   not "follow device", because area_ducking.yaml is explicit that zero is literal there: ducked players
   are set to 0% for the length of the interaction. All are readouts of a value rather than descriptions

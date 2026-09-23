@@ -46,7 +46,7 @@ export const HINTS = {
      need to read once is what a tooltip is for. Kept because one slider with three behaviours behind it
      is the kind of thing that gets reported as a bug. */
   remote_tts_volume:
-    "How loud answers are on the remote speakers. This device's own level is Assistant volume, on the home page. Sonos reads the level from the announcement itself; anything else has its volume set for the answer and put back afterwards.",
+    "How loud answers are on the remote speakers. This device's own level is Voice Volume Override, on the home page. Sonos reads the level from the announcement itself; anything else has its volume set for the answer and put back afterwards.",
 
   remote_wake_chime:
     "Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to. On Sonos and similar speakers the chime can land up to a second late - their clip playback has a fixed startup cost the device cannot remove.",

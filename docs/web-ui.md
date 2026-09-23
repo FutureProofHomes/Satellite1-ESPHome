@@ -56,7 +56,7 @@ Five routes, all on the hash, in this nav order:
 
 | Route | What it does |
 |---|---|
-| `#/home` | Sensor readings with tap-to-calibrate, media, the Assistant card (phase, transcript, mute, assistant volume), timers, LED ring |
+| `#/home` | Sensor readings with tap-to-calibrate, media, the Assistant card (phase, transcript, mute, voice volume override), timers, LED ring |
 | `#/wake-word` | Which wake words the device answers to, sensitivity, wake chime, and the stop word |
 | `#/audio` | TTS routing and area ducking as a tree over your Home Assistant areas, then the speaker's own wiring |
 | `#/presence` | Live radar plot or gate energies, and the radar's own settings |

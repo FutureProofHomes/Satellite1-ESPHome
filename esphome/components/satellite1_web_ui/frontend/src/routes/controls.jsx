@@ -356,7 +356,7 @@ function Timers({ voice }) {
 /**
  * What the assistant is doing, the last few exchanges so a misheard command is visible without
  * opening the log, and the two controls the owner brought back to it in the September 2026 rename
- * pass: Mute microphones (from the old Voice Input card) and Assistant volume (from Audio Output).
+ * pass: Mute microphones (from the old Voice Input card) and Voice Volume Override (from Audio Output).
  * Both are assistant-shaped decisions - whether it can hear you, how loud it answers - and they see
  * daily use, which is what this page is for.
  *
@@ -449,11 +449,11 @@ function VoiceStatus({ ctx, voice }) {
         </Row>
       )}
 
-      {/* Last in the card per the owner: the transcript is what you read, this is what you set. Keeps
-          its name and hint - the hint is what tells it apart from Remote routing's "Remote TTS volume"
-          now that the two no longer sit one card apart. */}
+      {/* Last in the card per the owner: the transcript is what you read, this is what you set. The
+          hint is what tells it apart from Remote routing's "Remote TTS volume" now that the two no
+          longer sit one card apart. */}
       {vol && (
-        <Row label="Assistant volume" hint={HINTS.voice_override}>
+        <Row label="Voice Volume Override" hint={HINTS.voice_override}>
           <Slider
             value={Number(vol.value)}
             min={Number(vol.min_value ?? 0)}
