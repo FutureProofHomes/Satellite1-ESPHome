@@ -488,6 +488,12 @@ select:
   # exists for assist-satellite targets (VoiceAssistantAnnounceFinished) and Music Assistant, but a
   # Sonos AudioClip is invisible to Home Assistant end to end, so one Sonos target forces a fixed
   # floor regardless.
+  #
+  # The guard only engages when a listen window actually follows: a continued conversation (the
+  # vendored component's continue_conversation flag, Home Assistant's own verdict, readable via
+  # get_continue_conversation() - see esphome/components/voice_assistant/FPH_VENDOR.md) or a voice
+  # sign-in (login_voice_pending). A routed one-shot answer opens no mic, so it pays none of this
+  # - the un-duck and the stop windows release at local drain as if the guard did not exist.
   - platform: template
     id: remote_sync_guard
     name: "Remote Sync Guard"
@@ -1575,12 +1581,22 @@ voice_assistant:
           # At on_end rather than alongside the routing call, because ordering is the point: by
           # on_end the component has queued the response URL for sure, so the silence lands BEHIND
           # it in the playlist (ENQUEUE_URI appends; PLAY_URI would have cleared it). Gated on
-          # tts_remote_sent so a response that stayed local pays no extra latency. If a very short
-          # response has already drained, the silence plays as its own 0.5-2s announcement of
-          # nothing - harmless, and the guard still covers the remote tail.
+          # tts_remote_sent so a response that stayed local pays no extra latency, AND on a listen
+          # window actually following - the vendored get_continue_conversation() (set from
+          # INTENT_END's continue_conversation arg and from start_conversation announces, both
+          # before on_end; consumed by the component only after) or the voice sign-in's pending
+          # window, kept as the explicit belt-and-braces test for that flow. A routed one-shot
+          # answer skips the enqueue entirely: no mic opens, so there is nothing to guard, and the
+          # 0.5-2s of held ducking and "announcing" state it used to pay disappear. (The literal
+          # trailing-"?" heuristic was rejected: LLM agents continue without one, a "?" does not
+          # guarantee continuation, and >500-char responses are truncated before any trigger sees
+          # the text.) If a very short response has already drained, the silence plays as its own
+          # 0.5-2s announcement of nothing - harmless, and the guard still covers the remote tail.
           - if:
               condition:
-                lambda: 'return id(tts_remote_sent);'
+                lambda: |-
+                  return id(tts_remote_sent) &&
+                         (id(va).get_continue_conversation() || id(web_ui_app)->login_voice_pending());
               then:
                 - lambda: |-
                     // The options are ordered 0.5s/1s/1.5s/2s, so index+1 is the number of 0.5s

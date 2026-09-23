@@ -338,7 +338,7 @@ that selection has.
 | `remote_tts_volume` | Remote TTS volume | How loud answers are on the remote speakers. This device's own level is Voice Volume Override, on the home page. Sonos reads the level from the announcement itself; anything else has its volume set for the answer and put back afterwards. |
 | `remote_wake_chime` | Remote wake chime | Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to. On Sonos and similar speakers the chime can land up to a second late - their clip playback has a fixed startup cost the device cannot remove. |
 | `remote_timer_ring` | Remote timer ring | Rings a finished timer on the target speakers too, until the alarm is stopped. Saying "stop" at any speaker silences it everywhere. |
-| `remote_sync_guard` | Remote sync guard | How long this device keeps its microphone closed after a routed answer, so it cannot hear its own answer from a speaker running slightly behind and mistake it for you. |
+| `remote_sync_guard` | Remote sync guard | How long this device keeps its microphone closed after a routed answer, so it cannot hear its own answer from a speaker running slightly behind and mistake it for you. It only engages when the assistant is about to listen again - a continued conversation or voice sign-in; one-shot answers skip it entirely. |
 | `duck_volume` | Duck volume | The level they drop to. Players already quieter than this are left alone, so a whole-house group does not get turned up. |
 
 `voice_override` and `remote_tts_volume` are the pair most easily confused, and with Voice Volume Override

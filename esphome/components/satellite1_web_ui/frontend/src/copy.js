@@ -55,7 +55,7 @@ export const HINTS = {
     'Rings a finished timer on the target speakers too, until the alarm is stopped. Saying "stop" at any speaker silences it everywhere.',
 
   remote_sync_guard:
-    "How long this device keeps its microphone closed after a routed answer, so it cannot hear its own answer from a speaker running slightly behind and mistake it for you.",
+    "How long this device keeps its microphone closed after a routed answer, so it cannot hear its own answer from a speaker running slightly behind and mistake it for you. It only engages when the assistant is about to listen again - a continued conversation or voice sign-in; one-shot answers skip it entirely.",
 
   // duck_area, duck_players and duck_tts_targets are gone for the same reason. Ducking is now the same
   // tree, and the answer to "which players" is visibly the thing being ticked.

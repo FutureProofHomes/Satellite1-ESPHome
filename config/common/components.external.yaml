@@ -22,3 +22,5 @@ external_components:
       - satellite1_radar
       - satellite1_web_ui
       - tas2780
+      # Vendored (see esphome/components/voice_assistant/FPH_VENDOR.md).
+      - voice_assistant
