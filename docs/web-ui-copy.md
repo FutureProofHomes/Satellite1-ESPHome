@@ -73,6 +73,7 @@ with microphones in it: people assume presence is heard rather than sensed.
 | Key | Where | Text |
 | --- | --- | --- |
 | `presence` | LD2450 / LD2410 card | Sensed by radar, not the microphones. It works through the case and notices people even when they sit completely still. |
+| `distance_unit` | Distance pill, Feet row | Shows every distance on this page in feet. The radar keeps measuring and storing centimetres either way, so Home Assistant and the saved settings are unaffected. |
 | `radar_range` | Detection range | How far the radar looks. Anything farther away is ignored - use it to stop the radar seeing into the hallway or the next room. All the way left is the full 6m reach. |
 | `radar_stability` | Stability | How sure the radar must be before it changes its answer. Higher is steadier but slower to notice changes. Lower is quicker but can flicker. |
 | `radar_timeout` | Timeout | How long the room still counts as occupied after the radar loses sight of everyone. Set it high enough that the lights stay on while you sit still. |

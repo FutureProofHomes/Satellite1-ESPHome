@@ -91,6 +91,12 @@ export const HINTS = {
 
   presence: "Sensed by radar, not the microphones. It works through the case and notices people even when they sit completely still.",
 
+  /* The unit toggle under the Distance pill. Same boundary sentence as temp_unit: display versus
+     stored, because a customer who tunes gates in feet deserves to know the device never left
+     centimetres. */
+  distance_unit:
+    "Shows every distance on this page in feet. The radar keeps measuring and storing centimetres either way, so Home Assistant and the saved settings are unaffected.",
+
   /* The radar's own settings, on Presence. Rewritten plain and short at the owner's request: one idea
      per hint, no jargon, and the "why you'd change this" up front. */
   radar_range: "How far the radar looks. Anything farther away is ignored - use it to stop the radar seeing into the hallway or the next room. All the way left is the full 6m reach.",

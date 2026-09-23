@@ -29,8 +29,15 @@
 import { useRef, useState } from "preact/hooks";
 
 import { HINTS, PRESENCE, TEXT } from "../copy.js";
-import { RADAR_LIVE_MS, useRadar } from "../lib/device.js";
-import { Btn, Card, Empty, Hint, Missing, N_PRES, Row, Slider, Toggle } from "../ui.jsx";
+import { entity, pathFor, post, RADAR_LIVE_MS, useRadar } from "../lib/device.js";
+import { Btn, Card, Empty, Hint, Missing, N_PRES, Pill, Row, Slider, Toggle } from "../ui.jsx";
+
+/** Display-only feet conversion (1 cm = 0.0328084 ft), driven by the distance_unit_ft switch. Every
+ *  write to the radar API stays in centimetres (or the module's verbatim resolution strings) - the
+ *  toggle changes what the labels say, never what the device hears. Decimal feet, one decimal, to
+ *  match the app's numeric style. */
+const ftOf = (cm) => cm * 0.0328084;
+const ftLabel = (cm) => `${ftOf(cm).toFixed(1)} ft`;
 
 /* ------------------------------------------------------------------ */
 /* The LD2450 plot                                                     */
@@ -108,7 +115,7 @@ function inPolygon(p, pts) {
 const FOV_X = Math.round(PLOT_DEPTH * Math.sin(Math.PI / 3));
 const FOV_Y = PLOT_DEPTH / 2;
 
-function Plot({ live, config, edit, onEdit, onSelect, onOpen, onHist }) {
+function Plot({ live, config, edit, onEdit, onSelect, onOpen, onHist, isFt }) {
   const svgRef = useRef(null);
   const trailRef = useRef({}); // per target slot, its last few positions - the comet tail
   const dragRef = useRef(null); // index of the held corner, "all" for the whole shape, null when idle
@@ -362,9 +369,10 @@ function Plot({ live, config, edit, onEdit, onSelect, onOpen, onHist }) {
             centreline at y = r; the label sits just below that crossing, except the outermost ring's,
             which sits just above it - r + 26 for the 600cm ring is past the bottom of the viewBox,
             which is how the 6m label went missing. */}
+        {/* The geometry stays in centimetres whatever the unit toggle says; only these labels convert. */}
         {[200, 400, 600].map((r) => (
           <text key={r} class="plot-tick" x="14" y={Math.min(r + 26, PLOT_DEPTH - 10)}>
-            {r / 100}m
+            {isFt ? ftLabel(r) : `${r / 100}m`}
           </text>
         ))}
       </svg>
@@ -561,14 +569,15 @@ const NUM_GATES = 9;
  * the shape here is `{"gates":{"move":[...],"still":[...]}}` as `handle_ld2410_live_` emits it, and the
  * layout is unverified against a real LD2410. Flagged rather than presented as tested.
  */
-function Gates({ live, config, write, busy }) {
+function Gates({ live, config, write, busy, isFt }) {
   const [drag, setDrag] = useState(null); // { field, idx, val } while a handle is held
 
   /* Each gate is one slice of distance, so it is labelled with the metres it actually watches rather
      than its index - "2.25-3" says what "3" never did. Computed from the configured resolution, so
-     flipping 0.75m/0.2m relabels the whole column to match what the module is now measuring. */
+     flipping 0.75m/0.2m relabels the whole column to match what the module is now measuring. In feet
+     mode the same boundaries convert for display (one decimal); the fields written stay untouched. */
   const res = config.distance_resolution === "0.2m" ? 0.2 : 0.75;
-  const fmt = (v) => String(parseFloat(v.toFixed(2)));
+  const fmt = (v) => (isFt ? String(parseFloat(ftOf(v * 100).toFixed(1))) : String(parseFloat(v.toFixed(2))));
 
   const groups = [
     ["Movement", (live && live.gates && live.gates.move) || [], "gate_move_thresholds", Number(config.max_move_gate) || 0, HINTS.gate_move],
@@ -605,7 +614,7 @@ function Gates({ live, config, write, busy }) {
             const thr = held ? drag.val : Number((config[field] || [])[i]) || 0;
             return (
               <div class={`gate${off ? " off" : ""}`} key={i}>
-                <span class="gate-n">{`${fmt(i * res)}\u2013${fmt((i + 1) * res)}m`}</span>
+                <span class="gate-n">{`${fmt(i * res)}\u2013${fmt((i + 1) * res)}${isFt ? "ft" : "m"}`}</span>
                 <div
                   class={`gate-bar${off ? "" : " editable"}`}
                   onPointerDown={(e) => {
@@ -651,20 +660,21 @@ function Gates({ live, config, write, busy }) {
  *  Nothing here is disabled while a write is in flight. Writes are optimistic and the queue serialises
  *  them, so there is nothing to protect - and greying every control out for each round trip is what
  *  made the whole card flash on every slider release. */
-function Ld2450Settings({ config, write, preview }) {
+function Ld2450Settings({ config, write, preview, isFt }) {
   return (
     <>
       {/* Zero is "no cut-off", which on this module means its full 6m reach - so the label says the
           reach rather than "default", and the ring is not drawn because nothing is being cut off. The
           preview is what lets the ring track the thumb in real time; the device hears one write, on
-          release. */}
+          release. The slider still steps and writes 10cm increments in feet mode - only the readout
+          converts. */}
       <Row label="Detection range" hint={HINTS.radar_range}>
         <Slider
           value={config.detection_range}
           min={0}
           max={600}
           step={10}
-          format={(v) => (Number(v) === 0 ? "6 m" : `${Math.round(v)} cm`)}
+          format={(v) => (Number(v) === 0 ? (isFt ? "20 ft" : "6 m") : isFt ? ftLabel(v) : `${Math.round(v)} cm`)}
           onPreview={(v) => preview({ detection_range: Math.round(v) })}
           onCommit={(v) => write({ detection_range: Math.round(v) })}
         />
@@ -704,7 +714,7 @@ function Ld2450Settings({ config, write, preview }) {
 }
 
 /** Undisabled during writes for the same reason as the LD2450's settings above. */
-function Ld2410Settings({ config, write, preview }) {
+function Ld2410Settings({ config, write, preview, isFt }) {
   return (
     <>
       {/* Same control and same meaning as the LD2450's, so the same hint rather than a second wording. */}
@@ -751,14 +761,15 @@ function Ld2410Settings({ config, write, preview }) {
 
       {/* A two-stop slider rather than a dropdown, at the owner's call - it sits among sliders, and a
           slider whose ends are the two choices reads as "less reach, finer" vs "more reach, coarser"
-          where a dropdown read as a form field. The handler takes the two strings verbatim. */}
+          where a dropdown read as a form field. The handler takes the two strings verbatim - the feet
+          labels are display only. */}
       <Row label="Distance resolution" hint={HINTS.radar_resolution}>
         <Slider
           value={config.distance_resolution === "0.2m" ? 0 : 1}
           min={0}
           max={1}
           step={1}
-          format={(v) => (Math.round(v) === 0 ? "0.2 m" : "0.75 m")}
+          format={(v) => (Math.round(v) === 0 ? (isFt ? "0.7 ft" : "0.2 m") : isFt ? "2.5 ft" : "0.75 m")}
           onCommit={(v) => write({ distance_resolution: Math.round(v) === 0 ? "0.2m" : "0.75m" })}
         />
       </Row>
@@ -787,9 +798,18 @@ const ZONE_STATE_KEYS = ["text_sensor/Radar Zone 1", "text_sensor/Radar Zone 2",
  */
 function StatusPills({ ctx, kind, live }) {
   const target = ctx.states["text_sensor/Radar Target"];
+  // The distance unit preference, an internal ESPHome switch like the temperature editor's - so a
+  // wall tablet and a phone agree, and a reboot keeps the choice. Absent on older firmware, in which
+  // case the Distance pill stays read-only and everything reads metric.
+  const unitFt = entity(ctx, "distance_unit_ft");
+  const isFt = !!unitFt && (unitFt.value === true || unitFt.state === "ON");
+  const dist = (cm) => (isFt ? ftLabel(cm) : `${(cm / 100).toFixed(1)} m`);
+  const [open, setOpen] = useState(null);
   // No .on ring on any of these: on the sensor chips that ring means "selected, editor open below",
   // and borrowing it here to mean "active" made the row look like some pills were pressed - the values
-  // already say what is happening.
+  // already say what is happening. The Distance pill is the one exception: when the firmware carries
+  // the unit switch it wears the shared Pill chip and opens the unit editor below, like the home
+  // page's temperature chip.
   const pills = [];
 
   if (kind === "ld2450") {
@@ -815,7 +835,7 @@ function StatusPills({ ctx, kind, live }) {
         v: occupied.length ? `Zone ${occupied.map((z) => z.n).join(", ")}` : present ? "Yes" : "No",
       },
       { l: "People", v: String(ts.length) },
-      { l: "Distance", v: near ? `${(near.d / 100).toFixed(1)} m` : "\u2014" },
+      { l: "Distance", v: near ? dist(near.d) : "\u2014", exp: true },
       { l: "Direction", v: near ? (ang < -15 ? "Left" : ang > 15 ? "Right" : "Ahead") : "\u2014" }
     );
   } else {
@@ -828,19 +848,33 @@ function StatusPills({ ctx, kind, live }) {
     // The LD2410 reports one distance, not coordinates, so this is the whole story it can tell.
     const d = ctx.states["sensor/Radar Detection Distance"] || ctx.states["sensor/Radar Moving Distance"];
     const cm = d ? Number(d.value) : NaN;
-    pills.push({ l: "Distance", v: Number.isFinite(cm) && cm > 0 ? `${(cm / 100).toFixed(1)} m` : "\u2014" });
+    pills.push({ l: "Distance", v: Number.isFinite(cm) && cm > 0 ? dist(cm) : "\u2014", exp: true });
   }
 
   return (
     <Card>
       <div class="pills">
-        {pills.map((p) => (
-          <span key={p.l} class="pill ro">
-            <span class="pill-v">{p.v}</span>
-            <span class="pill-l">{p.l}</span>
-          </span>
-        ))}
+        {pills.map((p) =>
+          p.exp && unitFt ? (
+            <Pill key={p.l} id="dist" open={open} setOpen={setOpen} label={p.l} value={p.v} />
+          ) : (
+            <span key={p.l} class="pill ro">
+              <span class="pill-v">{p.v}</span>
+              <span class="pill-l">{p.l}</span>
+            </span>
+          )
+        )}
       </div>
+      {open === "dist" && unitFt && (
+        <div class="editor">
+          <div class="row sm">
+            <span class="dim">Feet</span>
+            <Hint text={HINTS.distance_unit} />
+            <span class="grow" />
+            <Toggle checked={isFt} onChange={(v) => post(pathFor(ctx, "distance_unit_ft", v ? "turn_on" : "turn_off"))} />
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
@@ -888,6 +922,11 @@ export function Presence({ ctx }) {
 
   const is2450 = radarKind === "ld2450";
 
+  // One read for the whole route: the plot's tick labels, the gate rows and both settings panels
+  // follow the same preference the StatusPills editor writes.
+  const unitFt = entity(ctx, "distance_unit_ft");
+  const isFt = !!unitFt && (unitFt.value === true || unitFt.state === "ON");
+
   /** Opens a committed shape for editing - one function because there are two doors to it: the shape's
    *  button on the Zones card and the shape itself on the plot. */
   const openShape = (which) => {
@@ -929,6 +968,7 @@ export function Presence({ ctx }) {
               onSelect={(sel) => setEdit((e) => ({ ...e, sel }))}
               onOpen={openShape}
               onHist={(snap) => setEdit((e) => ({ ...e, hist: [...e.hist, snap] }))}
+              isFt={isFt}
             />
             {/* Zone controls live in the same card as the map they draw on - plot, instruction line,
                 buttons, one surface for the whole task, per the owner. The separate Zones card is gone. */}
@@ -942,15 +982,15 @@ export function Presence({ ctx }) {
             />
           </>
         ) : (
-          <Gates live={radarLive} config={radarConfig} write={radarWrite} busy={radarBusy} />
+          <Gates live={radarLive} config={radarConfig} write={radarWrite} busy={radarBusy} isFt={isFt} />
         )}
       </Card>
 
       <Card title="Settings">
         {is2450 ? (
-          <Ld2450Settings config={radarConfig} write={radarWrite} preview={radarPreview} />
+          <Ld2450Settings config={radarConfig} write={radarWrite} preview={radarPreview} isFt={isFt} />
         ) : (
-          <Ld2410Settings config={radarConfig} write={radarWrite} preview={radarPreview} />
+          <Ld2410Settings config={radarConfig} write={radarWrite} preview={radarPreview} isFt={isFt} />
         )}
 
         {/* No save button: every change is live immediately and is written to permanent storage on its

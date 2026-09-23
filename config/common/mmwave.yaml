@@ -29,3 +29,19 @@ text_sensor:
     id: radar_detected_text
     satellite1_radar_id: sat1_radar
     name: Radar Detected
+
+switch:
+  # The web app's distance unit preference for the Presence page, and nothing more: no logic hangs
+  # off it. Display-only, the same shape as hat_sensors.yaml's temp_display_fahrenheit - every value
+  # written to the radar API stays in centimetres (or the module's own resolution strings), so
+  # flipping it can never change what the module measures or stores. internal because it is a web-UI
+  # display preference, not a fact about the device; web_server's include_internal still carries it
+  # to the app over /events and the REST endpoints.
+  - platform: template
+    id: distance_display_feet
+    name: "Distance in Feet"
+    icon: "mdi:ruler"
+    internal: true
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
