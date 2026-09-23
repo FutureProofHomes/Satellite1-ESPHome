@@ -61,13 +61,22 @@ export function LoginScreen({ onSignedIn }) {
   const pwRef = useRef(null);
   const pollTimer = useRef(null);
   const live = useRef(true);
+  // The identity line in the hero: exactly one string, friendly name > mDNS name > the host the
+  // browser is already on. Seeded with location.hostname so the line is never empty and never jumps
+  // from blank to filled - whoami upgrades it in place when it answers (one visible text swap,
+  // accepted). On a wall of identical login screens this is the fact that says which device this is.
+  const [dev, setDev] = useState(location.hostname);
 
   useEffect(() => {
-    // The tab title, pre-login: the hostname is the only name this page may know (the friendly
-    // name lives behind the session), and it beats an address in a row of tabs. The app proper
-    // upgrades it to the friendly name after sign-in.
-    whoami().then((n) => {
-      if (n) document.title = n;
+    whoami().then((who) => {
+      if (!who) return;
+      // fn > "<name>.local" - the same priority as the line below the logo. `fn` is absent only on
+      // an older firmware body, which cannot happen inside one image but costs nothing to survive.
+      const label = who.fn || (who.name ? `${who.name}.local` : null);
+      if (label) setDev(label);
+      // The tab title too: the friendly name beats the hostname in a row of tabs, and the app
+      // proper uses the same name after sign-in.
+      document.title = who.fn || who.name;
     });
     return () => {
       live.current = false;
@@ -167,9 +176,12 @@ export function LoginScreen({ onSignedIn }) {
       <div class="login-glow" aria-hidden="true" />
       <div class="login-hero">
         <Logo />
-        {/* The product, not the hostname - "satellite1-d2256c" belongs in the tab title, where the
-            whoami effect above puts it. */}
+        {/* The product name, then which one: the identity line carries the friendly name (or the
+            host as a fallback) so ten identical login pages on one LAN are tellable apart. The
+            splash overlay reuses the .login-* classes but not this element - it renders its own
+            markup - so the line cannot bleed there. */}
         <h1 class="login-name">Satellite1</h1>
+        <div class="login-dev">{dev}</div>
         <div class="login-sub">{TEXT.login_sub}</div>
       </div>
 

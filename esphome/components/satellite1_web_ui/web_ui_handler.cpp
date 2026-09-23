@@ -575,18 +575,17 @@ void WebUIHandler::handle_mute_hold_(AsyncWebServerRequest *request) {
   request->send(200, "application/json", "{\"ok\":1}");
 }
 
-#if defined(USE_VOICE_ASSISTANT) || defined(USE_MICRO_WAKE_WORD) || defined(USE_SAT1_CRASH_REPORT)
 /// Escapes the two characters that can break a JSON string, plus control characters.
 ///
-/// Most strings this file emits are device names or versions, which are ours. Its two callers are the
-/// exceptions: a transcript line comes from speech recognition by way of Home Assistant, and a wake
-/// word's name comes from the model manifest fetched at build time. Both are the kind of string where
-/// a quotation mark is plausible, and one unescaped would truncate the response into invalid JSON.
+/// Most strings this file emits are device names or versions, which are ours. Its callers are the
+/// exceptions: a transcript line comes from speech recognition by way of Home Assistant, a wake
+/// word's name comes from the model manifest fetched at build time, and the state payload's
+/// friendly_name is a YAML substitution a customer can put a quote into. All are the kind of string
+/// where a quotation mark is plausible, and one unescaped would truncate the response into invalid
+/// JSON.
 ///
 /// Splits at the writer's buffer boundary rather than truncating, so it is also the required path
 /// for anything unbounded - see WU_CHUNK_HEADROOM.
-///
-/// Guarded on either caller, so a build with neither does not carry an unused static.
 static void write_json_string(ChunkWriter &w, const std::string &text) {
   w.print("\"");
   for (const char c : text) {
@@ -617,7 +616,6 @@ static void write_json_string(ChunkWriter &w, const std::string &text) {
   }
   w.print("\"");
 }
-#endif
 
 #ifdef USE_MICRO_WAKE_WORD
 void WebUIHandler::push_wake_detection(const std::string &word) {
@@ -2384,8 +2382,11 @@ void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
   // same number. A peer whose app finds this missing or out of range falls back to plain
   // navigation, so an old device is never driven by an app that misunderstands it.
   w.printf(R"({"apiv":%d,)", WU_API_VERSION);
-  w.printf(R"("name":"%s","friendly_name":"%s","mac":"%s","ip":"%s",)", App.get_name().c_str(),
-                 App.get_friendly_name().c_str(), mac_buf, ip_buf);
+  // friendly_name through the escaper, not printf: it is a YAML substitution a customer can put a
+  // quote into, and raw it would truncate the whole state payload into invalid JSON.
+  w.printf(R"("name":"%s","friendly_name":)", App.get_name().c_str());
+  write_json_string(w, App.get_friendly_name());
+  w.printf(R"(,"mac":"%s","ip":"%s",)", mac_buf, ip_buf);
 
 #ifdef USE_ETHERNET
   w.print(R"("net":"ethernet",)");

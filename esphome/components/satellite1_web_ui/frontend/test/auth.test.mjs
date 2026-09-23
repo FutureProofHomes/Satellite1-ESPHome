@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import test from "node:test";
 
-import { hmacSha256, sha256, toHex } from "../src/lib/auth.js";
+import { hmacSha256, sha256, toHex, whoami } from "../src/lib/auth.js";
 
 const refSha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const refHmac = (key, msg) => createHmac("sha256", key).update(msg).digest("hex");
@@ -41,6 +41,26 @@ test("hmacSha256 matches node:crypto around the block-size key boundary", () => 
       assert.equal(toHex(hmacSha256(key, msg)), refHmac(key, msg), `key ${keyLen}, msg ${msgLen}`);
     }
   }
+});
+
+test("whoami: the three body shapes the login page must survive", async (t) => {
+  // {name, fn} (current firmware), {name} only (defensive - fn is additive), and no answer at all.
+  // The login page's identity line hangs off exactly these: fn > name > the browser's own host.
+  const realFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  globalThis.fetch = async () => ({ json: async () => ({ name: "satellite1-a1b2c3", fn: "Satellite1 a1b2c3" }) });
+  assert.deepEqual(await whoami(), { name: "satellite1-a1b2c3", fn: "Satellite1 a1b2c3" });
+
+  globalThis.fetch = async () => ({ json: async () => ({ name: "satellite1-a1b2c3" }) });
+  assert.deepEqual(await whoami(), { name: "satellite1-a1b2c3", fn: null });
+
+  globalThis.fetch = async () => {
+    throw new Error("device gone");
+  };
+  assert.equal(await whoami(), null);
 });
 
 test("the login answer shape: HMAC-SHA256(SHA-256(password), nonce)", () => {

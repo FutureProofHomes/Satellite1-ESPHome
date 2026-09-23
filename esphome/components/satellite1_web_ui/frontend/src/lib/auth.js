@@ -178,10 +178,13 @@ export async function logoutAll() {
   return { ok: res.ok && body.ok === 1, key: body.key };
 }
 
-/** The device's mDNS hostname, from the one deliberately public fact endpoint. */
+/** The device's public identity from the one deliberately public fact endpoint: `{name, fn}`,
+ *  where `name` is the mDNS hostname and `fn` the friendly name - null on older firmware bodies
+ *  that carry no `fn`, and null overall when the device does not answer. */
 export async function whoami() {
   try {
-    return (await (await f("/api/sat1/whoami")).json()).name || null;
+    const j = await (await f("/api/sat1/whoami")).json();
+    return j && j.name ? { name: j.name, fn: j.fn || null } : null;
   } catch {
     return null;
   }
@@ -240,7 +243,7 @@ export async function maybeRedirectLocal() {
   } catch {
     /* fall through to the probe */
   }
-  const name = await whoami();
+  const name = (await whoami())?.name;
   if (!name) return false;
   const target = `http://${name}.local${portSuffix()}`;
   try {

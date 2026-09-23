@@ -3219,6 +3219,19 @@ polyline.draft {
   margin: 0;
   text-align: center;
 }
+/* The identity line between the product name and the tagline: which device this login page belongs
+   to. Ellipsis, no wrap (the .tname treatment) - a customer's friendly name can be long and the
+   hero must not reflow around it. Only login.jsx renders the element; the splash overlay reuses the
+   other .login-* classes but not this one. */
+.login-dev {
+  color: var(--fg-3);
+  font-size: 0.85rem;
+  max-width: min(400px, 90vw);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
 .login-sub {
   color: var(--fg-3);
   font-size: 0.85rem;

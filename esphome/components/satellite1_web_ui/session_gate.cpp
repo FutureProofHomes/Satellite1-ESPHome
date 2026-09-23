@@ -48,6 +48,34 @@ static void hmac_sha256_(const uint8_t *key, size_t key_len, const uint8_t *msg,
   mbedtls_md_hmac(md, key, key_len, msg, msg_len, out);
 }
 
+/// JSON-escapes src into out (quote, backslash, control characters), truncating whole escapes when
+/// out fills. The gate hand-rolls its JSON into fixed buffers, and whoami's `fn` is the one field
+/// that carries user-controlled text: friendly_name is a YAML substitution a customer can put `"`
+/// or `\` into, and one unescaped quote would break whoami for the smart redirect too.
+static void json_escape_(const char *src, char *out, size_t out_size) {
+  size_t o = 0;
+  for (const char *p = src; *p != '\0'; p++) {
+    const unsigned char c = static_cast<unsigned char>(*p);
+    char esc[8];
+    size_t n;
+    if (c == '"' || c == '\\') {
+      esc[0] = '\\';
+      esc[1] = static_cast<char>(c);
+      n = 2;
+    } else if (c < 0x20) {
+      n = static_cast<size_t>(snprintf(esc, sizeof(esc), "\\u%04x", static_cast<unsigned int>(c)));
+    } else {
+      esc[0] = static_cast<char>(c);
+      n = 1;
+    }
+    if (o + n + 1 > out_size)
+      break;
+    memcpy(out + o, esc, n);
+    o += n;
+  }
+  out[o] = '\0';
+}
+
 /// Constant-time equality over NUL-terminated strings, the same fold-the-length-in construction
 /// ESPHome's own Basic-auth check uses: no early exit, so a mismatch costs the same time wherever
 /// it is.
@@ -459,13 +487,16 @@ void SessionGate::deny_(AsyncWebServerRequest *request) {
 }
 
 void SessionGate::handle_whoami_(AsyncWebServerRequest *request) {
-  // Name only, and public by design: the smart redirect needs the mDNS hostname before any login
-  // exists. The plan's index-embedding variant would expose exactly the same string to exactly the
-  // same callers (the bundle is served unauthenticated either way), and cannot be done without
-  // abandoning the pre-gzipped PROGMEM bundle - so this endpoint is the same disclosure at a
-  // fraction of the cost. Nothing else rides along; state stays gated.
-  char body[80];
-  snprintf(body, sizeof(body), R"({"name":"%s"})", App.get_name().c_str());
+  // Names only, and public by design: the smart redirect needs the mDNS hostname before any login
+  // exists, and the login page shows the friendly name (`fn`) so a wall of identical login screens
+  // can be told apart. Neither is a new disclosure: the mDNS TXT records broadcast friendly_name to
+  // the whole LAN and /manifest.webmanifest serves it unauthenticated already. `fn` is escaped -
+  // friendly_name is user-controlled YAML text - and additive: older frontends keep reading .name.
+  // Nothing else rides along; state stays gated.
+  char fn[96];
+  json_escape_(App.get_friendly_name().c_str(), fn, sizeof(fn));
+  char body[192];
+  snprintf(body, sizeof(body), R"({"name":"%s","fn":"%s"})", App.get_name().c_str(), fn);
   this->send_json_(request, "200 OK", body, false, false, nullptr);
 }
 
