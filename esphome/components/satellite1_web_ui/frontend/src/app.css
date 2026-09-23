@@ -56,6 +56,11 @@
   --ok: #2e7d32;
   --warn: #b26a00;
   --err: #c62828;
+  /* The pill switches' fills (the Stop word and the chime bell, one control family): green and red
+     softened toward the palette's muted register - state colors, not alarm colors, which is why
+     these are not --ok/--err (owner call, September 2026; values from the tuner-v2 canvas). */
+  --tgl-on: #4a8a67;
+  --tgl-off: #b3574e;
 
   /* Anything drawn on top of --accent or --err. Was a hardcoded white in six places, which happened
      to be right on a blue button and wrong the moment the accent moved. */
@@ -109,6 +114,8 @@
   --ok: #4caf50;
   --warn: #ffa726;
   --err: #ef5350;
+  --tgl-on: #41996b;
+  --tgl-off: #b05a52;
 
   /* Near-black rather than white: the dark theme's accent is bright enough that white on it fails. */
   --on-accent: #04121a;
@@ -305,30 +312,67 @@ textarea {
 /* Shell                                                            */
 /* ---------------------------------------------------------------- */
 
-/* Lifted on a shadow rather than closed with a border, like the cards below it. */
-.topbar {
+/* The sticky head: just the topbar now - the route title bar it once shared this wrapper with was
+   retired for the folder tab (owner request, September 2026; see .rtab below). The wrapper stays,
+   because the translucency rules key on it. */
+.stickhead {
   position: sticky;
   top: 0;
   z-index: 20;
+  background: var(--bg-elev);
+  box-shadow: 0 1px 3px var(--shadow);
+}
+.topbar {
   display: flex;
   align-items: center;
   gap: var(--s-1);
   padding: var(--s-2) var(--s-3);
   padding-top: calc(var(--s-2) + env(safe-area-inset-top));
+}
+/* The route's name, worn as a folder tab growing out of the top card's top-left corner: a tab in
+   the card's own elevated background, the card's corner squared beneath it (the .rtab-row + .card
+   rule below), so tab and card read as one piece of paper. The open run to the tab's right is
+   reserved for the coming toast redesign - nothing else may move in. */
+.rtab-row {
+  display: flex;
+  align-items: flex-end;
+}
+.rtab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
   background: var(--bg-elev);
-  box-shadow: 0 1px 3px var(--shadow);
+  border-radius: var(--r-2) var(--r-2) 0 0;
+  padding: 8px 16px 7px;
+  font-weight: 650;
+  font-size: 14px;
+  /* The card's own shadow, clipped to the tab's top edge so the two cast as one shape. */
+  box-shadow: 0 -1px 2px var(--shadow);
+}
+.rtab-i {
+  display: inline-flex;
+  color: var(--accent);
+}
+.rtab-i .ni {
+  width: 16px;
+  height: 16px;
+}
+/* The card under the tab: flush against it, its top-left corner squared beneath the tab's own. */
+.rtab-row + .card,
+.rtab-row + * > .card:first-child {
+  border-top-left-radius: 0;
 }
 /* Translucent over a blur, so scrolled content ghosts through the bar the way every phone's own
    chrome does - but only where the blur exists, because translucency without it is just a bar the
    page shows through. The alphas restate the two --bg-elev values; they live here rather than in a
    token because this is the app's only translucent surface. */
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .topbar {
+  .stickhead {
     background: rgba(255, 255, 255, 0.8);
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
   }
-  [data-theme="dark"] .topbar {
+  [data-theme="dark"] .stickhead {
     background: rgba(28, 32, 38, 0.8);
   }
 }
@@ -3230,50 +3274,7 @@ polyline.draft {
 /* tree has no counterpart for.                                        */
 /* ------------------------------------------------------------------ */
 
-/* The wake word card's body is a stack of unlike blocks - the picker control, the tuner row, the
-   tuned-result box, the pipeline row, the swap/download notes - so the slot owns one rhythm for
-   all of them: a flex column with an s-3 gap, the same 12px two adjacent .ctl rows produce
-   elsewhere. The rows inside give up their own vertical padding so the gap is the whole story and
-   nothing double-spaces (hardware screenshot, September 2026: everything sat touching). */
-.ww-slot {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--s-3);
-}
-.ww-slot > .ctl {
-  padding: 0;
-}
-.ww-slot > .ww-note {
-  margin: 0;
-  padding: 0;
-}
-.ww-slot-t {
-  margin-bottom: var(--s-1);
-}
-/* The collapsed control: the slot's current word, full width, dressed like the house <select> so it
-   reads as the input it is. */
-.ww-cur {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s-2);
-  width: 100%;
-  background: var(--fill);
-  color: var(--fg);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-2);
-  padding: var(--s-2) var(--s-2);
-  font: var(--t-m) inherit;
-  cursor: pointer;
-}
-.ww-cur .ww-word {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* The picker is the tree with more rows behind it, so it stands a little taller before scrolling.
-   No margin of its own: the slot's gap owns the rhythm. */
+/* The picker is the tree with more rows behind it, so it stands a little taller before scrolling. */
 .ww-pick {
   max-height: 340px;
 }
@@ -3335,88 +3336,6 @@ polyline.draft {
   margin: var(--s-1) 0 0;
   padding: 0 var(--s-2);
 }
-/* The test moment: the invitation breathes the accent, the confirmation lands solid. */
-.ww-try {
-  color: var(--accent);
-  animation: ww-breathe 2s ease-in-out infinite;
-}
-.ww-heard {
-  color: var(--ok);
-  font-weight: 600;
-}
-@keyframes ww-breathe {
-  50% {
-    opacity: 0.55;
-  }
-}
-/* The tuner row's pair of buttons, and the one control in the app wearing a gradient face: the
-   owner asked for exactly this button ("green with cool gradient", September 2026), a deliberate
-   exception to the no-gradient-on-buttons rule - it marks the card's one guided, do-this action.
-   Reset Default wears the same red as the factory reset button, for the same reason: it throws a
-   measurement away. */
-.tn-btns-row {
-  display: flex;
-  gap: var(--s-2);
-}
-.btn.tn-go {
-  background: linear-gradient(135deg, var(--ok), #00897b);
-  border-color: transparent;
-  color: var(--on-accent);
-}
-/* The tuned-result box: the transcript subcard's neutral grey shape. */
-.tn-box {
-  padding: var(--s-2);
-  background: var(--fill);
-  border: 1px solid var(--line);
-  border-radius: var(--r-2);
-  font-size: var(--t-s);
-  color: var(--fg-2);
-}
-
-/* The Wake Word Tuner panel: a sunken box like the picker, holding the session's phases. */
-.tn-panel {
-  padding: var(--s-2);
-  background: var(--bg-sunk);
-  border: 1px solid var(--line);
-  border-radius: var(--r-2);
-}
-.tn-panel p {
-  margin: 0 0 var(--s-1);
-}
-.tn-panel p:last-child {
-  margin-bottom: 0;
-}
-/* One scored attempt: a track with the brand-gradient fill the sliders wear, the percentage at the
-   end so the bar and the number cannot disagree. */
-.tn-bar {
-  position: relative;
-  height: 16px;
-  margin: var(--s-1) 0;
-  background: var(--fill);
-  border-radius: var(--r-1);
-  overflow: hidden;
-}
-.tn-bar span {
-  display: block;
-  height: 100%;
-  background: var(--grad);
-  border-radius: var(--r-1);
-}
-.tn-bar em {
-  position: absolute;
-  right: var(--s-1);
-  top: 0;
-  line-height: 16px;
-  font-size: var(--t-xs);
-  font-style: normal;
-  color: var(--fg-2);
-}
-.tn-btns {
-  display: flex;
-  gap: var(--s-2);
-  margin-top: var(--s-1);
-}
-
 /* The sources card. */
 .ws-row {
   display: flex;
@@ -3441,4 +3360,523 @@ polyline.draft {
 .ws-foot a,
 .ws-name a {
   color: var(--accent);
+}
+
+/* ---------------------------------------------------------------- */
+/* The Living Graph (the v2 redesign, September 2026; the tuner-v2   */
+/* canvas is the design of record for every shape below). One SVG,   */
+/* two sizes: the collapsed row strip is the word's standing 24h     */
+/* record, the expanded one is the tuner itself. Two color worlds    */
+/* split at the knob - amber frost left (blurred dots under a veil), */
+/* a whisper of accent right with the dots crisp on top - and the    */
+/* two colors are the entire explanation.                            */
+/* ---------------------------------------------------------------- */
+
+/* One word's row. Hairline-divided siblings rather than nested cards; the first row loses the
+   divider so the card's own header does the separating. */
+.mb {
+  padding: var(--s-2) 0;
+  border-top: 1px solid var(--line);
+}
+.mb.first {
+  border-top: 0;
+  padding-top: var(--s-1);
+}
+.mb.off {
+  opacity: 0.45;
+}
+/* The clear break above the Stop row: the two swappable slots end here, and the heavier rule with
+   extra air says so (owner call, September 23 2026 - the card is always word 1, word 2, break,
+   Stop, with nothing below Stop). */
+.mb.brk {
+  border-top: 2px solid var(--line-2);
+  margin-top: var(--s-3);
+  padding-top: var(--s-3);
+}
+/* The firing flash: the row's moment when its word just fired - the same beat its dot lands on the
+   graph with the orbit ripple. No text; the animation is the announcement. */
+.mb.hot {
+  animation: mb-hot 3.5s ease-out;
+  border-radius: var(--r-2);
+}
+@keyframes mb-hot {
+  0%,
+  60% {
+    background: var(--accent-bg);
+  }
+  100% {
+    background: transparent;
+  }
+}
+.mb-t {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 30px;
+}
+.mb-right {
+  margin-left: auto;
+  font-size: var(--t-s);
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+.mb-sub {
+  margin: var(--s-1) 0 0;
+  font-size: var(--t-s);
+  color: var(--fg-3);
+}
+/* The Voice Pipeline on the row itself: seeing the pairing and changing it are the same gesture. */
+.mb-pipe {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  margin-top: var(--s-2);
+  font-size: var(--t-s);
+}
+.row-actions.center {
+  justify-content: center;
+  margin: var(--s-2) 0 var(--s-3);
+}
+/* The placement row's four verbs, held to one line on a phone: equal shares, tighter padding, and
+   labels that must not wrap - "Clear history" is the widest and sets the squeeze. */
+.row-actions.one4 {
+  flex-wrap: nowrap;
+}
+.row-actions.one4 .btn {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 4px;
+  font-size: var(--t-s);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+
+/* The word pill: the row's title, wearing its own picker chevron inside the border - tapping it
+   expands the word list inline where the graph sits (no modal anywhere on this route). The quiet
+   variant is a mid-swap ghost row's title, which opens nothing. Named .wpill, NOT .pill: that
+   class is the sensor chips' app-wide, and a duplicate here squeezed every chip on Home and
+   Presence into blue-bordered ellipses (owner's screenshots, September 22 2026). */
+.wpill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1.5px solid var(--accent);
+  background: none;
+  color: var(--fg);
+  border-radius: var(--r-pill);
+  padding: 3px 9px 3px 12px;
+  font: var(--t-m) inherit;
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.wpill.quiet {
+  cursor: default;
+  padding-right: 12px;
+}
+/* The pill switches: Stop's title IS its switch, and the chime bell in the card header is its
+   sibling - one control family, one fixed height, the iOS grammar (title/icon inside the button,
+   the white knob sliding end to end, the fill carrying the state: soft green listening, soft red
+   off). */
+.wsw {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 25px;
+  border: 0;
+  background: var(--tgl-off);
+  color: #fff;
+  border-radius: var(--r-pill);
+  padding: 0 12px 0 5px;
+  font: var(--t-m) inherit;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.wsw.on {
+  background: var(--tgl-on);
+  padding: 0 5px 0 12px;
+}
+/* The knob leads while off, trails while on - the slide is the render order flipping. */
+.wsw-knob {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--r-pill);
+  background: #fff;
+}
+.wsw-bell {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+}
+.wsw-bell svg {
+  width: 100%;
+  height: 100%;
+}
+.chimewrap {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  /* The card title's weight must not leak into a control that sits inside the <h2>. */
+  font-weight: 400;
+}
+/* The card-right slot already floats right; when the chime is there, mb-right yields. */
+.chimewrap + .mb-right {
+  margin-left: 0;
+}
+
+/* The untuned row's call to action: a solid accent capsule inside a soft halo of the accent's own
+   tint - deliberately the loudest control on the route, because it is the one thing an untuned
+   word wants. Sits on the title line exactly where a tuned word's status would be. */
+.tunebtn-halo {
+  display: inline-flex;
+  background: var(--accent-bg);
+  border-radius: var(--r-pill);
+  padding: 3px;
+  flex: none;
+}
+.tunebtn {
+  border: 0;
+  background: var(--accent);
+  color: var(--on-accent);
+  border-radius: var(--r-pill);
+  padding: 5px 14px;
+  font: var(--t-s) inherit;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tunebtn:active {
+  filter: brightness(0.92);
+}
+
+/* The freshly tuned row's status: the radar's live-dot grammar - the graph is streaming. */
+.mb-live {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.mb-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+}
+
+/* The graph itself. The touch layer owns the pointer (TouchGraph): draggable in placement, where
+   the browser must never claim the gesture for scrolling; tap-only at rest. The legend above and
+   the tick labels below are HTML siblings, not SVG text - SVG type misses the subpixel
+   antialiasing every other font in the app gets and read blurry beside it (owner's report); their
+   positions reuse the SVG's own x math so the layers cannot drift. */
+.lg {
+  display: block;
+  width: 100%;
+}
+.lg-wrap {
+  margin-top: var(--s-1);
+}
+.lg-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-bottom: var(--s-1);
+  font-size: var(--t-s);
+  color: var(--fg-2);
+}
+.lg-leg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.lg-leg-you {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+}
+.lg-leg-room {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--warn);
+  opacity: 0.85;
+}
+.lg-box {
+  position: relative;
+}
+.lg-box.draggable {
+  touch-action: none;
+  cursor: ew-resize;
+}
+/* Every 0-100% axis wears its name in the plot's lower-left (owner call; it replaced the frost's
+   "ignored" caption). Inline `bottom` from the JSX, since the axis strip's share of the height
+   varies with the graph's size. */
+.lg-conf {
+  position: absolute;
+  left: 4.5%;
+  font-size: var(--t-xs);
+  color: var(--fg-3);
+  pointer-events: none;
+}
+/* The tick labels, positioned by the same 12 + 2.76c viewBox math the marks use. */
+.lg-ticks {
+  position: relative;
+  height: 15px;
+  margin-top: 2px;
+  font-size: var(--t-xs);
+  color: var(--fg-3);
+}
+.lg-ticks span {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+/* What text remains inside the SVG (attempt labels, the popover) inherits the app's own stack. */
+.lg text {
+  font-family: inherit;
+}
+.lg-track {
+  fill: var(--bg-sunk);
+}
+/* The graph paper under every plot: faint minor rules, slightly stronger majors on the quarter
+   lines - instrument texture, never louder than a dot. */
+.lg-paper {
+  stroke: var(--fg-4);
+  stroke-width: 0.6;
+  opacity: 0.13;
+}
+.lg-paper.mj {
+  stroke-width: 0.9;
+  opacity: 0.26;
+}
+/* Right of the knob: a whisper of the accent - the zone where things happen, dots crisp on top. */
+.lg-tint {
+  fill: var(--accent);
+  opacity: 0.1;
+}
+/* Left of the knob: the amber veil over the blurred dots - hidden under the color, out of reach.
+   The blur itself is the SVG filter in the JSX; this is the wash that goes over it. */
+.lg-veil {
+  fill: var(--warn);
+  opacity: 0.16;
+}
+.lg-fire {
+  fill: var(--accent);
+}
+.lg-you {
+  fill: var(--accent);
+}
+/* The soft halo under every dot, in the dot's own color: the lift that separates it from the
+   track without drawing a border (owner call, September 22 2026). */
+.lg-halo-a {
+  fill: var(--accent);
+  opacity: 0.15;
+}
+.lg-halo-w {
+  fill: var(--warn);
+  opacity: 0.15;
+}
+.lg-room {
+  fill: var(--warn);
+}
+.lg-near,
+.lg-vad {
+  fill: none;
+  stroke: var(--warn);
+  stroke-width: 1.6;
+}
+.lg-al {
+  fill: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+}
+.lg-axis {
+  stroke: var(--fg-4);
+  stroke-opacity: 0.55;
+}
+/* The knob: an accent stem through the graph, a gripped handle standing proud - the radar gate
+   bars' drag lineage, drawn richer. Held, the stem brightens and a ring appears around the grip. */
+.lg-stem {
+  stroke: var(--accent);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+.lg-stem.held {
+  opacity: 1;
+}
+.lg-heldring {
+  fill: none;
+  stroke: var(--accent);
+  opacity: 0.35;
+}
+.lg-knob {
+  fill: var(--bg-elev);
+  stroke: var(--line-2);
+  stroke-width: 1;
+}
+.lg-knob.held {
+  stroke: var(--accent);
+  stroke-width: 1.6;
+}
+.lg-grip {
+  stroke: var(--fg-3);
+  stroke-width: 1;
+}
+/* The landing beat: a fresh event's orbit rippling out around its dot - the whole announcement
+   (there is no "heard it" text). Scale transforms need the fill-box origin or SVG scales from the
+   viewport corner. Static rings under reduced motion: the mark still reads as the newest. */
+.lg-rip {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.4;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lg-rip 1.8s ease-out infinite;
+}
+.lg-rip2 {
+  stroke-width: 1;
+  animation-delay: 0.25s;
+}
+.lg-rip-room {
+  stroke: var(--warn);
+}
+@keyframes lg-rip {
+  0% {
+    transform: scale(0.35);
+    opacity: 0.7;
+  }
+  75% {
+    opacity: 0.25;
+  }
+  100% {
+    transform: scale(1.15);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lg-rip {
+    animation: none;
+    opacity: 0.3;
+  }
+  .mb.hot {
+    animation: none;
+  }
+}
+/* The tapped dot's story: a small floating capsule over the graph, the retired detections list's
+   exact-time role told in place. */
+.lg-pop {
+  fill: var(--bg-elev);
+  stroke: var(--line-2);
+}
+.lg-popt {
+  fill: var(--fg);
+  font-size: 9.5px;
+}
+.lg-popline {
+  stroke: var(--accent);
+  stroke-width: 1;
+  opacity: 0.7;
+}
+.tn-flow p {
+  margin: var(--s-1) 0;
+}
+
+/* The inline picker: the word list expanding exactly where the graph sits, in a sunken well - the
+   pill's chevron opens it, and the modal sheet it replaced is retired on this route. */
+.ww-inline {
+  margin-top: var(--s-2);
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  overflow: hidden;
+}
+.ww-inline-foot {
+  margin: 0;
+  padding: var(--s-1) var(--s-2) var(--s-2);
+}
+.ww-inline-foot a {
+  color: var(--accent);
+}
+
+/* The Assistant card's per-wake-word transcript tabs (Home): the chip grammar, the active one
+   ringed. Only rendered with two or more tagged words - one word needs no tabs. */
+.tt-tabs {
+  display: flex;
+  gap: var(--s-1);
+  margin-bottom: var(--s-2);
+  flex-wrap: wrap;
+}
+.tt-tab {
+  border: 1px solid var(--line-2);
+  background: var(--bg-elev);
+  color: var(--fg);
+  border-radius: var(--r-pill);
+  padding: 4px 12px;
+  font: var(--t-s) inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.tt-tab.on {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* The sheet: the tall centered modal the picker lives in. Rides the Confirm modal's scrim; sized
+   like a page rather than a sentence, with its own sticky header and footer. */
+.sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100vw - 2 * var(--s-3)));
+  max-height: min(80vh, 640px);
+  background: var(--bg-elev);
+  border-radius: var(--r-3, 14px);
+  box-shadow: 0 12px 40px var(--shadow);
+  overflow: hidden;
+}
+.sheet-h {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--line);
+}
+.sheet-t {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sheet-b {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--s-2);
+}
+/* The picker fills the sheet's body instead of capping itself like the inline days. */
+.sheet-b .ww-pick {
+  max-height: none;
+}
+.sheet-f {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  border-top: 1px solid var(--line);
 }

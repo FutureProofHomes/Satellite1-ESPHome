@@ -825,20 +825,28 @@ export function useMaData(enabled) {
 /* Wake words, which are not entities                                  */
 /* ------------------------------------------------------------------ */
 
+/** The stop word's pseudo-slot index for the tune and cutoff endpoints - WL_STOP on the device.
+ *  Not a real slot: it never appears in `slots`, cannot be swapped, and its on/off is the
+ *  stop_word switch entity. Its tuned state rides the payload's `stopw` block. */
+export const STOP_SLOT = 2;
+
 /**
- * GET /api/sat1/wakewords: the two wake word slots, the built-in models, and the detection ring.
+ * GET /api/sat1/wakewords: the two wake word slots, the built-in models, the stop word's tuned
+ * state (`stopw`), the live room-pressure high-waters (`hw`), the close-call ring (`near`) and the
+ * detection ring.
  *
- * Read once on mount, then re-read only when the route knows something is moving - a swap in
- * flight, or the "say it now" test window. A wake word changes only when a person changes it, so a
- * standing poll would ask a question with the same answer for the life of the page; the route owns
- * the transient polling because only it knows when a swap started.
+ * Read once on mount, and - when `pollMs` is given - on a gentle standing poll while the caller is
+ * mounted. The poll earns its keep now that the payload carries *living* facts (the margin bars'
+ * room fill, the detections lane, ripicked close calls), where the old payload only changed when a
+ * person changed it; the route's transient fast loops (a swap in flight, a tune session) still run
+ * on top through `wakeRead`.
  *
  * Writes are fire-and-queue like every device write: the endpoint records the request and the
  * loader applies it from the main loop, so the poll of this same GET is the only truthful
  * confirmation - `st` moves through downloading to ready or error, and a failed swap leaves the
  * previous word in `m`/`w`, which is exactly what the card should fall back to showing.
  */
-export function useWakeSlots() {
+export function useWakeSlots(pollMs) {
   const [wake, setWake] = useState(null);
 
   const read = async () => {
@@ -849,25 +857,30 @@ export function useWakeSlots() {
 
   useEffect(() => {
     let live = true;
-    requestJson("/api/sat1/wakewords")
-      .then((d) => {
-        if (live && d && Array.isArray(d.slots)) setWake(d);
-        // Anything else is left as null, which the card reads as "this build has no wake word
-        // slots" - a build without the loader answers 404 here and means exactly that.
-      })
-      .catch(() => {});
+    let timer = null;
+    const tick = async () => {
+      const d = await requestJson("/api/sat1/wakewords").catch(() => null);
+      if (!live) return;
+      if (d && Array.isArray(d.slots)) setWake(d);
+      // Anything else is left as null, which the card reads as "this build has no wake word
+      // slots" - a build without the loader answers 404 here and means exactly that.
+      if (pollMs) timer = setTimeout(tick, pollMs);
+    };
+    tick();
     return () => {
       live = false;
+      if (timer) clearTimeout(timer);
     };
-  }, []);
+  }, [pollMs]);
 
   /** Points slot `i` at `spec`: a built-in id, a manifest URL, or "none". */
   const setSlot = (i, spec) => post(`/api/sat1/wakewords/slot?i=${i}&m=${encodeURIComponent(spec)}`);
 
-  /** Overrides a downloaded model's probability cutoff on slot `i` (0 = the model's own tuning). */
-  const setCutoff = (i, v) => post(`/api/sat1/wakewords/cutoff?i=${i}&v=${v}`);
+  // Cutoff writes live where their one caller is: the tuner's apply() builds the POST itself,
+  // because it alone knows the full stat set (`n`/`f`/`h`). A helper here once dropped `h` on the
+  // floor for whoever called it next - dead code with a wrong signature is worse than none.
 
-  return { wake, wakeRead: read, setSlot, setCutoff };
+  return { wake, wakeRead: read, setSlot };
 }
 
 /* ------------------------------------------------------------------ */

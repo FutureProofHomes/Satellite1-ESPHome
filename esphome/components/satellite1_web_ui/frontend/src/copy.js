@@ -110,11 +110,10 @@ export const HINTS = {
 
   wake_sound: "Plays a short chime on the speaker the moment the wake word is detected.",
 
-  // One hint on the first word card's title, rather than the same sentence on both. Two cards
-  // because that is the device: it runs at most two wake words at once, and each pairs with an
-  // assistant of its own in Home Assistant.
+  // On the Wake Words card's title. The card is the whole route now: rows, graphs, the chime bell
+  // in this very header - so the hint tells the one story that makes all of it legible.
   wake_words:
-    "This device listens for up to two wake words at once - this card is the first, the card below is the second. Pick each from the list: words beyond the two included ones are downloaded from their source when you choose them, and fetched again at every restart. The assistant under each word is the Home Assistant voice pipeline that answers it; Preferred follows whichever is marked preferred there.",
+    'This device listens for up to two wake words at once - one row each below - plus the "Stop" word that interrupts answers and alarms. Words beyond the built-in ones download from their source when you choose them, and fetch again at every restart. A tuned word wears its graph: everything left of the handle is ignored, every dot right of it is a real firing from the last 24 hours, fading as it ages. Tap the handle to retune, tap a dot for its story, tap the chevron on a word to change or remove it.',
 
   // The Voice Pipeline row's tooltip: what a pipeline is and where it lives, because this is the
   // one dropdown on the card whose contents the device did not make. The docs link renders after
@@ -122,11 +121,14 @@ export const HINTS = {
   voice_pipeline:
     "Voice pipelines decide who answers this wake word: which speech-to-text, which conversation agent, and which voice replies. They are built in Home Assistant under Settings, then Voice assistants - this list is whatever yours offers, and Preferred follows the one marked preferred there.",
 
-  // On every word's tuner row, which owns sensitivity now: no dropdown of guesses, one
-  // measured threshold. The hint explains what Tune actually does, because "the device listens to
-  // your room" is the part nobody expects a settings page to offer.
-  wake_advanced:
-    "How confident the device must be before this word fires. Tune measures it for your room and voice: the device listens to the room's sounds for a moment, then scores you saying the word three times, and sets the threshold between the two - above the noise, below your voice. Re-tune if the room changes, or reset to the tuning the model shipped with.",
+  /* wake_advanced, margin_bar, detections and scoreboard are retired with the surfaces they
+     explained (the v2 Living Graph replaced the margin bar, the detections card and the
+     scoreboard in one stroke - the tuner-v2 canvas is the design of record). */
+
+  // The Living Graph: its accessible name, and the tuner card's ⓘ. One sentence per element,
+  // read left to right - the two colors are the entire explanation of what a threshold is.
+  living_graph:
+    "A confidence scale from 0 to 100%. Everything left of the handle sits under the frost - the device ignores it. Everything right of it is live: solid dots are real firings at the confidence they scored, fading over 24 hours; hollow marks almost fired. Drag the handle to move the line; if dots you don't recognize sit just past it, drag past them.",
 
   // The Wake Word Sources card title. The trust caveat lives here, once, rather than on every
   // community row in the picker.
@@ -381,20 +383,52 @@ export const TEXT = {
   media_src_group: "group stream",
   media_src_local: "this speaker",
 
-  // Only when both slots are None. Phrased as a consequence rather than a warning: it is a reasonable
-  // thing to want, and the way back is the pickers directly above it.
-  no_wake_words: "No wake words are on, so the device will not respond to being spoken to. The mute button and Home Assistant still work.",
+  // no_wake_words was retired to a comment in September 2026 and deleted in the v2 sweep: the
+  // empty state's ww_route_none says everything it said.
 
   // The label for Home Assistant's `preferred` pipeline value, which needs a label rather than a
   // name so a customer who calls one of their own pipelines "Preferred" still gets two
   // distinguishable entries. (The old "Off" entry is gone: silencing a slot is the picker's None.)
   pipeline_preferred: "Preferred",
 
-  /* The four cards, in the owner's order, and the massive list inside the pickers. */
-  ww_card1: "Wake Word 1",
-  ww_card2: "Wake Word 2",
-  ww_settings: "Wake Word Settings",
+  /* The Wake Words card (the v2 Living Graph redesign, September 2026 - the tuner-v2 canvas is
+     the copy's design of record) and the massive word list, which expands inline under a word's
+     pill now. ww_pick_title, ww_card1/2 and ww_sources_btn retired with the modal sheet that
+     carried them. */
+  ww_card: "Wake Words",
+  // ww_settings ("Wake Word Settings") is retired with its card: the chime - the card's only
+  // control - moved into the Wake Words card's own header as the bell toggle (v2, September 2026).
   ww_search: "Search wake words",
+  // The empty route: one explanation, one action. "On the device, no cloud" is the fact worth
+  // leading with for a first-time owner deciding whether to trust a microphone.
+  ww_route_none: "This device isn't listening for anything yet. Pick a phrase and it starts listening for it - on the device, no cloud.",
+  ww_choose: "Choose a wake word",
+  ww_add: "+ Add word",
+  // On the picker row the other slot already holds - the reason it is disabled, on the row itself.
+  ww_on_other: "on the other slot",
+
+  /* The Living Graph's row vocabulary (v2: no badge, no menu - the graph's presence IS the tuned
+     state, and the two colors are the explanation). */
+  // The untuned row's one loud button - short on purpose (owner: "less text").
+  ww_tune_btn: "Tune it!",
+  // The chime bell toggle's accessible name (the control itself is the bell).
+  ww_chime: "Wake chime",
+  // The radar's live-dot grammar on a freshly tuned row: the graph is streaming.
+  lg_live: "Live",
+  // A tapped hollow mark's suffix in its popover: it almost fired, and didn't.
+  lg_ignored_short: "almost",
+  // The axis label every 0-100% graph carries in its lower-left (owner call - it replaced the
+  // frost's "ignored" caption; the veil says that on its own).
+  tn_axis: "Confidence",
+  // The dimmed old row mid-swap: truthfully still listening until the replacement is ready.
+  mb_still: "still listening",
+  mb_off: "off",
+  mb_swap_note: "\u201c%1\u201d is still listening until \u201c%2\u201d is ready.",
+
+  /* The stop word's row: its pill IS the switch (green listening, red off), and the graph is gone
+     entirely while off - a disabled model is unloaded, so there is nothing to draw. Capitalized
+     "Stop" everywhere it displays, owner call. */
+  stop_off_note: "Not listening. Tap \u201cStop\u201d to turn it back on.",
   // "Built-In", not "Included": the owner's word for the two words compiled into the firmware,
   // and it reads as the guarantee it is - these two exist without any download.
   ww_included: "Built-In wake words",
@@ -456,38 +490,56 @@ export const TEXT = {
   ws_remove_b: "The list above loses its words. A word you already picked keeps working - the device remembers its link, not the source.",
   ws_remove_c: "Remove",
 
-  /* The sensitivity row and the Wake Word Tuner behind it. The row states what is applied; the
-     panel walks the two phases and speaks in percentages because the scores are percentages. */
-  tn_row: "Wake Word Tuner",
-  tn_tune_now: "Tune Now",
-  tn_reset_default: "Reset Default",
-  // The grey result box under the tuner row, in the transcript subcard's neutral shape: what the
-  // tune concluded, in the same percentage vocabulary the session spoke.
-  tn_box: "Tuned for this room and voice - fires above %s confidence.",
-  tn_listen: "Listening to your room\u2026 %ss",
-  tn_listen_sub: "Stay quiet - or let the room be its usual self. The device is measuring what could set this word off by mistake.",
-  tn_noise: "Room noise peak: %s",
-  tn_noise_quiet: "Room noise: quiet",
-  // What the recommendation sentence says when the quiet phase heard nothing above the probe floor.
-  tn_noise_floor: "the room's quiet",
-  tn_speak: 'Now say \u201c%s\u201d - 3 times, from where you normally would.',
+  /* The v2 Wake Word Tuner: two user-paced phases on the Living Graph (the tuner-v2 canvas is the
+     design of record). No room-listening phase - the room's last 24 hours is already on the graph
+     as the amber smatter; no confirmation phase - the first real firing lands with its ripple and
+     that is the confirmation. It speaks in percentages because the scores are percentages. */
+  // The tuner card's title, quick edit included: instructions live in the grey line under the
+  // graph, never in a title (owner call - the "move the line" variant read as a second heading).
+  tn_title: 'Tune \u201c%s\u201d',
+  // The ready gate's one grey paragraph (owner's wording, shortened): what the dots are, what
+  // they're for, and that nothing here is final.
+  tn2_ready:
+    'Follow the prompts and walk the room saying \u201c%s\u201d. Blue dots are live detections; amber dots are the past 24 hours. You\u2019ll use them to place the firing line - and you can move it any time.',
+  // The stop word's one twist: it fires over playback, so measure it the way it will be used.
+  tn2_ready_stop:
+    'Start some music first - \u201cStop\u201d matters most while something plays. Then follow the prompts: blue dots are live detections, amber dots the past 24 hours.',
+  tn2_start: "Start",
+  // The positional rounds: three close-range tries by one voice overestimate the household's
+  // floor, so the far and other-voice rounds are the cheap insurance.
+  tn2_near: 'Round 1 of 3 - say \u201c%s\u201d from where you usually are. Twice is plenty.',
+  tn2_far: "Round 2 of 3 - now once from across the room.",
+  tn2_other: "Round 3 of 3 - hand it to anyone else who uses this device.",
+  tn2_skip: "Skip this round",
+  // The attempt dots' round labels on the graph.
+  tn_r_near: "near",
+  tn_r_far: "far",
+  tn_r_other: "them",
+  tn_legend_you: "you",
+  // The amber smatter's legend label (owner wording, September 2026).
+  tn_legend_hist: "wake history",
+  // The placement readout, narrating the knob live. Safe names the margin; the edges push back.
+  tn2_ok: "Fires above %s \u00b7 every room dot in the frost",
+  tn2_under: " \u00b7 %s pts under your quietest try",
+  tn2_high: "Above your quietest try (%s) - real calls from across the room will be missed.",
+  tn2_low: "Amber dots sit past your line - the room has scored this high in the last day. Expect false firings.",
+  tn_apply: "Apply",
+  // The placement row's other verbs: back into the voice rounds, and the red one that erases the
+  // track's remembered 24 hours (dots and smatter both - it is a measurement, hence the red).
+  tn2_retune: "Re-Tune",
+  tn2_clear: "Clear history",
+  // The no-gap failure, diagnosed by side: a loud room and a weak word are different problems.
+  tn_nogap_room: "The room is too loud for this word right now - its noise reaches the word's scores. Try a quieter moment, or move the device.",
+  tn_nogap_voice: "The word isn't scoring strongly enough - move closer, speak up. Or honestly: this model may be weak; try a different word.",
   // A wake model fired but the voice-activity model refused it. The person can fix this one.
   tn_vad: "That didn't register as speech - move closer or speak up, and try again.",
-  tn_rec: "Recommended: fire above %1 - over the room at %2, under your quietest attempt at %3.",
-  tn_apply: "Apply",
-  tn_confirm: 'Applied. Say \u201c%s\u201d once more to confirm\u2026',
-  tn_heard: "Heard it \u2713",
-  // The honest failure: no threshold separates this word from this room.
-  tn_nogap: "This word can't be told apart from your room right now - its scores overlap the room's noise. Try a quieter moment, or a different wake word.",
   // The capability fallback: the score channel needs debug logging compiled in (it is, on stock
   // firmware; a custom build may have turned it off).
   tn_nocap: "This firmware build can't score attempts, so tuning isn't available. Stock firmware can - this build was compiled without debug logging.",
   tn_gone: "The tuning session ended. Open it again to start over.",
 
-  /* Diagnostics: the recent detections list. */
-  det_title: "Recent wake detections",
-  det_none: "Nothing detected since the last restart.",
-  det_sub: "Up to eight, newest first, cleared on restart.",
+  /* The dots' popover vocabulary (the retired detections card's exact-time story, told in place). */
+  det_just_now: "just now",
 
   /* Diagnostics: the Crash Reports card. The empty state is a good day and reads like one. The
      no-partition note names the one fix (a USB flash) rather than describing the partition table,

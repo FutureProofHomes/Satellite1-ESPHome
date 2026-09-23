@@ -62,25 +62,32 @@ static const char *const WU_URL_ALIAS_SLASH = "/ui/";
 static constexpr size_t WU_TRANSCRIPT_RING = 8;
 
 /// One heard-or-said line. `heard` distinguishes the two so the UI can attribute them without
-/// carrying a second string per entry.
+/// carrying a second string per entry. `word` is the wake word that initiated the exchange (the
+/// most recent detection for heard lines, the exchange's heard line for replies), which is what
+/// lets the Home page show one transcript tab per wake word; empty when unknown.
 struct Utterance {
   std::string text;
   uint32_t at_uptime;
   bool heard;
+  std::string word;
 };
 
 #ifdef USE_MICRO_WAKE_WORD
-/// One wake word firing, for the "say it now" test moment and the Diagnostics history. The same
+/// One wake word firing, for the "say it now" test moment and the Living Graph's dots. The same
 /// ring serves both readers. Held as uptime so the payload can report an honest time-ago whatever
-/// the browser's clock thinks.
+/// the browser's clock thinks. `score` is the firing's max window mean, drained out of the
+/// loader's high-water register at the moment of detection (0 = unknown) - it is what places the
+/// dot on the word's confidence axis.
 struct WakeDetection {
   std::string word;
   uint32_t at_ms;
+  uint8_t score;
 };
 
-/// Eight, like the transcript ring and for the same reason: this is "what fired recently", not a
-/// history, and it is never written to flash.
-static constexpr size_t WU_DETECTION_RING = 8;
+/// Twenty-four (was eight): still "what fired recently" rather than a history, never written to
+/// flash - but the Wake Word route's time-lane earns a fuller day (owner call, September 2026),
+/// and two dozen entries are still only a few hundred payload bytes.
+static constexpr size_t WU_DETECTION_RING = 24;
 #endif
 
 /// One queued change to a Home Assistant select, waiting for the main loop to turn it into an action
@@ -503,6 +510,7 @@ class WebUIHandler : public AsyncWebHandler {
     WAKE_SLOT_SET,
     WAKE_CUTOFF_SET,
     WAKE_TUNE_SET,
+    WAKE_CLEAR_SET,
 #endif
 #ifdef USE_MEDIA_PLAYER
     MEDIA,
@@ -569,6 +577,7 @@ class WebUIHandler : public AsyncWebHandler {
   void handle_wake_slot_set_(AsyncWebServerRequest *request);
   void handle_wake_cutoff_set_(AsyncWebServerRequest *request);
   void handle_wake_tune_set_(AsyncWebServerRequest *request);
+  void handle_wake_clear_set_(AsyncWebServerRequest *request);
 #endif
 #ifdef USE_SAT1_CRASH_REPORT
   /// The crash history and its metadata as JSON; the two big payloads live on routes of their own.

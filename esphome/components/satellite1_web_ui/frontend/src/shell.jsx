@@ -50,7 +50,9 @@ const N_OUT = ni(
 
 const ROUTES = [
   { id: "home", label: "Home", view: Controls, icon: N_HOME },
-  { id: "wake-word", label: "Wake Word", view: WakeWords, icon: N_WAKE },
+  // "Wake Words", plural, everywhere it displays (owner call, September 2026): the route holds two
+  // of them plus the stop word, and the title bar below made the singular read as a typo.
+  { id: "wake-word", label: "Wake Words", view: WakeWords, icon: N_WAKE },
   { id: "audio", label: "Audio", view: Config, icon: N_AUDIO },
   { id: "presence", label: "Presence", view: Presence, icon: N_PRES },
   { id: "diagnostics", label: "Diagnostics", view: Diagnostics, icon: N_DIAG },
@@ -733,6 +735,9 @@ function AppInner({ primeKey, remote, localMac, onRemote, onLocal, onAuthLost })
 
   return (
     <div class="app">
+      {/* One sticky wrapper for the topbar and the route title bar: two separately-sticky siblings
+          cannot pin as a unit, and the translucent blur has to cover both or the seam shows. */}
+      <div class="stickhead">
       <header class="topbar">
         {/* A toggle, not an opener: the drawer's scrim starts below this bar, so the burger stays
             visible while the drawer is out and a second press should put things back. */}
@@ -767,8 +772,20 @@ function AppInner({ primeKey, remote, localMac, onRemote, onLocal, onAuthLost })
 
       {/* The stream-lost banner that sat here moved onto the toast surface below when the amber
           banners were retired - same wording, same meaning, one place for out-of-band news. */}
+      </div>
 
       <main class="wrap">
+        {/* The route's name, worn as a folder tab growing out of the top card's corner (owner
+            request, September 2026 - it replaced the full-width sticky route bar). Rendered from
+            the same ROUTES row the drawer uses, so the two can never disagree about a route's name
+            or glyph. The open run to the tab's right is reserved for the coming toast redesign;
+            nothing else may claim it. */}
+        <div class="rtab-row">
+          <div class="rtab">
+            <span class="rtab-i">{active.icon}</span>
+            {active.label}
+          </div>
+        </div>
         <View ctx={ctx} />
       </main>
 

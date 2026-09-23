@@ -377,17 +377,49 @@ function VoiceStatus({ ctx, voice }) {
   const lines = voice?.transcript || [];
   const mute = entity(ctx, "mute_mics");
   const vol = entity(ctx, "voice_override");
+
+  // One transcript tab per wake word (owner request, September 2026): each line arrives tagged
+  // with the word that initiated its exchange (`w`, new firmware; untagged lines show under every
+  // tab so old firmware loses nothing). The last-uttered word is the active tab - and *stays*
+  // following the newest exchange until the person picks another by hand, at which point their
+  // choice holds until a newer word fires.
+  const words = [];
+  for (let k = lines.length - 1; k >= 0; k--) {
+    const w = lines[k].w;
+    if (w && !words.includes(w)) words.push(w);
+  }
+  const newest = words[0] || null;
+  const [pick, setPick] = useState(null);
+  const newestRef = useRef(newest);
+  useEffect(() => {
+    if (newest !== newestRef.current) {
+      newestRef.current = newest;
+      setPick(null); // a fresh firing reclaims the tab for its word
+    }
+  }, [newest]);
+  const tab = pick && words.includes(pick) ? pick : newest;
+  const shown = words.length > 1 ? lines.filter((l) => !l.w || l.w === tab) : lines;
+
   if (!phase && !lines.length && !mute && !vol) return null;
 
   return (
     <Card title="Assistant" icon={N_CHAT} right={phase && <span class={`dim xs${voice?.running ? " accent" : ""}`}>{phase}</span>}>
+      {words.length > 1 && (
+        <div class="tt-tabs" role="tablist">
+          {words.map((w) => (
+            <button key={w} role="tab" aria-selected={w === tab} class={`tt-tab${w === tab ? " on" : ""}`} onClick={() => setPick(w)}>
+              &ldquo;{w === "stop" ? "Stop" : w}&rdquo;
+            </button>
+          ))}
+        </div>
+      )}
       {/* The transcript in a subcard of its own, per the owner - the same box the calibration editor
           draws, minus its accent border, which on that editor means "editing in progress" and here
           would promise an interaction the transcript does not have. The empty state sits inside the
           same box, so the card does not change shape the first time something is said. */}
       <div class="transcript">
-        {lines.length ? (
-          lines
+        {shown.length ? (
+          shown
             .slice()
             .reverse()
             .map((l, i) => (

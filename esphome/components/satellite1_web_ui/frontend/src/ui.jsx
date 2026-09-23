@@ -482,6 +482,11 @@ export function Confirm({ label, title, body, confirmLabel, danger, solid, disab
   );
 }
 
+/* The modal Sheet component that lived here (the wake word picker's tall centered surface) is
+   retired: the v2 redesign expands the picker inline under the word's pill, and no route opens a
+   modal for it any more (owner call, September 2026). The .sheet CSS survives - the device
+   switcher wears it as a top-hung drawer. */
+
 export function Btn({ children, onClick, disabled, danger, solid, cls }) {
   return (
     <button

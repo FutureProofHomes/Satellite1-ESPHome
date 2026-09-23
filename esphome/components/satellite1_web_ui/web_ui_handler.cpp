@@ -201,6 +201,8 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
       return Route::WAKE_CUTOFF_SET;
     if (url == "/api/sat1/wakewords/tune")
       return Route::WAKE_TUNE_SET;
+    if (url == "/api/sat1/wakewords/clearhist")
+      return Route::WAKE_CLEAR_SET;
 #endif
 #if defined(USE_MICRO_WAKE_WORD) && !defined(USE_SAT1_MWW_LOADER)
     if (url == "/api/sat1/wakewords")
@@ -357,6 +359,9 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
       break;
     case Route::WAKE_TUNE_SET:
       this->handle_wake_tune_set_(request);
+      break;
+    case Route::WAKE_CLEAR_SET:
+      this->handle_wake_clear_set_(request);
       break;
 #endif
     case Route::HA:
@@ -587,9 +592,17 @@ static void write_json_string(ChunkWriter &w, const std::string &text) {
 
 #ifdef USE_MICRO_WAKE_WORD
 void WebUIHandler::push_wake_detection(const std::string &word) {
+  // The firing's confidence, parked by the loader's notify_detection a few actions earlier in the
+  // same on_wake_word_detected automation (see take_detection_score for the contract). Collected
+  // before the lock: it is the loader's own atomic, not ring state.
+  uint8_t score = 0;
+#ifdef USE_SAT1_MWW_LOADER
+  if (this->wake_loader_ != nullptr)
+    score = this->wake_loader_->take_detection_score();
+#endif
   LockGuard guard{this->detection_lock_};
   this->detection_seq_++;
-  this->detections_.push_back(WakeDetection{word, millis()});
+  this->detections_.push_back(WakeDetection{word, millis(), score});
   if (this->detections_.size() > WU_DETECTION_RING)
     this->detections_.erase(this->detections_.begin());
 }
@@ -600,10 +613,12 @@ void WebUIHandler::push_wake_detection(const std::string &word) {
 /// now" test moment and the Diagnostics history, because all four are facts about the same thing.
 ///
 /// Shape:
-///   {"slots":[{"i":0,"m":"<spec>","w":"<phrase>","st":0,"err":0,"cut":0,"rt":0,"ld":1,"dl":0,"tot":0}],
+///   {"slots":[{"i":0,"m":"<spec>","w":"<phrase>","st":0,"err":0,"cut":0,"rt":0,"ld":1,
+///              "tn":[noise,floor,hi],"hw":0,"day":[24 hourly high-waters, newest first],
+///              "dl":0,"tot":0}],
 ///    "builtin":[["hey_jarvis","hey jarvis"]],
 ///    "det":[<seq>,"<phrase>",<ms ago>],
-///    "hist":[["<phrase>",<ms ago>]]}
+///    "hist":[["<phrase>",<ms ago>,<score 0-255, 0 unknown>]]}
 ///
 /// `m` is the slot's spec (a built-in id or a manifest URL, "" when the slot is silent), `st` and
 /// `err` are the loader's SlotState/SlotError numbers, `cut` the persisted sensitivity (0 = model
@@ -623,9 +638,35 @@ void WebUIHandler::handle_wake_words_(AsyncWebServerRequest *request) {
   uint32_t dl = 0, total = 0;
   int dl_slot = -1;
   this->wake_loader_->snapshot(slots, dl, total, dl_slot);
+  uint8_t hw[mww_runtime_loader::WL_SLOTS + 1] = {};
+  this->wake_loader_->hw_snapshot(hw);
+  // The hourly buckets raw, newest first - the tuner's "wake history" smatter (v2). ~100 bytes per
+  // track of payload, carried always so the knob-tap quick edit has its room data without a session.
+  uint8_t day[mww_runtime_loader::WL_SLOTS + 1][24] = {};
+  this->wake_loader_->hw_day_snapshot(day);
 
   begin_chunked_json(*request);
   ChunkWriter w{*request};
+  const auto write_day = [&w, &day](uint8_t t) {
+    w.print(R"(,"day":[)");
+    for (uint8_t k = 0; k < 24; k++)
+      w.printf(k == 0 ? "%u" : ",%u", day[t][k]);
+    w.print("]");
+  };
+  // The track's remembered 24h events, oldest first: [msAgo, score, kind (0 fire / 1 close call),
+  // id]. The id is the loader's stable per-entry tag - the UI keys each dot's jitter on it, so a
+  // new dot landing never moves the old ones. Persisted on the device, so it survives reboots.
+  const auto write_dh = [&w, this](uint8_t t) {
+    std::vector<mww_runtime_loader::TeleOut> tele;
+    this->wake_loader_->tele_snapshot(t, tele);
+    w.print(R"(,"dh":[)");
+    for (size_t k = 0; k < tele.size(); k++) {
+      const auto &r = tele[k];
+      w.printf(k == 0 ? "[%lu,%u,%u,%u]" : ",[%lu,%u,%u,%u]", static_cast<unsigned long>(r.ms_ago), r.score, r.kind,
+               r.id);
+    }
+    w.print("]");
+  };
   w.print(R"({"slots":[)");
   for (uint8_t i = 0; i < mww_runtime_loader::WL_SLOTS; i++) {
     const auto &s = slots[i];
@@ -637,6 +678,12 @@ void WebUIHandler::handle_wake_words_(AsyncWebServerRequest *request) {
     write_json_string(w, s.word);
     w.printf(R"(,"st":%u,"err":%u,"cut":%u,"rt":%u,"ld":%u)", s.state, s.error, s.cutoff, s.runtime ? 1 : 0,
                    s.id.empty() ? 0 : 1);
+    // The Living Graph's facts beyond the cutoff: the last tune's measured stats (persisted -
+    // noise ceiling, quietest attempt, loudest attempt), the live 24h high-water off the vendored
+    // register, and the raw hourly buckets behind it.
+    w.printf(R"(,"tn":[%u,%u,%u],"hw":%u)", s.tn_noise, s.tn_floor, s.tn_hi, hw[i]);
+    write_day(i);
+    write_dh(i);
     if (dl_slot == i)
       w.printf(",\"dl\":%lu,\"tot\":%lu", static_cast<unsigned long>(dl), static_cast<unsigned long>(total));
     w.print("}");
@@ -656,6 +703,38 @@ void WebUIHandler::handle_wake_words_(AsyncWebServerRequest *request) {
   }
   w.print("]");
 
+  // The stop word's pseudo-slot: its tuned state and live high-water. Whether it is *listening*
+  // stays the stop_word switch entity's story, which the app already reads over /events.
+  {
+    mww_runtime_loader::StopView sv;
+    this->wake_loader_->stop_snapshot(sv);
+    if (sv.present) {
+      w.printf(R"(,"stopw":{"cut":%u,"tn":[%u,%u,%u],"hw":%u)", sv.cutoff, sv.tn_noise, sv.tn_floor, sv.tn_hi,
+               hw[mww_runtime_loader::WL_STOP]);
+      write_day(mww_runtime_loader::WL_STOP);
+      write_dh(mww_runtime_loader::WL_STOP);
+      w.print("}");
+    }
+  }
+
+  // The close-call ring: scored near-misses off the register, plus VAD-refused detections (score
+  // 0, vad 1) on debug builds. Newest first, like the detection history below.
+  {
+    std::vector<mww_runtime_loader::NearRec> near;
+    this->wake_loader_->near_snapshot(near);
+    const uint32_t now = millis();
+    w.print(R"(,"near":[)");
+    for (size_t k = 0; k < near.size(); k++) {
+      const auto &n = near[near.size() - 1 - k];
+      if (k != 0)
+        w.print(",");
+      w.print("[");
+      write_json_string(w, n.word);
+      w.printf(",%u,%lu,%u]", n.score, static_cast<unsigned long>(now - n.at_ms), n.vad ? 1 : 0);
+    }
+    w.print("]");
+  }
+
   // The tuner's capability and, while a session is live, its score ring - newest last, as ages, so
   // the panel can both replay what it missed and draw the freshest attempt.
   w.printf(",\"tcap\":%d", mww_runtime_loader::MwwRuntimeLoader::tune_capable() ? 1 : 0);
@@ -664,13 +743,14 @@ void WebUIHandler::handle_wake_words_(AsyncWebServerRequest *request) {
     this->wake_loader_->tune_snapshot(tv);
     if (tv.slot >= 0) {
       const uint32_t now = millis();
-      w.printf(",\"tune\":{\"i\":%d,\"seq\":%lu,\"ev\":[", tv.slot, static_cast<unsigned long>(tv.seq));
+      w.printf(",\"tune\":{\"i\":%d,\"seq\":%lu,\"room\":%u,\"ev\":[", tv.slot, static_cast<unsigned long>(tv.seq),
+               tv.room);
       for (size_t k = 0; k < tv.events.size(); k++) {
         const auto &ev = tv.events[k];
         if (k != 0)
           w.print(",");
-        w.printf("[%u,%u,%u,%lu]", ev.peak, ev.avg, ev.vad_blocked ? 1 : 0,
-                       static_cast<unsigned long>(now - ev.at_ms));
+        w.printf("[%u,%u,%u,%lu,%u]", ev.peak, ev.avg, ev.vad_blocked ? 1 : 0,
+                 static_cast<unsigned long>(now - ev.at_ms), ev.mm);
       }
       w.print("]}");
     }
@@ -686,14 +766,15 @@ void WebUIHandler::handle_wake_words_(AsyncWebServerRequest *request) {
       w.printf(",%lu]", static_cast<unsigned long>(now - last.at_ms));
     }
     w.print(R"(,"hist":[)");
-    // Newest first, which is the order both readers show them in.
+    // Newest first. The third element is the firing's confidence (0-255 quantized, 0 = unknown),
+    // which is what places each dot on the Living Graph's axis; the UI windows entries at 24h.
     for (size_t k = 0; k < this->detections_.size(); k++) {
       const auto &d = this->detections_[this->detections_.size() - 1 - k];
       if (k != 0)
         w.print(",");
       w.print("[");
       write_json_string(w, d.word);
-      w.printf(",%lu]", static_cast<unsigned long>(now - d.at_ms));
+      w.printf(",%lu,%u]", static_cast<unsigned long>(now - d.at_ms), d.score);
     }
     w.print("]");
   }
@@ -748,7 +829,8 @@ void WebUIHandler::handle_wake_cutoff_set_(AsyncWebServerRequest *request) {
   }
   char *end = nullptr;
   const unsigned long at = strtoul(index_param->value().c_str(), &end, 10);
-  if (end == index_param->value().c_str() || *end != '\0' || at >= mww_runtime_loader::WL_SLOTS) {
+  // WL_STOP (== WL_SLOTS) is the stop word's pseudo-slot, as tunable as the real two.
+  if (end == index_param->value().c_str() || *end != '\0' || at > mww_runtime_loader::WL_STOP) {
     request->send(400, "application/json", "{\"ok\":0}");
     return;
   }
@@ -759,7 +841,44 @@ void WebUIHandler::handle_wake_cutoff_set_(AsyncWebServerRequest *request) {
     request->send(400, "application/json", "{\"ok\":0}");
     return;
   }
-  this->wake_loader_->queue_cutoff(static_cast<uint8_t>(at), static_cast<uint8_t>(value));
+  // The tune session's measured stats, optional: the room's ceiling (`n`) and the quietest
+  // attempt (`f`), persisted with the cutoff so the margin bar survives reloads. Absent or
+  // malformed reads as 0 (unknown), which the app renders as a bar without that side.
+  auto parse_stat = [&](const char *name) -> uint8_t {
+    auto *p = request->getParam(name);
+    if (p == nullptr)
+      return 0;
+    char *stat_end = nullptr;
+    const unsigned long v = strtoul(p->value().c_str(), &stat_end, 10);
+    if (stat_end == p->value().c_str() || *stat_end != '\0' || v > 254)
+      return 0;
+    return static_cast<uint8_t>(v);
+  };
+  this->wake_loader_->queue_cutoff(static_cast<uint8_t>(at), static_cast<uint8_t>(value), parse_stat("n"),
+                                   parse_stat("f"), parse_stat("h"));
+  request->send(200, "application/json", "{\"ok\":1}");
+}
+
+/// Erases track `i`'s remembered 24h telemetry - the Living Graph's dots and its hourly smatter -
+/// the tuner's Clear history button. Queued to the main loop like every loader write; the loader
+/// rewrites the persisted blob there, so the erasure survives reboots too.
+void WebUIHandler::handle_wake_clear_set_(AsyncWebServerRequest *request) {
+  if (this->wake_loader_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  auto *index_param = request->getParam("i");
+  if (index_param == nullptr) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+  char *end = nullptr;
+  const unsigned long at = strtoul(index_param->value().c_str(), &end, 10);
+  if (end == index_param->value().c_str() || *end != '\0' ||
+      !this->wake_loader_->queue_clear_history(static_cast<uint8_t>(at > 255 ? 255 : at))) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
   request->send(200, "application/json", "{\"ok\":1}");
 }
 
@@ -786,7 +905,8 @@ void WebUIHandler::handle_wake_tune_set_(AsyncWebServerRequest *request) {
   }
   char *end = nullptr;
   const unsigned long at = strtoul(index_param->value().c_str(), &end, 10);
-  if (end == index_param->value().c_str() || *end != '\0' || at >= mww_runtime_loader::WL_SLOTS) {
+  // WL_STOP (== WL_SLOTS) is the stop word's pseudo-slot - the same ritual tunes it.
+  if (end == index_param->value().c_str() || *end != '\0' || at > mww_runtime_loader::WL_STOP) {
     request->send(400, "application/json", "{\"ok\":0}");
     return;
   }
@@ -2128,10 +2248,30 @@ void WebUIHandler::handle_crash_erase_(AsyncWebServerRequest *request) {
 void WebUIHandler::push_utterance(const std::string &text, bool heard) {
   if (text.empty())
     return;
+  // The initiating wake word, for the Home page's per-word transcript tabs. A heard line follows
+  // its wake within the same pipeline run, so the newest detection is its initiator; a reply
+  // belongs to the exchange its heard line opened, so it inherits that line's word rather than
+  // re-reading the detections - a "stop" firing mid-reply must not re-attribute the answer.
+  std::string word;
+#ifdef USE_MICRO_WAKE_WORD
+  if (heard) {
+    LockGuard guard{this->detection_lock_};
+    if (!this->detections_.empty())
+      word = this->detections_.back().word;
+  }
+#endif
   LockGuard guard{this->transcript_lock_};
+  if (!heard) {
+    for (auto it = this->transcript_.rbegin(); it != this->transcript_.rend(); ++it) {
+      if (it->heard) {
+        word = it->word;
+        break;
+      }
+    }
+  }
   if (this->transcript_.size() >= WU_TRANSCRIPT_RING)
     this->transcript_.erase(this->transcript_.begin());
-  this->transcript_.push_back({text, static_cast<uint32_t>(millis_64() / 1000), heard});
+  this->transcript_.push_back({text, static_cast<uint32_t>(millis_64() / 1000), heard, word});
 }
 
 /// Timers and the assistant's phase, neither of which web_server can express.
@@ -2168,8 +2308,10 @@ void WebUIHandler::handle_voice_(AsyncWebServerRequest *request) {
     LockGuard guard{this->transcript_lock_};
     bool first = true;
     for (const auto &line : this->transcript_) {
-      w.printf(R"(%s{"heard":%s,"at":%u,"text":)", first ? "" : ",", line.heard ? "true" : "false",
-                     static_cast<unsigned int>(line.at_uptime));
+      w.printf(R"(%s{"heard":%s,"at":%u,"w":)", first ? "" : ",", line.heard ? "true" : "false",
+               static_cast<unsigned int>(line.at_uptime));
+      write_json_string(w, line.word);
+      w.print(R"(,"text":)");
       write_json_string(w, line.text);
       w.print("}");
       first = false;

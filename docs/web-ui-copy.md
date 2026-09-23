@@ -168,84 +168,115 @@ The Buttons card is no longer on this route. It moved to the foot of the home pa
 work", which is a question about the object in your hand rather than about its internals, and it sits beside
 the volume and mute it duplicates in hardware.
 
-### Wake Word
+### Wake Words
 
-Its own route since the September 2026 pass, rebuilt around **runtime wake word loading** later that
-month, and settled as **four cards in the owner's order**: **Wake Word 1**, **Wake Word 2**,
-**Wake Word Settings**, **Wake Word Sources**. Two word cards because two is what the device runs at
-once; each carries its picker (expanding in place into a searchable grouped list of every word its
-sources offer, ~790 at launch), its Assistant pairing, and its own **Sensitivity for this word**
-row. Words beyond the two included ones are downloaded from their source when picked and fetched
-again at every restart; a failed download leaves the previous word listening. The settings card
-holds what is not per-word — Wake chime and Say "stop" to interrupt — and the sources card manages
-where the list comes from.
+Its own route since the September 2026 pass, rebuilt three times that month — around **runtime
+wake word loading**, then the **Monitored Margin**, and finally the **Living Graph** (the
+`wake-words-tuner-v2` canvas is the design of record for every tuning, graph and word-selection
+surface; the older mockups canvas keeps the rest). One idea carries the page now: the graph stops
+being a report you read after tuning and becomes the single object you tune, watch, and correct.
+Two cards remain: **Wake Words** (one row per word, the stop word's permanent third row, and the
+chime bell in the card's own header) and **Wake Word Sources**. The Recent detections card and the
+Wake Word Settings card are both retired — the graphs absorbed one, the header bell the other.
+
+Each word's **row** is the whole story, with every control visible on it (no chevron menu, no
+modal, no `tuned` badge): the **pill** — the quoted phrase with its own chevron inside the border,
+which expands the **word picker inline** exactly where the graph sits (choosing another word is
+the change, unchecking the current one is the removal); the **Living Graph** once tuned — the
+graph's presence *is* the tuned state; the halo-ringed **Tune it!** button (`ww_tune_btn`) on an
+untuned row, sitting exactly where a tuned word's status would be; and the **Voice Pipeline**
+select. Mid-swap the card tells two truths at once: the old row dimmed with `mb_still` ("still
+listening", because it is), the new row downloading beneath with `mb_swap_note`. `+ Add word`
+expands the same inline tree while a slot is free and disappears entirely with both taken.
+
+The **Living Graph** is one SVG in two sizes. Collapsed on the row it is the word's standing
+24-hour record: two color worlds split at the threshold **knob** — left of it the amber frost
+(everything there is blurred, veiled, ignored), right of it a whisper of accent blue with every
+**real firing** crisp on top, a dot at the confidence the register actually measured, fading as it
+ages, landing with an orbit ripple in the same beat the row flashes (there is no "Heard it" text —
+the animation is the announcement). Hollow amber marks are close calls, sunk in the frost. Tap a
+dot for its story (`pct · time-ago`, `lg_ignored_short` suffixing an almost-fire); tap the knob
+and placement reopens over everything the graph knows. A freshly tuned row wears the radar's
+live-dot grammar (`lg_live`) — the graph is streaming.
+
+The **stop word** is a permanent third row displaying as **"Stop"** (capitalized everywhere; the
+model reports it lowercase), and its pill IS its switch — a filled iOS-style toggle with the title
+inside the button, soft green (`--tgl-on`) with the white knob at the right edge while listening,
+soft red (`--tgl-off`) with the knob slid left while off. Off hides the graph entirely
+(`stop_off_note`): a disabled model is unloaded, so there is nothing to draw. The **wake chime**
+in the card header wears the same switch grammar with the bell inside — green and ringing, or red
+and struck through — each with an ⓘ beside it.
 
 | Key | Where | Text |
 | --- | --- | --- |
-| `wake_words` | Wake Word 1 card title | This device listens for up to two wake words at once - this card is the first, the card below is the second. Pick each from the list: words beyond the two included ones are downloaded from their source when you choose them, and fetched again at every restart. The assistant under each word is the Home Assistant voice pipeline that answers it; Preferred follows whichever is marked preferred there. |
-| `wake_advanced` | every word's sensitivity row | How readily this word fires, starting from the tuning its model shipped with. Step toward more sensitive if it misses you from across the room; step back if the television sets it off. A community word that misbehaves at every step may simply not be trained well enough to use. |
+| `wake_words` | Wake Words card title | This device listens for up to two wake words at once - one row each below - plus the "Stop" word that interrupts answers and alarms. Words beyond the built-in ones download from their source when you choose them, and fetch again at every restart. A tuned word wears its graph: everything left of the handle is ignored, every dot right of it is a real firing from the last 24 hours, fading as it ages. Tap the handle to retune, tap a dot for its story, tap the chevron on a word to change or remove it. |
+| `living_graph` | the graph (accessible name + tuner ⓘ) | A confidence scale from 0 to 100%. Everything left of the handle sits under the frost - the device ignores it. Everything right of it is live: solid dots are real firings at the confidence they scored, fading over 24 hours; hollow marks almost fired. Drag the handle to move the line; if dots you don't recognize sit just past it, drag past them. |
 | `wake_sources` | Wake Word Sources card title | The wake word list is fetched live from these places - nothing is copied to our servers. Anyone can publish a wake word model, and quality varies: the included words are hand-tuned, community ones may fire too eagerly or miss you. Adding a source here only grows the list; a word starts being used when you pick it above. |
-| `wake_sound` | Wake chime | Plays a short chime on the speaker the moment the wake word is detected. |
-| `stop_word` | Say "stop" to interrupt | While an answer is playing - this device’s own, or one another Satellite1 routed here - saying "stop" cuts it off everywhere it is playing. A ringing timer can always be silenced this way, whichever way this is set. |
+| `wake_sound` | the chime bell's ⓘ | Plays a short chime on the speaker the moment the wake word is detected. |
+| `stop_word` | the Stop pill's ⓘ | While an answer is playing - this device’s own, or one another Satellite1 routed here - saying "stop" cuts it off everywhere it is playing. A ringing timer can always be silenced this way, whichever way this is set. |
 
-Sensitivity is the **Wake Word Tuner**'s job (September 20 2026, replacing the five-step presets and
-the two Home Assistant selects of the day before — a dropdown of guesses asked the customer to know
-what this tool measures for them). Each word card's **Wake Word Tuner** row carries two buttons —
-**Tune Now** (the app's one gradient-faced button, the owner's explicit exception to the
-no-gradient rule) and **Reset Default** (factory-reset red: it throws a measurement away, and sits
-disabled until there is one) — with a tuned word's result in the grey `tn_box` beneath, the
-transcript subcard's neutral shape ("Tuned for this room and voice - fires above 62% confidence.").
-Tune Now opens the guided session:
-the device listens to the room for fifteen seconds (`tn_listen`, `tn_listen_sub`), the customer says
-the word three times (`tn_speak`, each attempt a scored bar), and the recommendation (`tn_rec`)
-places the threshold above the room's loudest false score and below the quietest attempt, biased
-toward the noise side. Apply, then one more utterance at the real threshold confirms (`tn_confirm`,
-`tn_heard`) — which is what replaced the standalone say-it-now test. The honest failures each have a
-line: `tn_nogap` when no threshold separates word from room, `tn_vad` when an attempt did not
-register as speech, `tn_nocap` for a build compiled without the score channel (debug logging), and
-`tn_gone` for an expired session. Reset Default hands the model its own tuning back.
+The **Wake Word Tuner** is two user-paced phases on the same graph (v2, replacing the four-phase
+ritual — no room-listening phase, no confirmation phase). The **ready gate** (`tn2_ready`, the
+stop variant `tn2_ready_stop` still says *start some music first*) opens with the room's last 24
+hours already on the graph as the **amber smatter** — one faint dot per hourly high-water bucket,
+newest opaque, oldest nearly gone, a fresh register reading landing live with its ripple; legend
+`tn_legend_hist`, "wake history" (owner wording). No aggregate tick, no "24h peak" label: the
+room's reach is wherever the smatter ends. Then the **voice rounds** (`tn2_near/far/other` —
+near first, twice is plenty; once from across the room; round three, skippable, is anyone else in
+the house), attempts landing as labeled accent dots. Then **placement**: the knob seeds at a
+sensible spot inside the gap (Apply-without-dragging is a correct answer) and is dragged — dots
+sink into or surface out of the frost live — while the readout narrates the tradeoff (`tn2_ok` +
+`tn2_under` in the safe zone; `tn2_high`, amber-toned, at the quietest attempt; `tn2_low`,
+red-toned, when amber dots sit past the line — copy never attributes a firing to a source, owner
+call: "we don't know it's the TV"). Apply is the end: the session closes, the row returns wearing
+`lg_live`, and the first real firing confirms itself by landing with its ripple. The knob-tap
+**quick edit** (`tn2_title_quick`, '"Okay Nabu" · move the line') reopens placement with no
+session and no re-recording — the persisted voice stats feed the readout as data, never drawn as a
+band — with **Redo voice rounds** (`tn2_redo`) beside Apply for the full re-measure. Reset default
+is gone. The no-gap failure stays diagnosed by side (`tn_nogap_room` vs `tn_nogap_voice`);
+`tn_nocap` and `tn_gone` keep their jobs.
 
-Under the hood the tuner is built entirely on upstream APIs — no fork of `micro_wake_word`: the
-loader subscribes to the logger (the engine logs every detection's probabilities), floors the word's
-cutoff to a probe level for the session so even sub-threshold attempts score, and the wake-test
-suppression window keeps detections from starting the assistant or chiming while measuring. A
-session expires two minutes after the app's last keepalive and always restores the configured
-threshold; the tuned value survives reboots and re-downloads of the same word. The one maintenance
-coupling: the two parsed log lines are pinned to the exact ESPHome version in requirements.txt —
-re-check them on every bump (the parser site in mww_runtime_loader.cpp says the same).
+Under the hood everything rides the one vendored addition this repo carries: the **high-water
+register** in `micro_wake_word`'s `streaming_model` (see
+`esphome/components/micro_wake_word/FPH_VENDOR.md` — byte-identical to the pinned ESPHome release
+except that one `// FPH:`-marked block; upstream PR intended). It is the sole source of every
+sub-threshold score: the hourly buckets behind the smatter (`day` on the payload, 24 values per
+track, newest first), the scored close calls within ~5% below a cutoff (`near`), and — new in v2 —
+**each real firing's confidence**: `notify_detection` drains the register at the moment of firing
+and keeps the value instead of discarding it, `push_wake_detection` collects it a few actions
+later in the same automation, and the detection ring's entries carry it (`hist` grew a third
+element), which is what places every dot on every graph, on every build, debug or not. Tune stats
+(`n`/`f`/`h` on the cutoff endpoint) persist per word so the readout survives reloads; a session
+expires two minutes after the app's last keepalive and always restores the configured threshold.
 
-The picker wears the /audio route's tree clothes — the sunken scrolling box, group headers with a
-caret and a count pill, the drawn checkbox — because that is the app's one selection-list pattern.
-A row's small facts — languages ("en"), model size ("61 KB"), the `ww_unverified` caveat, and the
-training-generation tag that disambiguates twins ("v3") — all wear that same count-pill shape
-(owner request, September 2026: the dot-joined italic line they replaced read as a sentence rather
-than as tags); only the speak button keeps its own glyph.
-Groups are the sources: **Built-In wake words** first (the two compiled into the firmware, listed
-by the device itself), then
-one group per source. ESPHome's experiments folder is excluded at enumeration entirely (owner,
-September 2026): its own README says "minimally trained and tested, not supported in any way", and a
-word that never fires reads as our bug. There is no Disabled entry: a slot empties by unchecking
-the word it holds, and the collapsed picker then reads "No wake word selected." The slots are still not
-entities: the list and the swap ride `GET/POST /api/sat1/wakewords` and its `slot`/`cutoff`
-sub-endpoints, owned by the `mww_runtime_loader` component.
+The **word picker** expands inline (the modal sheet is retired) from a pill's chevron, `+ Add
+word`, or the empty state's one button (`ww_choose`, under `ww_route_none` — "on the device, no
+cloud" leads for a first-time owner deciding whether to trust a microphone). Inside, it wears the
+/audio route's tree clothes — the sunken scrolling box, group headers with a caret and a count
+pill, the drawn checkbox — because that is the app's one selection-list pattern. A row's small
+facts — languages ("en"), model size ("61 KB"), the `ww_unverified` caveat, the
+training-generation tag that disambiguates twins ("v3"), and `ww_on_other` on the row the other
+slot holds — all wear that same count-pill shape; only the speak button keeps its own glyph. The
+inline footer carries the request/train links. Groups are the sources: **Built-In wake words**
+first, then one group per source. There is no Disabled entry: a slot empties by unchecking the
+word it holds. The slots are still not entities: everything rides `GET/POST /api/sat1/wakewords`
+and its `slot`/`cutoff`/`tune` sub-endpoints, owned by the `mww_runtime_loader` component.
 
-The swap's own line under the picker carries its whole lifecycle: `ww_downloading` with a byte
-count, then either the ready state or `ww_failed` plus the specific `WW_ERR` reason and a Retry
-link. The picker never offers what the firmware is certain to refuse: manifests the browser can
-read but that are not version 2 (the ESPHome repository still hosts its old v1 files next to the v2
-ones) are filtered out at enumeration. The reasons are keyed to the firmware's SlotError numbers;
-the one customers will meet most is 2, the not-a-microWakeWord-model line, because the most popular
-wake word collections on GitHub are for a different engine. Key 0 is the fallback for a write the
-device refused outright (a URL past the 224-byte slot limit) or that never got an answer — before
-it existed those failures showed `ww_failed` with a blank where the reason goes. The apply-to-all-Satellite1s offer was
-removed September 20 2026 (owner: a general apply-to-peers mechanism for many controls comes
-later), and so was the post-swap tune invitation — Tune Now on the tuner row is the affordance, and
-a second one nagged.
+The swap's lifecycle lives on the rows (see above): the byte count in the new row's right slot,
+then either the settled row or `ww_failed` plus the specific `WW_ERR` reason with Retry as the
+row's button. The picker never offers what the firmware is certain to refuse: manifests the browser
+can read but that are not version 2 are filtered out at enumeration. The reasons are keyed to the
+firmware's SlotError numbers; the one customers will meet most is 2, the
+not-a-microWakeWord-model line, because the most popular wake word collections on GitHub are for a
+different engine. Key 0 is the fallback for a write the device refused outright or that never got
+an answer. Nothing celebrates a landed swap (owner: the row offers exactly the two next steps -
+the pipeline and Tune it! - and nothing shouts at the moment a first-time user is most easily
+overwhelmed; a real firing announces itself as its dot landing with the ripple, wordlessly).
 
-Home Assistant still owns which pipeline answers which word: the **Voice Pipeline** dropdown
-(renamed from Assistant — it is Home Assistant's own word for the thing being picked) sits last on
-each card, under the tuner, and is `Preferred` plus the customer's pipelines (the old `Off` entry
-is gone — silencing a slot is unchecking its word). Its tooltip (`voice_pipeline`) says pipelines
+Home Assistant still owns which pipeline answers which word: the **Voice Pipeline** select
+(renamed from Assistant — it is Home Assistant's own word for the thing being picked) sits on each
+word's row, and is `Preferred` plus the customer's pipelines (the old `Off` entry
+is gone — silencing a slot is removing its word). Its tooltip (`voice_pipeline`) says pipelines
 are built in Home Assistant under Settings › Voice assistants, ending in the `vp_docs` link to the
 FutureProofHomes walkthrough. The slot-sync keeps Home Assistant's two pairings equal to the two
 slots, and a wake word change made from Home Assistant's own select is adopted back into the slots
@@ -266,9 +297,10 @@ URL; the foot reads, verbatim, "Don't see your wake word? Request one, or train 
 microWakeWord." — the first link landing on the Tater catalog's request-a-wake-word README section
 (the free issue-driven trainer), the second on TaterTotterson/microWakeWord-Trainer-Nvidia-Docker.
 
-Diagnostics gained **Recent wake detections** (`det_title`): the last eight firings with time-ago,
-cleared on restart — the same firmware ring the test moment reads, for chasing "it triggered at
-3am".
+Diagnostics' **Recent wake detections** card retired here (September 22 2026), and the route's own
+Recent detections card followed it in the v2 pass: every word's Living Graph carries the same
+story in place — what fired, how confidently, and (a tap away) when — so the standalone record has
+no job left. Only `det_just_now` survives, in the dots' popovers.
 
 ### Audio
 
@@ -325,6 +357,20 @@ screen states. The wording changed with single-origin device switching (Septembe
 device now retargets this page at the peer rather than navigating to it - the change that keeps the iOS
 home-screen app out of Safari's in-app sheet - so the sentence owns both outcomes: the takeover for
 fleet-current firmware, the old navigation for anything older.
+
+Every route opens with its name worn as a **folder tab** growing out of the top card's top-left
+corner (the v2 chrome, replacing the short-lived sticky route title bar): the route's name and
+glyph from the same table the drawer reads, in the card's own background, the card's corner
+squared beneath it so tab and card read as one piece of paper. It carries no copy of its own; the
+open run to the tab's right is deliberately empty — reserved for the coming toast redesign, which
+will dock there. "Wake Word" became "Wake Words" in the same pass (the route holds two words plus
+Stop, and the singular read as a typo in a title).
+
+On Home, the Assistant card's transcript grew **one tab per wake word** (September 22 2026): each
+exchange arrives tagged with the word that initiated it, the last-uttered word's tab is active and
+follows fresh firings until the person picks another by hand, and a single word (or an untagged
+old-firmware transcript) shows no tabs at all. The tabs carry only the quoted words themselves —
+"Stop" capitalized like everywhere else — so they add no new copy.
 
 ## Standing text
 
