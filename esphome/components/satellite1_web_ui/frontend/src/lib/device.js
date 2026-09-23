@@ -82,6 +82,21 @@ function reportWriteError(path, why) {
 }
 
 /**
+ * Warning and error log lines, announced as they arrive on the stream - the toast wiring in the
+ * shell is the listener, and the same no-cycle reasoning as onWriteError puts the registry here.
+ * The stream is live-only, so these fire within milliseconds of the device emitting the line and
+ * never for history: a warning from before the page loaded is in the ring, not on this channel.
+ */
+const logAlertListeners = new Set();
+export function onLogAlert(fn) {
+  logAlertListeners.add(fn);
+  return () => logAlertListeners.delete(fn);
+}
+
+/** The component tag out of "[W][wifi:123]: ...": the coalescing key and the toast's subject. */
+const LOG_TAG = /^\[(?:VV|V|D|I|W|E|C)\]\[([^\]:]+)/;
+
+/**
  * Ask Home Assistant for a fresh area/player/pipeline list, once per page load, no matter which
  * route asks first or how many do.
  *
@@ -1125,14 +1140,25 @@ export function useEvents() {
 
     const onLog = (e) => {
       lastSeen = Date.now();
-      if (pausedRef.current) return;
       const text = e.data.replace(ANSI, "");
       const m = LEVEL.exec(text);
+      const lvl = m ? m[1] : "?";
       // `at` is the browser's clock at arrival, because the line itself carries no wall time - the
       // device's logger stamps uptime, not time of day, and the /events payload is just the text.
       // Arrival is honest enough: the stream is live-only, so a line is read within milliseconds of
-      // being produced or not at all.
-      logRef.current.push({ lvl: m ? m[1] : "?", text, at: Date.now() });
+      // being produced or not at all. Stamped once, here, so the alert payload below and the ring
+      // entry carry the same clock - it is the identity a toast's reveal uses to find its line.
+      const at = Date.now();
+      // The alert channel, deliberately ahead of the pause check below: pausing the Logs card to
+      // read something must hold the ring, not silence error toasts app-wide. And deliberately
+      // quiet while anyone is reading the log (the same watch count that gates the render): a
+      // toast announcing the log to the person looking at it is noise.
+      if ((lvl === "E" || lvl === "C" || lvl === "W") && logWatchRef.current === 0) {
+        const tag = LOG_TAG.exec(text)?.[1] || "";
+        for (const fn of logAlertListeners) fn({ lvl, tag, text, at });
+      }
+      if (pausedRef.current) return;
+      logRef.current.push({ lvl, text, at });
       if (logRef.current.length > LOG_RING) logRef.current.splice(0, logRef.current.length - LOG_RING);
       // The ring is a ref and the counter is the state, so a burst of log lines costs one render
       // rather than one render per line (a noisy boot is several hundred lines in a second) - and

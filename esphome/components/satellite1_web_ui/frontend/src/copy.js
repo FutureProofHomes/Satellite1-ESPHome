@@ -208,6 +208,11 @@ export const HINTS = {
 
   log: "The device's own log, live. This is the first place to look when something misbehaves, and the most useful thing to attach to a support request.",
 
+  // The notification drawer's ⓘ. The badge arithmetic is the one thing the surface cannot say for
+  // itself, so it leads; the 24-hour window and the swipe are the two behaviours people ask about.
+  notif:
+    "Toasts from the past 24 hours. The badge counts the ones that faded away before you could tap them; tapping a notification takes you to the same place the toast would have, and swiping it right (or tapping its ✕) files it under Archive. Everything clears itself after a day.",
+
   // The Crash Reports card. The second sentence is the workflow this card exists for; the third
   // manages the one expectation that surprises people (a full power cut takes the flight recorder's
   // memory with it, so unplugged crashes carry less detail).
@@ -280,6 +285,49 @@ export const TEXT = {
   // sticky toast: it describes an ongoing state, so it stays until the stream reconnects rather than
   // timing out. Tapping it goes to the device log, same as the write-failed toast.
   stream_lost: "Lost the connection to the device. Retrying.",
+
+  // The sticky's green ending, on the falling edge only - a session that never lost the stream
+  // never sees it. No second line: there is nothing to do about good news.
+  stream_back: "Connection to the device restored.",
+
+  // Log-driven toasts (notch toast redesign, September 2026): a warning or error line arriving on
+  // the stream, named by the component tag out of its "[W][wifi:123]" header so the coalesce badge
+  // counts one component's burst rather than mixing strangers. The fallback subject covers a line
+  // whose header did not parse. Second line is write_failed_go - the same tap, the same log.
+  log_toast_err: "Error from %s",
+  log_toast_warn: "Warning from %s",
+  log_toast_dev: "the device",
+
+  // A crash count that moved mid-session: the device rebooted from a crash while the page watched.
+  // Only mid-session moves toast - history is the Crash Reports card's story, told there.
+  crash_toast_t: "The device crashed and restarted.",
+  crash_toast_s: "Tap for the crash report.",
+
+  // Update news, once per session, the version in the title because it is the fact worth reading.
+  update_toast_t: "Update %s is available.",
+  update_toast_s: "Tap to install from Diagnostics.",
+
+  // The ✕ on every toast: dismiss without acting, against the card's tap which acts.
+  dismiss: "Dismiss",
+
+  /* The notification center (September 2026): the bell, its drawer, and the filter pills. The
+     bell's aria-label carries the live count in parentheses when there is one. "Archive" is both
+     the pill and the swipe well's word - one name for one place. */
+  notif_bell: "Notifications",
+  notif_title: "Notifications",
+  notif_all: "All",
+  notif_info: "Info",
+  notif_warn: "Warnings",
+  notif_err: "Errors",
+  notif_arch: "Archive",
+  // Two empty states: the filters share one (a quiet day is the good outcome and reads like it),
+  // the archive names itself so an empty archive does not read as a bug.
+  notif_empty: "Nothing here from the past 24 hours.",
+  notif_empty_arch: "Nothing archived yet.",
+  notif_foot: "Notifications clear after 24 hours.",
+  // Relative times on the rows: minutes under an hour, hours to the 24-hour edge.
+  notif_now: "just now",
+  notif_ago: "%s ago",
 
   // Only when the sheet has no peer rows at all. It used to also name the add-by-address field that
   // ended the sheet; the field is gone (owner's call), so Home Assistant's roster is the one way a

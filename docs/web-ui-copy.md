@@ -402,6 +402,19 @@ still puts itself back.
 `stream_lost` also changed surface, not wording: it is the one sticky toast, standing until the event
 stream reconnects, where the transient toasts (`write_failed`, the blocked nudge below) time out.
 
+The toasts moved again in the notch redesign (September 2026): they render one at a time in the run
+beside the route's folder tab, colour-coded by kind (red error, amber warning, green success, accent
+info), and bursts sharing a key coalesce into one card wearing a ×N badge. New strings with them:
+`stream_back` is the sticky's green ending on reconnect; `log_toast_err` / `log_toast_warn` announce
+a warning or error line arriving on the event stream, with `%s` the component tag out of its
+`[W][wifi:123]` header (`log_toast_dev` is the subject when the header did not parse) - suppressed
+while the Logs card is on screen; `crash_toast_*` fire when the crash count moves mid-session (the
+device rebooted from a crash while the page watched - history stays the Crash Reports card's story);
+`update_toast_*` carry firmware news once per session, the version in the title via `%s`. Tapping a
+toast acts - navigation with a reveal (the Logs card forced open at the right level filter, the Crash
+or Firmware card scrolled into view) or the fix drawer for the blocked nudge; the ✕ (`dismiss`)
+dismisses without acting.
+
 | Key | Text |
 | --- | --- |
 | `ha_connected` | Connected to Home Assistant |
@@ -439,6 +452,34 @@ triggers a Home Assistant re-sync, so the availability dots correct themselves w
 rather than showing the cache from the last sync.
 | `write_failed` | A change didn't reach the device, so it hasn't been applied. |
 | `write_failed_go` | Tap for the device log. |
+| `stream_back` | Connection to the device restored. |
+| `log_toast_err` | Error from %s |
+| `log_toast_warn` | Warning from %s |
+| `log_toast_dev` | the device |
+| `crash_toast_t` | The device crashed and restarted. |
+| `crash_toast_s` | Tap for the crash report. |
+| `update_toast_t` | Update %s is available. |
+| `update_toast_s` | Tap to install from Diagnostics. |
+| `dismiss` | Dismiss |
+| `notif_bell` / `notif_title` | Notifications |
+| `notif_all` | All |
+| `notif_info` | Info |
+| `notif_warn` | Warnings |
+| `notif_err` | Errors |
+| `notif_arch` | Archive |
+| `notif_empty` | Nothing here from the past 24 hours. |
+| `notif_empty_arch` | Nothing archived yet. |
+| `notif_foot` | Notifications clear after 24 hours. |
+| `notif_now` | just now |
+| `notif_ago` | %s ago |
+
+The `notif_*` block is the notification center (September 2026): a badged bell beside the theme
+toggle opening a top-hung drawer of the past 24 hours' err/warn/info toasts (green ok toasts are
+never kept). The badge is a live count of toasts that faded away untapped; tapping a row navigates
+with the toast's own reveal (the log line flashed, the card pulsed), and ✕ or a Gmail-style swipe
+right files the row under Archive - handled, kept a day, still tappable. Tapping a live toast on
+the notch archives it directly, so it never reaches the badge. `HINTS.notif` carries the drawer's
+ⓘ explanation.
 | `nothing_said` | A transcription of your voice interactions are displayed here. |
 | `media_idle` | Nothing playing. Group streams and media sent from Home Assistant show up here. |
 | `media_idle_bar` | Nothing playing |

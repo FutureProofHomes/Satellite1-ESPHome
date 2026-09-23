@@ -357,6 +357,24 @@ textarea {
   width: 16px;
   height: 16px;
 }
+/* The tab's label, in its own span so it can fold. Two duties. The standing one: a ceiling with
+   ellipsis, so a long tab degrades to a truncated label instead of pushing into the toast run.
+   And the fold: while a toast holds the row on a phone (.tlive from the shell), the label slides
+   shut and the tab is its glyph - the accent mark already anchoring the route - returning when
+   the toast leaves. Desktop keeps the label; from 641px up the row fits both. The transition
+   lives in the motion section's no-preference block. */
+.rtab-l {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 40vw;
+}
+@media (max-width: 640px) {
+  .rtab-row.tlive .rtab-l {
+    max-width: 0;
+    opacity: 0;
+  }
+}
 /* The card under the tab: flush against it, its top-left corner squared beneath the tab's own. */
 .rtab-row + .card,
 .rtab-row + * > .card:first-child {
@@ -537,71 +555,356 @@ textarea {
 }
 
 /* The toast surface (ToastHost in shell.jsx): every out-of-band report in the app, since the amber
-   banners retired. Fixed to the bottom rather than the top: banners could sit above the content they
-   qualified, but these report to the thumb that just did the tapping. A column so the two kinds can
-   coexist - the transient moment (a failed write, the blocked nudge) stacks above the sticky state
-   (stream lost), newest news nearest the thumb. z-index above the sheets and the hint layer both,
-   because a write can fail while either is open and a toast under a scrim is a toast nobody saw.
-   The container itself ignores the pointer - it is an invisible column, and a phantom strip eating
-   taps above the media bar would be a worse bug than any toast fixes. */
-.toasts {
+   banners retired. It lives in the run beside the route's folder tab - the space .rtab's comment
+   reserved - as one colour-coded card at a time (lib/toast.js owns the queueing and coalescing).
+   Fixed under the top bar rather than in the tab row's flow: at scroll 0 it sits exactly in the
+   notch, and once the page scrolls it stays visible floating under the bar, because a toast that
+   scrolls away with the row is a toast nobody saw. Right-aligned to .wrap's content box at both of
+   its widths, so tab and toast read as sharing one row. z-index above the sheets and the hint
+   layer both, as before - a write can fail while either is open, and a toast under a scrim is a
+   toast nobody saw. The container ignores the pointer; the card re-enables it. */
+.ntoasts {
   position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  /* Above the media bar, which owns the bottom edge - a toast behind the bar is a toast nobody
-     saw, same reasoning as the z-index. */
-  bottom: calc(var(--mbar-h) + var(--s-4) + env(safe-area-inset-bottom));
+  top: calc(var(--bar-h) + env(safe-area-inset-top) + 5px);
+  right: max(var(--s-3), calc((100vw - 720px) / 2 + var(--s-3)));
   z-index: 50;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--s-2);
-  max-width: min(360px, calc(100vw - 24px));
+  justify-content: flex-end;
+  max-width: min(400px, calc(100vw - 84px));
   pointer-events: none;
 }
-/* One shadowed elevated card, same grammar as the hint bubble; the state palette is on the title
-   line, not the whole card, so it catches the eye without shouting. Error voice by default (the
-   failed write); .warn below reads the same card in the warning tokens. */
-.toast {
+@media (min-width: 900px) {
+  .ntoasts {
+    right: max(var(--s-3), calc((100vw - 960px) / 2 + var(--s-3)));
+  }
+}
+/* One elevated card, the kind spoken by a coloured left bar, glyph and title tint - never the
+   whole surface, so it catches the eye without shouting. --tk is the kind's mark colour and --tkt
+   its text tone, set by the k-* classes below; everything else is neutral and shared. */
+.ntoast {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: var(--s-2) var(--s-3);
-  background: var(--fill-2);
-  border: 1px solid var(--err-line);
-  border-radius: var(--r-3);
+  align-items: stretch;
+  background: var(--bg-elev);
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--tk);
+  border-radius: var(--r-2);
   box-shadow: 0 6px 20px var(--shadow);
+  pointer-events: auto;
+  min-width: 0;
+  animation: ntoast-in 220ms ease-out;
+}
+/* The ghost on its way out: the same card finishing a fade the host keeps mounted for. Inert - it
+   is already dismissed, and a dying card that still eats taps would re-fire a stale action. */
+.ntoast.out {
+  animation: ntoast-out 240ms ease-in forwards;
+  pointer-events: none;
+}
+.k-err {
+  --tk: var(--err);
+  --tkt: var(--err-fg);
+}
+.k-warn {
+  --tk: var(--warn);
+  --tkt: var(--warn-fg);
+}
+.k-ok {
+  --tk: var(--ok);
+  --tkt: var(--ok);
+}
+.k-info {
+  --tk: var(--accent);
+  --tkt: var(--accent);
+}
+/* The tap target: everything but the ✕. A real button, unstyled, so the whole card is focusable
+   and announced without nesting a button in a button (the ✕ is its sibling). */
+.ntoast-hit {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  padding: 7px 2px 7px 9px;
+  background: none;
+  border: 0;
   cursor: pointer;
   text-align: left;
-  pointer-events: auto;
-  animation: toast-in 160ms ease-out;
+  color: inherit;
+  font: inherit;
+  min-width: 0;
 }
-.toast.warn {
-  border-color: var(--warn-line);
+.ntoast-i {
+  flex: none;
+  display: inline-flex;
+  margin-top: 1px;
+  color: var(--tk);
 }
-.toast.warn .toast-t {
-  color: var(--warn-fg);
+.ntoast-i .ni {
+  width: 15px;
+  height: 15px;
 }
-.toast-t {
-  font: 600 var(--t-s) inherit;
-  color: var(--err-fg);
+.ntoast-b {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
-.toast-s {
+.ntoast-t {
+  font-size: var(--t-s);
+  font-weight: 600;
+  color: var(--tkt);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ntoast-s {
   font-size: var(--t-xs);
   color: var(--fg-3);
 }
-@keyframes toast-in {
+/* The coalesce badge: a burst of the same news counted on one card, not a stack of cards. */
+.ntoast-n {
+  flex: none;
+  align-self: center;
+  font-size: var(--t-xs);
+  font-weight: 650;
+  color: var(--fg-2);
+  background: var(--fill);
+  border-radius: var(--r-pill);
+  padding: 1px 7px;
+}
+/* Dismiss-without-acting. Its own button beside the hit zone, sized for a thumb's corner tap. */
+.ntoast-x {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: var(--fg-3);
+}
+.ntoast-x svg {
+  width: 11px;
+  height: 11px;
+}
+@keyframes ntoast-in {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateX(10px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
+  }
+}
+@keyframes ntoast-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(10px);
   }
 }
 
+/* The reveal pulse a tapped toast leaves on its destination: an outline that breathes twice in
+   the accent and rests transparent - gentle and non-sticky, per the owner. Applied as a class by
+   the route (diagnostics.jsx) and removed by the same timeout, so nothing can stay lit. The log
+   card is exempt (its .ln.hl line flash carries the pulse instead); the firmware card moves it
+   onto the update panel when one stands, because that is the thing to address. */
+.reveal {
+  animation: reveal-pulse 2.5s ease-in-out;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+@keyframes reveal-pulse {
+  0%,
+  100% {
+    outline-color: transparent;
+  }
+  20%,
+  40% {
+    outline-color: var(--accent);
+  }
+  55% {
+    outline-color: transparent;
+  }
+  75% {
+    outline-color: var(--accent);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* The notification center: the bell, the badge and the drawer         */
+/* ------------------------------------------------------------------ */
+
+/* The bell, dressed like the theme toggle at the bar's other end. Relative for the badge. */
+.nbell {
+  position: relative;
+  color: var(--fg-2);
+  flex: none;
+}
+.nbell .ni {
+  width: 17px;
+  height: 17px;
+}
+/* The unhandled count. Error-red because unhandled is its meaning; a pill so two digits fit. */
+.nbadge {
+  position: absolute;
+  top: 1px;
+  right: -2px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--err);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: var(--r-pill);
+  /* A ring in the bar's own colour, so the badge reads as sitting on the bell, not clipped by it. */
+  box-shadow: 0 0 0 2px var(--bg-elev);
+}
+
+/* The drawer body: the switcher's .sheet wears these on top. */
+.npane {
+  gap: var(--s-2);
+}
+.npills {
+  display: flex;
+  gap: var(--s-1);
+  flex-wrap: wrap;
+  padding: 0 0 var(--s-1);
+}
+/* The filter pills, each in its kind's own text colour so the row palette explains itself. */
+.npill {
+  border: 1px solid var(--line-2);
+  background: none;
+  color: var(--fg-2);
+  border-radius: var(--r-pill);
+  padding: 3px 12px;
+  font-size: var(--t-s);
+  font-weight: 650;
+  cursor: pointer;
+}
+.npill.on {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 0.5px var(--accent);
+}
+.npill.p-warn.on {
+  border-color: var(--warn);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  box-shadow: inset 0 0 0 0.5px var(--warn);
+}
+.npill.p-err.on {
+  border-color: var(--err);
+  background: none;
+  color: var(--err-fg);
+  box-shadow: inset 0 0 0 0.5px var(--err);
+}
+.nlist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding-bottom: var(--s-2);
+}
+.nempty {
+  padding: var(--s-3) var(--s-1);
+}
+/* One history row: the toast anatomy (same k-* palette and inner classes) minus the elevation -
+   these sit in a list on the sheet, and thirty shadowed cards is a wall. The wrapper below owns
+   the swipe theatre. */
+.nrow-wrap {
+  position: relative;
+  max-height: 72px;
+  transition: max-height 0.16s ease 0.18s;
+}
+.nrow {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: stretch;
+  background: var(--fill);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--tk);
+  border-radius: var(--r-2);
+  min-width: 0;
+  transition: transform 0.18s ease;
+  /* The swipe belongs to the row; without this the browser claims the gesture for scrolling the
+     sheet the moment a finger moves diagonally. Vertical pans still start on the list itself. */
+  touch-action: pan-y;
+}
+.nrow-hit {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  padding: 7px 2px 7px 9px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  min-width: 0;
+}
+/* Archived rows: dimmed and quiet - handled, kept, still tappable to revisit the destination. */
+.nrow.arch {
+  opacity: 0.62;
+}
+/* The archive well behind a row: revealed as the row rides right, Gmail's own grammar. */
+.nrow-well {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding-left: var(--s-3);
+  border-radius: var(--r-2);
+  background: var(--fill-2);
+  color: var(--fg-3);
+  font-size: var(--t-xs);
+  font-weight: 650;
+}
+.nrow-well .ni {
+  width: 13px;
+  height: 13px;
+}
+/* The committed swipe, two transitions on one class: the row slides off (now), the wrapper's
+   height folds (the .16s after .18s delay above), and the JS archives after both - so the list
+   closes over the gap rather than snapping. */
+.nrow-wrap.gone {
+  max-height: 0;
+}
+.nrow-wrap.gone .nrow {
+  transform: translateX(110%);
+}
+/* The teaching bounce: the drawer's top row nudges right and back once per open, the archive well
+   peeking behind it - the gesture explaining itself. Once, not looping: a UI that keeps waving
+   is a UI that wants something. */
+.nrow.hintb {
+  animation: nrow-hint 1.1s ease-in-out 0.45s 1;
+}
+@keyframes nrow-hint {
+  0%,
+  100% {
+    transform: none;
+  }
+  30% {
+    transform: translateX(26px);
+  }
+  55% {
+    transform: none;
+  }
+  75% {
+    transform: translateX(9px);
+  }
+}
 .wrap {
   max-width: 720px;
   margin: 0 auto;
@@ -895,6 +1198,10 @@ html.held body {
   /* s-4, up from s-3: the extra 4px of air between cards is most of what "spacing rhythm" cost. */
   margin-bottom: var(--s-4);
   box-shadow: 0 1px 2px var(--shadow), 0 6px 16px -8px var(--shadow);
+  /* A toast reveal scrollIntoView's a card; these keep it clear of the sticky top bar on one edge
+     and the floating media bar on the other, whichever way the scroll approaches. */
+  scroll-margin-top: calc(var(--bar-h) + env(safe-area-inset-top) + 8px);
+  scroll-margin-bottom: calc(var(--mbar-h) + var(--s-4) + env(safe-area-inset-bottom));
 }
 /* Sentence case at t-l, replacing 12px uppercase-and-tracked. The small caps read as an engineering
    tool's section labels; a title the same case as the prose under it reads as a name. One step
@@ -1573,9 +1880,20 @@ input[type="range"]:disabled {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: var(--t-xs);
   line-height: 1.4;
+  /* The reveal reads a line's offsetTop to centre it; relative makes the panel that offset's
+     origin instead of whichever ancestor happens to be positioned. */
+  position: relative;
 }
 .ln {
   white-space: pre-wrap;
+}
+/* The line a toast pointed at: the accent tint plus the shared reveal pulse, cleared by the same
+   timeout that set it. Non-sticky by design - it orients, then gets out of the way of reading. */
+.ln.hl {
+  background: var(--accent-bg);
+  border-radius: var(--r-1);
+  animation: reveal-pulse 2.5s ease-in-out;
+  outline: 2px solid transparent;
 }
 /* The arrival clock on every line. Its own muted colour regardless of the line's level, so it stays a
    readable margin column through a run of red; tabular digits so seconds tick without wobbling; bold
@@ -2731,6 +3049,11 @@ polyline.draft {
   .wrap > * {
     animation: rise 0.2s ease-out;
   }
+  /* The tab label's fold and return while a toast holds the row (see .rtab-l). Here rather than
+     on the rule itself so the reduced world folds instantly instead of sliding. */
+  .rtab-l {
+    transition: max-width 0.2s ease, opacity 0.16s ease;
+  }
   /* The device switcher hangs from the top bar, so it drops rather than rises. (The expanded media
      view's entrance moved to the base panel-up animation it now shares with the players panel.) */
   .sheet {
@@ -2809,10 +3132,31 @@ polyline.draft {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .toast,
+  .ntoast,
+  .ntoast.out,
   .mpanel,
-  .msheet {
+  .msheet,
+  .reveal,
+  .ln.hl,
+  .nrow.hintb {
     animation: none;
+  }
+  /* The dismissed ghost has no fade to finish; showing it at all would be a toast flickering
+     back. The reduced world is instant in both directions. */
+  .ntoast.out {
+    display: none;
+  }
+  /* The reveal keeps its meaning without its breathing: a steady outline for the same 2.5s the
+     JS holds the class, cleared with it. The teach bounce simply does not run - the ✕ carries
+     the same action for everyone. */
+  .reveal,
+  .ln.hl {
+    outline: 2px solid var(--accent);
+  }
+  /* Swipes archive instantly: the row and its wrapper skip the slide-and-fold. */
+  .nrow,
+  .nrow-wrap {
+    transition: none;
   }
 }
 

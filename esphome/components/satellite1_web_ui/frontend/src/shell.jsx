@@ -12,6 +12,7 @@ import { loginKey, logout, maybeRedirectLocal, peerLogin, primeOtherOrigin, prob
 import {
   deviceIdentity,
   haBlocked,
+  onLogAlert,
   onWriteError,
   setRemoteTarget,
   useDeviceState,
@@ -19,6 +20,8 @@ import {
   useHaData,
   useSelection,
 } from "./lib/device.js";
+import { archiveNotif, listNotifs, notifCount, setNotifDevice, subscribeNotifs } from "./lib/notif.js";
+import { dismissToast, subscribeToasts, tapToast, toast, toastIntent } from "./lib/toast.js";
 import { LoginScreen } from "./login.jsx";
 import { MediaFooter } from "./media.jsx";
 import { FixDrawer, Splash } from "./splash.jsx";
@@ -485,85 +488,496 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, remote, loca
   );
 }
 
-/**
- * Every toast in the app, on one shared surface at the bottom edge. Toasts are the app's whole
- * out-of-band vocabulary since the amber banners were retired (owner decision, September 2026).
- *
- * Two kinds live here, stacked when they coexist. The one transient slot holds a moment: a write
- * that did not land (the controls already put their old values back, and that silence is the
- * problem - a switch that un-flips itself looks like a page that ignores clicks), or the blocked
- * nudge (Home Assistant actions are off; tapping opens the fix drawer). New transients replace the
- * standing one rather than stacking - a slider mid-drag against a dead device can fail a dozen
- * writes a second, and a dozen identical toasts is a haranguing, not a notification. Six seconds
- * for the write, eight for the nudge, which carries a sentence more.
- *
- * The sticky toast below them is the stream-lost state - an ongoing condition, not a moment, so it
- * stays until the SSE stream reconnects rather than timing out. It used to be a banner under the
- * top bar; it kept its wording and its meaning, only the surface changed.
- *
- * Buttons rather than divs with handlers, so each is focusable and announced. The write toast and
- * the stream toast go to Diagnostics, whose log panel is where the specific reason is.
- */
-function ToastHost({ connected, blocked, onFix }) {
-  const [t, setT] = useState(null);
-  const timer = useRef(null);
+/* The toast glyphs, one per kind, on the route icons' 16-box so the family reads as one hand.
+   The dots are h.01 paths: a round-capped stroke of no length renders as a dot at every zoom,
+   where a tiny circle element would need its own fill juggling. */
+const T_ICONS = {
+  err: ni(
+    <>
+      <circle cx="8" cy="8" r="6.1" />
+      <path d="M8 4.9v3.7" />
+      <path d="M8 11.2h.01" />
+    </>,
+  ),
+  warn: ni(
+    <>
+      <path d="M8 2.5 14.1 13H1.9L8 2.5Z" />
+      <path d="M8 6.6v2.8" />
+      <path d="M8 11.4h.01" />
+    </>,
+  ),
+  ok: ni(
+    <>
+      <circle cx="8" cy="8" r="6.1" />
+      <path d="M5.1 8.3 7 10.2l3.9-4.1" />
+    </>,
+  ),
+  info: ni(
+    <>
+      <circle cx="8" cy="8" r="6.1" />
+      <path d="M8 7.4v3.4" />
+      <path d="M8 5.1h.01" />
+    </>,
+  ),
+};
 
-  const show = (kind, ms) => {
-    setT(kind);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => setT(null), ms);
-  };
+/* The bell, on the route glyphs' 16-box like its toast siblings. */
+const N_BELL = ni(
+  <>
+    <path d="M8 2.6a3.9 3.9 0 0 0-3.9 3.9v2.9L2.9 11.4h10.2L11.9 9.4V6.5A3.9 3.9 0 0 0 8 2.6Z" />
+    <path d="M6.7 13.4a1.4 1.4 0 0 0 2.6 0" />
+  </>,
+);
+
+/* The archive well's box, shown behind a row mid-swipe (and peeking during the teach bounce). */
+const N_ARCH = ni(
+  <>
+    <path d="M2.6 5.6h10.8v7H2.6z" />
+    <path d="M2 2.9h12v2.7H2z" />
+    <path d="M6.3 8.2h3.4" />
+  </>,
+);
+
+/**
+ * What a tapped toast or a tapped history row does - one path for both surfaces, so they can
+ * never act differently on the same entry. `act` tokens come first (serialisable stand-ins for
+ * callbacks: "fix" opens the fix drawer); then navigation with the intent riding lib/toast.js's
+ * handoff. A tap made while already standing on the destination route needs the side channel:
+ * an identical hash fires no hashchange and remounts nothing, so the route hears a window event
+ * instead (Diagnostics listens while mounted).
+ */
+function runAct(t, onFix) {
+  if (t.act === "fix") {
+    onFix();
+    return;
+  }
+  if (!t.go) return;
+  if (t.intent) toastIntent(t.intent);
+  if (location.hash === t.go || `${location.hash}/` === t.go) {
+    window.dispatchEvent(new CustomEvent("toast-intent"));
+  } else {
+    location.hash = t.go;
+  }
+}
+
+/**
+ * Every toast in the app, in the run beside the route tab - the space .rtab's comment reserved.
+ * Toasts are the app's whole out-of-band vocabulary since the amber banners were retired (owner
+ * decision, September 2026); the bottom-edge surface this replaces (September 2026 redesign)
+ * taught the semantics that carry over: writes-only error reporting, one toast rather than a
+ * stack, the sticky stream-lost state.
+ *
+ * Two halves in one component. The surface: whatever lib/toast.js says is visible, drawn as one
+ * colour-coded tappable card that fades in beside the tab and out again - fixed under the top bar
+ * rather than in the tab row's flow, so it stays visible when the page scrolls (a toast that
+ * scrolls away with the row is a toast nobody saw) while sitting exactly in the notch at the top.
+ * `onLive` tells the shell a toast holds the row, which is what collapses the tab to its glyph on
+ * a phone (see .rtab-l in app.css).
+ *
+ * And the wiring: every event that raises a toast, subscribed or watched here because this is the
+ * one component that lives exactly as long as a device's session (AppInner remounts per device,
+ * which is what resets the once-per-session guards for a genuinely different device):
+ *   - a failed write (onWriteError - the semantics of the old surface, unchanged);
+ *   - a warning or error log line (onLogAlert; coalesced per component tag by the store's key,
+ *     already suppressed at the source while the Logs card has a reader);
+ *   - the stream lost (sticky until reconnect) and restored (the ok moment on the falling edge);
+ *   - the blocked nudge, on its rising edge as before, tapping into the fix drawer;
+ *   - a crash count that moved mid-session (the device rebooted from a crash under us);
+ *   - a firmware update arriving, once per session.
+ *
+ * Tapping acts - the callback, or the navigation with its intent riding lib/toast.js's handoff
+ * (and a window event for the tab already standing on the destination route, where an identical
+ * hash fires no hashchange). The ✕ dismisses without acting; a sticky toast survives a tap (the
+ * condition it names has not ended) but yields to the ✕ - it re-raises on the next rising edge.
+ */
+function ToastHost({ connected, blocked, device, states, onFix, onLive }) {
+  // The store's visible toast, and a ghost of the one leaving so the exit can animate - an
+  // element unmounted the moment it is dismissed is gone before any transition can run.
+  const [cur, setCur] = useState(null);
+  const [ghost, setGhost] = useState(null);
+  const prev = useRef(null);
+
+  useEffect(() => subscribeToasts(setCur), []);
 
   useEffect(() => {
-    const off = onWriteError(() => show("write", 6000));
-    return () => {
-      off();
-      clearTimeout(timer.current);
-    };
-    // show holds no state; the empty deps are the subscription's lifetime.
+    const was = prev.current;
+    prev.current = cur;
+    onLive(!!cur);
+    if (was && (!cur || cur.id !== was.id)) {
+      setGhost(was);
+      const t = setTimeout(() => setGhost(null), 240);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+    // onLive is a setState arrow, new each render; the toast identity is the real dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [cur]);
+
+  useEffect(
+    () =>
+      onWriteError(() =>
+        toast({
+          kind: "err",
+          key: "write",
+          ttl: 6000,
+          title: TEXT.write_failed,
+          sub: TEXT.write_failed_go,
+          go: "#/diagnostics",
+          intent: { card: "log" },
+        }),
+      ),
+    [],
+  );
+
+  useEffect(
+    () =>
+      onLogAlert(({ lvl, tag, text, at }) => {
+        const err = lvl !== "W";
+        toast({
+          kind: err ? "err" : "warn",
+          // Keyed per level and component, so ten wifi warnings are one toast wearing ×10 while
+          // an unrelated error still gets its own card.
+          key: `log-${err ? "E" : "W"}-${tag}`,
+          ttl: 6000,
+          title: (err ? TEXT.log_toast_err : TEXT.log_toast_warn).replace("%s", tag || TEXT.log_toast_dev),
+          sub: TEXT.write_failed_go,
+          go: "#/diagnostics",
+          // The line rides the intent by the same {at, text} identity the ring holds (device.js
+          // stamps both from one clock), so the reveal can land on the exact line - and a
+          // coalescing burst adopts the newest line as it counts up.
+          intent: { card: "log", level: err ? "E" : "W", line: { at, text } },
+        });
+      }),
+    [],
+  );
 
   // The nudge, on the rising edge only: once when the app is entered while blocked (which includes
   // arriving through the splash's Continue), and again only if the state genuinely re-enters -
   // never on every re-render of a blocked session.
   useEffect(() => {
-    if (blocked) show("blocked", 8000);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (blocked)
+      toast({
+        kind: "warn",
+        key: "blocked",
+        ttl: 8000,
+        title: TEXT.blocked_toast_t,
+        sub: TEXT.blocked_toast_s,
+        // A token, not a callback: the history row replays this after a reload, and a function
+        // cannot survive localStorage. runAct maps it back to the fix drawer.
+        act: "fix",
+      });
   }, [blocked]);
 
+  // The stream: a sticky while it is down, resolved by its own reconnect, and one green moment on
+  // the way back up. `sawDown` is separate from the handle because the user may have ✕'d the
+  // sticky - the recovery is still news.
+  const lost = useRef(null);
+  const sawDown = useRef(false);
+  useEffect(() => {
+    if (!connected) {
+      sawDown.current = true;
+      if (!lost.current)
+        lost.current = toast({
+          kind: "warn",
+          key: "stream",
+          title: TEXT.stream_lost,
+          sub: TEXT.write_failed_go,
+          go: "#/diagnostics",
+          intent: { card: "log" },
+        });
+    } else {
+      if (lost.current) {
+        lost.current.resolve();
+        lost.current = null;
+      }
+      if (sawDown.current) {
+        sawDown.current = false;
+        toast({ kind: "ok", key: "stream-ok", ttl: 4000, title: TEXT.stream_back });
+      }
+    }
+  }, [connected]);
+
+  // A crash count that moves mid-session means the device just rebooted from a crash under us.
+  // Seeded on the first reading rather than toasting it: history is the Crash Reports card's story.
+  const crashSeen = useRef(null);
+  const crash = device?.crash;
+  useEffect(() => {
+    if (crash == null) return;
+    if (crashSeen.current != null && crash > crashSeen.current)
+      toast({
+        kind: "err",
+        key: "crash",
+        ttl: 12000,
+        title: TEXT.crash_toast_t,
+        sub: TEXT.crash_toast_s,
+        go: "#/diagnostics",
+        intent: { card: "crash" },
+      });
+    crashSeen.current = crash;
+  }, [crash]);
+
+  // Update news, once per session (the ref resets with AppInner's remount, so a device switch can
+  // report the other device's update - which is correct, it is different news).
+  const updTold = useRef(false);
+  const upd = device?.e?.firmware ? states[device.e.firmware] : undefined;
+  const updState = upd?.state;
+  useEffect(() => {
+    if (updTold.current || updState !== "UPDATE AVAILABLE") return;
+    updTold.current = true;
+    toast({
+      kind: "info",
+      key: "update",
+      ttl: 10000,
+      title: TEXT.update_toast_t.replace("%s", upd.value || ""),
+      sub: TEXT.update_toast_s,
+      go: "#/diagnostics",
+      intent: { card: "firmware" },
+    });
+    // upd.value rides updState: the entity publishes both in one message.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [updState]);
+
+  const shown = cur || ghost;
+  if (!shown) return null;
+  const out = !cur;
+
+  const tap = () => {
+    if (!cur) return;
+    // tapToast settles the history entry as handled and takes the transient off the screen; a
+    // tapped sticky stays standing (its condition has not ended) with only its entry settled.
+    tapToast(cur.id);
+    runAct(cur, onFix);
+  };
+
   return (
-    <div class="toasts">
-      {t === "write" && (
+    <div class="ntoasts">
+      <div key={shown.id} class={`ntoast k-${shown.kind}${out ? " out" : ""}`}>
+        <button class="ntoast-hit" disabled={out} onClick={tap}>
+          <span class="ntoast-i">{T_ICONS[shown.kind]}</span>
+          <span class="ntoast-b">
+            <span class="ntoast-t">{shown.title}</span>
+            {shown.sub && <span class="ntoast-s">{shown.sub}</span>}
+          </span>
+          {shown.count > 1 && <span class="ntoast-n">{`\u00d7${shown.count}`}</span>}
+        </button>
+        <button class="ntoast-x" aria-label={TEXT.dismiss} disabled={out} onClick={() => dismissToast(shown.id)}>
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <path d="M2.8 2.8l6.4 6.4M9.2 2.8l-6.4 6.4" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* The notification center: the bell, and the drawer behind it         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The bell in the top bar, wearing the badge: a live count of unhandled notifications from
+ * lib/notif.js. +1 when a toast fades away untapped, -1 as each entry is tapped or dismissed -
+ * and never cleared by merely opening the drawer (owner decision, September 2026): the badge
+ * answers "how many things still need me", not "have I peeked".
+ */
+function NotifBell({ onOpen }) {
+  const [n, setN] = useState(notifCount);
+  useEffect(() => subscribeNotifs(() => setN(notifCount())), []);
+  const label = n > 0 ? `${TEXT.notif_bell} (${n})` : TEXT.notif_bell;
+  return (
+    <button class="icon nbell" aria-label={label} title={label} onClick={onOpen}>
+      {N_BELL}
+      {n > 0 && <span class="nbadge">{n > 99 ? "99+" : n}</span>}
+    </button>
+  );
+}
+
+/** "just now", "12m ago", "3h ago" - the drawer covers 24 hours, so hours are the ceiling. */
+function ago(ts) {
+  const m = Math.round((Date.now() - ts) / 60000);
+  if (m < 1) return TEXT.notif_now;
+  const rel = m < 60 ? `${m}m` : `${Math.floor(m / 60)}h`;
+  return TEXT.notif_ago.replace("%s", rel);
+}
+
+/**
+ * One history row, wearing the toast anatomy (the k-* palette, the glyph, the ×N badge) plus the
+ * drawer's own verbs: tap to act, ✕ to archive, or the Gmail-style swipe - the row rides the
+ * finger rightward over the archive well, commits past 40% of its width or on a quick flick,
+ * springs back short of both. The slop-then-capture pattern is useSheetDrag's (see ui.jsx),
+ * turned horizontal and gated on |dx| > |dy| so it never fights the drawer's own scroll; a plain
+ * tap stays a click because nothing is captured inside the slop.
+ *
+ * The commit is two transitions on one class: the row slides off, then the wrapper's max-height
+ * folds (the delay sequences them), and the archive lands after both - so the list closes over
+ * the gap instead of snapping. `hint` plays the one teaching bounce on the drawer's top row.
+ */
+function NotifRow({ e, hint, onAct, onArchive }) {
+  const [dx, setDx] = useState(0);
+  const [leaving, setLeaving] = useState(false);
+  const st = useRef(null);
+  const wrap = useRef(null);
+  const swiped = useRef(false);
+  const archived = e.state === "archived";
+
+  const commit = () => {
+    setDx(0);
+    setLeaving(true);
+    setTimeout(() => onArchive(e.id), 380);
+  };
+
+  const swipe = archived
+    ? {}
+    : {
+        onPointerDown: (ev) => {
+          st.current = { x: ev.clientX, y: ev.clientY, t: Date.now(), id: ev.pointerId, held: false };
+        },
+        onPointerMove: (ev) => {
+          const s = st.current;
+          if (!s) return;
+          if (!s.held) {
+            const adx = Math.abs(ev.clientX - s.x);
+            const ady = Math.abs(ev.clientY - s.y);
+            // Inside the slop it is a tap; more vertical than horizontal and it is the drawer's
+            // scroll - either way, not ours yet.
+            if (adx < 7 || adx <= ady) return;
+            s.held = true;
+            swiped.current = true;
+            try {
+              ev.currentTarget.setPointerCapture(s.id);
+            } catch {
+              /* keep following the bubbled events instead */
+            }
+          }
+          setDx(Math.max(0, ev.clientX - s.x));
+        },
+        onPointerUp: () => {
+          const s = st.current;
+          st.current = null;
+          if (!s || !s.held) return;
+          // The captured pointer's click retargets to the row; without this a completed swipe
+          // would also count as the tap it visually is not.
+          setTimeout(() => {
+            swiped.current = false;
+          }, 0);
+          const w = wrap.current?.offsetWidth || 320;
+          const flick = dx > 24 && Date.now() - s.t < 250;
+          if (dx > w * 0.4 || flick) commit();
+          else setDx(0);
+        },
+        onPointerCancel: () => {
+          st.current = null;
+          setDx(0);
+        },
+      };
+
+  return (
+    <div ref={wrap} class={`nrow-wrap${leaving ? " gone" : ""}`}>
+      {!archived && (
+        <div class="nrow-well" aria-hidden="true">
+          {N_ARCH}
+          {TEXT.notif_arch}
+        </div>
+      )}
+      <div
+        class={`nrow k-${e.kind}${archived ? " arch" : ""}${hint ? " hintb" : ""}`}
+        style={dx ? `transform:translateX(${dx}px);transition:none` : undefined}
+        {...swipe}
+      >
         <button
-          class="toast"
+          class="nrow-hit"
           onClick={() => {
-            setT(null);
-            location.hash = "#/diagnostics";
+            if (swiped.current || leaving) return;
+            onAct(e);
           }}
         >
-          <span class="toast-t">{TEXT.write_failed}</span>
-          <span class="toast-s">{TEXT.write_failed_go}</span>
+          <span class="ntoast-i">{T_ICONS[e.kind]}</span>
+          <span class="ntoast-b">
+            <span class="ntoast-t">{e.title}</span>
+            <span class="ntoast-s">
+              {ago(e.ts)}
+              {e.sub ? ` \u00b7 ${e.sub}` : ""}
+            </span>
+          </span>
+          {e.count > 1 && <span class="ntoast-n">{`\u00d7${e.count}`}</span>}
         </button>
-      )}
-      {t === "blocked" && (
-        <button
-          class="toast warn"
-          onClick={() => {
-            setT(null);
-            onFix();
-          }}
-        >
-          <span class="toast-t">{TEXT.blocked_toast_t}</span>
-          <span class="toast-s">{TEXT.blocked_toast_s}</span>
-        </button>
-      )}
-      {!connected && (
-        <button class="toast warn" onClick={() => (location.hash = "#/diagnostics")}>
-          <span class="toast-t">{TEXT.stream_lost}</span>
-          <span class="toast-s">{TEXT.write_failed_go}</span>
-        </button>
-      )}
+        {!archived && (
+          <button class="ntoast-x" aria-label={TEXT.dismiss} onClick={() => !leaving && commit()}>
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+              <path d="M2.8 2.8l6.4 6.4M9.2 2.8l-6.4 6.4" />
+            </svg>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The drawer's filter pills, in the toast palette so the row colours explain themselves. */
+const NOTIF_FILTERS = [
+  ["all", () => TEXT.notif_all],
+  ["info", () => TEXT.notif_info],
+  ["warn", () => TEXT.notif_warn],
+  ["err", () => TEXT.notif_err],
+  ["arch", () => TEXT.notif_arch],
+];
+
+/**
+ * The notification drawer, hanging from the top bar in the device switcher's exact clothes: the
+ * same .sheet, the same drawer citizenship (Escape, the one-drawer rule, the finger-following
+ * upward swipe), the same bottom handle. Pending entries are excluded - their toast is still on
+ * the notch, which is their surface until they settle. Archived rows live under their own pill,
+ * dimmed but still tappable: archive means handled, not deleted.
+ */
+function NotifDrawer({ onFix, onClose }) {
+  useDrawer("notif", true, onClose);
+  const [dragStyle, drag] = useSheetDrag(onClose, -1);
+  const [filter, setFilter] = useState("all");
+  // Re-render on store changes (a toast can settle while the drawer stands open).
+  const [, bump] = useState(0);
+  useEffect(() => subscribeNotifs(() => bump((n) => n + 1)), []);
+
+  const all = listNotifs();
+  const rows = all.filter((e) => {
+    if (e.state === "pending") return false;
+    if (filter === "arch") return e.state === "archived";
+    return e.state === "active" && (filter === "all" || e.kind === filter);
+  });
+
+  // The teaching bounce: the top active row at the moment the drawer opened, once per open. Held
+  // in a ref so re-renders (a filter tap, a store change) never replay it.
+  const hintId = useRef(undefined);
+  if (hintId.current === undefined) hintId.current = all.find((e) => e.state === "active")?.id ?? null;
+
+  const act = (e) => {
+    onClose();
+    archiveNotif(e.id);
+    runAct(e, onFix);
+  };
+
+  return (
+    <div class="scrim" onClick={onClose}>
+      <div class="sheet npane" style={dragStyle || undefined} {...drag} onClick={(ev) => ev.stopPropagation()}>
+        <div class="mgroup-head dim sm" data-grab>
+          {TEXT.notif_title}
+          <Hint text={HINTS.notif} />
+        </div>
+        <div class="npills" role="tablist">
+          {NOTIF_FILTERS.map(([id, label]) => (
+            <button key={id} class={`npill p-${id}${filter === id ? " on" : ""}`} role="tab" aria-selected={filter === id} onClick={() => setFilter(id)}>
+              {label()}
+            </button>
+          ))}
+        </div>
+        <div class="nlist">
+          {rows.map((e) => (
+            <NotifRow key={e.id} e={e} hint={e.id === hintId.current && filter !== "arch"} onAct={act} onArchive={archiveNotif} />
+          ))}
+          {rows.length === 0 && <p class="dim sm nempty">{filter === "arch" ? TEXT.notif_empty_arch : TEXT.notif_empty}</p>}
+        </div>
+        <p class="sheet-foot">{TEXT.notif_foot}</p>
+        <button class="mpanel-handle" data-grab aria-label="Close" onClick={onClose} />
+      </div>
     </div>
   );
 }
@@ -678,6 +1092,11 @@ function AppInner({ primeKey, remote, localMac, onRemote, onLocal, onAuthLost })
   const [splashDone, setSplashDone] = useState(false);
   // The fix drawer, reachable from the blocked toast and every in-place "Show fix" link.
   const [fixOpen, setFixOpen] = useState(false);
+  // Whether a toast holds the run beside the route tab - what collapses the tab to its glyph on a
+  // phone (the .tlive class below; the CSS keeps desktop tabs whole, where both fit).
+  const [toastLive, setToastLive] = useState(false);
+  // The notification drawer behind the bell.
+  const [notifOpen, setNotifOpen] = useState(false);
 
   // The drawer's own items close it as they navigate; this covers the routes nobody tapped - the
   // back button, a bookmark, a hash typed over the current one - so a navigation never leaves the
@@ -716,6 +1135,13 @@ function AppInner({ primeKey, remote, localMac, onRemote, onLocal, onAuthLost })
   useEffect(() => {
     if (deviceError === "HTTP 401") onAuthLost();
   }, [deviceError, onAuthLost]);
+
+  // Point the notification history at this device's bucket the moment the MAC is known - which
+  // also covers a remote-control retarget, since AppInner remounts per device and re-runs this.
+  const mac = device?.mac;
+  useEffect(() => {
+    if (mac) setNotifDevice(mac);
+  }, [mac]);
 
   const active = ROUTES.find((r) => r.id === route) || ROUTES[0];
   const View = active.view;
@@ -767,6 +1193,10 @@ function AppInner({ primeKey, remote, localMac, onRemote, onLocal, onAuthLost })
           {/* Always down: this opens a sheet, and a dropdown that points sideways reads as a link. */}
           <Chevron down cls="caret" />
         </button>
+        {/* The bell, badge and drawer: the toast history of the past 24 hours (owner request,
+            September 2026). Beside the theme toggle - the top bar's right edge is where every
+            app keeps its bell, and the badge must be visible from any route. */}
+        <NotifBell onOpen={() => setNotifOpen(true)} />
         <ThemeSwitch />
       </header>
 
@@ -778,12 +1208,13 @@ function AppInner({ primeKey, remote, localMac, onRemote, onLocal, onAuthLost })
         {/* The route's name, worn as a folder tab growing out of the top card's corner (owner
             request, September 2026 - it replaced the full-width sticky route bar). Rendered from
             the same ROUTES row the drawer uses, so the two can never disagree about a route's name
-            or glyph. The open run to the tab's right is reserved for the coming toast redesign;
-            nothing else may claim it. */}
-        <div class="rtab-row">
+            or glyph. The run to the tab's right is the toast surface (ToastHost below draws there,
+            fixed so it survives scrolling); .tlive is how the tab knows to yield the row - on a
+            phone it folds to its glyph while a toast stands, and unfolds when the toast leaves. */}
+        <div class={`rtab-row${toastLive ? " tlive" : ""}`}>
           <div class="rtab">
             <span class="rtab-i">{active.icon}</span>
-            {active.label}
+            <span class="rtab-l">{active.label}</span>
           </div>
         </div>
         <View ctx={ctx} />
@@ -796,9 +1227,19 @@ function AppInner({ primeKey, remote, localMac, onRemote, onLocal, onAuthLost })
 
       {/* `blocked` waits for the splash to leave: while it is up, the verdict is its story to tell,
           and the toast's job is to keep the fix reachable afterwards. */}
-      <ToastHost connected={events.connected} blocked={splashDone && haBlocked(ha.ha)} onFix={() => setFixOpen(true)} />
+      <ToastHost
+        connected={events.connected}
+        blocked={splashDone && haBlocked(ha.ha)}
+        device={device}
+        states={events.states}
+        onFix={() => setFixOpen(true)}
+        onLive={setToastLive}
+      />
 
       {fixOpen && <FixDrawer ctx={ctx} onClose={() => setFixOpen(false)} />}
+
+      {/* Mounted only while open, like the switcher - useDrawer gates on mount. */}
+      {notifOpen && <NotifDrawer onFix={() => setFixOpen(true)} onClose={() => setNotifOpen(false)} />}
 
       {/* Last, so it paints over everything below while it stands. Mounted with AppInner: this is
           the first authenticated moment, whether the session came from the login screen a second

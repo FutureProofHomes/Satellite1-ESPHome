@@ -243,8 +243,12 @@ export function Arrow({ cls }) {
  * The header becomes a button only when collapsible. Making every card's header a button would put a
  * dozen useless tab stops in front of a keyboard user before they reach a control.
  */
-export function Card({ title, icon, hint, right, children, collapsible, name, defaultOpen = false, ...rest }) {
-  const [open, setOpen] = useState(() => (collapsible ? readOpen(name, defaultOpen) : true));
+/* `forceOpen` starts the card open regardless of the remembered collapse - what a toast's tap
+   intent uses so "Tap for the device log" cannot land on a folded card. It wins the first render
+   only and is deliberately not written to storage: the reveal is this visit's business, and the
+   owner's standing preference should greet the next one unchanged. */
+export function Card({ title, icon, hint, right, children, collapsible, name, defaultOpen = false, forceOpen, ...rest }) {
+  const [open, setOpen] = useState(() => (collapsible ? forceOpen || readOpen(name, defaultOpen) : true));
 
   const toggle = () => {
     const next = !open;

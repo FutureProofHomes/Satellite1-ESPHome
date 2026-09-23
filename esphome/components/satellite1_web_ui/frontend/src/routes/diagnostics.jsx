@@ -12,6 +12,7 @@ import { CONFIRM, HINTS, TEXT } from "../copy.js";
 import { logoutAll, qrSignInLink, signInLink } from "../lib/auth.js";
 import { entity, pathFor, post, request, requestJson } from "../lib/device.js";
 import { qrSvgPath } from "../lib/qr.js";
+import { takeIntent } from "../lib/toast.js";
 import { Btn, Card, Chevron, Confirm, Fact, Missing, N_DIAG, Row, Toggle } from "../ui.jsx";
 
 const kb = (n) => `${Math.round(n / 1024)} KB`;
@@ -90,7 +91,7 @@ function Device({ ctx }) {
  * visits never read. Renders nothing on a build without the crash_report component, whose absence
  * makes the endpoint 404 - the same contract as every optional card.
  */
-function CrashCard({ ctx }) {
+function CrashCard({ ctx, reveal }) {
   const [data, setData] = useState(null);
   const [tail, setTail] = useState(null);
   const [showLog, setShowLog] = useState(false);
@@ -151,7 +152,7 @@ function CrashCard({ ctx }) {
       .catch(() => {});
 
   return (
-    <Card title={TEXT.crash_title} collapsible name="crash" defaultOpen hint={HINTS.crash}>
+    <Card title={TEXT.crash_title} collapsible name="crash" defaultOpen forceOpen={reveal} hint={HINTS.crash} id="card-crash">
       {data.records.length === 0 && <p class="dim sm">{TEXT.crash_none}</p>}
 
       {/* Each record is a stacked block in the transcript subcard box, not a label/control row: a
@@ -249,7 +250,7 @@ function Firmware({ ctx }) {
   const installing = upd && upd.state === "INSTALLING";
 
   return (
-    <Card title="Firmware">
+    <Card title="Firmware" id="card-firmware">
       <div class="facts">
         {/* Named for the product rather than for ESPHome's word for it. "Project" is what the manifest
             calls this, which means nothing to anyone who did not write the manifest. */}
@@ -412,15 +413,28 @@ function LevelMenu({ value, onChange }) {
   );
 }
 
-function Log({ ctx }) {
+function Log({ ctx, intent }) {
   const { log, logSeq, pausedRef, logWatch } = ctx;
   const [paused, setPaused] = useState(false);
 
   // Register as the log's reader for exactly as long as this card is mounted. While no reader is
   // registered the ring still fills - that is what lets this card show the recent past the moment
-  // someone navigates here - but arriving lines stop costing the rest of the app renders.
+  // someone navigates here - but arriving lines stop costing the rest of the app renders. (This is
+  // also what silences log toasts while the card is on screen - see onLogAlert in device.js.)
   useEffect(() => logWatch(), []);
-  const [minLevel, setMinLevel] = useState("D");
+  // A toast's intent seeds the level filter, so "Tap for the device log" on a warning lands on the
+  // warnings, not on the debug firehose that buried them.
+  const [minLevel, setMinLevel] = useState(intent?.level || "D");
+  // The line the intent points at, held while its flash runs. {at, text} is the identity the ring
+  // stamps in device.js, so the match is exact when the line still exists.
+  const [hl, setHl] = useState(intent?.line || null);
+  useEffect(() => {
+    // The late-intent case: a toast tapped while this route was already standing (the write-failed
+    // toast can fire here; log toasts cannot - they are suppressed while this card watches. A
+    // history row from the drawer can carry a line here, though.)
+    if (intent?.level) setMinLevel(intent.level);
+    if (intent?.line) setHl(intent.line);
+  }, [intent]);
   const [filter, setFilter] = useState("");
   // The Show/Hide invert that lived beside the filter field is gone at the owner's request; the
   // filter is match-only now.
@@ -444,6 +458,27 @@ function Log({ ctx }) {
   }, [logSeq, paused, needle, minLevel]);
 
   useEffect(() => () => (pausedRef.current = false), [pausedRef]);
+
+  // The line reveal: once the flagged row is in the DOM (the render above marks it .hl), scroll
+  // the panel so it sits mid-view, then let the flash run out and clear. Scrolling the panel by
+  // hand rather than scrollIntoView because the page itself is already travelling to the card -
+  // two smooth scrolls fighting over one viewport is seasickness. atBottom is parked so the
+  // live stream cannot yank the view to the newest line mid-flash. When the line has churned out
+  // of the 1000-line ring (or was never captured while paused), the honest fallback is the
+  // freshest view at the intended level - the flash is skipped rather than lighting a stranger.
+  useEffect(() => {
+    if (!hl) return undefined;
+    const el = box.current?.querySelector(".ln.hl");
+    if (el && box.current) {
+      box.current.scrollTop = Math.max(0, el.offsetTop - box.current.clientHeight / 2);
+      atBottom.current = false;
+    } else if (box.current) {
+      box.current.scrollTop = box.current.scrollHeight;
+    }
+    const t = setTimeout(() => setHl(null), 2600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hl]);
 
   // The timestamp goes into the dump too: a support request's "when did it happen" deserves the same
   // answer the screen gives.
@@ -471,6 +506,11 @@ function Log({ ctx }) {
       collapsible
       name="log"
       defaultOpen
+      // Keyed so an intent arriving while the card stands collapsed can still reveal it: forceOpen
+      // is an initial-render decision, and the remount is what makes it one again.
+      key={intent ? "revealed" : "log"}
+      forceOpen={!!intent}
+      id="card-log"
       hint={HINTS.log}
       right={
         <span class="row gap">
@@ -524,7 +564,7 @@ function Log({ ctx }) {
           </p>
         )}
         {lines.map((l, i) => (
-          <div key={i} class={`ln t-${LEVELS[l.lvl] || "dim"}`}>
+          <div key={i} class={`ln t-${LEVELS[l.lvl] || "dim"}${hl && l.at === hl.at && l.text === hl.text ? " hl" : ""}`}>
             {/* The time keeps its own muted colour on every level, so a wall of red errors still has a
                 readable clock running down its margin. */}
             <span class="ln-t">{stamp(l.at)}</span>
@@ -753,18 +793,97 @@ function Launch({ ctx }) {
 /* ------------------------------------------------------------------ */
 
 export function Diagnostics({ ctx }) {
+  // The tap intent a toast carried here - "open the log at level W", "show the crash card" -
+  // taken once at mount. The window event covers a toast tapped while this route was already
+  // standing, where an identical hash fires no hashchange and nothing remounts.
+  const [intent, setIntent] = useState(() => takeIntent());
+  useEffect(() => {
+    const on = () => setIntent(takeIntent());
+    addEventListener("toast-intent", on);
+    return () => removeEventListener("toast-intent", on);
+  }, []);
+
+  // The reveal: scroll the target card under the sticky bar - the cards' scroll margins keep it
+  // clear of the top bar and the media bar - and pulse the thing to address: the firmware card's
+  // update panel when one stands, else the card itself. The pulse is a class the CSS animates and
+  // this removes; non-sticky by design (owner: "gentle fade in and out, not a sticky highlight").
+  // The Logs card is exempt - its reveal is the line flash below, and two highlights on one card
+  // is a page shouting.
+  //
+  // One scroll is not enough on this page, and the first build proved it (owner's screenshot,
+  // September 2026: an update toast landing on Crash Reports). The cards above the target keep
+  // growing after mount - the crash card renders nothing until its fetch returns, the Device card
+  // fills on its first poll - so a scroll that landed correctly is wrong two hundred pixels later.
+  // So the target stays pinned for the reveal window: a ResizeObserver on the body re-scrolls
+  // (instantly - only the first ride is smooth) every time late content shifts the layout, and a
+  // crash-card target that does not exist yet is found on the shift that creates it. The user
+  // outranks the pin: one wheel tick or touch-drag and it stands down for good.
+  useEffect(() => {
+    if (!intent) return undefined;
+    let el = null;
+    let target = null;
+    let userTook = false;
+    let ended = false;
+    const timers = [];
+
+    const pin = (smooth) => {
+      if (userTook || ended) return;
+      if (!el) {
+        el = document.getElementById(`card-${intent.card}`);
+        if (!el) return; // not rendered yet; the resize that creates it re-enters here
+        target = intent.card === "log" ? null : el.querySelector(".updbox") || el;
+        target?.classList.add("reveal");
+        timers.push(setTimeout(() => target?.classList.remove("reveal"), 2600));
+      }
+      el.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+    };
+
+    pin(true);
+    const took = () => {
+      userTook = true;
+    };
+    window.addEventListener("wheel", took, { passive: true });
+    window.addEventListener("touchmove", took, { passive: true });
+    // The observer fires once on observe() before anything has changed; that beat is skipped so
+    // it cannot cut the smooth ride short for no reason.
+    let first = true;
+    const ro = new ResizeObserver(() => {
+      if (first) {
+        first = false;
+        return;
+      }
+      pin(false);
+    });
+    ro.observe(document.body);
+    timers.push(
+      setTimeout(() => {
+        ended = true;
+        ro.disconnect();
+      }, 2800),
+    );
+
+    return () => {
+      ended = true;
+      ro.disconnect();
+      window.removeEventListener("wheel", took);
+      window.removeEventListener("touchmove", took);
+      for (const t of timers) clearTimeout(t);
+      target?.classList.remove("reveal");
+    };
+  }, [intent]);
+
   return (
     <>
       {ctx.device && ctx.device.ha === false && <p class="banner">{TEXT.ha_disconnected_detail}</p>}
       <Device ctx={ctx} />
       {/* Right under Device, whose Last Restart row is the question this card answers. */}
-      <CrashCard ctx={ctx} />
+      <CrashCard ctx={ctx} reveal={intent?.card === "crash"} />
       <Firmware ctx={ctx} />
       <Launch ctx={ctx} />
       {/* Buttons moved to the foot of Controls. It is the one card here that answers "does the hardware
           respond to me", which is a question about the thing you are holding rather than about its
           internals - and it belongs beside the volume and mute controls it duplicates in hardware. */}
-      <Log ctx={ctx} />
+      <Log ctx={ctx} intent={intent?.card === "log" ? intent : null} />
       <Maintenance ctx={ctx} />
     </>
   );
