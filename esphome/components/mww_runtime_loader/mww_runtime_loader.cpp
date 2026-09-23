@@ -605,11 +605,22 @@ void MwwRuntimeLoader::nudge_ha_() {
   // Home Assistant caches the wake word list it fetched when its API connection came up, and this
   // generation of the protocol has no configuration-changed push - so a word downloaded after that
   // is invisible to the ESPHome device page (the "Hey Nexus" the customer just picked shows as
-  // nothing) until Home Assistant asks again. The one lever that exists is the connection itself:
-  // drop it cleanly and Home Assistant reconnects within seconds and re-fetches, and the fresh
-  // list carries the new word's real phrase plus the active set its selects read. Delayed a beat
-  // so the swap's HTTP response and the app's follow-up writes drain first.
-  this->set_timeout("wl_nudge_ha", 2500, []() {
+  // nothing) until Home Assistant asks again. Delayed a beat so the swap's HTTP response and the
+  // app's follow-up writes drain first; a same-name set_timeout replaces a pending one, so a
+  // displace-and-download burst tells Home Assistant once.
+  this->set_timeout("wl_nudge_ha", 2500, [this]() {
+    // The YAML hook outranks the connection drop. Its automation asks Home Assistant to reload
+    // this device's config entry - deterministic where the reconnect's re-fetch is a hope (the
+    // stale "No Wake Word" select was exactly a reconnect whose re-read never came) - and the
+    // reload rebuilds the wake word selects so the new word is offered, not merely advertised.
+    // Dropping the connection on top would only race the reload's own reconnect.
+    if (this->reload_via_yaml_) {
+      this->set_changed_trigger_.trigger();
+      return;
+    }
+    // No hook wired: the legacy lever. Drop the connection cleanly and Home Assistant reconnects
+    // within seconds and re-fetches, and the fresh list carries the new word's real phrase plus
+    // the active set its selects read.
     if (api::global_api_server == nullptr)
       return;
     bool any = false;

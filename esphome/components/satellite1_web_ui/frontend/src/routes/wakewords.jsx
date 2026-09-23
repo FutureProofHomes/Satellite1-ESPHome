@@ -1248,6 +1248,22 @@ export function WakeWords({ ctx }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The one-shot mount repair for historical staleness: a word that is listening on the device but
+  // holds no Home Assistant slot - a browser closed mid-pairing, or a swap that predates the
+  // device-side reload - gets slotted the moment anyone opens this page. One word per mount (a
+  // second unslotted word would race the first for the same free slot on a stale view; the next
+  // visit catches it), and syncSlot's own guards skip slotted words and stop when no slot is free.
+  const repaired = useRef(false);
+  useEffect(() => {
+    if (repaired.current || !assist.ready) return;
+    const orphan = activeWords.find((w) => assist.pipelineFor(w) === null);
+    if (!orphan) return;
+    repaired.current = true;
+    assist.syncSlot(orphan, true).catch(() => {});
+    // Also keyed on the device's word list: HA readiness and the slot read land in either order.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assist.ready, activeWords.length]);
+
   // The row-flash moment: a fresh firing (det seq bump) lights its word's row while the dot lands
   // on its graph with the ripple - the same beat, no text.
   const [hot, setHot] = useState(null);
@@ -1274,35 +1290,44 @@ export function WakeWords({ ctx }) {
     return () => clearTimeout(t);
   }, [pop]);
 
-  /** Writes the swap into Home Assistant's wake word selects - unchanged from the previous route,
-   *  including every reason it works the way it does (see git history for the war stories). */
+  /** Writes the swap into Home Assistant's wake word selects - unchanged in shape from the
+   *  previous route (see git history for the war stories), hardened on two fronts after the
+   *  stale-select bug: an empty payload is a transient miss to wait out rather than a verdict to
+   *  stop on, and the deadline covers a config-entry reload rather than a bare reconnect. */
   const syncAssist = async (i, prevWord, nextWord) => {
     const named = (sel, w) => sel.findIndex((x) => w && (x[1] || "").toLowerCase() === w.toLowerCase());
-    const deadline = Date.now() + 30000;
+    // 60s, not the old 30: after a download the device now asks Home Assistant to reload this
+    // device's config entry, which tears down and rebuilds every entity - longer than the old
+    // reconnect, and the pairing write only lands once the selects are back with the new option.
+    const deadline = Date.now() + 60000;
     for (;;) {
       const fresh = await requestJson("/api/sat1/ha").catch(() => null);
       const sel = fresh?.d?.asst?.s;
-      if (!Array.isArray(sel) || !sel.length) return;
-      let ent, option;
-      if (!nextWord) {
-        const off = named(sel, prevWord);
-        if (off < 0) return;
-        ent = sel[off][0];
-        option = NO_WAKE_WORD;
-      } else {
-        if (named(sel, nextWord) >= 0) return;
-        let at = named(sel, prevWord);
-        if (at < 0) at = sel.findIndex((x) => x[1] === NO_WAKE_WORD);
-        if (at < 0) at = Math.min(i, sel.length - 1);
-        ent = sel[at][0];
-        option = nextWord;
+      // A missing or empty asst block is EXPECTED right now - Home Assistant is reconnecting or
+      // mid-reload, which is exactly when this loop runs - so it is a miss to retry, not a reason
+      // to stop. Returning here permanently was how a download could strand the HA select on
+      // "No Wake Word" forever (one bad poll and nothing ever retried).
+      if (Array.isArray(sel) && sel.length) {
+        let ent, option;
+        if (!nextWord) {
+          const off = named(sel, prevWord);
+          if (off < 0) return;
+          ent = sel[off][0];
+          option = NO_WAKE_WORD;
+        } else {
+          if (named(sel, nextWord) >= 0) return;
+          let at = named(sel, prevWord);
+          if (at < 0) at = sel.findIndex((x) => x[1] === NO_WAKE_WORD);
+          if (at < 0) at = Math.min(i, sel.length - 1);
+          ent = sel[at][0];
+          option = nextWord;
+        }
+        await post(`/api/sat1/ha/select?e=${encodeURIComponent(ent)}&o=${encodeURIComponent(option)}`).catch(() => {});
+        await ctx.haRefresh();
       }
-      await post(`/api/sat1/ha/select?e=${encodeURIComponent(ent)}&o=${encodeURIComponent(option)}`).catch(() => {});
-      await ctx.haRefresh();
       if (!alive.current || Date.now() > deadline) return;
       // A breather between rounds: Home Assistant needs seconds to reconnect and re-read after
-      // the loader's nudge, and re-posting flat out just burned the device's socket table while
-      // it did.
+      // the reload, and re-posting flat out just burned the device's socket table while it did.
       await sleep(500);
     }
   };

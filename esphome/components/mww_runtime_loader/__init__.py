@@ -8,6 +8,7 @@ persistence (the URL is remembered, the model is re-downloaded at boot - never s
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
+from esphome import automation
 from esphome.components import logger, psram
 from esphome.components.http_request import HttpRequestComponent
 from esphome.components.micro_wake_word import MicroWakeWord
@@ -21,6 +22,7 @@ MULTI_CONF = False
 
 CONF_MICRO_WAKE_WORD_ID = "micro_wake_word_id"
 CONF_HTTP_REQUEST_ID = "http_request_id"
+CONF_ON_WAKE_WORD_SET_CHANGED = "on_wake_word_set_changed"
 
 mww_runtime_loader_ns = cg.esphome_ns.namespace("mww_runtime_loader")
 MwwRuntimeLoader = mww_runtime_loader_ns.class_("MwwRuntimeLoader", cg.Component)
@@ -30,6 +32,13 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(MwwRuntimeLoader),
         cv.GenerateID(CONF_MICRO_WAKE_WORD_ID): cv.use_id(MicroWakeWord),
         cv.GenerateID(CONF_HTTP_REQUEST_ID): cv.use_id(HttpRequestComponent),
+        # Fired (debounced) when the advertised wake word set changed - a downloaded word arriving
+        # or leaving - never for changes Home Assistant itself originated, never for boot
+        # re-downloads. Wiring this REPLACES the loader's legacy API-connection drop: the
+        # automation owns telling Home Assistant (config-entry reload), see nudge_ha_().
+        cv.Optional(CONF_ON_WAKE_WORD_SET_CHANGED): automation.validate_automation(
+            single=True
+        ),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -51,3 +60,11 @@ async def to_code(config):
     cg.add(var.set_http_request(await cg.get_variable(config[CONF_HTTP_REQUEST_ID])))
     # satellite1_web_ui compiles its slot endpoints only when this component is in the build.
     cg.add_define("USE_SAT1_MWW_LOADER", True)
+
+    if CONF_ON_WAKE_WORD_SET_CHANGED in config:
+        cg.add(var.set_reload_via_yaml(True))
+        await automation.build_automation(
+            var.get_wake_word_set_changed_trigger(),
+            [],
+            config[CONF_ON_WAKE_WORD_SET_CHANGED],
+        )

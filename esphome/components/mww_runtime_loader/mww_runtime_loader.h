@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 // For the ESPHOME_LOG_LEVEL comparison in tune_capable(): the tuner's score channel is the debug
@@ -243,6 +244,14 @@ class MwwRuntimeLoader : public Component {
   void set_micro_wake_word(micro_wake_word::MicroWakeWord *mww) { this->mww_ = mww; }
   void set_http_request(http_request::HttpRequestComponent *http) { this->http_ = http; }
 
+  /// Fired from the nudge timeout on the main loop when the ADVERTISED wake word set changed - a
+  /// downloaded word arriving or leaving - never for changes Home Assistant itself originated, and
+  /// never for boot re-downloads. When YAML wires on_wake_word_set_changed, the automation owns
+  /// telling Home Assistant (homeassistant.reload_config_entry, the same lever the radar's layout
+  /// change pulls) and the legacy connection drop stands down; an unwired build keeps the drop.
+  Trigger<> *get_wake_word_set_changed_trigger() { return &this->set_changed_trigger_; }
+  void set_reload_via_yaml(bool v) { this->reload_via_yaml_ = v; }
+
   /* ---- httpd-task-safe API, called by satellite1_web_ui ---- */
 
   /// Asks slot `i` to hold `spec`: "" or "none" empties it, a built-in model id enables that
@@ -461,10 +470,14 @@ class MwwRuntimeLoader : public Component {
   void release_job_strings_();
   void apply_request_(uint8_t i, const std::string &spec);
   void apply_cutoff_(uint8_t i, uint8_t value, uint8_t noise, uint8_t floor, uint8_t hi);
-  /// Drops the native API connections a moment from now, so Home Assistant reconnects and
-  /// re-reads the wake word list. Called when the advertised set changes - a downloaded word
-  /// arriving or leaving - never for changes Home Assistant itself originated.
+  /// Tells Home Assistant the advertised wake word set changed, a moment from now. With the
+  /// on_wake_word_set_changed automation wired it fires the trigger (YAML asks HA to reload this
+  /// device's config entry); otherwise it drops the native API connections so HA reconnects and
+  /// re-reads the list. Called when the advertised set changes - a downloaded word arriving or
+  /// leaving - never for changes Home Assistant itself originated.
   void nudge_ha_();
+  Trigger<> set_changed_trigger_;
+  bool reload_via_yaml_{false};
 
   /* ---- the tune session, main loop unless noted ---- */
   void apply_tune_(uint8_t i, bool on);

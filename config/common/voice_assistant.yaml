@@ -189,6 +189,31 @@ micro_wake_word:
 mww_runtime_loader:
   id: mww_loader
   micro_wake_word_id: mww
+  # The advertised wake word set changed - a downloaded word arrived or left. Home Assistant only
+  # reads a device's wake word list when it connects, and this protocol generation has no
+  # configuration-changed push, so it is asked to reload this device's config entry: it
+  # disconnects, reconnects, re-fetches the voice assistant configuration, and rebuilds the wake
+  # word selects with the new word in their options. Deterministic where the loader's old
+  # connection drop was a hope (the stale "No Wake Word" select was a reconnect whose re-read never
+  # came), and it works with the browser closed - the app's pairing loop is a second layer, not the
+  # only writer. Same mechanism and same jinja as the radar's entity-layout reload in mmwave.yaml;
+  # tts_self_entry_jinja is defined in tts_routing.yaml and both packages are always included by
+  # satellite1.base.yaml. The brief entity flicker a reload causes in HA dashboards is accepted
+  # (same trade the radar package made). If Home Assistant is not connected there is nothing to do:
+  # its next connection starts with a fresh fetch anyway.
+  on_wake_word_set_changed:
+    - if:
+        condition: api.connected
+        then:
+          - logger.log: "Wake word set changed; asking Home Assistant to reload this device"
+          - homeassistant.service:
+              service: homeassistant.reload_config_entry
+              data_template:
+                entry_id: >-
+                  ${tts_self_entry_jinja}
+                  {{ ns.entry }}
+              variables:
+                mac: !lambda 'return esphome::get_mac_address_pretty();'
 
 voice_assistant:
   id: va
