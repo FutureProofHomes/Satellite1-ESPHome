@@ -239,6 +239,10 @@ class WebUIHandler : public AsyncWebHandler {
   /// section - behind the gate, so only a signed-in browser ever reads it.
   void set_session_key_fn(std::function<const char *()> fn) { this->session_key_fn_ = std::move(fn); }
 
+  /// Whether the web UI password is pinned by YAML (a fleet-shared substitution re-applied every
+  /// boot). Rides GET /api/sat1/state as `pw_fixed` so the app hides the change-password form.
+  void set_pw_fixed_fn(std::function<bool()> fn) { this->pw_fixed_fn_ = std::move(fn); }
+
   /// Longest gap between two consecutive main-loop iterations since this was last read, in
   /// milliseconds. Written from the main loop, read from the httpd task, and reset by the read -
   /// which is why it is an exchange rather than a load. Diagnostics is the only reader.
@@ -643,6 +647,7 @@ class WebUIHandler : public AsyncWebHandler {
   const uint8_t *icons_[3]{nullptr, nullptr, nullptr};
   size_t icon_lens_[3]{0, 0, 0};
   std::function<const char *()> session_key_fn_{};
+  std::function<bool()> pw_fixed_fn_{};
   std::atomic<uint32_t> *max_loop_ms_{nullptr};
   std::vector<EntityRef> entities_;
 #ifdef USE_SAT1_WEB_UI_SOUNDS

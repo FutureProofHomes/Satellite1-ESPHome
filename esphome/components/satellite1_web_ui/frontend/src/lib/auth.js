@@ -178,6 +178,32 @@ export async function logoutAll() {
   return { ok: res.ok && body.ok === 1, key: body.key };
 }
 
+/**
+ * The authenticated password change (POST /api/sat1/password). The current password is proven
+ * through the same nonce challenge the login runs - it never crosses the wire; the new one
+ * necessarily does, once, which the component's documented threat model already accepts for the
+ * bearer cookie. Through apiUrl like logoutAll: while remote-controlling a peer, the password
+ * being changed is the peer's, and the fresh key must be adopted on the spot or the re-key
+ * strands this page's own session mid-use.
+ */
+export async function changePassword(current, next) {
+  const nres = await f(apiUrl("/api/sat1/login/nonce"));
+  const nonce = (await nres.json()).n;
+  if (!nonce) return { ok: false };
+  const answer = toHex(hmacSha256(sha256(utf8(current)), utf8(nonce)));
+  const res = await f(apiUrl("/api/sat1/password"), form({ n: nonce, r: answer, new: next }));
+  const body = await res.json().catch(() => ({}));
+  if (res.ok && body.ok === 1 && body.key) updateRemoteKey(body.key);
+  return {
+    ok: res.ok && body.ok === 1,
+    key: body.key,
+    locked: body.locked === 1,
+    retry: body.retry || 0,
+    fixed: body.fixed === 1,
+    invalid: body.invalid === 1,
+  };
+}
+
 /** The device's public identity from the one deliberately public fact endpoint: `{name, fn}`,
  *  where `name` is the mDNS hostname and `fn` the friendly name - null on older firmware bodies
  *  that carry no `fn`, and null overall when the device does not answer. */

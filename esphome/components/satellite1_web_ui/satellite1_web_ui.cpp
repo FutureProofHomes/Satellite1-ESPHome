@@ -19,6 +19,7 @@ void Satellite1WebUI::setup() {
   // token.
   this->gate_.setup();
   this->handler_.set_session_key_fn([this]() { return this->gate_.session_key(); });
+  this->handler_.set_pw_fixed_fn([this]() { return this->gate_.password_fixed(); });
   // The actions-checkbox verdict, read at window-open time so the spoken-code mode is only picked
   // when Home Assistant will actually speak it. The handler holds the verdict (tts_routing's probe
   // pushes it there for /api/sat1/ha); reading it back is one atomic load, safe from the httpd task
@@ -97,6 +98,8 @@ void Satellite1WebUI::loop() {
       this->login_window_trigger_.trigger(a, b);
     if (this->gate_.take_close_event(a))
       this->login_window_end_trigger_.trigger(a);
+    if (this->gate_.take_password_change(a))
+      this->password_change_trigger_.trigger(a);
   }
 
   // Collapses any number of refresh requests since the last iteration into one sync, which is what we

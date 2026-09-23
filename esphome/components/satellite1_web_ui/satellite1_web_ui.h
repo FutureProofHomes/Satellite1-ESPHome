@@ -109,9 +109,11 @@ class Satellite1WebUI : public Component {
   /// The credentials, handed over by the on_boot lambda in common/web_ui.yaml at priority 600 -
   /// after the stored password is restored, before the gate computes its token at setup (250).
   /// These no longer go to web_server_base at all, so no handler is ever wrapped in the digest
-  /// middleware; the gate runs the same digest check itself as its curl/script fallback.
-  void set_credentials(const char *username, const std::string &password) {
-    this->gate_.set_credentials(username, password);
+  /// middleware; the gate runs the same digest check itself as its curl/script fallback. `fixed`
+  /// marks a YAML-pinned fleet password, which the change endpoint refuses to alter (it would
+  /// silently revert on the next boot) and the state payload reports as pw_fixed.
+  void set_credentials(const char *username, const std::string &password, bool fixed = false) {
+    this->gate_.set_credentials(username, password, fixed);
   }
 
   /// Whether a voice approval could be heard right now - the mute slider and switch, read at
@@ -156,6 +158,11 @@ class Satellite1WebUI : public Component {
 
   /// Fired from loop() when the window closes, with the result ("approved"/"expired"/"denied").
   Trigger<std::string> *get_login_window_end_trigger() { return &this->login_window_end_trigger_; }
+
+  /// Fired from loop() after the gate accepts an authenticated password change, with the new
+  /// password. YAML owns persistence from here: it assigns the NVS-backed global and republishes
+  /// the Web UI Password sensor so Home Assistant shows the new value.
+  Trigger<std::string> *get_password_change_trigger() { return &this->password_change_trigger_; }
 
 #ifdef USE_VOICE_ASSISTANT
   void set_voice_assistant(voice_assistant::VoiceAssistant *va) { this->handler_.set_voice_assistant(va); }
@@ -288,6 +295,7 @@ class Satellite1WebUI : public Component {
   Selection selection_;
   Trigger<std::string, std::string> login_window_trigger_;
   Trigger<std::string> login_window_end_trigger_;
+  Trigger<std::string> password_change_trigger_;
 #ifdef USE_SAT1_WEB_UI_SENDSPIN
   sendspin_::SendspinHub *sendspin_hub_{nullptr};
 #endif

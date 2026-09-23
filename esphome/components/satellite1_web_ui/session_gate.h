@@ -47,6 +47,12 @@ static constexpr uint32_t SG_SEQ_QUIET_MS = 8000;
 static constexpr uint8_t SG_PW_FAILS = 5;
 static constexpr uint32_t SG_PW_LOCKOUT_MS = 60000;
 
+/// New-password bounds for the authenticated change endpoint. 31 because the NVS global that
+/// persists it caps at max_restore_data_length: 32 (common/web_ui.yaml) - a longer password would
+/// silently fail to restore and lock everyone out on the next boot. 8 is the floor.
+static constexpr size_t SG_PW_MIN = 8;
+static constexpr size_t SG_PW_MAX = 31;
+
 /// Voice-approval lockout: after this many failed voice windows the voice paths close and new
 /// windows open button-only, for a period that doubles per failure up to the cap. The offline
 /// challenge is a 1-in-729 guess per window; the backoff is what turns that into hours per try.
@@ -107,11 +113,18 @@ class SessionGate : public AsyncWebHandler {
 
   /// The digest/basic fallback credentials and the token's password half. `username` is a string
   /// literal from YAML; the password is copied. Called from the on_boot lambda in
-  /// common/web_ui.yaml at priority 600, before setup() above.
-  void set_credentials(const char *username, const std::string &password) {
+  /// common/web_ui.yaml at priority 600, before setup() above. `fixed` says the password is the
+  /// YAML substitution re-applied on every boot (a fleet-shared password) - the change endpoint
+  /// refuses then, because a change would silently revert on restart.
+  void set_credentials(const char *username, const std::string &password, bool fixed = false) {
     this->username_ = username;
     this->password_ = password;
+    this->password_fixed_ = fixed;
   }
+
+  /// Whether the password is pinned by YAML - read by the state payload (`pw_fixed`) so the app
+  /// hides the change-password form instead of offering one that cannot work.
+  bool password_fixed() const { return this->password_fixed_; }
 
   /// Whether the microphones can hear a voice approval right now. Read at window-open time to pick
   /// the mode; a muted mic opens the window button-only, and the login page says why.
@@ -185,6 +198,12 @@ class SessionGate : public AsyncWebHandler {
   /// Hands out the one queued close event ("approved"/"expired"/"denied").
   bool take_close_event(std::string &result);
 
+  /// Hands out the one queued password-change event (the accepted new password), for the
+  /// on_password_change automation that assigns the NVS global and republishes the Web UI
+  /// Password sensor. HTTP handlers run on the httpd task and must not fire automations, so the
+  /// endpoint queues and loop() drains - the same shape as the open/close events above.
+  bool take_password_change(std::string &new_password);
+
   /* ---- AsyncWebHandler ---- */
   // NOLINTNEXTLINE(readability-identifier-naming)
   bool canHandle(AsyncWebServerRequest *request) const override;
@@ -206,6 +225,7 @@ class SessionGate : public AsyncWebHandler {
     POLL,        // GET  /api/sat1/login/poll
     CANCEL,      // POST /api/sat1/login/cancel (requires the window's own pair cookie)
     WHOAMI,      // GET  /api/sat1/whoami
+    PASSWORD,    // POST /api/sat1/password (requires a valid session AND the current password)
     PREFLIGHT,   // OPTIONS /api/sat1/...
   };
 
@@ -241,6 +261,7 @@ class SessionGate : public AsyncWebHandler {
   void handle_poll_(AsyncWebServerRequest *request);
   void handle_cancel_(AsyncWebServerRequest *request);
   void handle_whoami_(AsyncWebServerRequest *request);
+  void handle_password_(AsyncWebServerRequest *request);
   void handle_preflight_(AsyncWebServerRequest *request);
   void deny_(AsyncWebServerRequest *request);
 
@@ -285,6 +306,7 @@ class SessionGate : public AsyncWebHandler {
 
   std::string username_;
   std::string password_;
+  bool password_fixed_{false};
   std::function<bool()> mic_available_fn_;
   std::function<int()> ha_actions_fn_;
   bool seq_available_{false};
@@ -356,6 +378,10 @@ class SessionGate : public AsyncWebHandler {
   char ev_mode_[8]{};
   char ev_secret_[SG_SEQ_LEN + 2]{};
   char ev_result_[12]{};
+  /// The password-change event: the accepted new password, waiting for loop() to hand it to the
+  /// on_password_change automation. Same lock discipline as the payloads above.
+  std::atomic<bool> ev_password_{false};
+  char ev_new_password_[SG_PW_MAX + 1]{};
 
   /// Stable storage for the headers send_json_ sets - see its comment. One request at a time on
   /// the httpd task is what makes members sufficient.

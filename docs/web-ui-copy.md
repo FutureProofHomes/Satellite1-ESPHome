@@ -670,6 +670,7 @@ back out.
 | `update` | Install this update? | The device downloads the new firmware and restarts itself when it finishes. The assistant and any audio stop until it is back - a few minutes. Keep it powered the whole time. |
 | `xmos_restart` | Restart the audio chip? | The microphones and speaker drop out for a few seconds while it comes back. Nothing is erased and no settings change. |
 | `xmos_flash` | Reflash the audio chip? | Rewrites the audio chip's firmware from a known-good copy. It takes about a minute, the microphones and speaker are silent throughout, and the device must stay powered. |
+| `pw_change` | Change the password? | Every other signed-in browser, pasted sign-in link and QR code stops working the moment it changes. This browser stays signed in, and Home Assistant's Web UI Password sensor shows the new value. |
 | `radar_restart` | Restart the radar module? | Presence detection drops out for a few seconds while the module comes back. Nothing is erased and no settings change. |
 | `radar_factory` | Reset the radar to factory defaults? | Erases the settings stored on the radar module itself - detection range, gate thresholds and zones, everything tuned on the Presence page - and restarts it. This device's own settings are not touched, but the radar tuning cannot be brought back. |
 | `restart` | Restart this device? | It reboots right away and is back in under a minute. All of your settings survive a restart. |

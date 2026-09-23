@@ -9,10 +9,10 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
 import { CONFIRM, HINTS, TEXT } from "../copy.js";
-import { logoutAll, mdnsLooksBroken, qrSignInLink, signInLink } from "../lib/auth.js";
+import { changePassword, logoutAll, mdnsLooksBroken, qrSignInLink, signInLink } from "../lib/auth.js";
 import { entity, entityPath, pathFor, post, request, requestJson } from "../lib/device.js";
 import { qrSvgPath } from "../lib/qr.js";
-import { takeIntent } from "../lib/toast.js";
+import { takeIntent, toast } from "../lib/toast.js";
 import { Btn, Card, Chevron, Confirm, Fact, Missing, N_DIAG, Row, Toggle } from "../ui.jsx";
 
 const kb = (n) => `${Math.round(n / 1024)} KB`;
@@ -836,7 +836,121 @@ function Launch({ ctx }) {
           </div>
         </div>
       </div>
+      <ChangePassword ctx={ctx} />
     </Card>
+  );
+}
+
+/**
+ * The authenticated password change, at the foot of the Launch card - the card that already owns
+ * the session and credential surface. The current password is proven with the login's nonce
+ * challenge (it never crosses the wire); the new one is entered twice and checked client-side
+ * before any request. A success re-keys this browser in place and kills every other session,
+ * pasted link and QR - the logout_all contract - so the submit goes through a Confirm that says
+ * exactly that. The Launch card's link and QR pick the new key up on the next state poll.
+ *
+ * Hidden entirely on pw_fixed builds: a YAML-pinned fleet password is re-imposed on every boot,
+ * so a change here would silently revert - the device refuses it and the form never shows.
+ */
+function ChangePassword({ ctx }) {
+  const [cur, setCur] = useState("");
+  const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  if (ctx.device?.pw_fixed) return null;
+
+  // Mirrors the firmware's password_acceptable_ exactly, so nothing valid here gets a 400 there:
+  // 8-31 printable ASCII, no quote or backslash (they would complicate every place the password is
+  // embedded - the HA payload's literal_eval path among them), no leading/trailing space.
+  const check = () => {
+    if (next.length < 8 || next.length > 31) return TEXT.pw_len;
+    if (/["\\]/.test(next) || /[^\x20-\x7e]/.test(next) || next.trim() !== next) return TEXT.pw_chars;
+    if (next !== again) return TEXT.pw_mismatch;
+    return null;
+  };
+
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await changePassword(cur, next);
+      if (r.ok) {
+        setCur("");
+        setNext("");
+        setAgain("");
+        toast({ kind: "ok", title: TEXT.pw_changed, sub: TEXT.pw_changed_sub, ttl: 6000 });
+      } else if (r.locked) {
+        setErr(TEXT.login_locked.replace("%s", String(r.retry || 60)));
+      } else if (r.fixed) {
+        setErr(TEXT.pw_fixed_note);
+      } else if (r.invalid) {
+        setErr(TEXT.pw_chars);
+      } else {
+        setErr(TEXT.pw_wrong);
+      }
+    } catch {
+      setErr(TEXT.login_unreachable);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div class="pwc">
+      <div class="row">
+        <span class="grow strong">{TEXT.pw_title}</span>
+      </div>
+      <input
+        class="in"
+        type="password"
+        value={cur}
+        placeholder={TEXT.pw_current}
+        autocomplete="current-password"
+        aria-label={TEXT.pw_current}
+        onInput={(e) => setCur(e.currentTarget.value)}
+      />
+      <input
+        class="in"
+        type="password"
+        value={next}
+        placeholder={TEXT.pw_new}
+        autocomplete="new-password"
+        aria-label={TEXT.pw_new}
+        onInput={(e) => setNext(e.currentTarget.value)}
+      />
+      <input
+        class="in"
+        type="password"
+        value={again}
+        placeholder={TEXT.pw_again}
+        autocomplete="new-password"
+        aria-label={TEXT.pw_again}
+        onInput={(e) => setAgain(e.currentTarget.value)}
+      />
+      <div class="launch-actions">
+        <Confirm
+          label={busy ? TEXT.pw_busy : TEXT.pw_title}
+          title={CONFIRM.pw_change.t}
+          body={CONFIRM.pw_change.b}
+          confirmLabel={TEXT.pw_title}
+          danger
+          disabled={busy || !cur || !next || !again}
+          onConfirm={() => {
+            // Client-side checks run at the moment of commitment, so a mismatch typed after the
+            // modal opened is still caught; nothing leaves the browser unless they pass.
+            const bad = check();
+            if (bad) {
+              setErr(bad);
+              return;
+            }
+            submit();
+          }}
+        />
+      </div>
+      {err && <p class="t-err sm">{err}</p>}
+    </div>
   );
 }
 

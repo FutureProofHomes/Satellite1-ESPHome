@@ -250,6 +250,8 @@ SessionGate::GateRoute SessionGate::route_(AsyncWebServerRequest *request) const
       return GateRoute::LOGOUT;
     if (url == "/api/sat1/logout_all")
       return GateRoute::LOGOUT_ALL;
+    if (url == "/api/sat1/password")
+      return GateRoute::PASSWORD;
   } else if (method == HTTP_GET) {
     if (url == "/api/sat1/login/nonce")
       return GateRoute::NONCE;
@@ -330,6 +332,9 @@ void SessionGate::handleRequest(AsyncWebServerRequest *request) {
       break;
     case GateRoute::WHOAMI:
       this->handle_whoami_(request);
+      break;
+    case GateRoute::PASSWORD:
+      this->handle_password_(request);
       break;
     case GateRoute::PREFLIGHT:
       this->handle_preflight_(request);
@@ -640,6 +645,118 @@ void SessionGate::handle_logout_all_(AsyncWebServerRequest *request) {
   // it must be able to read the fresh key or the regenerate strands its own session mid-use. The
   // caller just proved a session (the authorized_ check above), so echoing CORS to a LAN origin
   // hands the new key only to someone the old key already vouched for.
+  char body[96];
+  snprintf(body, sizeof(body), R"({"ok":1,"key":"%s"})", this->token_hex_);
+  this->send_json_(request, "200 OK", body, true, false, nullptr, true);
+}
+
+/// Whether `pw` is acceptable as a new password: 8-31 printable ASCII characters, no leading or
+/// trailing space, and no quote or backslash. The quote/backslash exclusion keeps every place the
+/// password is embedded simple - the Web UI Password sensor rides Home Assistant payloads that go
+/// through literal_eval, and the YAML substitution path documents the same restriction.
+static bool password_acceptable_(const std::string &pw) {
+  if (pw.size() < SG_PW_MIN || pw.size() > SG_PW_MAX)
+    return false;
+  if (pw.front() == ' ' || pw.back() == ' ')
+    return false;
+  for (const char c : pw) {
+    const auto u = static_cast<unsigned char>(c);
+    if (u < 0x20 || u > 0x7E || c == '"' || c == '\\')
+      return false;
+  }
+  return true;
+}
+
+void SessionGate::handle_password_(AsyncWebServerRequest *request) {
+  // The authenticated password *change*: a valid session alone is not enough - the caller must
+  // also prove knowledge of the current password through the same nonce challenge the login runs,
+  // so a stolen cookie cannot quietly re-key the device. An unauthenticated reset is deliberately
+  // not offered: a locked-out owner reads the current password off the Home Assistant sensor or
+  // signs in with the device-presence pairing flow instead.
+  if (!this->authorized_(request)) {
+    this->deny_(request);
+    return;
+  }
+
+  // A YAML-pinned fleet password would silently revert on the next boot; refuse with a distinct
+  // shape so the app can explain instead of pretending it worked.
+  if (this->password_fixed_) {
+    this->send_json_(request, "409 Conflict", R"({"ok":0,"fixed":1})", false, false, nullptr, true);
+    return;
+  }
+
+  const uint32_t now = millis();
+  // The current-password proof shares the login's lockout, so a cookie thief probing for the
+  // password gets the same 5-strikes/60s wall a login brute force does.
+  if (this->pw_locked_) {
+    const int32_t left = static_cast<int32_t>(this->pw_lock_until_ - now);
+    if (left > 0) {
+      char body[64];
+      snprintf(body, sizeof(body), R"({"ok":0,"locked":1,"retry":%u})", static_cast<unsigned>(left) / 1000 + 1);
+      this->send_json_(request, "429 Too Many Requests", body, false, false, nullptr, true);
+      return;
+    }
+    this->pw_locked_ = false;
+  }
+
+  auto *n = request->getParam("n");
+  auto *r = request->getParam("r");
+  auto *next = request->getParam("new");
+  if (n == nullptr || r == nullptr || next == nullptr) {
+    this->send_json_(request, "400 Bad Request", R"({"ok":0})", false, false, nullptr, true);
+    return;
+  }
+
+  // Identical nonce and proof math to handle_login_: r = HMAC-SHA256(SHA-256(current_pw), n), the
+  // nonce single-use and burned on any attempt, so the current password never crosses the wire.
+  const bool nonce_ok = this->nonce_hex_[0] != '\0' && ct_equal_(this->nonce_hex_, n->value().c_str()) &&
+                        now - this->nonce_at_ <= 60000;
+  this->nonce_hex_[0] = '\0';
+  bool proof_ok = false;
+  if (nonce_ok) {
+    uint8_t pw_hash[32];
+    mbedtls_sha256(reinterpret_cast<const uint8_t *>(this->password_.c_str()), this->password_.size(), pw_hash, 0);
+    uint8_t mac[32];
+    hmac_sha256_(pw_hash, sizeof(pw_hash), reinterpret_cast<const uint8_t *>(n->value().c_str()), n->value().size(),
+                 mac);
+    char expected[65];
+    to_hex_(mac, sizeof(mac), expected);
+    proof_ok = ct_equal_(expected, r->value().c_str());
+  }
+
+  if (!proof_ok) {
+    if (++this->pw_fails_ >= SG_PW_FAILS) {
+      this->pw_fails_ = 0;
+      this->pw_locked_ = true;
+      this->pw_lock_until_ = now + SG_PW_LOCKOUT_MS;
+      ESP_LOGW(TAG_SG, "Too many failed password proofs; password path locked for %us",
+               static_cast<unsigned>(SG_PW_LOCKOUT_MS / 1000));
+    }
+    this->send_json_(request, "401 Unauthorized", R"({"ok":0})", false, false, nullptr, true);
+    return;
+  }
+  this->pw_fails_ = 0;
+
+  const std::string &new_pw = next->value();
+  if (!password_acceptable_(new_pw)) {
+    this->send_json_(request, "400 Bad Request", R"({"ok":0,"invalid":1})", false, false, nullptr, true);
+    return;
+  }
+
+  // The change, in order: the gate's own copy (token derivation and the digest fallback read it),
+  // the recomputed token - which instantly kills every other cookie, sign-in link and QR - and the
+  // queued event loop() hands to YAML, which persists the NVS global and republishes the Web UI
+  // Password sensor. The caller alone survives, re-keyed by the response below - the same UX
+  // contract as logout_all.
+  this->password_ = new_pw;
+  this->compute_token_();
+  {
+    LockGuard guard{this->win_lock_};
+    snprintf(this->ev_new_password_, sizeof(this->ev_new_password_), "%s", new_pw.c_str());
+  }
+  this->ev_password_.store(true);
+  ESP_LOGI(TAG_SG, "Password changed from the web app; every other session and sign-in link is now invalid");
+
   char body[96];
   snprintf(body, sizeof(body), R"({"ok":1,"key":"%s"})", this->token_hex_);
   this->send_json_(request, "200 OK", body, true, false, nullptr, true);
@@ -1121,6 +1238,17 @@ bool SessionGate::take_close_event(std::string &result) {
     return false;
   LockGuard guard{this->win_lock_};
   result = this->ev_result_;
+  return true;
+}
+
+bool SessionGate::take_password_change(std::string &new_password) {
+  if (!this->ev_password_.exchange(false))
+    return false;
+  LockGuard guard{this->win_lock_};
+  new_password = this->ev_new_password_;
+  // Wiped once handed over: the loop's copy goes to the NVS global, and a stale plaintext copy
+  // sitting in a member buffer serves nobody.
+  memset(this->ev_new_password_, 0, sizeof(this->ev_new_password_));
   return true;
 }
 

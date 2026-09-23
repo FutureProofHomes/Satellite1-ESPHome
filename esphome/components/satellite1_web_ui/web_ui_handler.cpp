@@ -2433,6 +2433,11 @@ void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
       w.printf(R"("key":"%s",)", key);
   }
 
+  // Whether the password is YAML-pinned (fleet builds): the change-password form hides on true,
+  // because a change would silently revert on the next boot.
+  if (this->pw_fixed_fn_)
+    w.printf(R"("pw_fixed":%s,)", this->pw_fixed_fn_() ? "true" : "false");
+
   w.printf(R"("heap":{"free":%zu,"total":%zu,"block":%zu},)", internal.total_free_bytes,
                  internal.total_free_bytes + internal.total_allocated_bytes, internal.largest_free_block);
   // Three numbers rather than two, because free-of-total is ambiguous for PSRAM and the difference

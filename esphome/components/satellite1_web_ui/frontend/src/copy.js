@@ -328,6 +328,23 @@ export const TEXT = {
     "Every signed-in browser and every sign-in link or QR code stops working immediately. This browser stays signed in, and the new link appears here.",
   launch_regen_confirm: "Sign out everywhere",
 
+  /* The change-password form at the foot of the Launch card. The bounds sentence states the
+     firmware's exact rule so a refusal is never a mystery; the "wrong" line is deliberately the
+     login form's tone. pw_changed_sub restates the logout_all consequence at the moment it
+     happened, because the person's other devices are about to show login screens. */
+  pw_title: "Change password",
+  pw_current: "Current password",
+  pw_new: "New password",
+  pw_again: "Confirm new password",
+  pw_busy: "Changing\u2026",
+  pw_len: "The new password needs 8 to 31 characters.",
+  pw_chars: "Letters, numbers, and punctuation only - no quotes, backslashes, or spaces at the ends.",
+  pw_mismatch: "The two copies of the new password don't match.",
+  pw_wrong: "That's not the current password.",
+  pw_fixed_note: "This device's password is set in its build configuration and can't be changed here.",
+  pw_changed: "Password changed",
+  pw_changed_sub: "Every other signed-in browser and sign-in link has been signed out.",
+
   ha_connected: "Connected to Home Assistant",
   ha_disconnected: "Not connected to Home Assistant",
   ha_disconnected_detail:
@@ -849,6 +866,10 @@ export const CONFIRM = {
   restart: {
     t: "Restart this device?",
     b: "It reboots right away and is back in under a minute. All of your settings survive a restart.",
+  },
+  pw_change: {
+    t: "Change the password?",
+    b: "Every other signed-in browser, pasted sign-in link and QR code stops working the moment it changes. This browser stays signed in, and Home Assistant's Web UI Password sensor shows the new value.",
   },
   radar_restart: {
     t: "Restart the radar module?",

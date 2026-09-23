@@ -75,6 +75,7 @@ CONF_LOGIN_MIC_AVAILABLE = "login_mic_available"
 CONF_MUTE_SWITCH = "mute_switch"
 CONF_ON_LOGIN_WINDOW = "on_login_window"
 CONF_ON_LOGIN_WINDOW_END = "on_login_window_end"
+CONF_ON_PASSWORD_CHANGE = "on_password_change"
 CONF_MICRO_WAKE_WORD_ID = "micro_wake_word_id"
 CONF_WAKE_LOADER_ID = "wake_loader_id"
 CONF_CRASH_REPORT_ID = "crash_report_id"
@@ -179,6 +180,7 @@ CONFIG_SCHEMA = cv.All(
             # approvable by the button alone.
             cv.Optional(CONF_ON_LOGIN_WINDOW): automation.validate_automation(single=True),
             cv.Optional(CONF_ON_LOGIN_WINDOW_END): automation.validate_automation(single=True),
+            cv.Optional(CONF_ON_PASSWORD_CHANGE): automation.validate_automation(single=True),
             # Timers and the assistant's phase have no entity to read them from: get_timers() is a
             # plain vector on the component, and the phase is a `globals:` int that config/ already
             # maintains through the existing on_listening / on_stt_vad_* triggers. Both optional so
@@ -350,6 +352,15 @@ async def to_code(config):
             var.get_login_window_end_trigger(),
             [(cg.std_string, "result")],
             config[CONF_ON_LOGIN_WINDOW_END],
+        )
+
+    # Fired from loop() after the gate accepts an authenticated password change; the YAML side
+    # persists the new value (the NVS-backed global) and republishes the Web UI Password sensor.
+    if CONF_ON_PASSWORD_CHANGE in config:
+        await automation.build_automation(
+            var.get_password_change_trigger(),
+            [(cg.std_string, "new_password")],
+            config[CONF_ON_PASSWORD_CHANGE],
         )
 
     # Behind a define, like the sendspin hub below: without it the handler never includes audio.h,

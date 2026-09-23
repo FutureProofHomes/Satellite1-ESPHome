@@ -3523,6 +3523,20 @@ polyline.draft {
   flex-wrap: wrap;
 }
 
+/* The change-password form at the Launch card's foot: a ruled-off section so the card reads as
+   two ideas (the link above, the credential below), with the shared .in fields stacked. Capped at
+   the login card's width - three full-width fields across a desktop card read as a form nobody
+   finished designing. */
+.pwc {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line);
+  max-width: 400px;
+}
+
 /* ---------------------------------------------------------------- */
 /* The verdict splash and the actions fix drawer (splash.jsx)       */
 /* ---------------------------------------------------------------- */

@@ -108,7 +108,12 @@ esphome:
             // decides whether later handlers get wrapped in the digest middleware the gate
             // replaces. Priority 600 puts this after the restore above and before the gate
             // computes its session token at setup priority 250.
-            id(web_ui_app)->set_credentials("${web_ui_username}", id(web_ui_password_value));
+            //
+            // The third argument marks a YAML-pinned password: this block re-imposes it on every
+            // boot, so the app's change-password endpoint refuses (and the form hides via the
+            // state payload's pw_fixed) rather than accepting a change that would silently revert.
+            id(web_ui_app)->set_credentials("${web_ui_username}", id(web_ui_password_value),
+                                            !WEB_UI_YAML_PASSWORD.empty());
             id(web_ui_password_text).publish_state(id(web_ui_password_value));
 
     # The on-demand listener. 200 runs after WebServer::setup() has taken web_server_base's one
@@ -381,6 +386,19 @@ satellite1_web_ui:
                 # there, exactly as tts_call_flash uses it.
                 - lambda: id(warning) = true;
           - script.execute: control_leds
+
+  # An accepted password change from the app (POST /api/sat1/password: session + proof of the
+  # current password; the gate has already re-keyed itself and invalidated every other session).
+  # This side owns persistence: the NVS-backed global so the change survives a reboot, a forced
+  # preferences sync so a power cut minutes later cannot revert it with every session already
+  # dead, and the Web UI Password sensor so Home Assistant (and the peer roster that rides it)
+  # shows the new value.
+  on_password_change:
+    - lambda: |-
+        id(web_ui_password_value) = new_password;
+        global_preferences->sync();
+        id(web_ui_password_text).publish_state(new_password);
+    - logger.log: "Web UI password changed from the app; other sessions signed out"
 
   # Which entity backs which control in the app.
   #
