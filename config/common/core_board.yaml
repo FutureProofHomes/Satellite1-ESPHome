@@ -39,6 +39,31 @@ esp32:
       CONFIG_SPIRAM_RODATA: "y"
       CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
 
+      # Heap policy: malloc/new above 4KB tries PSRAM first and falls back to internal
+      # (USE_MALLOC replaces ESPHome's default USE_CAPS_ALLOC, under which malloc never
+      # touches PSRAM at all). Decided from a live coredump (September 24 2026): the web
+      # UI's Home Assistant sync sends an ~8.2KB action call - the ~7.7KB response_template
+      # rides on every page request - and encoding it grows the API's shared write buffer
+      # through plain operator new[]. On a WiFi build the largest free internal block sits
+      # near 7KB under load, the 8,183-byte allocation failed, and with exceptions compiled
+      # out a failed new is not an error path but an abort(): the device rebooted mid
+      # page-load. common/web_ui_ha.yaml fixed and documents the receive half of exactly
+      # this; the send half needs the allocator itself to stop insisting on internal DRAM,
+      # and so does whatever component grows past a fragmented heap's largest block next.
+      #
+      # 4096 keeps small, hot allocations internal (WiFi's ~1.6KB RX buffers included);
+      # 49152 is fenced off for callers that require internal memory (DMA, task internals).
+      # CAPS_ALLOC is negated because the psram component hard-sets it to "y" after our
+      # options land: both writes survive into the generated defaults, the two symbols are
+      # members of one Kconfig choice, and the last "=y" line wins - which is why
+      # USE_MALLOC is deliberately ordered after USE_CAPS_ALLOC here. Trust neither
+      # explanation over evidence: confirm CONFIG_SPIRAM_USE_MALLOC=y in the generated
+      # sdkconfig.satellite1 whenever ESPHome is upgraded.
+      CONFIG_SPIRAM_USE_CAPS_ALLOC: "n"
+      CONFIG_SPIRAM_USE_MALLOC: "y"
+      CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL: "4096"
+      CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL: "49152"
+
       # Core dump to the partition above, in ELF with a CRC32 - ELF because
       # esp_core_dump_get_summary() (the on-device "what crashed" readout) only exists for ELF
       # dumps, CRC32 rather than SHA because the integrity check runs at every crashed boot.
