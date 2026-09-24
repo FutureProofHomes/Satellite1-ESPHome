@@ -11,6 +11,7 @@ import { HINTS, TEXT } from "./copy.js";
 import { loginKey, logout, maybeRedirectLocal, peerLogin, primeOtherOrigin, probePeer, takeUrlKey } from "./lib/auth.js";
 import {
   deviceIdentity,
+  entity,
   haBlocked,
   onLogAlert,
   onWriteError,
@@ -22,6 +23,7 @@ import {
   useSelection,
 } from "./lib/device.js";
 import { archiveAllNotifs, archiveNotif, listNotifs, notifCount, setNotifDevice, subscribeNotifs } from "./lib/notif.js";
+import { setSparkDevice, sparkRecord } from "./lib/sparkhist.js";
 import { dismissToast, subscribeToasts, tapToast, toast, toastIntent } from "./lib/toast.js";
 import { LoginScreen } from "./login.jsx";
 import { MediaFooter } from "./media.jsx";
@@ -1150,9 +1152,13 @@ function AppInner({ primeKey, remote, localMac, onRemote, onLocal, onAuthLost })
 
   // Point the notification history at this device's bucket the moment the MAC is known - which
   // also covers a remote-control retarget, since AppInner remounts per device and re-runs this.
+  // The sparkline history rides the same hand-off: same per-MAC bucketing, same migration dance.
   const mac = device?.mac;
   useEffect(() => {
-    if (mac) setNotifDevice(mac);
+    if (mac) {
+      setNotifDevice(mac);
+      setSparkDevice(mac);
+    }
   }, [mac]);
 
   const active = ROUTES.find((r) => r.id === route) || ROUTES[0];
@@ -1160,6 +1166,28 @@ function AppInner({ primeKey, remote, localMac, onRemote, onLocal, onAuthLost })
   // onShowFix rides the ctx so any route's "Show fix" link can open the drawer without threading a
   // prop through every card between here and there.
   const ctx = { device, deviceError, ...events, ...ha, ...selection, onShowFix: () => setFixOpen(true) };
+
+  // The sensor chips' sparkline history (lib/sparkhist.js), recorded here rather than in the Home
+  // route's SensorPills so the buffer accrues on every route, not only while Home is open. Values
+  // are the entities' native units (°C - the °F flip is display-only, same rule as the offset).
+  // Two paths into the store, both deduped there: the change effects catch a moved value the
+  // moment its SSE message lands, and the 60s beat keeps flat periods accruing points - the merge
+  // reducer deliberately swallows no-change publishes, so a timer is the only way to see them.
+  const sparkTemp = Number(entity(ctx, "temp")?.value);
+  const sparkHum = Number(entity(ctx, "humidity")?.value);
+  const sparkLux = Number(entity(ctx, "lux")?.value);
+  useEffect(() => sparkRecord("temp", sparkTemp), [sparkTemp]);
+  useEffect(() => sparkRecord("humidity", sparkHum), [sparkHum]);
+  useEffect(() => sparkRecord("lux", sparkLux), [sparkLux]);
+  const sparkNow = useRef(null);
+  sparkNow.current = { temp: sparkTemp, humidity: sparkHum, lux: sparkLux };
+  useEffect(() => {
+    const t = setInterval(() => {
+      const s = sparkNow.current;
+      for (const k in s) sparkRecord(k, s[k]);
+    }, 60000);
+    return () => clearInterval(t);
+  }, []);
   // Resolved once here rather than in the three places that show it, so the bar, the nav pane and the
   // switcher sheet cannot end up disagreeing about what this device is called.
   const { name: label, area } = deviceIdentity(device, ha.ha);

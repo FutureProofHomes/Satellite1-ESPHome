@@ -1710,6 +1710,24 @@ input[type="range"]:disabled {
   cursor: pointer;
   text-decoration: none;
   display: block;
+  /* The sparkline's anchor and clip: the chart layer is absolute in the chip's bottom band and the
+     border-radius clips it. z-index: 0 makes the chip a stacking context, so the chart's z-index:
+     -1 tucks it above this background but under the reading - decoration, never over the text. */
+  position: relative;
+  overflow: hidden;
+  z-index: 0;
+}
+/* The area chart in the chip's bottom band (ui.jsx's Spark): sized here, coloured by its own SVG
+   gradient from --accent/--accent-bg - the app's tokens, both themes for free. Not a tap target:
+   pointer-events off, aria-hidden at the source. */
+.spark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 38%;
+  z-index: -1;
+  pointer-events: none;
 }
 /* An inset ring rather than a border, so selecting a pill does not shift the text inside it. */
 .pill.on {

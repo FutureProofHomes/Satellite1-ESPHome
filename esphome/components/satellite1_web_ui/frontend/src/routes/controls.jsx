@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { HINTS, PRESENCE, TEXT } from "../copy.js";
 import { entity, haBlocked, haSyncOnce, haTooOld, pathFor, PHASE, post, useVoice } from "../lib/device.js";
+import { sparkPoints } from "../lib/sparkhist.js";
 import { Arrow, Card, Empty, Hint, Missing, N_CHAT, Pill, Row, Select, Slider, Toggle } from "../ui.jsx";
 
 /* ------------------------------------------------------------------ */
@@ -157,6 +158,10 @@ function SensorPills({ ctx }) {
             setOpen={r.offset === null ? () => {} : setOpen}
             label={r.label}
             value={show(r)}
+            // The sparkline in the chip's bottom band: the shell-recorded history, the sensor's own
+            // display step as the backfill amplitude, and a per-device+sensor seed so the synthetic
+            // prefix is deterministic (ui.jsx's Spark).
+            spark={{ pts: sparkPoints(r.key), amp: r.step, seed: `${(ctx.device?.mac || "local").toLowerCase()}:${r.key}` }}
           />
         ))}
         {presence && (
