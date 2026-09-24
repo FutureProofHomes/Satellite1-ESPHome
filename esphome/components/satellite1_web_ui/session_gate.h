@@ -385,8 +385,10 @@ class SessionGate : public AsyncWebHandler {
 
   /// Stable storage for the headers send_json_ sets - see its comment. One request at a time on
   /// the httpd task is what makes members sufficient.
-  char session_cookie_buf_[128]{};
-  char pair_cookie_buf_[96]{};
+  /// Sized for the ingress-proxied worst case: name + 64-hex token + a 96-char X-Ingress-Path
+  /// cookie Path + Max-Age + HttpOnly + SameSite + Secure (see send_json_'s cookie block).
+  char session_cookie_buf_[256]{};
+  char pair_cookie_buf_[224]{};
   char origin_buf_[80]{};
 };
 

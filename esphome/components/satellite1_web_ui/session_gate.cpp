@@ -411,6 +411,23 @@ bool SessionGate::origin_is_lan_(const std::string &origin) {
   return o[0] == 10 || (o[0] == 192 && o[1] == 168) || (o[0] == 172 && o[1] >= 16 && o[1] <= 31);
 }
 
+/// Whether a client-supplied X-Ingress-Path is safe to embed as a cookie Path attribute: a
+/// root-relative path in the charset a proxy mount actually uses, short enough for the cookie
+/// buffers. The strictness is the security argument - no ';', ',', spaces or control characters
+/// means the value cannot smuggle extra cookie attributes or split the header, and a forged value
+/// can only *narrow* where the browser sends a cookie it already holds, never widen it.
+static bool ingress_path_ok_(const std::string &p) {
+  if (p.empty() || p[0] != '/' || p.size() > 96)
+    return false;
+  for (const char c : p) {
+    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '/' ||
+                    c == '_' || c == '-' || c == '.';
+    if (!ok)
+      return false;
+  }
+  return true;
+}
+
 void SessionGate::send_json_(AsyncWebServerRequest *request, const char *status, const char *body, bool set_session,
                              bool clear_session, const char *pair_nonce, bool lan_cors) {
   httpd_resp_set_status(*request, status);
@@ -425,18 +442,39 @@ void SessionGate::send_json_(AsyncWebServerRequest *request, const char *status,
     httpd_resp_set_hdr(*request, "Vary", "Origin");
   }
 
+  // Where the cookies apply, and how hard they hold on. Direct access is exactly what it always
+  // was: Path=/ and no Secure. Through a Home Assistant ingress proxy (hass_ingress), two things
+  // change, both read from headers only a proxy sends. X-Ingress-Path ("/api/ingress/<name>")
+  // becomes the cookie Path, because through the proxy the cookie lands on the *HA origin* - at
+  // Path=/ two Satellite1 panels on one HA would evict each other's sessions on every login;
+  // scoped to each panel's mount they coexist. X-Forwarded-Proto: https adds the Secure flag, so
+  // an HA reachable on both schemes never sends the session over plain http (never set on direct
+  // access, where the origin is plain http and a Secure cookie would simply not be stored). Both
+  // set and clear use the same attributes - a clear whose Path or Secure differs from the set
+  // would leave the original cookie standing.
+  const char *cookie_path = "/";
+  std::string ingress_path;
+  const auto ingress = request->get_header("X-Ingress-Path");
+  if (ingress.has_value() && ingress_path_ok_(ingress.value())) {
+    ingress_path = ingress.value();
+    cookie_path = ingress_path.c_str();
+  }
+  const auto proto = request->get_header("X-Forwarded-Proto");
+  const char *secure = proto.has_value() && proto.value() == "https" ? "; Secure" : "";
+
   if (set_session) {
     snprintf(this->session_cookie_buf_, sizeof(this->session_cookie_buf_),
-             "%s=%s; Path=/; Max-Age=7776000; HttpOnly; SameSite=Lax", SESSION_COOKIE, this->token_hex_);
+             "%s=%s; Path=%s; Max-Age=7776000; HttpOnly; SameSite=Lax%s", SESSION_COOKIE, this->token_hex_,
+             cookie_path, secure);
     httpd_resp_set_hdr(*request, "Set-Cookie", this->session_cookie_buf_);
   } else if (clear_session) {
     snprintf(this->session_cookie_buf_, sizeof(this->session_cookie_buf_),
-             "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax", SESSION_COOKIE);
+             "%s=; Path=%s; Max-Age=0; HttpOnly; SameSite=Lax%s", SESSION_COOKIE, cookie_path, secure);
     httpd_resp_set_hdr(*request, "Set-Cookie", this->session_cookie_buf_);
   }
   if (pair_nonce != nullptr) {
     snprintf(this->pair_cookie_buf_, sizeof(this->pair_cookie_buf_),
-             "%s=%s; Path=/; Max-Age=180; HttpOnly; SameSite=Lax", PAIR_COOKIE, pair_nonce);
+             "%s=%s; Path=%s; Max-Age=180; HttpOnly; SameSite=Lax%s", PAIR_COOKIE, pair_nonce, cookie_path, secure);
     httpd_resp_set_hdr(*request, "Set-Cookie", this->pair_cookie_buf_);
   }
 
