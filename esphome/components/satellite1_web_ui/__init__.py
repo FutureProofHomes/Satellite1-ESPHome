@@ -11,6 +11,7 @@ from esphome.components import (
     audio,
     binary_sensor,
     button,
+    esp32,
     event,
     media_player,
     number,
@@ -45,7 +46,7 @@ from esphome.components.sendspin import (
 from esphome.components.voice_assistant import VoiceAssistant
 from esphome.components.web_server_base import CONF_WEB_SERVER_BASE_ID, WebServerBase
 from esphome.const import CONF_ID, Framework
-from esphome.core import CORE, HexInt
+from esphome.core import CORE, CoroPriority, HexInt, coroutine_with_priority
 import esphome.final_validate as fv
 
 _LOGGER = logging.getLogger(__name__)
@@ -311,6 +312,19 @@ def _final_validate(config):
 FINAL_VALIDATE_SCHEMA = _final_validate
 
 
+# Room for a reverse proxy's request headers. esp-idf's default is 512 bytes and ESPHome's
+# web_server_idf raises it to 1024 - both sized for a browser talking to the device directly. A
+# Home Assistant ingress proxy (hass_ingress, the setup the Diagnostics card documents) forwards
+# the browser's *entire* header set and adds its own (X-Ingress-Path, three X-Forwarded-*), plus
+# whatever cookies live on the HA domain: past 1024 in practice (seen live: a bare 431 "Header
+# fields are too long" from esp-idf before any handler ran), and 4096 covers a cookie-laden shared
+# domain with margin. The cost is one scratch buffer inside the single httpd instance, allocated
+# once at server start - not per socket - so ~3KB of internal RAM over web_server_idf's value.
+@coroutine_with_priority(CoroPriority.FINAL)
+async def _raise_httpd_header_budget():
+    esp32.add_idf_sdkconfig_option("CONFIG_HTTPD_MAX_REQ_HDR_LEN", 4096)
+
+
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
@@ -330,6 +344,12 @@ async def to_code(config):
     # every existing curl invocation and tuner script already speaks.
     cg.add_define("USE_WEBSERVER_AUTH")
     cg.add_define("USE_WEBSERVER_AUTH_DIGEST")
+
+    # Room for a reverse proxy's request headers - scheduled at FINAL priority because it is a
+    # last-write-wins dict entry and web_server_idf's own to_code (auto-loaded through
+    # web_server_base, default priority) sets the same key to 1024 after this coroutine runs;
+    # proven by a build whose generated sdkconfig read 1024 with a plain call here.
+    CORE.add_job(_raise_httpd_header_budget)
 
     if CONF_LOGIN_MIC_AVAILABLE in config:
         mic = await cg.process_lambda(
