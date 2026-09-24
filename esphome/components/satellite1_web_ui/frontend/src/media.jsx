@@ -75,6 +75,12 @@ const MA_PAUSED_RECHECK_MS = 45000;
  *  bits that decide whether a control renders; the rest are commands the footer always offers. */
 const SUP = { NEXT: 1 << 3, PREV: 1 << 4, SHUFFLE: 1 << 10 };
 
+/** How long a transport command's pending ring may ride before giving up - useHeld's five seconds,
+ *  the app-wide escape for a write the device refused or dropped. Transport confirmation arrives on
+ *  the 1s playing-cadence poll, so a healthy command settles in one or two ticks; the deadline only
+ *  exists so a dead device cannot leave a ring spinning forever. */
+const PENDING_MAX_MS = 5000;
+
 const fmtTime = (ms) => {
   const s = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -247,13 +253,65 @@ function tintStyle(col) {
 /* Shared model                                                       */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Commands awaiting their echo in the polled payload: { key: { done, at } }.
+ *
+ * Music Assistant's own player rings the acting button while the *server's* in-progress flag is up
+ * (PlayBtn.vue's `play_action_in_progress`), but /api/sat1/media carries no such flag and the
+ * command POST's answer carries nothing at all - the next poll is the only confirmation that
+ * exists. So the lifecycle is reconstructed client-side: an entry starts on click (the honest
+ * "processing began" moment - the POST is fire-and-forget behind it), and settles on the first
+ * payload whose per-command `done` predicate passes, or at the deadline - whichever is first, so a
+ * ring can never spin forever even against a dead device.
+ */
+function usePendingCmds(media) {
+  const [pending, setPending] = useState({});
+
+  // Every fresh payload settles whatever it can; the deadline settles the rest.
+  useEffect(() => {
+    setPending((p) => {
+      const now = Date.now();
+      const kept = Object.entries(p).filter(([, e]) => !e.done(media) && now - e.at < PENDING_MAX_MS);
+      return kept.length === Object.keys(p).length ? p : Object.fromEntries(kept);
+    });
+  }, [media]);
+
+  // The deadline must also fire between payloads: polls run 5s apart while idle, and a device that
+  // stopped answering sends no payload at all - the effect above never runs on silence.
+  useEffect(() => {
+    const ats = Object.values(pending).map((e) => e.at);
+    if (!ats.length) return undefined;
+    const wait = Math.max(50, PENDING_MAX_MS - (Date.now() - Math.min(...ats)) + 30);
+    const t = setTimeout(() => {
+      setPending((p) => {
+        const now = Date.now();
+        const kept = Object.entries(p).filter(([, e]) => now - e.at < PENDING_MAX_MS);
+        return kept.length === Object.keys(p).length ? p : Object.fromEntries(kept);
+      });
+    }, wait);
+    return () => clearTimeout(t);
+  }, [pending]);
+
+  const start = (key, done) => setPending((p) => ({ ...p, [key]: { done, at: Date.now() } }));
+  return [pending, start];
+}
+
 /** The card's logic, verbatim where it could be: which source owns the footer, the held pause, and
  *  where each command must land. `maPaused` is the upper tiers' word that the group is paused (the
  *  file comment's second pause path); it joins `held` rather than replacing it, because each covers
  *  the other's blind spot - `held` works with no tier answering, the tiers work across browsers. */
 function useMediaModel(maPaused) {
-  const { media, mediaCmd } = useMedia(true);
+  const { media, mediaCmd, mediaPoke } = useMedia(true);
   const [held, setHeld] = useState(false);
+
+  // One pending map for both surfaces: the bar's play button and the sheet's send the same
+  // command, so they must ring together. Starting an entry also pulls the next poll forward -
+  // an idle-cadence poll is 5s away, the ring's whole deadline.
+  const [pending, startCmd] = usePendingCmds(media);
+  const startPending = (key, done) => {
+    startCmd(key, done);
+    mediaPoke();
+  };
 
   const deviceActive = media ? media.state === 2 || media.state === 3 : false;
   const ssPlaying = media?.ss_state === 2;
@@ -280,11 +338,16 @@ function useMediaModel(maPaused) {
   const album = showMeta ? media?.album : "";
   const art = showMeta ? media?.art : "";
 
+  // The pause predicate on the sendspin path reads ss_state, not the derived state: pausing a
+  // group sets `held` before the POST, which flips the derived view to "Paused" instantly - the
+  // raw stream state is what actually confirms the command landed.
   const playPause = () => {
     if (playing) {
       if (sendspin) setHeld(true);
+      startPending("play", sendspin ? (m) => m?.ss_state !== 2 : (m) => m?.state !== 2);
       mediaCmd("pause", { src: srcParam });
     } else {
+      startPending("play", sendspin ? (m) => m?.ss_state === 2 : (m) => m?.state === 2);
       mediaCmd("play", { src: srcParam });
     }
   };
@@ -306,6 +369,8 @@ function useMediaModel(maPaused) {
     album,
     art,
     playPause,
+    pending,
+    startPending,
     stateText,
     srcText,
   };
@@ -538,7 +603,7 @@ function Artwork({ art, big }) {
 /* ------------------------------------------------------------------ */
 
 function MediaSheet({ model, tiers, tint, onClose, onPlayers }) {
-  const { media, mediaCmd, sendspin, playing, active, announcing, srcParam } = model;
+  const { media, mediaCmd, sendspin, playing, active, announcing, srcParam, pending, startPending } = model;
   const { ws, wsOn, me, maCmd, maCfg, setMaCfg, members } = tiers;
 
   // A drawer like the players panel now (owner's request, September 2026): Escape and the
@@ -578,15 +643,32 @@ function MediaSheet({ model, tiers, tint, onClose, onPlayers }) {
   const sup = media?.sup;
   const supHas = (bit) => sup == null || (sup & bit) !== 0;
 
+  // Both feedback mechanisms run together: the optimistic value moves the icon ("to here"), the
+  // pending ring says "working" until the poll echoes the value - and both settle on the same
+  // payload, so they cannot disagree.
   const toggleShuffle = () => {
+    const next = shuffle ? 0 : 1;
     setOptShuffle(!shuffle);
-    mediaCmd("shuffle", { v: shuffle ? 0 : 1, src: "sendspin" });
+    startPending("shuffle", (m) => m?.shuffle === next);
+    mediaCmd("shuffle", { v: next, src: "sendspin" });
   };
   // One button cycling off -> all -> one -> off, which is the order the three are reached for.
   const cycleRepeat = () => {
     const next = repeat === 0 ? 2 : repeat === 2 ? 1 : 0;
     setOptRepeat(next);
+    startPending("repeat", (m) => m?.repeat === next);
     mediaCmd("repeat", { m: ["off", "one", "all"][next], src: "sendspin" });
+  };
+
+  // Prev/next have no queue index to watch, so "done" is a heuristic: the track identity moved
+  // (title changed), or the position fell below where it stood at the click - which is also what
+  // prev does mid-track, restarting the same song. Two identical consecutive tracks ride to the
+  // deadline: a slightly long spin, never a wrong state.
+  const skip = (key) => {
+    const t0 = media?.title;
+    const p0 = media?.pos ?? 0;
+    startPending(key, (m) => m?.title !== t0 || (m?.pos ?? 0) < p0);
+    mediaCmd(key, { src: srcParam });
   };
 
   const showTransport = active && !announcing;
@@ -634,26 +716,35 @@ function MediaSheet({ model, tiers, tint, onClose, onPlayers }) {
             {/* The heart went with the whole favorites feature (owner's request, September 2026) -
                 a press had no readable echo in any payload, so the button could only ever say
                 "sent", and the owner judged it not worth the row space. */}
+            {/* Each control disables while its own command is pending - Music Assistant's behaviour,
+                and the guard against a double-send the device would replay. The ring explains the
+                inertness; the disabled state needs no extra styling (nothing greys these classes). */}
             {showSkips && ctrl && supHas(SUP.SHUFFLE) && (
-              <button class={`mbtn${shuffle ? " on" : ""}`} aria-label="Shuffle" aria-pressed={shuffle} onClick={toggleShuffle}>
+              <button
+                class={`mbtn${shuffle ? " on" : ""}${pending.shuffle ? " busy" : ""}`}
+                aria-label="Shuffle"
+                aria-pressed={shuffle}
+                disabled={!!pending.shuffle}
+                onClick={toggleShuffle}
+              >
                 {I_SHUFFLE}
               </button>
             )}
             {showSkips && supHas(SUP.PREV) && (
-              <button class="mbtn" aria-label="Previous track" onClick={() => mediaCmd("prev", { src: srcParam })}>
+              <button class={`mbtn${pending.prev ? " busy" : ""}`} aria-label="Previous track" disabled={!!pending.prev} onClick={() => skip("prev")}>
                 {I_PREV}
               </button>
             )}
-            <button class="mplay" aria-label={playing ? "Pause" : "Play"} onClick={model.playPause}>
+            <button class={`mplay${pending.play ? " busy" : ""}`} aria-label={playing ? "Pause" : "Play"} disabled={!!pending.play} onClick={model.playPause}>
               {playing ? I_PAUSE : I_PLAY}
             </button>
             {showSkips && supHas(SUP.NEXT) && (
-              <button class="mbtn" aria-label="Next track" onClick={() => mediaCmd("next", { src: srcParam })}>
+              <button class={`mbtn${pending.next ? " busy" : ""}`} aria-label="Next track" disabled={!!pending.next} onClick={() => skip("next")}>
                 {I_NEXT}
               </button>
             )}
             {showSkips && ctrl && (
-              <button class={`mbtn${repeat !== 0 ? " on" : ""}`} aria-label="Repeat" onClick={cycleRepeat}>
+              <button class={`mbtn${repeat !== 0 ? " on" : ""}${pending.repeat ? " busy" : ""}`} aria-label="Repeat" disabled={!!pending.repeat} onClick={cycleRepeat}>
                 {I_REPEAT}
                 {repeat === 1 && <span class="mrpt1 num">1</span>}
               </button>
@@ -949,8 +1040,9 @@ export function MediaFooter({ ha, mac }) {
           </button>
           {active && !announcing && (
             <button
-              class="mplay sm"
+              class={`mplay sm${model.pending.play ? " busy" : ""}`}
               aria-label={playing ? "Pause" : "Play"}
+              disabled={!!model.pending.play}
               onClick={(e) => {
                 e.stopPropagation();
                 model.playPause();

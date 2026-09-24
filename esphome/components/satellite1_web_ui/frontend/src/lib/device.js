@@ -717,10 +717,16 @@ export function useVoice(enabled) {
  * a paused group stream, which the device sees as an idle player). Fire-and-forget on purpose: the
  * device queues the command for its main loop, so the POST's answer never carries the state that
  * resulted - the next poll does. A failed post already surfaces through the toast.
+ *
+ * `mediaPoke` pulls the next poll forward. It exists for the pending rings on the transport
+ * controls (media.jsx's usePendingCmds): a play sent from idle rides the 5s cadence, and a ring
+ * that spins out most of its deadline waiting for a poll that would have confirmed at once reads
+ * as a slow device. One nudged re-poll shortly after the command is queued closes that gap.
  */
 export function useMedia(enabled) {
   const [media, setMedia] = useState(null);
   const busy = media ? media.state === 2 || media.state === 3 : false;
+  const pokeRef = useRef(null);
 
   useEffect(() => {
     if (!enabled) return;
@@ -728,6 +734,10 @@ export function useMedia(enabled) {
     let timer = null;
 
     const tick = async () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
       try {
         const json = await requestJson("/api/sat1/media");
         if (json && live) setMedia(json);
@@ -737,9 +747,18 @@ export function useMedia(enabled) {
       if (live) timer = setTimeout(tick, busy ? 1000 : 5000);
     };
 
+    // 250ms, not immediate: the command POST this follows has to reach the device's queue first,
+    // or the nudged poll reads back the state the command is about to change.
+    pokeRef.current = () => {
+      if (!live) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(tick, 250);
+    };
+
     tick();
     return () => {
       live = false;
+      pokeRef.current = null;
       if (timer) clearTimeout(timer);
     };
   }, [enabled, busy]);
@@ -751,7 +770,9 @@ export function useMedia(enabled) {
     return post(`/api/sat1/media/${cmd}${qs ? `?${qs}` : ""}`);
   };
 
-  return { media, mediaCmd };
+  const mediaPoke = () => pokeRef.current?.();
+
+  return { media, mediaCmd, mediaPoke };
 }
 
 /**

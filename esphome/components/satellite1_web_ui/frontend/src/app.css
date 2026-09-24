@@ -2661,6 +2661,8 @@ polyline.draft {
   color: var(--tbfg, var(--bg-elev));
   cursor: pointer;
   flex: none;
+  /* The anchor for the pending ring below, as .mbtn already is for its repeat-one badge. */
+  position: relative;
 }
 .mplay .mi {
   width: 22px;
@@ -2691,6 +2693,21 @@ polyline.draft {
   right: 8px;
   font-size: 9px;
   line-height: 1;
+}
+/* The pending ring: an indeterminate arc circling the button (not the glyph) while its command
+   awaits the poll's echo - Music Assistant's own play-button spinner, drawn with the boot splash's
+   keyframes. currentColor rides the tint's --tfg (or --tbfg on the filled play) like every glyph
+   here. aria-hidden by construction: the buttons keep their labels, disabled conveys the state. */
+.mbtn.busy::after,
+.mplay.busy::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spl-rot 0.9s linear infinite;
+  pointer-events: none;
 }
 
 .mvol-row {
@@ -3158,6 +3175,14 @@ polyline.draft {
   .ln.hl,
   .nrow.hintb {
     animation: none;
+  }
+  /* The pending ring stops spinning but must still say "working": a full dim circle instead of
+     the rotating arc. */
+  .mbtn.busy::after,
+  .mplay.busy::after {
+    animation: none;
+    border-color: currentColor;
+    opacity: 0.4;
   }
   /* The dismissed ghost has no fade to finish; showing it at all would be a toast flickering
      back. The reduced world is instant in both directions. */
