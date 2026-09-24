@@ -4,6 +4,7 @@ from pathlib import Path
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import mdns, socket, uart
+from esphome.components.esp32 import include_builtin_idf_component
 from esphome.const import CONF_ESPHOME, CONF_ID, Framework
 from esphome.core.entity_helpers import (
     register_device_class,
@@ -72,6 +73,7 @@ def _final_validate(config):
 FINAL_VALIDATE_SCHEMA = _final_validate
 
 async def to_code(config):
+    include_builtin_idf_component("json")
     device_class_indices = {
         "distance": register_device_class("distance"),
         "illuminance": register_device_class("illuminance"),
