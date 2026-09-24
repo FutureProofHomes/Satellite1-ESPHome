@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { CONFIRM, HINTS, TEXT } from "../copy.js";
 import { changePassword, logoutAll, mdnsLooksBroken, qrSignInLink, signInLink } from "../lib/auth.js";
-import { entity, entityPath, pathFor, post, request, requestJson } from "../lib/device.js";
+import { BASE, entity, entityPath, pathFor, post, request, requestJson } from "../lib/device.js";
 import { qrSvgPath } from "../lib/qr.js";
 import { takeIntent, toast } from "../lib/toast.js";
 import { Btn, Card, Chevron, Confirm, Fact, Missing, N_DIAG, ni, Row, Toggle } from "../ui.jsx";
@@ -143,7 +143,7 @@ function CrashCard({ ctx, reveal }) {
      than the request() helper, whose .text would decode the zip's bytes as UTF-8 and corrupt them;
      the session cookie rides fetch's same-origin default. */
   const downloadDump = () =>
-    fetch("/api/sat1/crash/dump.bin")
+    fetch(`${BASE}/api/sat1/crash/dump.bin`)
       .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(String(r.status)))))
       .then((b) => {
         const url = URL.createObjectURL(b);
@@ -775,6 +775,28 @@ function Maintenance({ ctx }) {
  * signed in (the device answers with a fresh cookie), and the new link takes over here within a
  * state poll.
  */
+/** Copies to the clipboard, true on success. navigator.clipboard does not exist on insecure
+ *  origins, which the direct device pages always are - the textarea dance is the fallback that
+ *  still works everywhere. Shared by the Launch link and the Home Assistant card's YAML. */
+function copyText(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.cssText = "position:fixed;opacity:0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    return true;
+  } catch {
+    return false; /* The text is on screen; selecting it by hand still works. */
+  }
+}
+
 function Launch({ ctx }) {
   const d = ctx.device;
   const [copied, setCopied] = useState(false);
@@ -791,24 +813,9 @@ function Launch({ ctx }) {
   const qr = qrSvgPath(ipLink || link);
 
   const copy = () => {
-    try {
-      // navigator.clipboard does not exist on insecure origins, which this page always is - the
-      // textarea dance is the fallback that still works everywhere.
-      if (navigator.clipboard?.writeText) {
-        navigator.clipboard.writeText(link);
-      } else {
-        const ta = document.createElement("textarea");
-        ta.value = link;
-        ta.style.cssText = "position:fixed;opacity:0";
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand("copy");
-        ta.remove();
-      }
+    if (copyText(link)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* The link is on screen; selecting it by hand still works. */
     }
   };
 
@@ -951,6 +958,139 @@ function ChangePassword({ ctx }) {
       </div>
       {err && <p class="t-err sm">{err}</p>}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Home Assistant sidebar setup                                        */
+/* ------------------------------------------------------------------ */
+
+const HASS_INGRESS_URL = "https://github.com/lovelylain/hass_ingress";
+
+/**
+ * Everything needed to put this page in the Home Assistant sidebar, through the third-party
+ * hass_ingress integration's proxy mode. Right under Launch because it is the same subject - ways
+ * to reach this UI - and collapsed by default because it is setup, not status: most visits to this
+ * page are not setup visits.
+ *
+ * Proxy mode (work_mode: ingress) rather than an iframe of this device's own origin, because the
+ * iframe cannot work: an https HA page may not embed a plain-http device (mixed content, blocked
+ * before the request is made), and inside a cross-site iframe the browser refuses to send this
+ * device's SameSite=Lax session cookie, so login loops forever. Proxied, the browser only ever
+ * talks to HA's own origin - both problems vanish at once, and the same YAML serves local-http
+ * and public-https installs alike. The frontend's side of the contract is BASE (lib/device.js).
+ *
+ * The block covers the *whole fleet*, not just this device (owner call, September 2026): the HA
+ * sync roster already names every Satellite1 Home Assistant knows - mac, live IP, display name -
+ * so the card mints one paste-ready arrangement with exactly one sidebar item. This device is the
+ * visible entry, titled "Satellite1 Fleet"; every peer rides behind it as a hass_ingress child
+ * (`parent:`), hidden from the sidebar but reachable at /<parent>/<child> - which is where the
+ * device switcher's panel links land (see peerRow in shell.jsx: it probes the flat path first and
+ * falls back to the nested one). Peer panel keys are minted from this device's own hostname base
+ * plus each peer's mac suffix - the same name_add_mac_suffix convention the switcher relies on -
+ * so the two ends of the contract cannot drift apart. A device renamed away from the convention,
+ * or a roster row without a routable IP, is silently left out; with no roster at all (HA down,
+ * solo device) the block degrades to this device's entry alone.
+ *
+ * The per-entry lines: require_admin (parent only - children are not sidebar panels) because the
+ * panel exposes the devices' sign-in pages to every HA user who can see it, and admin-only is the
+ * right default to hand out; expire_time because hass_ingress's own token defaults to an hour,
+ * after which a standing tab is signed out of the *proxy* mid-session; the host header because
+ * the proxy forwards the browser's Host, which the pairing endpoints' DNS-rebinding guard rightly
+ * rejects - push-button sign-in needs a Host this device answers to.
+ */
+function HomeAssistant({ ctx }) {
+  const d = ctx.device;
+  const [copied, setCopied] = useState(false);
+  if (!d?.ip) return null;
+
+  const slugify = (s) =>
+    String(s)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  const clean = (s) => String(s || "").replace(/["\\]/g, "");
+  const IPV4 = /^\d+\.\d+\.\d+\.\d+$/;
+
+  const ownName = String(d.name || "satellite1").toLowerCase();
+  const ownSlug = slugify(ownName) || "satellite1";
+  const lines = [
+    "ingress:",
+    `  ${ownSlug}:`,
+    "    work_mode: ingress",
+    '    title: "Satellite1 Fleet"',
+    "    icon: mdi:satellite-uplink",
+    `    url: http://${d.ip}`,
+    "    require_admin: true   # only admins see the panel; remove to show everyone",
+    "    expire_time: 604800   # keep long-lived tabs signed in (default is 1 hour)",
+    "    headers:",
+    `      host: ${d.ip}   # keeps push-button sign-in working through the proxy`,
+  ];
+
+  // The peers, from the same roster the device switcher reads. The base-name proof and the
+  // per-peer derivations mirror peerRow's exactly - one convention, two consumers.
+  const ownSuffix = String(d.mac || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(-6);
+  const baseOk = ownSuffix.length === 6 && ownName.endsWith(ownSuffix);
+  const rows = baseOk
+    ? (ctx.ha?.d?.dev || [])
+        .filter((r) => (r?.[3] || "").toLowerCase() !== (d.mac || "").toLowerCase())
+        .sort((a, b) => String(a?.[1] || "").localeCompare(String(b?.[1] || "")))
+    : [];
+  for (const r of rows) {
+    const suffix = String(r?.[3] || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "")
+      .slice(-6);
+    // The routable address: the roster's live IP, else an IP-literal configuration_url. A row
+    // with neither cannot be proxied and is left out rather than emitted broken.
+    let ip = String(r?.[11] || "");
+    if (!IPV4.test(ip)) {
+      try {
+        const h = new URL(String(r?.[5] || "")).hostname;
+        ip = IPV4.test(h) ? h : "";
+      } catch {
+        ip = "";
+      }
+    }
+    if (suffix.length !== 6 || !ip) continue;
+    lines.push(
+      `  ${slugify(ownName.slice(0, -6) + suffix)}:`,
+      `    parent: ${ownSlug}   # hidden from the sidebar; the device switcher reaches it`,
+      "    work_mode: ingress",
+      `    title: "${clean(r?.[1]) || "Satellite1"}"`,
+      `    url: http://${ip}`,
+      "    expire_time: 604800",
+      "    headers:",
+      `      host: ${ip}`,
+    );
+  }
+  const yaml = lines.join("\n");
+
+  const copy = () => {
+    if (copyText(yaml)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <Card title="Home Assistant" collapsible name="ha_ingress" hint={HINTS.ha_ingress}>
+      <p class="dim sm hai-note">
+        {TEXT.hai_pre}
+        <a href={HASS_INGRESS_URL} target="_blank" rel="noopener">
+          {TEXT.hai_link}
+        </a>
+        {TEXT.hai_post}
+      </p>
+      <pre class="hai-yaml">{yaml}</pre>
+      <div class="launch-actions">
+        <Btn onClick={copy}>{copied ? TEXT.hai_copied : TEXT.hai_copy}</Btn>
+      </div>
+      <p class="dim sm">{TEXT.hai_dhcp_hint}</p>
+    </Card>
   );
 }
 
@@ -1109,6 +1249,8 @@ export function Diagnostics({ ctx }) {
       <CrashCard ctx={ctx} reveal={intent?.card === "crash"} />
       <Firmware ctx={ctx} />
       <Launch ctx={ctx} />
+      {/* Right under Launch, whose subject it shares: ways to reach this UI. */}
+      <HomeAssistant ctx={ctx} />
       {/* Buttons moved to the foot of Controls. It is the one card here that answers "does the hardware
           respond to me", which is a question about the thing you are holding rather than about its
           internals - and it belongs beside the volume and mute controls it duplicates in hardware. */}

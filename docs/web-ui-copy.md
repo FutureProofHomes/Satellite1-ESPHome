@@ -120,6 +120,7 @@ looking at a third of them was the more expensive problem.
 | `esp_temp` | ESP32 Temp | The ESP32 chip's own temperature, not the room's. It reads well above ambient inside the sealed case, so warm is normal; sustained readings above 80 °C / 176 °F are worth investigating. The room's temperature is on the home page. |
 | `reset` | Last restart | Why the device last restarted. 'USB peripheral' means it was flashed. 'Power glitch' or 'Brownout' points at the power supply rather than at the firmware. |
 | `launch` | Launch card title | Scan the code with a phone, or paste the link into a Home Assistant dashboard button, and that browser lands here already signed in - no password, no button press. The code carries the device's current network address, so any phone on your network can scan it; the link carries the device's permanent name, the right form to paste somewhere that keeps it. Anyone who has either can sign in with it, so treat them like the password. Sign out everywhere revokes them and every session, then issues a new one. |
+| `ha_ingress` | Home Assistant card title | Puts your Satellite1s in Home Assistant's sidebar, proxied through Home Assistant itself - so it works wherever Home Assistant does, on your local network or over a public https address. hass_ingress is a third-party integration, not part of this firmware. The YAML covers every Satellite1 Home Assistant knows about: this device is the one visible "Satellite1 Fleet" entry, the rest sit hidden behind it, and the device switcher reaches them all from inside the panel. Anyone who can open the panel reaches the devices' sign-in pages through it; the YAML limits the panel to admin users - remove the require_admin line to show it to everyone. |
 | `xmos` | XMOS firmware, and the XMOS Recovery card title | The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's. |
 | `xmos_flash` | Reflash XMOS vX.X.X | Rewrites the audio chip's firmware from the image embedded in this build. The device is deaf and mute until it finishes, which takes about a minute. Do not cut power. |
 | `radar_recovery` | LD2410 / LD2450 Recovery card title | The radar module's own recovery actions. Restart just power-cycles the module. Factory reset erases the settings stored on the module itself - detection range, gate thresholds, zones, everything tuned on the Presence page - and does not touch this device's settings. |
@@ -150,6 +151,19 @@ scanned live off the screen, so the address is fresh by construction, and an IP 
 cannot resolve `.local` names — while the link keeps the permanent `.local` form for anything
 long-lived, like a dashboard button. The hint is the only place this is explained; on the card the
 two simply work.
+
+The **Home Assistant** card sits under Launch (same subject: ways to reach this UI) and stays
+collapsed by default — it is setup, not status. Its strings: `hai_pre` "Put your Satellite1 fleet
+in the Home Assistant sidebar with the third-party ", `hai_link` "hass_ingress" (the external
+link), `hai_post` ' integration: install it from HACS, add the block below to your
+configuration.yaml (replacing any ingress: section you already have), and restart Home Assistant.
+One "Satellite1 Fleet" item appears in the sidebar, and the device switcher works inside it.'; the
+copy button `hai_copy` "Copy YAML" / `hai_copied` "Copied"; and `hai_dhcp_hint` "The YAML carries
+each device's current IP address. Give your Satellite1s DHCP reservations so the addresses stay
+valid - if one changes, update its url and host lines to match." The YAML block itself is generated
+from the fleet's live names and IPs (this device as the one visible "Satellite1 Fleet" entry, every
+roster peer as a hidden `parent:` child), so it is not mirrored here; its inline comments are part
+of the snippet on purpose (they travel with the paste into configuration.yaml).
 
 `xmos_erase` was deleted along with the row it explained. Erasing the audio chip leaves it blank — no
 microphones, no speaker, no wake word — and the only way back is the Reflash row directly above it, which

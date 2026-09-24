@@ -34,6 +34,13 @@ export const HINTS = {
   launch:
     "Scan the code with a phone, or paste the link into a Home Assistant dashboard button, and that browser lands here already signed in - no password, no button press. The code carries the device's current network address, so any phone on your network can scan it; the link carries the device's permanent name, the right form to paste somewhere that keeps it. Anyone who has either can sign in with it, so treat them like the password. Sign out everywhere revokes them and every session, then issues a new one.",
 
+  /* The Home Assistant card on Diagnostics. What needs explaining is why the panel goes through
+     Home Assistant rather than straight at the device (it works from anywhere HA does, including
+     a public https address), that the integration is not ours, and what the panel exposes - which
+     is what makes the YAML's admin default defensible. */
+  ha_ingress:
+    "Puts your Satellite1s in Home Assistant's sidebar, proxied through Home Assistant itself - so it works wherever Home Assistant does, on your local network or over a public https address. hass_ingress is a third-party integration, not part of this firmware. The YAML covers every Satellite1 Home Assistant knows about: this device is the one visible \"Satellite1 Fleet\" entry, the rest sit hidden behind it, and the device switcher reaches them all from inside the panel. Anyone who can open the panel reaches the devices' sign-in pages through it; the YAML limits the panel to admin users - remove the require_admin line to show it to everyone.",
+
   /* On the card title rather than a row, because what needs explaining is the tree, and the tree has no
      row of its own to hang an ⓘ off. This is also the only place Local Speaker is explained: it is the
      one tick in there whose effect is not obvious from its name, since it silences this device rather
@@ -327,6 +334,19 @@ export const TEXT = {
   launch_regen_body:
     "Every signed-in browser and every sign-in link or QR code stops working immediately. This browser stays signed in, and the new link appears here.",
   launch_regen_confirm: "Sign out everywhere",
+
+  /* The Home Assistant card under Launch: the sidebar-panel setup. The sentences stay short on
+     purpose - the YAML block is the actual instructions, minted with the whole fleet's names and
+     addresses so there is nothing to fill in. */
+  hai_pre: "Put your Satellite1 fleet in the Home Assistant sidebar with the third-party ",
+  hai_link: "hass_ingress",
+  hai_post:
+    ' integration: install it from HACS, add the block below to your configuration.yaml (replacing any ingress: section you already have), and restart Home Assistant. One "Satellite1 Fleet" item appears in the sidebar, and the device switcher works inside it.',
+  hai_copy: "Copy YAML",
+  hai_copied: "Copied",
+  // The one thing that can quietly break the panel later: the YAML pins today's IP addresses.
+  hai_dhcp_hint:
+    "The YAML carries each device's current IP address. Give your Satellite1s DHCP reservations so the addresses stay valid - if one changes, update its url and host lines to match.",
 
   /* The change-password form at the foot of the Launch card. The bounds sentence states the
      firmware's exact rule so a refusal is never a mystery; the "wrong" line is deliberately the
