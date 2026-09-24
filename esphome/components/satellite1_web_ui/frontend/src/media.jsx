@@ -81,6 +81,12 @@ const SUP = { NEXT: 1 << 3, PREV: 1 << 4, SHUFFLE: 1 << 10 };
  *  exists so a dead device cannot leave a ring spinning forever. */
 const PENDING_MAX_MS = 5000;
 
+/** The group edits' own deadline, deliberately longer than PENDING_MAX_MS: a relayed join/unjoin is
+ *  confirmed by a resync that legitimately takes 2-7s (the 2.2s poke, the ~6s panel cycle), so five
+ *  seconds would routinely give up on healthy edits. The socket tier clears in well under a second
+ *  regardless; twelve is only how long a failure takes to unwind. */
+const GROUP_PENDING_MAX_MS = 12000;
+
 const fmtTime = (ms) => {
   const s = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -426,33 +432,69 @@ function useTiers(ha, mac, wake) {
   // schedule one early read rather than waiting out the poll cycle.
   const poke = () => setTimeout(maRead, 2200);
 
-  // Optimistic group state, cleared whenever a fresh payload arrives, keyed because the group is a
-  // list. On the socket tier the clearing event is a player update, arriving within a moment.
+  // Optimistic per-member volume, cleared whenever a fresh payload arrives, keyed because the group
+  // is a list. On the socket tier the clearing event is a player update, arriving within a moment.
   const [optVol, setOptVol] = useState({});
-  const [optGone, setOptGone] = useState([]);
-  const [joining, setJoining] = useState(false);
   useEffect(() => {
     setOptVol({});
-    setOptGone([]);
-    setJoining(false);
   }, [ma, ws.players]);
+
+  // Group edits in flight: { id: { kind: "join" | "unjoin", at } }. A pending join keeps its
+  // addable row visible with a spinning ring (Plan 12's mechanism, a payload-confirmed pending
+  // entry); a pending unjoin keeps the member row *hidden* - the instant optimistic hide the old
+  // optGone list did, which the owner kept (September 2026) over a lingering ringed row.
+  const [pendingGroup, setPendingGroup] = useState({});
 
   // The group as rows of [id, name, volume], from whichever tier is answering. The ids differ in
   // kind - MA player ids on the socket, Home Assistant entity ids through the relay - which is
   // fine, because the commands below come from the same tier as the rows they act on.
   const wsMemberIds = wsOn ? (ws.me.group_members?.length ? ws.me.group_members : [ws.me.player_id]) : null;
+  const rawMembers = wsOn
+    ? wsMemberIds.map((id) => {
+        const p = ws.players[id];
+        return [id, p?.name || id, p?.volume_level ?? -1];
+      })
+    : live?.g || [];
+
+  // Clearing is membership-confirmation, not any-payload (which is what the old optGone did, and
+  // what let a poll that landed before the unjoin briefly resurrect the removed row): a join
+  // settles once the id appears in the fresh members list, an unjoin once it no longer does, and
+  // anything older than the deadline settles regardless.
+  useEffect(() => {
+    setPendingGroup((p) => {
+      if (!Object.keys(p).length) return p;
+      const now = Date.now();
+      const has = (id) => rawMembers.some((m) => m[0] === id);
+      const kept = Object.entries(p).filter(
+        ([id, e]) => (e.kind === "join" ? !has(id) : has(id)) && now - e.at < GROUP_PENDING_MAX_MS,
+      );
+      return kept.length === Object.keys(p).length ? p : Object.fromEntries(kept);
+    });
+    // rawMembers is derived from exactly these two payload sources; the payloads are the events.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ma, ws.players]);
+
+  // The deadline must also fire without a payload - a socket that went quiet sends nothing for the
+  // effect above to run on, and a ring (or a hidden row) must never outlive a failed edit.
+  useEffect(() => {
+    const ats = Object.values(pendingGroup).map((e) => e.at);
+    if (!ats.length) return undefined;
+    const wait = Math.max(50, GROUP_PENDING_MAX_MS - (Date.now() - Math.min(...ats)) + 30);
+    const t = setTimeout(() => {
+      setPendingGroup((p) => {
+        const now = Date.now();
+        const kept = Object.entries(p).filter(([, e]) => now - e.at < GROUP_PENDING_MAX_MS);
+        return kept.length === Object.keys(p).length ? p : Object.fromEntries(kept);
+      });
+    }, wait);
+    return () => clearTimeout(t);
+  }, [pendingGroup]);
+
   // Alphabetical on both tiers (owner's request, September 2026): the socket reports members in
   // join order and the relay in payload order, and neither order means anything to the person
   // scanning the list for a room's name.
-  const members = (
-    wsOn
-      ? wsMemberIds.map((id) => {
-          const p = ws.players[id];
-          return [id, p?.name || id, p?.volume_level ?? -1];
-        })
-      : live?.g || []
-  )
-    .filter(([id]) => !optGone.includes(id))
+  const members = rawMembers
+    .filter(([id]) => pendingGroup[id]?.kind !== "unjoin")
     .sort((a, b) => a[1].localeCompare(b[1]));
   const addables = (
     wsOn
@@ -474,7 +516,7 @@ function useTiers(ha, mac, wake) {
     }
   };
   const gUnjoin = (id) => {
-    setOptGone((prev) => [...prev, id]);
+    setPendingGroup((p) => ({ ...p, [id]: { kind: "unjoin", at: Date.now() } }));
     if (wsOn) ws.cmd("players/cmd/ungroup", { player_id: id }).catch(() => {});
     else {
       maCmd("unjoin", { e: id });
@@ -482,7 +524,7 @@ function useTiers(ha, mac, wake) {
     }
   };
   const gJoin = (id) => {
-    setJoining(true);
+    setPendingGroup((p) => ({ ...p, [id]: { kind: "join", at: Date.now() } }));
     if (wsOn) ws.cmd("players/cmd/group", { player_id: id, target_player: ws.me.player_id }).catch(() => {});
     else {
       maCmd("join", { e: me, m: id });
@@ -509,7 +551,7 @@ function useTiers(ha, mac, wake) {
     members,
     addables,
     optVol,
-    joining,
+    pendingGroup,
     gVol,
     gUnjoin,
     gJoin,
@@ -852,7 +894,7 @@ function MaPanel({ cfg, setCfg, status }) {
  */
 function PlayersPanel({ model, tiers, tint, haReady, onClose }) {
   const { media, mediaCmd, srcParam, groupHeld } = model;
-  const { wsOn, me, live, members, addables, optVol, joining, gVol, gUnjoin, gJoin } = tiers;
+  const { wsOn, me, live, members, addables, optVol, pendingGroup, gVol, gUnjoin, gJoin } = tiers;
 
   // Escape and the one-drawer rule, plus the finger-following swipe-down. Opening this panel is
   // what closes the expanded view under it - the chip in that view opens this one.
@@ -908,16 +950,24 @@ function PlayersPanel({ model, tiers, tint, haReady, onClose }) {
                 )}
               </div>
             ))}
-            {joining && <div class="dim sm">{TEXT.media_group_loading}</div>}
             {/* One row per joinable speaker with a drawn +, replacing a native <select> - the select
                 rendered as a grey form control on the tinted panel, and it hid the list MA's own
-                sheet shows outright behind an extra tap. */}
+                sheet shows outright behind an extra tap. A tapped row stays put with a ring spinning
+                around its + (and locks) until the join is confirmed - per-row, so two quick adds
+                spin independently; it replaced a single "Asking Music Assistant..." line that named
+                no row. The + rides in .mgroup-glyph so the ring can wrap the drawn circle rather
+                than the full-width row. */}
             {(wsOn || live) && addables.length > 0 && (
               <div class="mgroup-adds">
                 <div class="dim sm">{TEXT.media_add_speaker}</div>
                 {addables.map(([id, name]) => (
-                  <button key={id} class="mgroup-addrow" onClick={() => gJoin(id)}>
-                    {I_PLUS}
+                  <button
+                    key={id}
+                    class={`mgroup-addrow${pendingGroup[id] ? " busy" : ""}`}
+                    disabled={!!pendingGroup[id]}
+                    onClick={() => gJoin(id)}
+                  >
+                    <span class="mgroup-glyph">{I_PLUS}</span>
                     <span>{name}</span>
                   </button>
                 ))}

@@ -2821,6 +2821,25 @@ polyline.draft {
   border: 1px solid var(--tdim, var(--line-2));
   border-radius: var(--r-pill);
 }
+/* The +'s pending-ring anchor: the ring must wrap the drawn circle, not the row - .mgroup-addrow
+   is a full-width button, and a ring around 300px of row reads as a broken border, not a spinner.
+   The wrapper sizes itself to the glyph's box, so the ring tracks any resizing of the circle;
+   the svg inside stays still while only the ::after spins. */
+.mgroup-glyph {
+  position: relative;
+  display: flex;
+  flex: none;
+}
+.mgroup-addrow.busy .mgroup-glyph::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spl-rot 0.9s linear infinite;
+  pointer-events: none;
+}
 
 /* The players chip at the foot of the expanded view: who is playing, opening the players panel -
    MA's own furniture (owner's screenshot 4). */
@@ -3179,7 +3198,8 @@ polyline.draft {
   /* The pending ring stops spinning but must still say "working": a full dim circle instead of
      the rotating arc. */
   .mbtn.busy::after,
-  .mplay.busy::after {
+  .mplay.busy::after,
+  .mgroup-addrow.busy .mgroup-glyph::after {
     animation: none;
     border-color: currentColor;
     opacity: 0.4;
