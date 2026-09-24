@@ -2774,20 +2774,28 @@ polyline.draft {
   grid-row: 2;
   grid-column: 2;
   align-self: center;
-  color: var(--fg-3);
+  /* Full contrast, not the old var(--fg-3) dimming: the +/- pair was tiny, faint and hairline all
+     at once (owner's report, September 2026), and these are the panel's actionable controls, not
+     labels. --tfg tracks the album tint; .mpanel's color:inherit below feeds the same value. */
+  color: var(--tfg, var(--fg));
 }
-/* The drawn minus, dressed exactly as the add rows' + (same size, same hairline circle), so the
-   two read as one add/remove pair. It replaced a bare text ✕, which read as "close". */
+/* The drawn minus, dressed exactly as the add rows' + (same size, same circle), so the two read as
+   one add/remove pair. It replaced a bare text ✕, which read as "close". Sized up in September
+   2026 (owner's report: "tiny"): a 20px glyph in a 34px circle - between the chip's 15px label
+   glyph and the 42px transport buttons, the register for list-row controls - with the stroke and
+   the border on currentColor as one weight/colour system. The CSS stroke-width beats the svg's
+   own 1.5 presentation attribute for these two uses only; every other mi() icon keeps it. */
 .mgroup-x .mi {
-  width: 15px;
-  height: 15px;
-  padding: 4px;
+  width: 20px;
+  height: 20px;
+  padding: 6px;
   margin: 0;
-  border: 1px solid var(--tdim, var(--line-2));
+  stroke-width: 2.25;
+  border: 1.5px solid currentColor;
   border-radius: var(--r-pill);
 }
 /* The add-speaker list: a quiet heading and one drawn-+ row per joinable player, replacing the
-   native select (see PlayersPanel). Rows are full-width thumb targets; the + rides in a hairline
+   native select (see PlayersPanel). Rows are full-width thumb targets; the + rides in a drawn
    circle so the row reads as an action, not a label. */
 .mgroup-adds {
   display: flex;
@@ -2809,16 +2817,18 @@ polyline.draft {
   text-align: left;
   cursor: pointer;
 }
+/* The +, matching the minus above stroke for stroke (see .mgroup-x .mi for the sizing story). */
 .mgroup-addrow .mi {
-  width: 15px;
-  height: 15px;
-  padding: 4px;
+  width: 20px;
+  height: 20px;
+  padding: 6px;
   flex: none;
   /* The generic .mi centres itself with auto margins for the transport buttons it was drawn for;
      in this flex row those margins absorb the free space and fling the + to the middle, so they
      come off here and the gap property spaces the row instead. */
   margin: 0;
-  border: 1px solid var(--tdim, var(--line-2));
+  stroke-width: 2.25;
+  border: 1.5px solid currentColor;
   border-radius: var(--r-pill);
 }
 /* The +'s pending-ring anchor: the ring must wrap the drawn circle, not the row - .mgroup-addrow
