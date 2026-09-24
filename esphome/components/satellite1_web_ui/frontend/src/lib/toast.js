@@ -96,13 +96,19 @@ function show(t) {
  */
 export function toast(t) {
   const entry = { id: ++idSeq, count: 1, ...t };
-  if (entry.kind !== "ok") entry.nid = recordNotif(entry);
+  // Deferred past the coalesce paths below: recordNotif dedupes by key+title itself, and a raise
+  // that folds into a visible toast reports through touchNotif - recording it here too would
+  // count the same hit twice on the entry.
+  const record = () => {
+    if (entry.kind !== "ok") entry.nid = recordNotif(entry);
+  };
   const handle = { resolve: () => endToast(entry.id, "expire") };
 
   if (!entry.ttl) {
     // One sticky per key: re-raising an already-standing condition hands back the standing one.
     const dup = entry.key && stickies.find((s) => s.key === entry.key);
     if (dup) return { resolve: () => endToast(dup.id, "expire") };
+    record();
     stickies.push(entry);
     emit();
     return handle;
@@ -114,7 +120,7 @@ export function toast(t) {
       // adopts the newest title and intent - so a ×12 toast tapped lands on the latest line the
       // burst produced, not the first.
       transient = { ...transient, count: transient.count + 1, title: entry.title, sub: entry.sub, intent: entry.intent };
-      if (transient.nid) touchNotif(transient.nid, { count: transient.count, title: entry.title, sub: entry.sub, intent: entry.intent });
+      if (transient.nid) touchNotif(transient.nid, { title: entry.title, sub: entry.sub, intent: entry.intent });
       clearTimeout(hideTimer);
       hideTimer = setTimeout(() => endTransient("expire"), entry.ttl);
       emit();
@@ -126,18 +132,20 @@ export function toast(t) {
       queued.title = entry.title;
       queued.sub = entry.sub;
       queued.intent = entry.intent;
-      if (queued.nid) touchNotif(queued.nid, { count: queued.count, title: entry.title, sub: entry.sub, intent: entry.intent });
+      if (queued.nid) touchNotif(queued.nid, { title: entry.title, sub: entry.sub, intent: entry.intent });
       return { resolve: () => endToast(queued.id, "expire") };
     }
     const at = recent.get(entry.key);
     if (at && Date.now() - at < RECENT_MS) {
       // The rate floor: just-told news stays told on screen - but it still happened, so the
-      // history keeps the fresh entry as an unhandled fact.
+      // history takes the hit (deduped into its standing row) as an already-settled fact.
+      record();
       if (entry.nid) settleNotif(entry.nid, "expire");
       return handle;
     }
   }
 
+  record();
   if (!transient) {
     show(entry);
   } else if (entry.kind === "err" && transient.kind !== "err") {

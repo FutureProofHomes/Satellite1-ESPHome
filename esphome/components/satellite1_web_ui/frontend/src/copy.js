@@ -393,6 +393,9 @@ export const TEXT = {
   // the archive names itself so an empty archive does not read as a bug.
   notif_empty: "Nothing here from the past 24 hours.",
   notif_empty_arch: "Nothing archived yet.",
+  // One press, every unhandled row to Archive, the badge to zero. "Clear", not "delete": the rows
+  // survive under the Archive pill for their 24 hours.
+  notif_clear: "Clear All",
   notif_foot: "Notifications clear after 24 hours.",
   // Relative times on the rows: minutes under an hour, hours to the 24-hour edge.
   notif_now: "just now",
@@ -439,7 +442,7 @@ export const TEXT = {
   // Shown in place of the transcript, not instead of the card. The card carries the assistant's phase in
   // its header, so it has something to say from the moment the device answers; this only fills the space
   // where the lines will go. Reworded to the owner's text, September 2026.
-  nothing_said: "A transcription of your voice interactions are displayed here.",
+  nothing_said: "Voice transcriptions are displayed here.",
 
   // The media footer's idle line. The footer stays on every page - the volume inside still sets the
   // level whatever plays next arrives at - so this fills the space the track title will use.

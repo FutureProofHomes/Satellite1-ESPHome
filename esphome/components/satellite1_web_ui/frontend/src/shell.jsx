@@ -21,7 +21,7 @@ import {
   useHaData,
   useSelection,
 } from "./lib/device.js";
-import { archiveNotif, listNotifs, notifCount, setNotifDevice, subscribeNotifs } from "./lib/notif.js";
+import { archiveAllNotifs, archiveNotif, listNotifs, notifCount, setNotifDevice, subscribeNotifs } from "./lib/notif.js";
 import { dismissToast, subscribeToasts, tapToast, toast, toastIntent } from "./lib/toast.js";
 import { LoginScreen } from "./login.jsx";
 import { MediaFooter } from "./media.jsx";
@@ -964,6 +964,15 @@ function NotifDrawer({ onFix, onClose }) {
         <div class="mgroup-head dim sm" data-grab>
           {TEXT.notif_title}
           <Hint text={HINTS.notif} />
+          {/* Clear All: every unhandled row to Archive, the badge to zero, one press (owner
+              request, September 2026). Only while there is something to clear - a dead button in
+              an empty drawer is furniture. Archived rows are untouched: this is "mark all
+              handled", not delete. */}
+          {all.some((e) => e.state === "active") && (
+            <button class="btn ghost sm nclear" onClick={archiveAllNotifs}>
+              {TEXT.notif_clear}
+            </button>
+          )}
         </div>
         <div class="npills" role="tablist">
           {NOTIF_FILTERS.map(([id, label]) => (

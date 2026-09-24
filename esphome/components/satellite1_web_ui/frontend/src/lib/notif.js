@@ -109,19 +109,46 @@ export function subscribeNotifs(fn) {
   return () => subs.delete(fn);
 }
 
-/** A new toast's entry, born pending. Returns the id the toast store keeps for settlement. */
-export function recordNotif({ kind, title, sub, count, go, intent, act }) {
-  const e = { id: ++idSeq, ts: Date.now(), state: "pending", kind, title, sub, count: count || 1, go, intent, act };
+/**
+ * A toast's entry. Deduplicated by key and title against the whole 24-hour window, not just the
+ * on-screen coalesce (owner's screenshot, September 23: a reload re-raises the update toast, and a
+ * per-raise entry stacked four "Update v0.2.1 is available" rows and re-counted the badge each
+ * time). The same news re-announced folds into its one row - the ×N badge, a fresh clock, the
+ * newest intent - and the row's state stands: an active entry stays counted once, and an archived
+ * one stays archived, because handled news re-announcing itself is not new work (settleNotif's
+ * early-return keeps the re-raised toast's expiry from resurrecting it). Title is part of the
+ * identity on purpose: "update" is one key across versions, and v0.2.2 arriving after v0.2.1 was
+ * archived is genuinely new news that deserves a new row and a badge.
+ *
+ * Returns the id the toast store keeps for settlement, whichever path produced it.
+ */
+export function recordNotif({ kind, key, title, sub, count, go, intent, act }) {
+  if (key) {
+    const dup = entries.find((x) => x.key === key && x.title === title);
+    if (dup) {
+      dup.count += 1;
+      dup.ts = Date.now();
+      if (sub !== undefined) dup.sub = sub;
+      if (intent !== undefined) dup.intent = intent;
+      save();
+      return dup.id;
+    }
+  }
+  const e = { id: ++idSeq, ts: Date.now(), state: "pending", kind, key, title, sub, count: count || 1, go, intent, act };
   entries.push(e);
   save();
   return e.id;
 }
 
-/** A coalescing burst updating its one entry: newest title/intent win, the count and clock move. */
+/** A coalescing burst while its toast is still up: one more hit on the one entry - the count and
+ *  clock move, the newest title/intent win. The count increments here rather than mirroring the
+ *  toast's own badge, because the entry may already carry hits from before this toast was born. */
 export function touchNotif(id, patch) {
   const e = entries.find((x) => x.id === id);
   if (!e) return;
-  Object.assign(e, patch, { ts: Date.now() });
+  e.count += 1;
+  e.ts = Date.now();
+  Object.assign(e, patch);
   save();
 }
 
@@ -144,4 +171,17 @@ export function archiveNotif(id) {
   if (!e || e.state === "archived") return;
   e.state = "archived";
   save();
+}
+
+/** Clear All: every unhandled entry archived in one press, the badge to zero. Pending entries are
+ *  left alone - their toast is still on screen and its own settlement decides their fate. */
+export function archiveAllNotifs() {
+  let moved = false;
+  for (const e of entries) {
+    if (e.state === "active") {
+      e.state = "archived";
+      moved = true;
+    }
+  }
+  if (moved) save();
 }

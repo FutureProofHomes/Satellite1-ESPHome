@@ -772,6 +772,11 @@ textarea {
 .npane {
   gap: var(--s-2);
 }
+/* Clear All, on the header's far edge - the flex head's auto margin is the whole layout. */
+.nclear {
+  margin-left: auto;
+  flex: none;
+}
 .npills {
   display: flex;
   gap: var(--s-1);
@@ -1858,6 +1863,11 @@ input[type="range"]:disabled {
 }
 
 .utt {
+  /* Flex, so the label and the utterance are two columns: the text (an anonymous flex item) wraps
+     inside its own box, and a long line's continuation aligns under its first word rather than
+     sliding back beneath the label. Baseline-aligned because the label's type is a size smaller. */
+  display: flex;
+  align-items: baseline;
   margin: 0 0 var(--s-1);
   font-size: var(--t-m);
   color: var(--fg-2);
@@ -1866,7 +1876,7 @@ input[type="range"]:disabled {
   color: var(--fg);
 }
 .utt-who {
-  display: inline-block;
+  flex: none;
   /* Wide enough for "ASSIST:", the longer of the two labels, so both utterances start their text at
      the same x - the labels differ in length and would otherwise stagger the column. */
   min-width: 52px;

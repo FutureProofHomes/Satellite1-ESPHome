@@ -473,6 +473,7 @@ rather than showing the cache from the last sync.
 | `notif_arch` | Archive |
 | `notif_empty` | Nothing here from the past 24 hours. |
 | `notif_empty_arch` | Nothing archived yet. |
+| `notif_clear` | Clear All |
 | `notif_foot` | Notifications clear after 24 hours. |
 | `notif_now` | just now |
 | `notif_ago` | %s ago |
@@ -484,7 +485,7 @@ with the toast's own reveal (the log line flashed, the card pulsed), and ✕ or 
 right files the row under Archive - handled, kept a day, still tappable. Tapping a live toast on
 the notch archives it directly, so it never reaches the badge. `HINTS.notif` carries the drawer's
 ⓘ explanation.
-| `nothing_said` | A transcription of your voice interactions are displayed here. |
+| `nothing_said` | Voice transcriptions are displayed here. |
 | `media_idle` | Nothing playing. Group streams and media sent from Home Assistant show up here. |
 | `media_idle_bar` | Nothing playing |
 | `media_src_group` | group stream |
