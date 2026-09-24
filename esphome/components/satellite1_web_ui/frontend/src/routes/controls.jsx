@@ -487,18 +487,9 @@ function VoiceStatus({ ctx, voice }) {
         )}
       </div>
 
-      {mute && (
-        <Row label="Mute microphones" hint={HINTS.mute}>
-          <Toggle
-            checked={mute.value === true || mute.state === "ON"}
-            onChange={(v) => post(pathFor(ctx, "mute_mics", v ? "turn_on" : "turn_off"))}
-          />
-        </Row>
-      )}
-
-      {/* Last in the card per the owner: the transcript is what you read, this is what you set. The
-          hint is what tells it apart from Remote routing's "Remote TTS volume" now that the two no
-          longer sit one card apart. */}
+      {/* Row order below the transcript is the owner's (September 2026): volume, then finished
+          speaking detection, then mute. The volume hint is what tells it apart from Remote routing's
+          "Remote TTS volume" now that the two no longer sit one card apart. */}
       {vol && (
         <Row label="Voice Volume Override" hint={HINTS.voice_override}>
           <Slider
@@ -522,6 +513,15 @@ function VoiceStatus({ ctx, voice }) {
               ["relaxed", "Relaxed"],
             ]}
             onChange={setFsd}
+          />
+        </Row>
+      )}
+
+      {mute && (
+        <Row label="Mute microphones" hint={HINTS.mute}>
+          <Toggle
+            checked={mute.value === true || mute.state === "ON"}
+            onChange={(v) => post(pathFor(ctx, "mute_mics", v ? "turn_on" : "turn_off"))}
           />
         </Row>
       )}
