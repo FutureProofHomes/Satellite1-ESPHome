@@ -61,16 +61,16 @@ export function LoginScreen({ onSignedIn }) {
   const pwRef = useRef(null);
   const pollTimer = useRef(null);
   const live = useRef(true);
-  // The identity line in the hero: exactly one string, friendly name > mDNS name > the host the
-  // browser is already on. Seeded with location.hostname so the line is never empty and never jumps
-  // from blank to filled - whoami upgrades it in place when it answers (one visible text swap,
-  // accepted). On a wall of identical login screens this is the fact that says which device this is.
+  // The identity line beneath the card: exactly one string, friendly name > mDNS name > the host
+  // the browser is already on. Seeded with location.hostname so the line is never empty and never
+  // jumps from blank to filled - whoami upgrades it in place when it answers (one visible text
+  // swap, accepted). On a wall of identical login screens this says which device this is.
   const [dev, setDev] = useState(location.hostname);
 
   useEffect(() => {
     whoami().then((who) => {
       if (!who) return;
-      // fn > "<name>.local" - the same priority as the line below the logo. `fn` is absent only on
+      // fn > "<name>.local" - the same priority as the line below the card. `fn` is absent only on
       // an older firmware body, which cannot happen inside one image but costs nothing to survive.
       const label = who.fn || (who.name ? `${who.name}.local` : null);
       if (label) setDev(label);
@@ -176,12 +176,7 @@ export function LoginScreen({ onSignedIn }) {
       <div class="login-glow" aria-hidden="true" />
       <div class="login-hero">
         <Logo />
-        {/* The product name, then which one: the identity line carries the friendly name (or the
-            host as a fallback) so ten identical login pages on one LAN are tellable apart. The
-            splash overlay reuses the .login-* classes but not this element - it renders its own
-            markup - so the line cannot bleed there. */}
         <h1 class="login-name">Satellite1</h1>
-        <div class="login-dev">{dev}</div>
         <div class="login-sub">{TEXT.login_sub}</div>
       </div>
 
@@ -277,6 +272,12 @@ export function LoginScreen({ onSignedIn }) {
           <div class="login-hint">{TEXT.login_pw_hint}</div>
         </form>
       </div>
+
+      {/* Which device this login page belongs to: the friendly name (or the host as a fallback),
+          beneath the card as a quiet caption so ten identical login pages on one LAN are tellable
+          apart. The splash overlay reuses the .login-* classes but not this element - it renders
+          its own markup - so the line cannot bleed there. */}
+      <div class="login-dev">{dev}</div>
     </div>
   );
 }

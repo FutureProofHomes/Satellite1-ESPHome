@@ -3219,19 +3219,6 @@ polyline.draft {
   margin: 0;
   text-align: center;
 }
-/* The identity line between the product name and the tagline: which device this login page belongs
-   to. Ellipsis, no wrap (the .tname treatment) - a customer's friendly name can be long and the
-   hero must not reflow around it. Only login.jsx renders the element; the splash overlay reuses the
-   other .login-* classes but not this one. */
-.login-dev {
-  color: var(--fg-3);
-  font-size: 0.85rem;
-  max-width: min(400px, 90vw);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-align: center;
-}
 .login-sub {
   color: var(--fg-3);
   font-size: 0.85rem;
@@ -3242,6 +3229,22 @@ polyline.draft {
   flex-direction: column;
   gap: 14px;
   padding: 20px;
+  z-index: 1;
+}
+/* The identity line beneath the card: which device this login page belongs to. A quiet caption in
+   the .login-hint register (--fg-4, small), pulled in against the column's 28px gap so it reads as
+   the card's footnote rather than a stray sibling. Ellipsis, no wrap (the .tname treatment) - a
+   customer's friendly name can be long and the column must not reflow around it. Only login.jsx
+   renders the element; the splash overlay reuses the other .login-* classes but not this one. */
+.login-dev {
+  color: var(--fg-4);
+  font-size: 0.78rem;
+  max-width: min(400px, 90vw);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  margin-top: -12px;
   z-index: 1;
 }
 .login-device {
@@ -3271,10 +3274,13 @@ polyline.draft {
     animation: login-breathe 2.8s ease-in-out infinite;
   }
   .login-hero,
-  .login-card {
+  .login-card,
+  .login-dev {
     animation: login-rise 0.45s ease-out both;
   }
-  .login-card {
+  /* The identity line rises with the card it captions - one movement, not a straggler. */
+  .login-card,
+  .login-dev {
     animation-delay: 0.08s;
   }
 }
