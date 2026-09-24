@@ -535,6 +535,9 @@ class WebUIHandler : public AsyncWebHandler {
 #ifdef USE_MEDIA_PLAYER
     MEDIA,
     MEDIA_SET,
+#ifdef USE_SAT1_WEB_UI_SENDSPIN
+    MEDIA_ART,
+#endif
 #endif
 #ifdef USE_SAT1_WEB_UI_SOUNDS
     SOUND,
@@ -616,6 +619,12 @@ class WebUIHandler : public AsyncWebHandler {
 #ifdef USE_MEDIA_PLAYER
   void handle_media_(AsyncWebServerRequest *request);
   void handle_media_set_(AsyncWebServerRequest *request);
+#ifdef USE_SAT1_WEB_UI_SENDSPIN
+  /// GET /api/sat1/media/art: the current track's artwork, fetched from its plain-http source and
+  /// streamed back - the mixed-content escape hatch for the app inside an https Home Assistant
+  /// ingress panel. See the handler's comment for why it takes no parameters.
+  void handle_media_art_(AsyncWebServerRequest *request);
+#endif
 
   /// Which player a command or the card is about, resolved fresh each time it is asked.
   ///
@@ -830,6 +839,11 @@ class WebUIHandler : public AsyncWebHandler {
   /// track.
   std::basic_string<char, std::char_traits<char>, RAMAllocator<char>> media_meta_json_;
   Mutex media_meta_lock_;
+
+  /// The current artwork URL, raw beside the escaped copy inside media_meta_json_: the art relay
+  /// (handle_media_art_) needs it as a fetchable string, and un-escaping the fragment back out
+  /// would be the wrong direction. Written with the fragment under the same lock, read under it.
+  std::string media_art_url_;
 
   /// The response body the endpoint assembles: core + numbers + fragment. PSRAM and persistent for
   /// the same reason the HA payload's buffers are - httpd_resp_send copies synchronously, the

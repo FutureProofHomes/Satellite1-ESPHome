@@ -27,6 +27,10 @@
 #include <esp_partition.h>
 #endif
 
+#ifdef USE_SAT1_WEB_UI_SENDSPIN
+#include <esp_http_client.h>
+#endif
+
 #ifdef USE_API
 #include "esphome/components/api/api_server.h"
 #endif
@@ -259,6 +263,12 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
 #ifdef USE_MEDIA_PLAYER
   if (url == "/api/sat1/media")
     return Route::MEDIA;
+#ifdef USE_SAT1_WEB_UI_SENDSPIN
+  // No clash with MEDIA_SET's /api/sat1/media/ prefix: that arm only matches POSTs, and this
+  // branch is already inside the GET half of the split.
+  if (url == "/api/sat1/media/art")
+    return Route::MEDIA_ART;
+#endif
 #endif
 #ifdef USE_SAT1_WEB_UI_SOUNDS
   // A prefix like MEDIA_SET's: the sound's name rides the path. Exempt in the session gate for the
@@ -400,6 +410,11 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
     case Route::MEDIA_SET:
       this->handle_media_set_(request);
       break;
+#ifdef USE_SAT1_WEB_UI_SENDSPIN
+    case Route::MEDIA_ART:
+      this->handle_media_art_(request);
+      break;
+#endif
 #endif
 #ifdef USE_SAT1_WEB_UI_SOUNDS
     case Route::SOUND:
@@ -1401,6 +1416,121 @@ static void append_json_escaped_(std::basic_string<char, std::char_traits<char>,
   }
 }
 
+/// GET /api/sat1/media/art - the current track's artwork, relayed through the device.
+///
+/// Exists for one caller: the app running inside an https Home Assistant ingress panel, where the
+/// Sendspin artwork URL - Music Assistant's plain-http image proxy - is mixed content the browser
+/// refuses before any request is made. This device sits on the same LAN as that server, so it
+/// fetches the image over http and streams it back; through the panel the bytes then ride HA's own
+/// https origin end to end. Direct visits never call this (the app uses the URL as-is there - see
+/// mapArt in lib/device.js), so outside a panel the endpoint costs nothing.
+///
+/// Deliberately parameterless: it serves the URL the device itself holds from the metadata message,
+/// never one the caller names, so it cannot be turned into an open proxy into the LAN. http:// only
+/// - an https artwork URL needs no relay (the page can embed it anywhere), and TLS here would mean
+/// a cert bundle for a fetch the page could already make itself.
+///
+/// Every failure is the same 404: "no art", "art host down" and "art host answered 500" all render
+/// as the app's placeholder note icon, and no second word would change what the user sees. The
+/// content type is sniffed from the first bytes (JPEG, PNG, WebP, GIF cover what MA and the
+/// streaming CDNs serve; esp_http_client offers no tidy response-header getter and browsers sniff
+/// <img> bytes regardless) and the response is cacheable: the app's ?v= carries a hash of the
+/// source URL, so a track change is a new URL here and an unchanged track is a browser-cache hit
+/// rather than a second LAN fetch. The wildcard CORS header is deliberate - raw httpd responses
+/// bypass init_response_'s default, and the artwork tint reads pixels back through a canvas, which
+/// a cross-origin image without it would taint.
+///
+/// Blocking the httpd task for the transfer's duration is accepted the way the crash dump's send
+/// accepts it: a LAN image is a few hundred KB on a fast link, and the size cap below bounds a
+/// broken or hostile upstream that streams forever - past it the response stops without the final
+/// chunk, so the browser sees a truncated body rather than a clean image.
+void WebUIHandler::handle_media_art_(AsyncWebServerRequest *request) {
+  std::string url;
+  {
+    LockGuard guard(this->media_meta_lock_);
+    url = this->media_art_url_;
+  }
+  if (url.size() <= 7 || strncmp(url.c_str(), "http://", 7) != 0) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  esp_http_client_config_t cfg{};
+  cfg.url = url.c_str();
+  cfg.timeout_ms = 8000;
+  esp_http_client_handle_t client = esp_http_client_init(&cfg);
+  if (client == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  // PSRAM scratch like the crash dump's: the httpd task's stack is not where 4KB belongs.
+  RAMAllocator<char> alloc(RAMAllocator<char>::ALLOC_EXTERNAL);
+  constexpr size_t CHUNK = 4096;
+  char *buf = alloc.allocate(CHUNK);
+  if (buf == nullptr) {
+    esp_http_client_cleanup(client);
+    this->send_low_memory_(request);
+    return;
+  }
+
+  if (esp_http_client_open(client, 0) != ESP_OK || esp_http_client_fetch_headers(client) < 0 ||
+      esp_http_client_get_status_code(client) != 200) {
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    alloc.deallocate(buf, CHUNK);
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  constexpr size_t MAX_ART = 2 * 1024 * 1024;
+  size_t total = 0;
+  bool first = true;
+  bool ok = true;
+  while (ok) {
+    const int n = esp_http_client_read(client, buf, static_cast<int>(CHUNK));
+    if (n < 0)
+      ok = false;
+    if (n <= 0)
+      break;
+    if (first) {
+      // Headers land with the first body bytes in hand, which is what makes the sniff possible.
+      // All three set_* calls store pointers; the literals live forever.
+      first = false;
+      const auto *u = reinterpret_cast<const uint8_t *>(buf);
+      const char *type = "application/octet-stream";
+      if (n >= 3 && u[0] == 0xFF && u[1] == 0xD8 && u[2] == 0xFF) {
+        type = "image/jpeg";
+      } else if (n >= 8 && memcmp(u, "\x89PNG\r\n\x1a\n", 8) == 0) {
+        type = "image/png";
+      } else if (n >= 12 && memcmp(u, "RIFF", 4) == 0 && memcmp(u + 8, "WEBP", 4) == 0) {
+        type = "image/webp";
+      } else if (n >= 4 && memcmp(u, "GIF8", 4) == 0) {
+        type = "image/gif";
+      }
+      httpd_resp_set_type(*request, type);
+      httpd_resp_set_hdr(*request, "Cache-Control", "max-age=86400");
+      httpd_resp_set_hdr(*request, "Access-Control-Allow-Origin", "*");
+    }
+    total += static_cast<size_t>(n);
+    if (total > MAX_ART) {
+      ok = false;
+      break;
+    }
+    ok = httpd_resp_send_chunk(*request, buf, n) == ESP_OK;
+  }
+  if (ok && first) {
+    // Opened cleanly but the body was empty - a 200 with zero image bytes is upstream lying, and
+    // the placeholder is still the right rendering.
+    request->send(404, "application/json", "{\"ok\":0}");
+  } else if (ok) {
+    httpd_resp_send_chunk(*request, nullptr, 0);
+  }
+  esp_http_client_close(client);
+  esp_http_client_cleanup(client);
+  alloc.deallocate(buf, CHUNK);
+}
+
 void WebUIHandler::media_set_meta(const char *title, const char *artist, const char *album, const char *art,
                                   uint32_t dur_ms) {
   // Built into a fresh string and swapped under the lock, so a poll on the httpd task never reads a
@@ -1433,6 +1563,14 @@ void WebUIHandler::media_set_meta(const char *title, const char *artist, const c
   this->media_dur_ms_.store(dur_ms, std::memory_order_relaxed);
   LockGuard guard(this->media_meta_lock_);
   this->media_meta_json_.swap(next);
+  // The raw URL beside the escaped fragment, for the art relay. The same 320-byte cap as the JSON
+  // field, but over-cap clears rather than truncates: a cut URL fetches nothing, and the relay
+  // answering 404 (the app's placeholder) beats it answering someone else's error page.
+  if (art == nullptr || art[0] == '\0' || strlen(art) > 320) {
+    this->media_art_url_.clear();
+  } else {
+    this->media_art_url_.assign(art);
+  }
 }
 
 void WebUIHandler::media_set_ctrl(bool shuffle, uint8_t repeat, uint16_t supported, uint32_t seek_max_ms) {
