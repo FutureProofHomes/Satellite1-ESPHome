@@ -501,6 +501,10 @@ satellite1_web_ui:
       btn_mute: btn_left
       btn_action: btn_action
       line_out: line_out_sensor
+      # Whether the stop model is running right now, published by the stop_word_arm/disarm wrapper
+      # scripts (voice_assistant.yaml). The stop_word switch above is the preference; this is the
+      # runtime truth, and the Wake Words card's "Listening"/"Paused" label is their difference.
+      stop_active: stop_word_active
 
     text_sensors:
       network: network_status_sensor

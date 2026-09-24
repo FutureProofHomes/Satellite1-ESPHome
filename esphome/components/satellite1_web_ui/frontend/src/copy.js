@@ -533,8 +533,13 @@ export const TEXT = {
   ww_tune_btn: "Tune it!",
   // The chime bell toggle's accessible name (the control itself is the bell).
   ww_chime: "Wake chime",
-  // The radar's live-dot grammar on a freshly tuned row: the graph is streaming.
-  lg_live: "Live",
+  // The tuned rows' status dot, green: the model is loaded and this word works right now. Renamed
+  // from lg_live/"Live" (owner call, September 2026): "listening" says what the device is doing.
+  lg_listening: "Listening",
+  // The stop word's row while armed but not currently running, yellow: its model only turns on
+  // during spoken answers, routed announcements and ringing timers (the stop_word_active sensor
+  // is the ground truth, published by the same firmware scripts that flip the model).
+  lg_paused: "Paused",
   // A tapped hollow mark's suffix in its popover: it almost fired, and didn't.
   lg_ignored_short: "almost",
   // The axis label every 0-100% graph carries in its lower-left (owner call - it replaced the

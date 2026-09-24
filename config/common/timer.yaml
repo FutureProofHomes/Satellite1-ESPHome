@@ -16,8 +16,9 @@ switch:
     internal: true
     restore_mode: ALWAYS_OFF
     on_turn_off:
-      # Disable stop wake word
-      - micro_wake_word.disable_model: stop
+      # Disable stop wake word (through the wrapper, which also publishes stop_word_active for the
+      # web UI's status label - never call disable_model: stop directly, see voice_assistant.yaml)
+      - script.execute: stop_word_disarm
       - script.execute: disable_repeat
       # Stop any current annoucement (ie: stop the timer ring mid playback)
       - if:
@@ -41,8 +42,8 @@ switch:
     on_turn_on:
       # Duck audio
       - script.execute: audio_gain_reconcile
-      # Enable stop wake word
-      - micro_wake_word.enable_model: stop
+      # Enable stop wake word (through the wrapper - see on_turn_off above)
+      - script.execute: stop_word_arm
       # Ring timer
       - script.execute: ring_timer
       # Mirror the ring onto the routing targets (tts_routing.yaml; self-gated on the Remote Timer

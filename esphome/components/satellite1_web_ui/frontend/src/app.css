@@ -4073,7 +4073,9 @@ polyline.draft {
   filter: brightness(0.92);
 }
 
-/* The freshly tuned row's status: the radar's live-dot grammar - the graph is streaming. */
+/* The tuned rows' status: the radar's live-dot grammar, green now rather than accent-blue (owner
+   call, September 2026) - "Listening" is a state, and --ok is the state colour, AA-safe in both
+   themes. The .paused variant is the stop row's armed-but-idle state, in --warn. */
 .mb-live {
   margin-left: auto;
   display: inline-flex;
@@ -4081,7 +4083,7 @@ polyline.draft {
   gap: 5px;
   font-size: var(--t-xs);
   font-weight: 600;
-  color: var(--accent);
+  color: var(--ok);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   white-space: nowrap;
@@ -4090,7 +4092,13 @@ polyline.draft {
   width: 7px;
   height: 7px;
   border-radius: var(--r-pill);
-  background: var(--accent);
+  background: var(--ok);
+}
+.mb-live.paused {
+  color: var(--warn);
+}
+.mb-live.paused .mb-live-dot {
+  background: var(--warn);
 }
 
 /* The graph itself. The touch layer owns the pointer (TouchGraph): draggable in placement, where

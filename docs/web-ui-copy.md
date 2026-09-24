@@ -200,13 +200,19 @@ The **Living Graph** is one SVG in two sizes. Collapsed on the row it is the wor
 ages, landing with an orbit ripple in the same beat the row flashes (there is no "Heard it" text —
 the animation is the announcement). Hollow amber marks are close calls, sunk in the frost. Tap a
 dot for its story (`pct · time-ago`, `lg_ignored_short` suffixing an almost-fire); tap the knob
-and placement reopens over everything the graph knows. A freshly tuned row wears the radar's
-live-dot grammar (`lg_live`) — the graph is streaming.
+and placement reopens over everything the graph knows. A tuned row wears the radar's live-dot
+grammar in green (`lg_listening`, renamed from `lg_live`/"Live" — "listening" says what the
+device is doing).
 
 The **stop word** is a permanent third row displaying as **"Stop"** (capitalized everywhere; the
 model reports it lowercase), and its pill IS its switch — a filled iOS-style toggle with the title
-inside the button, soft green (`--tgl-on`) with the white knob at the right edge while listening,
-soft red (`--tgl-off`) with the knob slid left while off. Off hides the graph entirely
+inside the button, soft green (`--tgl-on`) with the white knob at the right edge while armed,
+soft red (`--tgl-off`) with the knob slid left while off. Its status label is honest about the
+runtime state: the stop model only actually runs during spoken answers, routed announcements and
+ringing timers, so the row reads a yellow-dot **`lg_paused`** ("Paused") while armed but idle and
+flips to green `lg_listening` the moment the firmware arms the model (the `stop_word_active`
+sensor, published by the same scripts that flip it — the running state wins even with the switch
+off, because a ringing timer arms it regardless). Off hides the graph entirely
 (`stop_off_note`): a disabled model is unloaded, so there is nothing to draw. The **wake chime**
 in the card header wears the same switch grammar with the bell inside — green and ringing, or red
 and struck through — each with an ⓘ beside it.
@@ -233,7 +239,7 @@ sink into or surface out of the frost live — while the readout narrates the tr
 `tn2_under` in the safe zone; `tn2_high`, amber-toned, at the quietest attempt; `tn2_low`,
 red-toned, when amber dots sit past the line — copy never attributes a firing to a source, owner
 call: "we don't know it's the TV"). Apply is the end: the session closes, the row returns wearing
-`lg_live`, and the first real firing confirms itself by landing with its ripple. The knob-tap
+`lg_listening`, and the first real firing confirms itself by landing with its ripple. The knob-tap
 **quick edit** (`tn2_title_quick`, '"Okay Nabu" · move the line') reopens placement with no
 session and no re-recording — the persisted voice stats feed the readout as data, never drawn as a
 band — with **Redo voice rounds** (`tn2_redo`) beside Apply for the full re-measure. Reset default

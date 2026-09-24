@@ -62,6 +62,10 @@ micro_wake_word:
       id: hey_jarvis
     - model: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/wake-word/okay_nabu.json
       id: okay_nabu
+    # Never call enable_model/disable_model: stop directly - go through the stop_word_arm /
+    # stop_word_disarm scripts below, which pair the flip with publishing stop_word_active. The
+    # web UI's "Listening"/"Paused" status label rides that sensor, and a direct call would let
+    # the label drift from the model's real state.
     - model: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/wake-word/stop.json
       id: stop
       internal: true
@@ -378,6 +382,25 @@ script:
       # Enable stop wake word
       # - lambda: id(stop).enable();
 
+  # The only two ways the stop model may be flipped. Each pairs the enable/disable with publishing
+  # stop_word_active in the same instant, so the web UI's "Listening"/"Paused" label flips when
+  # the firmware flips, by construction - the publish and the flip cannot separate, and the state
+  # rides the /events stream the app already holds open. Every call site below and in timer.yaml
+  # goes through these; see the note on the model definition above.
+  - id: stop_word_arm
+    then:
+      - micro_wake_word.enable_model: stop
+      - binary_sensor.template.publish:
+          id: stop_word_active
+          state: ON
+
+  - id: stop_word_disarm
+    then:
+      - micro_wake_word.disable_model: stop
+      - binary_sensor.template.publish:
+          id: stop_word_active
+          state: OFF
+
   # Arms the stop word for an announcement this device did not produce - a response another
   # Satellite1 routed here, or a tts.speak - so the person standing next to whichever speaker is
   # talking can say "stop" and be heard by it. Own responses are activate_stop_word_once's job
@@ -410,7 +433,7 @@ script:
               - media_player.is_announcing:
                   id: external_media_player
           then:
-            - micro_wake_word.enable_model: stop
+            - script.execute: stop_word_arm
             - wait_until:
                 not:
                   media_player.is_announcing:
@@ -421,7 +444,7 @@ script:
                     - switch.is_off: timer_ringing
                     - lambda: 'return !id(tts_playing);'
                 then:
-                  - micro_wake_word.disable_model: stop
+                  - script.execute: stop_word_disarm
 
   - id: activate_stop_word_once
     then:
@@ -435,7 +458,7 @@ script:
               - switch.is_off: timer_ringing
               - switch.is_on: stop_word_interrupt
           then:
-            - micro_wake_word.enable_model: stop
+            - script.execute: stop_word_arm
             - wait_until:
                 not:
                   media_player.is_announcing:
@@ -444,7 +467,7 @@ script:
                 condition:
                   switch.is_off: timer_ringing
                 then:
-                  - micro_wake_word.disable_model: stop
+                  - script.execute: stop_word_disarm
 
   # Single owner of the shared output gain. The mixer has no per-pipeline gain of its own (a
   # source speaker's set_volume forwards straight to the shared output speaker), so the only way
@@ -606,6 +629,19 @@ switch:
     internal: true
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
+
+binary_sensor:
+  # Whether the stop model is running right now - published by stop_word_arm/stop_word_disarm in
+  # the same instant they flip the model, which is what keeps it honest (the scripts are the only
+  # callers, see the note on the model definition). The stop_word_interrupt switch above is the
+  # preference; this is the runtime state, and the difference is exactly what the web UI's
+  # "Listening"/"Paused" label reports. internal: true like the switch - a web-app fact, reached
+  # over the web server's /events under include_internal. No restore: the model is disabled at
+  # boot and this initialises false to match.
+  - platform: template
+    id: stop_word_active
+    name: "Stop Word Active"
+    internal: true
 
 # The "Wake word sensitivity" selects are gone (owner decision, September 20 2026). Sensitivity is
 # the Wake Word Tuner's job now - the web app measures the room and the customer's voice and applies

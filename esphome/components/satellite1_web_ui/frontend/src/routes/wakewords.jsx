@@ -650,9 +650,9 @@ function ChimeBell({ ctx }) {
 
 /**
  * One word's row: the pill (title + inline-picker chevron; Stop: the switch itself), the transient
- * right slot (LIVE dot, download progress, "off"), the untuned row's Tune it! button, then the
- * living graph - or the inline picker in its place while the pill is open - the sub line, and the
- * Voice Pipeline select.
+ * right slot (green "Listening" dot, the stop row's yellow "Paused", download progress, "off"),
+ * the untuned row's Tune it! button, then the living graph - or the inline picker in its place
+ * while the pill is open - the sub line, and the Voice Pipeline select.
  */
 function WordRow({
   first,
@@ -671,6 +671,7 @@ function WordRow({
   onBtn,
   right,
   live,
+  paused,
   graph,
   picker,
   sub,
@@ -700,7 +701,14 @@ function WordRow({
         {live ? (
           <span class="mb-live">
             <span class="mb-live-dot" />
-            {TEXT.lg_live}
+            {TEXT.lg_listening}
+          </span>
+        ) : paused ? (
+          // The stop row only: armed but its model is not running right now (see stopRow). Yellow,
+          // because it is neither the green truth nor an error - just the honest in-between.
+          <span class="mb-live paused">
+            <span class="mb-live-dot" />
+            {TEXT.lg_paused}
           </span>
         ) : (
           <span class="mb-right">{right || ""}</span>
@@ -1384,6 +1392,13 @@ export function WakeWords({ ctx }) {
 
   const stopSwitch = entity(ctx, "stop_word");
   const stopOn = stopSwitch ? stopSwitch.value === true || stopSwitch.state === "ON" : false;
+  // The stop model's runtime state, published by the firmware's stop_word_arm/disarm scripts in
+  // the same instant they flip the model (voice_assistant.yaml) and pushed over /events. The
+  // switch above is the preference; this is the truth the "Listening"/"Paused" label reports.
+  // null on firmware without the sensor, in which case the row falls back to the old
+  // switch-implied behaviour - never a false "Paused".
+  const stopActive = entity(ctx, "stop_active");
+  const stopRunning = stopActive ? stopActive.value === true || stopActive.state === "ON" : null;
   const stopw = wake?.stopw || null;
 
   const assistNote = !assist.ready && activeWords.length > 0 && (
@@ -1508,6 +1523,13 @@ export function WakeWords({ ctx }) {
     if (!stopw || !stopSwitch) return null;
     const tuned = stopOn && stopw.cut > 0;
     const isHot = hot && hot.word === "stop";
+    // Three states where there used to be two (owner's report, September 2026: the model is
+    // disabled in steady state, so a standing "Live" was a lie). Green "Listening" whenever the
+    // model is genuinely running - the running state wins even with the switch off, because a
+    // ringing timer arms it regardless. Yellow "Paused" while armed but idle, tuned or not (a
+    // paused stop word is paused either way). Switch off keeps its "off" + explanatory sub.
+    const live = stopRunning == null ? tuned : stopRunning;
+    const paused = stopRunning === false && stopOn;
     return (
       <WordRow
         brk
@@ -1516,7 +1538,8 @@ export function WakeWords({ ctx }) {
         stopOn={stopOn}
         onStopToggle={() => post(pathFor(ctx, "stop_word", stopOn ? "turn_off" : "turn_on"))}
         hot={isHot}
-        live={tuned}
+        live={live}
+        paused={paused}
         right={!stopOn ? TEXT.mb_off : ""}
         tuneBtn={stopOn && !tuned}
         onTune={() => setTuning({ i: STOP_SLOT, word: "stop", isStop: true, quick: false })}
