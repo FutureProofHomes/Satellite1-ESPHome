@@ -164,17 +164,6 @@ const I_VOL = mi(
   <path d="M2.8 6.4h2.4L8.6 3.8v8.4L5.2 9.6H2.8z" />,
   <path d="M11.2 6a3.1 3.1 0 0 1 0 4" />,
 );
-/** The volume-row cone with 0-3 waves: the group/local volume as a glance. Same geometry family as
- *  I_VOL above, the cone nudged left so three arcs fit the 16-unit box. */
-const VOL_ARCS = [
-  <path d="M10.4 6.6a2 2 0 0 1 0 2.8" />,
-  <path d="M12.2 5.4a3.6 3.6 0 0 1 0 5.2" />,
-  <path d="M14 4.2a5.2 5.2 0 0 1 0 7.6" />,
-];
-const iVol = (waves) => mi(<path d="M2.2 6.4h2.4L8 3.8v8.4L4.6 9.6H2.2z" />, <>{VOL_ARCS.slice(0, waves)}</>);
-/** Thirds, because the icon has three states to spend and the slider is linear: 0 = muted/unknown,
- *  1-33 = one wave, 34-66 = two, 67-100 = three. */
-const volWaves = (v) => (!v ? 0 : v <= 33 ? 1 : v <= 66 ? 2 : 3);
 
 /* ------------------------------------------------------------------ */
 /* The artwork's colour                                                */
@@ -809,18 +798,11 @@ function MediaSheet({ model, tiers, tint, onClose, onPlayers }) {
             players panel both carry one, and a third copy on this screen was clutter, not control. */}
 
         {/* The group moved to the players panel the bar's speaker button opens; this chip is the
-            expanded view's way in, named for who is playing (owner's screenshot 4). The volume
-            icon beside it is the bar's new button again - same wave count, same destination,
-            deliberately duplicated for user clarity (owner's request, September 2026). */}
-        <div class="mchip-row">
-          <button class="mchip" onClick={onPlayers}>
-            {I_SPK}
-            <span>{chip}</span>
-          </button>
-          <button class="mbtn mvolbtn" aria-label="Volume" onClick={onPlayers}>
-            {iVol(volWaves(model.groupHeld ? media.ss_volume : media.volume))}
-          </button>
-        </div>
+            expanded view's way in, named for who is playing (owner's screenshot 4). */}
+        <button class="mchip" onClick={onPlayers}>
+          {I_SPK}
+          <span>{chip}</span>
+        </button>
 
         <MaPanel cfg={maCfg} setCfg={setMaCfg} status={maCfg.url && maCfg.token ? ws.status : "off"} />
         </div>
@@ -1081,9 +1063,6 @@ export function MediaFooter({ ha, mac }) {
   const barTitle = model.title || model.stateText || TEXT.media_idle_bar;
   const barSub = model.artist || (active || announcing ? model.srcText : "");
   const gcount = tiers.members.length;
-  // The one expression the slider below reads, hoisted so the volume icon and the slider can never
-  // disagree about what "current volume" means.
-  const vol = model.groupHeld ? media.ss_volume : media.volume;
 
   return (
     <>
@@ -1097,20 +1076,6 @@ export function MediaFooter({ ha, mac }) {
           <button class="mbar-meta" aria-label="Open media view" aria-expanded={open}>
             <BarTitle text={barTitle} />
             {barSub && <div class="mbar-s dim">{barSub}</div>}
-          </button>
-          {/* The volume-indicator button: the wave count is the volume at a glance, and it opens
-              the same players panel as the speaker button beside it - two doors to one place, on
-              purpose, for user clarity (owner's request, September 2026). Distinct aria-label so
-              screen readers don't hear two identical buttons. */}
-          <button
-            class="mbtn mvolbtn"
-            aria-label="Volume"
-            onClick={(e) => {
-              e.stopPropagation();
-              setPanel(true);
-            }}
-          >
-            {iVol(volWaves(vol))}
           </button>
           <button
             class="mbtn mspk"
@@ -1143,7 +1108,7 @@ export function MediaFooter({ ha, mac }) {
           <div class="mbar-vol" onClick={(e) => e.stopPropagation()}>
             {I_VOL}
             <Vol
-              value={vol}
+              value={model.groupHeld ? media.ss_volume : media.volume}
               onCommit={(v) => mediaCmd("volume", { v, src: srcParam })}
             />
           </div>

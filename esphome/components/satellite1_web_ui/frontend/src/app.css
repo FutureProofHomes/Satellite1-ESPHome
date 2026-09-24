@@ -2887,20 +2887,6 @@ polyline.draft {
   width: 15px;
   height: 15px;
 }
-/* The chip and the volume-indicator button beside it, centred as the lone chip was. */
-.mchip-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--s-2);
-}
-/* The volume-indicator button, in the bar and the chip row both: .mbtn's 42px circle sized down to
-   match the 36px .mspk beside it so the row's rhythm holds. Press dip comes with .mbtn. */
-.mvolbtn {
-  width: 36px;
-  height: 36px;
-  color: inherit;
-}
 
 /* The players panel: the slide-up behind the bar's speaker button (owner's screenshots 2 and 3).
    Partial-height over its own scrim, above the expanded view (z 40) since the chip opens it from
