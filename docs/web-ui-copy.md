@@ -548,6 +548,18 @@ the last because `zi_more` already says a zone needs three corners.
 | `cap_no_volume` | No volume control |
 | `cap_self` | This device |
 | `player_offline` | Offline |
+| `cl_aria` | FutureProofHomes community links |
+| `cl_docs` | Docs |
+| `cl_github` | GitHub |
+| `cl_youtube` | YouTube |
+| `cl_discord` | Discord |
+
+The `cl_*` block is the community links row at the very bottom of Diagnostics (September 2026): four
+quiet icon-and-word links under the ESP32 Recovery card — the documentation site
+(docs.futureproofhomes.net), the FutureProofHomes GitHub organisation, the YouTube channel and the
+Discord invite (discord.futureproofhomes.net). Each opens in a new tab; `cl_aria` names the row's
+`<nav>` for screen readers, since it has no visible heading. Organisation links, not device links,
+so controlling a peer remotely shows the same row.
 
 `copied` was deleted along with the Logs card's Copy button. The button never worked honestly on this
 origin - the Clipboard API needs a secure context, this app is served over plain HTTP, so it ran on a

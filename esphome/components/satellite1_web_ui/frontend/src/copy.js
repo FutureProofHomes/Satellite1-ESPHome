@@ -701,6 +701,16 @@ export const TEXT = {
   crash_erase_row: "Crash history",
   crash_erase: "Erase history",
 
+  /* The community links row at the very bottom of Diagnostics, under ESP32 Recovery: the
+     organisation's documentation, GitHub, YouTube and Discord. One word each - the glyph beside it
+     carries the rest - and the aria label names the <nav> for screen readers, since the row itself
+     has no heading. */
+  cl_aria: "FutureProofHomes community links",
+  cl_docs: "Docs",
+  cl_github: "GitHub",
+  cl_youtube: "YouTube",
+  cl_discord: "Discord",
+
   // Shown under the wake words when the assistant selects could not be read and no more specific
   // reason applies (the two below cover blocked actions and an old Home Assistant). Says which half
   // of the card is affected, because whether the device listens is its own to answer and that half

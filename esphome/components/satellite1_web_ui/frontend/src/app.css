@@ -3878,6 +3878,34 @@ polyline.draft {
   color: var(--accent);
 }
 
+/* The community links under Diagnostics' last card: a colophon, not a card - no border, no
+   heading. Muted at rest on purpose (accent only under the pointer or focus): it sits below the
+   recovery buttons and must not out-shout them. Wraps for 320px phones. */
+.dx-links {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  margin-top: var(--s-4);
+  font-size: var(--t-s);
+}
+.dx-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  color: var(--fg-3);
+  text-decoration: none;
+}
+.dx-links a:hover,
+.dx-links a:focus-visible {
+  color: var(--accent);
+}
+.dx-links .ni {
+  width: 16px;
+  height: 16px;
+}
+
 /* ---------------------------------------------------------------- */
 /* The Living Graph (the v2 redesign, September 2026; the tuner-v2   */
 /* canvas is the design of record for every shape below). One SVG,   */

@@ -13,7 +13,7 @@ import { changePassword, logoutAll, mdnsLooksBroken, qrSignInLink, signInLink } 
 import { entity, entityPath, pathFor, post, request, requestJson } from "../lib/device.js";
 import { qrSvgPath } from "../lib/qr.js";
 import { takeIntent, toast } from "../lib/toast.js";
-import { Btn, Card, Chevron, Confirm, Fact, Missing, N_DIAG, Row, Toggle } from "../ui.jsx";
+import { Btn, Card, Chevron, Confirm, Fact, Missing, N_DIAG, ni, Row, Toggle } from "../ui.jsx";
 
 const kb = (n) => `${Math.round(n / 1024)} KB`;
 const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
@@ -959,6 +959,67 @@ function ChangePassword({ ctx }) {
    describes, and one home for the data beats two. */
 
 /* ------------------------------------------------------------------ */
+/* Community links                                                     */
+/* ------------------------------------------------------------------ */
+
+/* Four glyphs in ui.jsx's `ni` register - 16-box, stroked in currentColor - rather than the brand
+   assets: pixel-true marks would bring their own colours into two themes, and everything else on
+   this page is drawn this way. An open book, the octocat's outline, a play button in a rounded
+   screen, and the Discord face. */
+const I_BOOK = ni(
+  <>
+    <path d="M1.6 2.4h3.8a2.6 2.6 0 0 1 2.6 2.6v8.9a2 2 0 0 0-2-2H1.6z" />
+    <path d="M14.4 2.4h-3.8A2.6 2.6 0 0 0 8 5v8.9a2 2 0 0 1 2-2h4.4z" />
+  </>,
+);
+const I_GITHUB = ni(
+  <>
+    <path d="M10.67 14.67v-2.58a2.25 2.25 0 0 0-.63-1.74c2.09-.23 4.29-1.03 4.29-4.67a3.63 3.63 0 0 0-1-2.52 3.38 3.38 0 0 0-.06-2.51s-.79-.23-2.61.99a8.92 8.92 0 0 0-4.66 0c-1.82-1.22-2.61-.99-2.61-.99a3.38 3.38 0 0 0-.06 2.51 3.63 3.63 0 0 0-1 2.52c0 3.61 2.2 4.4 4.29 4.67a2.25 2.25 0 0 0-.62 1.73v2.59" />
+    <path d="M6 12.67c-3.33 1-3.33-1.67-4.67-2" />
+  </>,
+);
+const I_YOUTUBE = ni(
+  <>
+    <rect x="1.8" y="4" width="12.4" height="8.4" rx="2.6" />
+    <path d="M6.9 6.6v3.2l3-1.6z" fill="currentColor" />
+  </>,
+);
+const I_DISCORD = ni(
+  <>
+    <path d="M10.33 11.67l.67 1.33s2.78-.89 3.67-2.33c0-.67.35-5.43-2-7-1-.67-2.67-1-2.67-1l-.67 1.33h-1.33" />
+    <path d="M5.69 11.67l-.67 1.33s-2.78-.89-3.67-2.33c0-.67-.35-5.43 2-7 1-.67 2.67-1 2.67-1l.67 1.33h1.33" />
+    <circle cx="5.67" cy="8.33" r="1" fill="currentColor" stroke="none" />
+    <circle cx="10.33" cy="8.33" r="1" fill="currentColor" stroke="none" />
+  </>,
+);
+
+/* The organisation's four front doors. Organisation links, not device links - which is why the
+   remote-control mode shows the same row - and held in code like the wake words Sources card's
+   URLs (lib/wakesources.js), the app's other external links. */
+const COMMUNITY = [
+  { label: TEXT.cl_docs, url: "https://docs.futureproofhomes.net/", icon: I_BOOK },
+  { label: TEXT.cl_github, url: "https://github.com/FutureProofHomes", icon: I_GITHUB },
+  { label: TEXT.cl_youtube, url: "https://www.youtube.com/@futureproofhomes", icon: I_YOUTUBE },
+  { label: TEXT.cl_discord, url: "https://discord.futureproofhomes.net/", icon: I_DISCORD },
+];
+
+/* The colophon under the last card - deliberately not a Card: a bordered box would compete with
+   ESP32 Recovery above it, and these four words need no heading. Muted at rest (accent on hover)
+   for the same reason: help lives here, but it must not out-shout the recovery buttons. */
+function CommunityLinks() {
+  return (
+    <nav class="dx-links" aria-label={TEXT.cl_aria}>
+      {COMMUNITY.map((c) => (
+        <a key={c.label} href={c.url} target="_blank" rel="noopener">
+          {c.icon}
+          {c.label}
+        </a>
+      ))}
+    </nav>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 
 export function Diagnostics({ ctx }) {
   // The tap intent a toast carried here - "open the log at level W", "show the crash card" -
@@ -1053,6 +1114,7 @@ export function Diagnostics({ ctx }) {
           internals - and it belongs beside the volume and mute controls it duplicates in hardware. */}
       <Log ctx={ctx} intent={intent?.card === "log" ? intent : null} />
       <Maintenance ctx={ctx} />
+      <CommunityLinks />
     </>
   );
 }
