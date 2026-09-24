@@ -2460,19 +2460,29 @@ polyline.draft {
 }
 /* The speaker glyph naming the row: without it the slider read as a scrubber (owner's report,
    September 2026). The generic .mi centres itself with auto margins for the transport row; here
-   that would fling the glyph to the middle, so they come off. */
+   that would fling the glyph to the middle, so they come off. 20px, up from 15 (owner: "a little
+   too small", September 2026) - still inside the slider's 30px row, still --tdim: it is a label,
+   and only its size was the complaint. */
 .mbar-vol > .mi {
-  width: 15px;
-  height: 15px;
+  width: 20px;
+  height: 20px;
   flex: none;
   margin: 0;
   color: var(--tdim, var(--fg-3));
 }
-/* The speaker button, its badge carrying the group's size - members including this device. */
-.mspk {
-  width: 36px;
-  height: 36px;
+/* The speaker button, its badge carrying the group's size - members including this device. The
+   .mbtn.mspk compound is load-bearing: a plain .mspk loses the cascade to the .mbtn block further
+   down (same specificity, later source), which is how this block's old width: 36px and color:
+   inherit were dead rules all along - the button has always rendered as a 42px dim .mbtn. Kept at
+   42px, with the glyph up from the transports' 21px to 25px and the colour finally landing at
+   full tint contrast (owner: "a little too small", September 2026) - it is the players door, not
+   a transport toggle, and the filled play beside it stays the heavier of the two regardless. */
+.mbtn.mspk {
   color: inherit;
+}
+.mbtn.mspk .mi {
+  width: 25px;
+  height: 25px;
 }
 .mbdg {
   position: absolute;
@@ -2892,9 +2902,12 @@ polyline.draft {
   font-size: var(--t-s);
   cursor: pointer;
 }
+/* 18px, trailing the bar cabinet's climb to 25 (owner: "a little too small", September 2026):
+   the same glyph should not read as two different speakers, but inline with the chip's text it
+   stays a size down from the bar's standalone button. */
 .mchip .mi {
-  width: 15px;
-  height: 15px;
+  width: 18px;
+  height: 18px;
 }
 
 /* The players panel: the slide-up behind the bar's speaker button (owner's screenshots 2 and 3).
