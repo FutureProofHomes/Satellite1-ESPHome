@@ -2,6 +2,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 
 import { TEXT } from "./copy.js";
+import { sparkPaths } from "./lib/sparkline.js";
 
 /* ------------------------------------------------------------------ */
 /* Drawn glyphs                                                        */
@@ -290,128 +291,38 @@ export function Card({ title, icon, hint, right, children, collapsible, name, de
 /* The chip sparkline                                                  */
 /* ------------------------------------------------------------------ */
 
-/** The sparkline's window and cadence mirror lib/sparkhist.js's buffer: 3 hours, 60s points. */
-const SPARK_WINDOW_MS = 3 * 60 * 60 * 1000;
-const SPARK_STEP_MS = 60 * 1000;
-/** Stored samples further apart than this are a closed-tab outage, bridged by synthetic points so
- *  the reopened chip shows one continuous quiet line instead of a cliff. */
-const SPARK_GAP_MS = 10 * 60 * 1000;
-
-/** FNV-1a over the seed string ("mac:key") into two phases - the synthetic backfill is identical
- *  across renders and reloads, so a refresh never shows a different past. */
-function sparkPhases(seed) {
-  let h = 2166136261;
-  for (let i = 0; i < seed.length; i++) {
-    h ^= seed.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  const a = (h >>> 0) / 4294967296;
-  const b = (Math.imul(h, 2654435761) >>> 0) / 4294967296;
-  return [a * 2 * Math.PI, b * 2 * Math.PI];
-}
-
-/** The backfill's shape: two slow sinusoids (47min and 13min periods), so the synthetic span
- *  undulates like a room rather than jittering like noise. Amplitude is the sensor's own display
- *  step - deliberately sub-perceptual, less than the sensor's natural drift. */
-const sparkWobble = (t, amp, p1, p2) =>
-  amp * (0.6 * Math.sin((2 * Math.PI * t) / (47 * 60000) + p1) + 0.4 * Math.sin((2 * Math.PI * t) / (13 * 60000) + p2));
-
-/**
- * The full series to draw: real points, plus the quiet deterministic synthetic prefix from the
- * window's start to the first real point (cold start - user decision, September 2026: no growing
- * stub), plus bridges across mid-history gaps. Anchored at the neighbouring real values, so the
- * seams are invisible; the synthetic points are never stored and never set the y-scale.
- */
-function sparkSeries(pts, amp, seed, now) {
-  const start = now - SPARK_WINDOW_MS;
-  const real = pts.filter((p) => p[0] >= start && p[0] <= now);
-  if (!real.length) return null;
-  const [p1, p2] = sparkPhases(seed);
-  const out = [];
-  // The prefix: normal 60s cadence from the window's start to the earliest real point, gentle
-  // variation around v0 - the first real reading. Timestamps aligned to the cadence grid so the
-  // same wall-clock minute always gets the same synthetic value (determinism across renders).
-  const first = real[0];
-  for (let t = Math.ceil(start / SPARK_STEP_MS) * SPARK_STEP_MS; t < first[0]; t += SPARK_STEP_MS) {
-    out.push([t, first[1] + sparkWobble(t, amp, p1, p2)]);
-  }
-  for (let i = 0; i < real.length; i++) {
-    const p = real[i];
-    if (i > 0) {
-      const prev = real[i - 1];
-      if (p[0] - prev[0] > SPARK_GAP_MS) {
-        // The bridge: interpolating between the two real endpoints, same amplitude, same
-        // determinism - the outage reads as a calm line, not a pretence the data was live.
-        for (let t = prev[0] + SPARK_STEP_MS; t < p[0]; t += SPARK_STEP_MS) {
-          const f = (t - prev[0]) / (p[0] - prev[0]);
-          out.push([t, prev[1] + (p[1] - prev[1]) * f + sparkWobble(t, amp, p1, p2)]);
-        }
-      }
-    }
-    out.push(p);
-  }
-  return { series: out, real };
-}
-
-/** Catmull-Rom through the points, emitted as cubic Béziers - the smoothing that makes sixty
- *  samples read as a curve rather than a polyline. */
-function sparkPathD(xy) {
-  let d = `M${xy[0][0].toFixed(2)} ${xy[0][1].toFixed(2)}`;
-  for (let i = 0; i < xy.length - 1; i++) {
-    const p0 = xy[i - 1] || xy[i];
-    const p1 = xy[i];
-    const p2 = xy[i + 1];
-    const p3 = xy[i + 2] || p2;
-    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
-    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
-    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
-    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
-    d += `C${c1x.toFixed(2)} ${c1y.toFixed(2)} ${c2x.toFixed(2)} ${c2y.toFixed(2)} ${p2[0].toFixed(2)} ${p2[1].toFixed(2)}`;
-  }
-  return d;
-}
-
 /**
  * The area chart living in a chip's bottom band: decoration under the reading, never a control.
+ * The maths - bucket-averaging the history into a couple dozen points and smoothing a quadratic
+ * bézier through them, mini-graph-card's approach - lives in lib/sparkline.js, pure and DOM-free,
+ * so the preview tooling can draw the production curve outside a browser.
+ *
  * Colours are the app's own tokens, one look for all three chips (owner decision, September 2026
- * - nothing lifted from the Lovelace screenshot): the line is --accent, the fill a gradient from
- * --accent-bg down to transparent - the "stated tint, not an rgba mix" reasoning app.css records,
- * inheriting both themes for free. --grad is not used (the owner's two-places rule).
+ * - nothing lifted from the Lovelace screenshot): the line is --accent, and the fill is --accent
+ * again, faded through stop-opacity down to transparent, rather than --accent-bg - the pale tint
+ * sat invisible on the light theme's near-white chip and heavy on the dark theme's, where one
+ * accent at one low opacity reads the same against both. --grad is not used (the owner's
+ * two-places rule). Both layers ride well under full opacity (user request, September 2026:
+ * "somewhat faded behind the text"), on top of the z-index: -1 the chip's stacking context
+ * already gives them, so the reading stays the loudest thing in the chip.
  */
 function Spark({ pts, amp, seed }) {
-  const now = Date.now();
-  const made = pts && pts.length ? sparkSeries(pts, amp, seed, now) : null;
+  const made = sparkPaths(pts, amp, seed);
   if (!made) return null;
-  const { series, real } = made;
-  // The y-scale belongs to the real points alone, padded ±10% so a near-flat line does not slam
-  // the edges; a genuinely flat line pads by the display step instead, so it draws mid-band.
-  let lo = Infinity;
-  let hi = -Infinity;
-  for (const p of real) {
-    if (p[1] < lo) lo = p[1];
-    if (p[1] > hi) hi = p[1];
-  }
-  const pad = hi - lo > 0 ? (hi - lo) * 0.1 : amp || 1;
-  lo -= pad;
-  hi += pad;
-  const start = now - SPARK_WINDOW_MS;
-  const xy = series.map(([t, v]) => [((t - start) / SPARK_WINDOW_MS) * 100, 100 - ((v - lo) / (hi - lo)) * 100]);
-  const line = sparkPathD(xy);
-  const fill = `${line}L${xy[xy.length - 1][0].toFixed(2)} 100L${xy[0][0].toFixed(2)} 100Z`;
   // Gradient ids are document-global; seeded per device+sensor so three chips cannot collide.
   const gid = `spkg-${seed.replace(/[^a-z0-9]/gi, "")}`;
   return (
     <svg class="spark" viewBox="0 0 100 100" preserveAspectRatio="none" pointer-events="none" aria-hidden="true">
       <defs>
         <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="var(--accent-bg)" />
-          <stop offset="1" stop-color="var(--accent-bg)" stop-opacity="0" />
+          <stop offset="0" stop-color="var(--accent)" stop-opacity="0.18" />
+          <stop offset="1" stop-color="var(--accent)" stop-opacity="0" />
         </linearGradient>
       </defs>
-      <path d={fill} fill={`url(#${gid})`} stroke="none" />
+      <path d={made.fill} fill={`url(#${gid})`} stroke="none" />
       {/* non-scaling-stroke, because preserveAspectRatio="none" would otherwise smear the 1.5px
           line into different widths on the two axes. */}
-      <path d={line} fill="none" stroke="var(--accent)" stroke-width="1.5" opacity="0.8" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
+      <path d={made.line} fill="none" stroke="var(--accent)" stroke-width="1.5" opacity="0.45" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
     </svg>
   );
 }
