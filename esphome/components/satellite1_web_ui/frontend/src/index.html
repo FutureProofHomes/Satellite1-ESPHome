@@ -11,11 +11,14 @@
      and the touch icon is fetched from the path in the link with no cookies at all, which is why
      the session gate exempts it. status-bar black-translucent lets the app paint under the notch,
      which viewport-fit=cover above already opted into. -->
-<link rel="manifest" href="/manifest.webmanifest">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<!-- Relative hrefs, not root-absolute: served at "/" they resolve to the same paths they always
+     did, and served under a Home Assistant ingress prefix (/api/ingress/<name>/) they resolve
+     under it - the one place in this document that must work at both mounts. -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <!-- The tab favicon reuses the touch icon: the logo already embedded for the home screen, one more
      link and zero more bytes. Browsers scale the 180px PNG down without complaint. -->
-<link rel="icon" type="image/png" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -27,7 +30,12 @@
      reason - a separate request would be a second round trip on a seven-socket server.
      Light is the default when nothing is stored. localStorage throws rather than no-ops with site
      data blocked, so the whole thing is guarded; the cost of failure is the default theme. -->
-<script>try{var t=localStorage.getItem("sat1.theme");document.documentElement.dataset.theme=t==="dark"?"dark":"light"}catch(e){}
+<!-- data-embed marks a page served under a proxy prefix (Home Assistant ingress) - any pathname
+     longer than the bare "/" - and app.css zeroes the safe-area insets off it: the embedding
+     chrome already clears the notch, and honouring the inset again painted a blank band above the
+     top bar. Set here, pre-paint, for the same reason as the theme attribute below it. -->
+<script>if(location.pathname.length>1)document.documentElement.dataset.embed="1";
+try{var t=localStorage.getItem("sat1.theme");document.documentElement.dataset.theme=t==="dark"?"dark":"light"}catch(e){}
 /* iOS Safari auto-zooms onto any focused text control under 16px and leaves the page zoomed after -
    the login field made every first visit end up magnified. maximum-scale=1 turns that off, and iOS
    has ignored it for real pinch gestures since iOS 10, so a person who wants to zoom still can.

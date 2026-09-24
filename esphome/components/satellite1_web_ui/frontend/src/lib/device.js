@@ -31,6 +31,27 @@ import { useEffect, useReducer, useRef, useState } from "preact/hooks";
  */
 let remoteTarget = null; // { base, key } | null
 
+/**
+ * Where this document is mounted: "" served from the device root, "/api/ingress/<name>" when a
+ * Home Assistant ingress proxy (hass_ingress) serves it under HA's own origin. Computed once at
+ * module load and never again - the router is hash-based, so the pathname cannot change under us.
+ * Every local URL the app builds rides this prefix; at "" the strings are byte-identical to what
+ * they always were, which is the whole no-regression argument for direct access.
+ *
+ * The typeof guard is for the node test runner, which imports this module (through auth.js) with
+ * no `location` in scope - under node the prefix is simply "", the direct-access shape.
+ */
+export const BASE = (typeof location === "undefined" ? "/" : location.pathname).replace(/\/+$/, "");
+
+/**
+ * True when the page is served through an ingress proxy rather than by the device itself. The
+ * origin games (the IP<->.local redirect, the dual-origin cookie priming) and the peer switcher's
+ * in-place jumps are all wrong in that context - the page's origin is Home Assistant's, possibly
+ * https, where a navigation or fetch to a plain-http device origin is blocked as mixed content -
+ * so their owners check here and stand down.
+ */
+export const proxied = BASE !== "";
+
 export function setRemoteTarget(target) {
   remoteTarget = target ? { base: String(target.base).replace(/\/+$/, ""), key: target.key } : null;
   // The once-per-load HA sync guard is per-device state in disguise: a fresh target deserves the
@@ -47,10 +68,10 @@ export function updateRemoteKey(key) {
   if (remoteTarget && key) remoteTarget = { ...remoteTarget, key };
 }
 
-/** A path like "/api/sat1/state" as this app should actually fetch it: untouched for the local
- *  device, prefixed and key-carrying for a remote one. */
+/** A path like "/api/sat1/state" as this app should actually fetch it: the ingress prefix (empty
+ *  when served directly) for the local device, prefixed and key-carrying for a remote one. */
 export function apiUrl(path) {
-  if (!remoteTarget) return path;
+  if (!remoteTarget) return BASE + path;
   return `${remoteTarget.base}${path}${path.includes("?") ? "&" : "?"}key=${remoteTarget.key}`;
 }
 
@@ -723,6 +744,25 @@ export function useVoice(enabled) {
  * that spins out most of its deadline waiting for a poll that would have confirmed at once reads
  * as a slow device. One nudged re-poll shortly after the command is queued closes that gap.
  */
+/** djb2 in base36: not cryptographic, just enough to tell one artwork URL from the next, so the
+ *  relay path below changes exactly when the art does and browser caching handles the rest. */
+const artKey = (s) => {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+};
+
+/** Behind the ingress proxy, a plain-http artwork URL is mixed content on an https Home Assistant
+ *  - the browser refuses it before any request is made. The device relays the current track's art
+ *  at /api/sat1/media/art (web_ui_handler.cpp), which rides the panel's own origin, so this swap
+ *  is what makes covers appear inside HA at all. Direct visits and remote control keep the URL
+ *  as-is: there the direct fetch works and costs the device nothing. An https artwork URL is
+ *  never swapped - it embeds fine anywhere, relay or no relay. */
+const mapArt = (json) =>
+  proxied && !isRemote() && json?.art && /^http:\/\//i.test(json.art)
+    ? { ...json, art: `${BASE}/api/sat1/media/art?v=${artKey(json.art)}` }
+    : json;
+
 export function useMedia(enabled) {
   const [media, setMedia] = useState(null);
   const busy = media ? media.state === 2 || media.state === 3 : false;
@@ -740,7 +780,7 @@ export function useMedia(enabled) {
       }
       try {
         const json = await requestJson("/api/sat1/media");
-        if (json && live) setMedia(json);
+        if (json && live) setMedia(mapArt(json));
       } catch {
         // Same as the voice poll: the stream banner covers a device that has gone.
       }

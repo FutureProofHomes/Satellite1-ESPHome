@@ -160,7 +160,7 @@
   /* The height of .topbar, which the nav drawer hangs directly beneath. Measured rather than derived: the
      bar is 2 x --s-2 of padding around its tallest child, the title button, and that button's 33px comes
      from the type scale plus its own padding rather than from any single token. Anything that needs to sit
-     under the bar adds env(safe-area-inset-top) as well, since the bar pads for the notch on top of this.
+     under the bar adds var(--sat) as well, since the bar pads for the notch on top of this.
      A test asserts the drawer's top edge meets the bar's bottom edge, so a change to the bar fails there
      rather than drifting quietly. */
   --bar-h: 51px;
@@ -173,6 +173,23 @@
      The switcher and the panel already agreed on 480px; the media drawer spanned the whole viewport,
      which on a desktop made it the odd one out of a set that should read as one family. */
   --drawer-w: 480px;
+
+  /* The notch and home-indicator insets, behind one indirection on purpose: every rule in this
+     file that used to say env(safe-area-inset-*) says var(--sat)/var(--sab) now, so the embedded
+     override below is two lines instead of fourteen. */
+  --sat: env(safe-area-inset-top);
+  --sab: env(safe-area-inset-bottom);
+}
+
+/* Inside a Home Assistant ingress panel (index.html sets the attribute pre-paint), the embedding
+   chrome already keeps the page clear of the status bar and home indicator - and iOS propagates
+   the insets into the iframe anyway, so honouring them there pays the notch twice: a blank band
+   the height of the status bar above the top bar (owner's companion-app screenshots, September
+   2026). Zeroed rather than removed, because the same page served directly still runs full-bleed
+   under the notch, where the insets are load-bearing. */
+html[data-embed] {
+  --sat: 0px;
+  --sab: 0px;
 }
 
 * {
@@ -327,7 +344,7 @@ textarea {
   align-items: center;
   gap: var(--s-1);
   padding: var(--s-2) var(--s-3);
-  padding-top: calc(var(--s-2) + env(safe-area-inset-top));
+  padding-top: calc(var(--s-2) + var(--sat));
 }
 /* The route's name, worn as a folder tab growing out of the top card's top-left corner: a tab in
    the card's own elevated background, the card's corner squared beneath it (the .rtab-row + .card
@@ -565,7 +582,7 @@ textarea {
    toast nobody saw. The container ignores the pointer; the card re-enables it. */
 .ntoasts {
   position: fixed;
-  top: calc(var(--bar-h) + env(safe-area-inset-top) + 5px);
+  top: calc(var(--bar-h) + var(--sat) + 5px);
   right: max(var(--s-3), calc((100vw - 720px) / 2 + var(--s-3)));
   z-index: 50;
   display: flex;
@@ -915,7 +932,7 @@ textarea {
   margin: 0 auto;
   /* The bottom padding reserves the media bar's height on top of what it always reserved, so the
      last card on any route scrolls clear of the fixed bar. */
-  padding: var(--s-3) var(--s-3) calc(var(--s-5) + var(--mbar-h) + env(safe-area-inset-bottom));
+  padding: var(--s-3) var(--s-3) calc(var(--s-5) + var(--mbar-h) + var(--sab));
 }
 /* Two columns on a desktop, where one 720px column left half the window blank. CSS columns rather
    than grid: the cards differ wildly in height (the log panel against a three-row card), and columns
@@ -988,7 +1005,7 @@ html.held body {
    switched with a zero-length transition delayed by the fade rather than transitioned itself: discrete
    properties flip at the halfway point, which would blank the drawer while it was still sliding out. */
 .navscrim {
-  top: calc(var(--bar-h) + env(safe-area-inset-top));
+  top: calc(var(--bar-h) + var(--sat));
   opacity: 0;
   visibility: hidden;
   transition:
@@ -1068,7 +1085,7 @@ html.held body {
    route list is. Reads as a signature, not a row: no hover, no cursor, quieter type. */
 .navpane-foot {
   margin-top: auto;
-  padding: var(--s-3) var(--s-4) calc(var(--s-3) + env(safe-area-inset-bottom));
+  padding: var(--s-3) var(--s-4) calc(var(--s-3) + var(--sab));
   border-top: 1px solid var(--line);
 }
 .navpane-dev {
@@ -1118,7 +1135,7 @@ html.held body {
   max-width: var(--drawer-w);
   max-height: 82vh;
   margin: 0 auto;
-  padding: calc(var(--s-1) + env(safe-area-inset-top)) var(--s-4) 0;
+  padding: calc(var(--s-1) + var(--sat)) var(--s-4) 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   background: var(--bg-elev);
@@ -1213,8 +1230,8 @@ html.held body {
   box-shadow: 0 1px 2px var(--shadow), 0 6px 16px -8px var(--shadow);
   /* A toast reveal scrollIntoView's a card; these keep it clear of the sticky top bar on one edge
      and the floating media bar on the other, whichever way the scroll approaches. */
-  scroll-margin-top: calc(var(--bar-h) + env(safe-area-inset-top) + 8px);
-  scroll-margin-bottom: calc(var(--mbar-h) + var(--s-4) + env(safe-area-inset-bottom));
+  scroll-margin-top: calc(var(--bar-h) + var(--sat) + 8px);
+  scroll-margin-bottom: calc(var(--mbar-h) + var(--s-4) + var(--sab));
 }
 /* Sentence case at t-l, replacing 12px uppercase-and-tracked. The small caps read as an engineering
    tool's section labels; a title the same case as the prose under it reads as a name. One step
@@ -2404,7 +2421,7 @@ polyline.draft {
   position: fixed;
   left: var(--s-3);
   right: var(--s-3);
-  bottom: calc(var(--s-3) + env(safe-area-inset-bottom));
+  bottom: calc(var(--s-3) + var(--sab));
   z-index: 20;
   display: flex;
   flex-direction: column;
@@ -2563,7 +2580,7 @@ polyline.draft {
      plus auto margins is what centres a fixed element. */
   max-width: var(--drawer-w);
   margin: 0 auto;
-  top: calc(env(safe-area-inset-top) + 16px);
+  top: calc(var(--sat) + 16px);
   z-index: 40;
   display: flex;
   flex-direction: column;
@@ -2594,7 +2611,7 @@ polyline.draft {
   flex-direction: column;
   align-items: center;
   gap: var(--s-3);
-  padding: var(--s-4) var(--s-4) calc(var(--s-5) + env(safe-area-inset-bottom));
+  padding: var(--s-4) var(--s-4) calc(var(--s-5) + var(--sab));
   /* No max-width of its own any more: the drawer itself is capped at --drawer-w, so the 480px this
      carried became dead weight against the byte budget. */
   width: 100%;
@@ -2928,7 +2945,7 @@ polyline.draft {
   max-width: var(--drawer-w);
   max-height: 75vh;
   margin: 0 auto;
-  padding: var(--s-1) var(--s-4) calc(var(--s-4) + env(safe-area-inset-bottom));
+  padding: var(--s-1) var(--s-4) calc(var(--s-4) + var(--sab));
   overflow-y: auto;
   overscroll-behavior: contain;
   background: var(--tint, var(--bg-elev));
@@ -3284,7 +3301,7 @@ polyline.draft {
   align-items: center;
   justify-content: center;
   gap: 28px;
-  padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+  padding: 24px 16px calc(24px + var(--sab));
   position: relative;
   overflow: hidden;
 }
@@ -3634,6 +3651,26 @@ polyline.draft {
   flex-wrap: wrap;
 }
 
+/* The Home Assistant card's YAML block (routes/diagnostics.jsx): the launch-link surface, but a
+   real <pre> in real monospace - this genuinely is terminal-bound text whose indentation carries
+   meaning (it is YAML), the same argument the log viewer makes. Scrolls sideways on phones rather
+   than wrapping, because a soft-wrapped YAML line pasted into configuration.yaml is broken YAML. */
+.hai-yaml {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--t-s);
+  line-height: 1.5;
+  color: var(--fg-2);
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  overflow-x: auto;
+}
+.hai-note a {
+  color: var(--accent);
+}
+
 /* The change-password form at the Launch card's foot: a ruled-off section so the card reads as
    two ideas (the link above, the credential below), with the shared .in fields stacked. Capped at
    the login card's width - three full-width fields across a desktop card read as a form nobody
@@ -3666,7 +3703,7 @@ polyline.draft {
   align-items: center;
   justify-content: center;
   gap: 24px;
-  padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+  padding: 24px 16px calc(24px + var(--sab));
   overflow-y: auto;
   background: var(--bg);
 }

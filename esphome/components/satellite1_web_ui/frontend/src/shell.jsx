@@ -8,14 +8,29 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
 import { HINTS, TEXT } from "./copy.js";
-import { loginKey, logout, maybeRedirectLocal, peerLogin, primeOtherOrigin, probePeer, takeUrlKey } from "./lib/auth.js";
 import {
+  loginKey,
+  loginPassword,
+  logout,
+  maybeRedirectLocal,
+  panelSlug,
+  peerLogin,
+  primeOtherOrigin,
+  probePeer,
+  putPanelHandoff,
+  takePanelHandoff,
+  takeUrlKey,
+  whoami,
+} from "./lib/auth.js";
+import {
+  BASE,
   deviceIdentity,
   entity,
   haBlocked,
   onLogAlert,
   onWriteError,
   peerOrigin,
+  proxied,
   setRemoteTarget,
   useDeviceState,
   useEvents,
@@ -426,13 +441,101 @@ function SwitcherSheet({ device, label, area, route, ha, haRefresh, remote, loca
         <a
           key={d[3]}
           class="peer go"
-          href={`${location.origin}/#/${route}`}
+          href={`${location.origin}${location.pathname}#/${route}`}
           onClick={(e) => {
             if (e.button !== 0 || e.metaKey || e.ctrlKey) return;
             e.preventDefault();
             onLocal();
           }}
         >
+          {body}
+        </a>
+      );
+    }
+    // Behind the ingress proxy, a peer's own plain-http origin is out of reach: navigating this
+    // (possibly https) HA panel there in place is blocked as mixed content, and so are the
+    // cross-origin sign-in fetches the seamless jump rides. But the panel page and the HA frontend
+    // share one origin, which opens a better door: target="_top" navigation to the *peer's own
+    // ingress panel* - the entry path is "/" plus the panel's YAML key, and that key is the peer's
+    // mDNS hostname under the same slug rule the Diagnostics card's generated YAML uses, so a
+    // fleet set up from those cards switches natively inside HA (companion app included - a
+    // first build's target="_blank" IP link tossed iOS users out to Safari, owner's report,
+    // September 2026). The hostname comes from the row's raw configuration_url, not peerOrigin(),
+    // which deliberately swaps in the live IP. A row with no usable hostname (IP-only) falls back
+    // to the new-tab link: a top-level http navigation is allowed where an embedded one is not,
+    // and a possibly-dead panel link would be strictly worse.
+    if (url && proxied) {
+      let peerSlug = "";
+      try {
+        const h = new URL(String(d?.[5] || "")).hostname.replace(/\.local$/i, "");
+        if (h && !/^\d+\.\d+\.\d+\.\d+$/.test(h) && !h.includes(":"))
+          peerSlug = h.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+      } catch {
+        /* no configuration_url on this row; the mac derivation below */
+      }
+      if (!peerSlug) {
+        // The rung that actually fires on most installs: HA's ESPHome integration writes
+        // configuration_url with the IP it connects on (web_ui_ha.yaml's own sample row shows it),
+        // and an IP names no panel. But the fleet's hostnames are <base>-<last six hex of mac>
+        // (name_add_mac_suffix), this page knows its own hostname and mac from the state payload,
+        // and the roster row carries the peer's mac - so the peer's hostname is this device's base
+        // plus the peer's suffix. The endsWith check is the honesty test: a device renamed away
+        // from the convention proves the base is unknowable, and the new-tab fallback below beats
+        // a guessed link to a panel that does not exist.
+        const ownName = String(device?.name || "").toLowerCase();
+        const ownSuffix = String(device?.mac || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(-6);
+        const peerSuffix = String(d?.[3] || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(-6);
+        if (ownSuffix.length === 6 && peerSuffix.length === 6 && ownName.endsWith(ownSuffix)) {
+          const peerName = ownName.slice(0, -6) + peerSuffix;
+          peerSlug = peerName.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+        }
+      }
+      if (peerSlug) {
+        // Two panel layouts exist and the link must serve both. Flat: every device is its own
+        // sidebar entry at /<slug>. Nested: one visible entry and the rest hidden behind
+        // hass_ingress's parent: option, served at /<parent>/<slug> - the layout that keeps the
+        // sidebar to a single "Satellite1 Fleet" item. The app cannot know which one the owner
+        // wrote, but HA answers a hard 404 for unregistered routes and the panel page is
+        // same-origin, so one HEAD probe of the flat path decides: 404 means nested, and the
+        // parent segment is wherever the top window is currently standing (on a child page the
+        // first segment is still the parent). The href underneath stays the flat form for
+        // middle-click; the probe only runs on the plain left-click this handler owns.
+        const goPanel = async (e) => {
+          if (e.button !== 0 || e.metaKey || e.ctrlKey) return;
+          e.preventDefault();
+          let target = `/${peerSlug}`;
+          try {
+            const r = await fetch(target, { method: "HEAD", cache: "no-store", signal: AbortSignal.timeout(3000) });
+            if (r.status === 404) {
+              const seg = window.top.location.pathname.split("/")[1] || "";
+              if (seg && seg !== peerSlug) target = `/${seg}/${peerSlug}`;
+            }
+          } catch {
+            /* An unanswerable probe changes nothing: the flat link is the best guess standing. */
+          }
+          // Seamless sign-in, the proxied twin of the LAN jump. The peer cannot be signed in from
+          // here - its device content lives at an /api/ingress/... path this page does not know, and
+          // its plain-http origin is mixed content - so instead the peer's password (d[7], the Web UI
+          // Password sensor every device publishes) is left in shared HA-origin localStorage under
+          // the peer's slug, and the peer's own app claims it on boot and signs itself in (see
+          // putPanelHandoff and the boot effect). No handoff, no harm: the peer's own login screen
+          // takes over, exactly as before.
+          const pw = d?.[7];
+          if (pw) putPanelHandoff(peerSlug, pw);
+          try {
+            window.top.location.href = target;
+          } catch {
+            location.href = target;
+          }
+        };
+        return (
+          <a key={d[3]} class={`peer go${up ? "" : " off"}`} href={`/${peerSlug}`} target="_top" onClick={goPanel}>
+            {body}
+          </a>
+        );
+      }
+      return (
+        <a key={d[3]} class={`peer go${up ? "" : " off"}`} href={peerHref(url, route)} target="_blank" rel="noopener">
           {body}
         </a>
       );
@@ -1062,8 +1165,28 @@ export function App() {
         }
       }
       try {
-        const r = await fetch("/api/sat1/sel", { cache: "no-store", signal: AbortSignal.timeout(15000) });
-        setPhase(r.status === 401 ? "login" : "in");
+        const r = await fetch(`${BASE}/api/sat1/sel`, { cache: "no-store", signal: AbortSignal.timeout(15000) });
+        if (r.status !== 401) {
+          setPhase("in");
+          return;
+        }
+        // No session yet. Inside an ingress panel this may be a device switch: the switcher stashed
+        // this device's password in shared HA-origin localStorage before navigating here (see
+        // peerRow's goPanel). Identify ourselves by the one public endpoint, claim any handoff left
+        // under our slug, and sign in with it - the seamless landing that replaces a password prompt.
+        if (proxied) {
+          const who = await whoami();
+          const pw = who?.name ? takePanelHandoff(panelSlug(who.name)) : null;
+          if (pw) {
+            const lr = await loginPassword(pw).catch(() => null);
+            if (lr?.ok) {
+              primeKey.current = lr.key;
+              setPhase("in");
+              return;
+            }
+          }
+        }
+        setPhase("login");
       } catch {
         setPhase("login");
       }

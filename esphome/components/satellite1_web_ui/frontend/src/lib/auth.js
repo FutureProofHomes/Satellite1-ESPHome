@@ -14,7 +14,7 @@
  * numbers). Verified against node:crypto over random inputs before shipping.
  */
 
-import { apiUrl, updateRemoteKey } from "./device.js";
+import { apiUrl, BASE, proxied, updateRemoteKey } from "./device.js";
 
 /* ------------------------------------------------------------------ */
 /* SHA-256 and HMAC                                                    */
@@ -90,7 +90,15 @@ export const toHex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2,
 /* The gate's endpoints                                                */
 /* ------------------------------------------------------------------ */
 
-const f = (path, opts) => fetch(path, { signal: AbortSignal.timeout(15000), cache: "no-store", ...opts });
+/** For URLs already built elsewhere - apiUrl output, which carries the ingress prefix or a remote
+ *  base of its own. Everything except the URL handling of `f` below. */
+const fu = (url, opts) => fetch(url, { signal: AbortSignal.timeout(15000), cache: "no-store", ...opts });
+
+/** For this device's own gate endpoints, named by root path. BASE rather than apiUrl on purpose:
+ *  these are about *this browser's* session on *this origin* (login, logout, pairing), and must
+ *  never retarget to a remote peer the way apiUrl does - but they do need the ingress prefix when
+ *  the page is proxied, or they would land on Home Assistant's root and 404. */
+const f = (path, opts) => fu(BASE + path, opts);
 
 /** Form-encoded on purpose: the device parses it for free (<=1KB rides web_server_idf's own form
  *  path), and cross-origin it is a CORS "simple request", so the priming call needs no preflight. */
@@ -172,7 +180,7 @@ export async function logoutAll() {
   // belongs to whichever device the page is showing - while remote-controlling a peer, that is the
   // peer. The regenerate takes our own key with it, so the fresh one in the body is adopted on the
   // spot; the next poll then carries it and the Launch card re-renders from there.
-  const res = await f(apiUrl("/api/sat1/logout_all"), form({}));
+  const res = await fu(apiUrl("/api/sat1/logout_all"), form({}));
   const body = await res.json().catch(() => ({}));
   if (res.ok && body.key) updateRemoteKey(body.key);
   return { ok: res.ok && body.ok === 1, key: body.key };
@@ -187,11 +195,11 @@ export async function logoutAll() {
  * strands this page's own session mid-use.
  */
 export async function changePassword(current, next) {
-  const nres = await f(apiUrl("/api/sat1/login/nonce"));
+  const nres = await fu(apiUrl("/api/sat1/login/nonce"));
   const nonce = (await nres.json()).n;
   if (!nonce) return { ok: false };
   const answer = toHex(hmacSha256(sha256(utf8(current)), utf8(nonce)));
-  const res = await f(apiUrl("/api/sat1/password"), form({ n: nonce, r: answer, new: next }));
+  const res = await fu(apiUrl("/api/sat1/password"), form({ n: nonce, r: answer, new: next }));
   const body = await res.json().catch(() => ({}));
   if (res.ok && body.ok === 1 && body.key) updateRemoteKey(body.key);
   return {
@@ -261,6 +269,10 @@ export function mdnsLooksBroken() {
 }
 
 export async function maybeRedirectLocal() {
+  // Behind the ingress proxy the page's origin is Home Assistant's, not the device's: there is no
+  // .local twin to upgrade to, and a location.replace to the device origin would tear the app out
+  // of the panel - or be blocked outright as mixed content when HA is https.
+  if (proxied) return false;
   if (!isIpHost(location.hostname)) return false;
   // Guarded like every localStorage read here: it throws with site data blocked, and re-running
   // the probe is the survivable cost of not knowing.
@@ -318,6 +330,10 @@ export function takeUrlKey() {
  * someday rather than anything now.
  */
 export function primeOtherOrigin(key, name, ip) {
+  // Proxied, the session lives as a first-party cookie on the HA origin; the device's own IP and
+  // .local origins are not where this browser signs in, and the priming fetch would be mixed
+  // content under https anyway.
+  if (proxied) return;
   let other = null;
   if (isIpHost(location.hostname)) {
     if (name) other = `http://${name}.local${portSuffix()}`;
@@ -392,6 +408,61 @@ export async function probePeer(origin, key) {
   } catch {
     return null;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* The panel-to-panel sign-in handoff                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Seamless device switching inside a Home Assistant ingress panel, without ever guessing the
+ * proxy's internal path shape.
+ *
+ * Every Satellite1 panel's iframe is served from Home Assistant's own origin, so they all share
+ * one localStorage. When the switcher moves to a peer it cannot sign that peer in from here - the
+ * peer's device content lives at an /api/ingress/... path this page does not know, and its plain
+ * http origin is mixed content - but it *can* leave the peer's password (already on this page, from
+ * the HA roster) in that shared store and let the peer's own app, which can always reach its own
+ * API, consume it on boot and sign itself in.
+ *
+ * The value is short-lived and single-use: a 60s expiry bounds the window, takePanelHandoff deletes
+ * on read, and the key is the peer's panel slug so a stale entry can only ever be claimed by the
+ * device it names. The password is the Web UI Password sensor Home Assistant already publishes, so
+ * any code on the HA origin could read it from the HA API regardless - the store adds no disclosure
+ * the platform did not already have, and the TTL keeps even that to a couple of seconds.
+ */
+const PANEL_HANDOFF_TTL = 60000;
+
+export function putPanelHandoff(slug, password) {
+  if (!slug || !password) return;
+  try {
+    localStorage.setItem(`sat1.ho.${slug}`, JSON.stringify({ p: password, e: Date.now() + PANEL_HANDOFF_TTL }));
+  } catch {
+    /* No store, no seamless switch - the peer's own login screen is the fallback. */
+  }
+}
+
+export function takePanelHandoff(slug) {
+  if (!slug) return null;
+  const key = `sat1.ho.${slug}`;
+  try {
+    const raw = localStorage.getItem(key);
+    localStorage.removeItem(key);
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    return v && v.p && v.e > Date.now() ? v.p : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The panel slug a device answers to: its mDNS hostname slugified the way the ingress YAML keys
+ *  and the switcher both do it, so the handoff's two ends agree by construction. */
+export function panelSlug(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 export async function peerLogin(origin, password) {
