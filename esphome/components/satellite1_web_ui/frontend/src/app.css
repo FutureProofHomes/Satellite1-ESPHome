@@ -3038,6 +3038,420 @@ polyline.draft {
 .mapanel .in::placeholder {
   color: var(--tdim, var(--fg-4));
 }
+/* The server scan (September 2026): the find button, its progress/failure line, and one row per
+   verified server. Rows are whole-row buttons like the add-speaker rows, with the picked one
+   wearing the accent ring the filter pills use - same vocabulary, same meaning: selected. */
+.mascan-btn {
+  align-self: flex-start;
+}
+.mascan-note {
+  margin: 0;
+}
+.mascan-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: var(--s-2);
+  background: none;
+  border: 1px solid var(--tdim, var(--line-2));
+  border-radius: var(--r-2);
+  color: inherit;
+  font: var(--t-m) inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.mascan-row.on {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 0.5px var(--accent);
+}
+.mascan-name {
+  font-weight: 650;
+}
+.mascan-sub {
+  font-size: var(--t-xs);
+  color: var(--tdim, var(--fg-3));
+}
+
+/* ------------------------------------------------------------------ */
+/* The search drawer (Plan 20)                                         */
+/* ------------------------------------------------------------------ */
+
+/* The top bar's magnifying glass, dressed exactly like the bell beside it. */
+.nsearch {
+  color: var(--fg-2);
+  flex: none;
+}
+.nsearch .ni {
+  width: 17px;
+  height: 17px;
+}
+
+/* The drawer: the players panel's bottom-sheet anatomy in the theme's own clothes - no album
+   tint, because this surface is about what *could* play, not what is. Column flex so the field
+   and pills pin while only the body scrolls. `tall` holds the full height while connected, so
+   results arriving and leaving cannot bounce the sheet; the empty states keep the natural
+   height the mockups show. */
+.search-scrim {
+  z-index: 44;
+}
+.search-drawer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  max-width: var(--drawer-w);
+  max-height: 88vh;
+  margin: 0 auto;
+  padding: var(--s-1) var(--s-4) calc(var(--s-2) + env(safe-area-inset-bottom));
+  background: var(--bg-elev);
+  color: var(--fg);
+  border-radius: var(--r-3) var(--r-3) 0 0;
+  box-shadow: 0 -6px 24px var(--shadow);
+  animation: panel-up 180ms ease-out;
+}
+.search-drawer.tall {
+  height: 88vh;
+}
+/* The generic .mi centres itself with auto margins for the transport row it was drawn for; in
+   this drawer's flex rows those margins fling glyphs to the middle, so they come off wholesale. */
+.search-drawer .mi {
+  margin: 0;
+}
+
+/* The field: a filled box with the glyph inside, pinned above the scrolling body. 16px input on
+   purpose - anything smaller makes iOS Safari zoom the page on focus. */
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: none;
+  background: var(--fill);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  padding: var(--s-2) var(--s-3);
+}
+.search-field > .mi {
+  width: 16px;
+  height: 16px;
+  color: var(--fg-3);
+  flex: none;
+}
+.search-in {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: 16px inherit;
+  outline: none;
+  padding: 0;
+}
+.search-in::placeholder {
+  color: var(--fg-4);
+}
+.search-x {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--fill-2);
+  color: var(--fg-3);
+  padding: 0;
+  cursor: pointer;
+}
+.search-x .mi {
+  width: 9px;
+  height: 9px;
+}
+
+/* The type pills: the notification drawer's .npill family, in one non-wrapping row that scrolls
+   sideways on a narrow phone rather than folding into a second line. */
+.search-pills {
+  display: flex;
+  gap: var(--s-1);
+  flex: none;
+  overflow-x: auto;
+  padding: var(--s-2) 0;
+  scrollbar-width: none;
+}
+.search-pills::-webkit-scrollbar {
+  display: none;
+}
+.search-pills .npill {
+  flex: none;
+}
+
+.search-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Gutters the tapped row's card bleeds into (its negative margins below). Without them the
+     bleed overflows the scroll container sideways and conjures a horizontal scrollbar; the
+     negative margin out here keeps every plain row aligned with the field and pills above. */
+  padding: 0 var(--s-2);
+  margin: 0 calc(-1 * var(--s-2));
+}
+
+/* Section heads over the grouped results, and the accent "Show more" under each group. */
+.search-sec {
+  font-size: var(--t-s);
+  font-weight: 650;
+  padding: var(--s-2) 0 2px;
+}
+.search-more {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: var(--t-s) inherit;
+  font-weight: 650;
+  padding: 4px 0 var(--s-1);
+  cursor: pointer;
+}
+
+/* A result: 40px art (round for artists, the note glyph underneath a failed or absent image),
+   name over a dim sub-line, the play affordance at the edge. The tapped row and its action row
+   share one --fill surface, bled to the drawer's padding so the pair reads as a single card.
+   The modifier is .on, not .sel - .sel is the app's <select> styling and captures anything
+   wearing the name. */
+.search-hit.on {
+  background: var(--fill);
+  border-radius: var(--r-2);
+  margin: 0 calc(-1 * var(--s-2));
+  padding: 0 var(--s-2) var(--s-2);
+}
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  padding: var(--s-2) 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.search-art {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-2);
+  background: var(--fill-2);
+  color: var(--fg-4);
+  overflow: hidden;
+}
+.search-art.round {
+  border-radius: var(--r-pill);
+}
+.search-art img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.search-art .mi {
+  width: 17px;
+  height: 17px;
+}
+.search-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.search-t {
+  font-size: var(--t-l);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.search-s {
+  font-size: var(--t-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.search-go {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  color: var(--fg-3);
+}
+.search-go .mi {
+  width: 11px;
+  height: 11px;
+}
+/* The confirmation a row wears once the server said yes - green because it is one. */
+.search-ok {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  color: var(--ok);
+  font-size: var(--t-xs);
+  font-weight: 650;
+}
+.search-ok .mi {
+  width: 13px;
+  height: 13px;
+}
+
+/* The tapped row's three verbs: the solid-accent Play now with its consequence as a sub-label,
+   the two queue verbs outlined beside it (mockup frame 4). */
+.search-acts {
+  display: flex;
+  gap: var(--s-1);
+}
+.search-act {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  background: var(--bg-elev);
+  color: var(--fg-2);
+  padding: 8px 4px;
+  font: var(--t-xs) inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.search-act.solid {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.search-act:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.search-act .mi {
+  width: 15px;
+  height: 15px;
+}
+.search-act-sub {
+  font-weight: 400;
+  font-size: 10px;
+  opacity: 0.75;
+}
+/* The in-flight ring, the boot splash's rotation at glyph size, standing where the glyph was so
+   the button does not reflow. currentColor rides the solid button's --on-accent too. */
+.search-spin {
+  display: block;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spl-rot 0.9s linear infinite;
+}
+
+/* Recent searches: a clock-glyph row per remembered query, with its own forget ✕. */
+.search-rec {
+  display: flex;
+  align-items: center;
+}
+.search-rec-hit {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) 0;
+  background: none;
+  border: 0;
+  color: var(--fg-2);
+  font: var(--t-l) inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.search-rec-hit .mi {
+  width: 15px;
+  height: 15px;
+  color: var(--fg-4);
+}
+.search-rec-x {
+  color: var(--fg-4);
+}
+.search-rec-x .mi {
+  width: 10px;
+  height: 10px;
+}
+
+/* The footer naming where a pick will play, pinned under the scrolling body. */
+.search-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex: none;
+  font-size: var(--t-xs);
+  border-top: 1px solid var(--line);
+  padding-top: var(--s-2);
+  margin-top: var(--s-1);
+}
+.search-foot strong {
+  font-weight: 650;
+  color: var(--fg-2);
+}
+
+/* The not-connected empty state (mockup frame 6) and the centred spinner moments. */
+.search-empty {
+  text-align: center;
+  padding: var(--s-4) var(--s-3);
+}
+.search-empty > .mi {
+  width: 40px;
+  height: 40px;
+  margin: var(--s-3) auto var(--s-2);
+  color: var(--fg-4);
+}
+.search-empty-t {
+  font-size: 15px;
+  font-weight: 650;
+  margin-bottom: var(--s-1);
+}
+.search-empty p {
+  max-width: 300px;
+  margin: 0 auto var(--s-3);
+}
+.search-empty .mapanel {
+  text-align: left;
+}
+.search-status {
+  text-align: center;
+  padding: var(--s-4) 0;
+}
+.search-status .search-spin {
+  width: 22px;
+  height: 22px;
+  border-width: 2.5px;
+  border-color: var(--line-2);
+  border-top-color: var(--accent);
+  margin: var(--s-4) auto var(--s-2);
+}
 
 /* ------------------------------------------------------------------ */
 /* Log panel: filter, highlight and counts                             */

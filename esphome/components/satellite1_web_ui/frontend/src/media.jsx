@@ -54,7 +54,8 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 
 import { HINTS, TEXT } from "./copy.js";
 import { useMaData, useMedia } from "./lib/device.js";
-import { maSettings, useMaSocket } from "./lib/ma.js";
+import { maCfgFetch, maCfgSave, maSettings, scanForMa, useMaSocket } from "./lib/ma.js";
+import { SearchDrawer } from "./search.jsx";
 import { Chevron, rangeFill, useDrawer, useHeld, useSheetDrag } from "./ui.jsx";
 
 const MEDIA_STATE = { 2: "Playing", 3: "Paused", 4: "Announcing" };
@@ -423,6 +424,26 @@ function useTiers(ha, mac, wake) {
   const ws = useMaSocket(mac, maCfg.url && maCfg.token ? maCfg : null);
   const wsOn = ws.status === "on" && !!ws.me;
 
+  // A browser with no stored connection asks the device for its copy, once per mount (AppInner
+  // remounts per device, which is the right cadence - the copy is per-device). This is what makes
+  // "set up once, works on every phone" true: the first browser saved here through MaPanel, and
+  // every later one seeds itself. localStorage keeps winning when it has an answer, so a browser
+  // that deliberately points at a different server is not overwritten.
+  useEffect(() => {
+    if (maCfg.url && maCfg.token) return undefined;
+    let live = true;
+    maCfgFetch().then((cfg) => {
+      if (!live || !cfg) return;
+      maSettings.set(cfg.url, cfg.token);
+      setMaCfg(cfg);
+    });
+    return () => {
+      live = false;
+    };
+    // Mount-time seeding only: maCfg gaining a value is this effect's own doing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const disc = ha?.d?.ma;
   const me = disc?.e || "";
   const { ma, maCmd, maRead, maAsk } = useMaData(!!me && !wsOn && wake);
@@ -644,7 +665,7 @@ function Artwork({ art, big }) {
 /* The expanded view                                                  */
 /* ------------------------------------------------------------------ */
 
-function MediaSheet({ model, tiers, tint, onClose, onPlayers }) {
+function MediaSheet({ model, tiers, tint, ip, onClose, onPlayers }) {
   const { media, mediaCmd, sendspin, playing, active, announcing, srcParam, pending, startPending } = model;
   const { ws, wsOn, me, maCmd, maCfg, setMaCfg, members } = tiers;
 
@@ -804,7 +825,7 @@ function MediaSheet({ model, tiers, tint, onClose, onPlayers }) {
           <span>{chip}</span>
         </button>
 
-        <MaPanel cfg={maCfg} setCfg={setMaCfg} status={maCfg.url && maCfg.token ? ws.status : "off"} />
+        <MaPanel cfg={maCfg} setCfg={setMaCfg} status={maCfg.url && maCfg.token ? ws.status : "off"} ip={ip} />
         </div>
       </div>
     </>
@@ -815,16 +836,44 @@ function MediaSheet({ model, tiers, tint, onClose, onPlayers }) {
  * The Music Assistant connection panel, folded shut at the bottom of the sheet.
  *
  * The one place in the app that asks for a credential, and deliberately buried: the footer is
- * complete without it, and this exists for the person who wants the real-time tier and knows where
- * their MA server lives. The token is a long-lived one from MA's own profile settings; both fields
- * go to localStorage and nowhere else - the device never sees them, which is the tier's whole
- * design. The dot on the fold is the connection, so the panel can stay shut once it works.
+ * complete without it, and this exists for the person who wants the real-time tier. The token is a
+ * long-lived one from MA's own profile settings; it lands in localStorage and - since September
+ * 2026, at the owner's request - on the device behind the session gate, so the second browser in a
+ * household inherits the connection instead of asking for the token again (see lib/ma.js's header
+ * for the trust reasoning). The dot on the fold is the connection, so the panel can stay shut once
+ * it works.
+ *
+ * The address no longer has to be known or typed: "Find my server" sweeps the device's own /24 on
+ * Music Assistant's signature port and verifies every listener over the WebSocket hello (see
+ * scanForMa), so the common path is one tap, one row, one pasted token.
+ *
+ * `defaultOpen` starts the fold open - the search drawer's not-connected state passes it, because
+ * there the person has already asked for the panel by pressing "Set up connection". `ip` seeds the
+ * scan's subnet: the device's address is the one address guaranteed to be on the right network.
  */
-function MaPanel({ cfg, setCfg, status }) {
-  const [open, setOpen] = useState(false);
+function MaPanel({ cfg, setCfg, status, ip, defaultOpen }) {
+  const [open, setOpen] = useState(!!defaultOpen);
   const [url, setUrl] = useState(cfg.url);
   const [token, setToken] = useState(cfg.token);
   const configured = !!(cfg.url && cfg.token);
+
+  // The scan: idle -> {done, total} while running -> a result list (or "https"/"none"), with a
+  // liveness flag so a panel closed mid-sweep drops the answer instead of setting dead state.
+  const [scan, setScan] = useState(null);
+  const scanLive = useRef(false);
+  useEffect(
+    () => () => {
+      scanLive.current = false;
+    },
+    [],
+  );
+  const startScan = () => {
+    scanLive.current = true;
+    setScan({ done: 0, total: 0 });
+    scanForMa(ip, (done, total) => scanLive.current && setScan((s) => (s && s.list ? s : { done, total })))
+      .then((list) => scanLive.current && setScan(list.length ? { list } : { err: "none" }))
+      .catch(() => scanLive.current && setScan({ err: "https" }));
+  };
 
   const connect = () => {
     const u = url.trim();
@@ -832,10 +881,13 @@ function MaPanel({ cfg, setCfg, status }) {
     if (!u || !t) return;
     maSettings.set(u, t);
     setCfg({ url: u, token: t });
+    // The device's copy, for the next browser. Fire-and-forget: this browser is already connected.
+    maCfgSave(u, t);
   };
   const disconnect = () => {
     maSettings.clear();
     setCfg({ url: "", token: "" });
+    maCfgSave("", "");
   };
 
   return (
@@ -856,6 +908,36 @@ function MaPanel({ cfg, setCfg, status }) {
             aria-label="Music Assistant address"
             onInput={(e) => setUrl(e.currentTarget.value)}
           />
+          {/* The scan, under the field it fills. One button while idle; a counter while the sweep
+              runs; then one tappable row per verified server, named by the server itself with its
+              version and address, choosing which fills the field above. */}
+          {!scan && (
+            <button class="btn sm mascan-btn" onClick={startScan}>
+              {TEXT.ma_scan_btn}
+            </button>
+          )}
+          {scan && !scan.list && !scan.err && (
+            <p class="dim xs mascan-note">
+              {TEXT.ma_scanning.replace("%s", scan.total ? `${scan.done}/${scan.total}` : "")}
+            </p>
+          )}
+          {scan?.err && (
+            <p class="dim xs mascan-note">{scan.err === "https" ? TEXT.ma_scan_https : TEXT.ma_scan_none}</p>
+          )}
+          {scan?.list &&
+            scan.list.map((s) => (
+              <button
+                key={s.id}
+                class={`mascan-row${url.trim() === s.url ? " on" : ""}`}
+                onClick={() => setUrl(s.url)}
+              >
+                <span class="mascan-name">{s.name}</span>
+                <span class="mascan-sub">
+                  {s.version ? `${s.version} \u00b7 ` : ""}
+                  {s.url.replace(/^https?:\/\//, "")}
+                </span>
+              </button>
+            ))}
           <input
             class="in"
             type="password"
@@ -1004,7 +1086,11 @@ function BarTitle({ text }) {
   );
 }
 
-export function MediaFooter({ ha, mac }) {
+/** `search`/`onSearchClose`: the search drawer's open state, owned by the shell (its opener is
+ *  the top bar's magnifying glass) but rendered here, because this component owns the tiers the
+ *  drawer runs on - hoisting the socket instead would remount it around every open. `ip` is the
+ *  device's own address, seeding the MaPanel scan's subnet. */
+export function MediaFooter({ ha, mac, ip, search, onSearchClose }) {
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState(false);
   const tiers = useTiers(ha, mac, open || panel);
@@ -1056,8 +1142,28 @@ export function MediaFooter({ ha, mac }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relayPaused, open, panel]);
 
+  // The search drawer, built before the early return below: searching must not wait on the
+  // media poll - the drawer's own states cover every tier the poll would have vouched for. The
+  // MaPanel rides in as a prop rather than an import on search.jsx's side, because media.jsx
+  // renders SearchDrawer and importing back the other way would be a cycle.
+  const searchEl = search ? (
+    <SearchDrawer
+      tiers={tiers}
+      setup={
+        <MaPanel
+          cfg={tiers.maCfg}
+          setCfg={tiers.setMaCfg}
+          status={tiers.maCfg.url && tiers.maCfg.token ? tiers.ws.status : "off"}
+          ip={ip}
+          defaultOpen
+        />
+      }
+      onClose={onSearchClose}
+    />
+  ) : null;
+
   // Waits for the first poll rather than painting an empty shell, exactly as the card did.
-  if (!model.media) return null;
+  if (!model.media) return searchEl;
 
   const { media, mediaCmd, srcParam, active, announcing, playing } = model;
   const barTitle = model.title || model.stateText || TEXT.media_idle_bar;
@@ -1119,11 +1225,13 @@ export function MediaFooter({ ha, mac }) {
           model={model}
           tiers={tiers}
           tint={tint}
+          ip={ip}
           onClose={() => setOpen(false)}
           onPlayers={() => setPanel(true)}
         />
       )}
       {panel && <PlayersPanel model={model} tiers={tiers} tint={tint} haReady={!!ha?.d} onClose={() => setPanel(false)} />}
+      {searchEl}
     </>
   );
 }

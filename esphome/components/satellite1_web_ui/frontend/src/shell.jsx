@@ -69,6 +69,15 @@ const N_OUT = ni(
   </>,
 );
 
+/* The magnifying glass beside the bell, opening the Music Assistant search drawer (Plan 20).
+   Local like N_OUT: the top bar is its only wearer - the drawer itself draws its own copy. */
+const N_SEARCH = ni(
+  <>
+    <circle cx="7" cy="7" r="4.4" />
+    <path d="M10.4 10.4 14 14" />
+  </>,
+);
+
 const ROUTES = [
   { id: "home", label: "Home", view: Controls, icon: N_HOME },
   // "Wake Words", plural, everywhere it displays (owner call, September 2026): the route holds two
@@ -1234,6 +1243,11 @@ function AppInner({ primeKey, remote, localMac, onRemote, onLocal, onAuthLost })
   const [toastLive, setToastLive] = useState(false);
   // The notification drawer behind the bell.
   const [notifOpen, setNotifOpen] = useState(false);
+  // The search drawer behind the magnifying glass. The state lives here because the opener is
+  // the top bar's; the drawer renders inside MediaFooter, which owns the Music Assistant socket
+  // it runs on. The one-drawer rule still closes it from either side - useDrawer calls this
+  // component's setter through onSearchClose.
+  const [searchOpen, setSearchOpen] = useState(false);
 
   // The drawer's own items close it as they navigate; this covers the routes nobody tapped - the
   // back button, a bookmark, a hash typed over the current one - so a navigation never leaves the
@@ -1356,6 +1370,12 @@ function AppInner({ primeKey, remote, localMac, onRemote, onLocal, onAuthLost })
           {/* Always down: this opens a sheet, and a dropdown that points sideways reads as a link. */}
           <Chevron down cls="caret" />
         </button>
+        {/* The magnifying glass: Music Assistant search, on every route (Plan 20). Left of the
+            bell, dressed like it. Always visible even before the MA connection exists - the
+            drawer's own empty state explains what search needs and offers the setup. */}
+        <button class="icon nsearch" aria-label={TEXT.search_open} title={TEXT.search_open} onClick={() => setSearchOpen(true)}>
+          {N_SEARCH}
+        </button>
         {/* The bell, badge and drawer: the toast history of the past 24 hours (owner request,
             September 2026). Beside the theme toggle - the top bar's right edge is where every
             app keeps its bell, and the badge must be visible from any route. */}
@@ -1385,8 +1405,9 @@ function AppInner({ primeKey, remote, localMac, onRemote, onLocal, onAuthLost })
 
       {/* On every route, below the content - .wrap carries bottom padding so nothing hides under it.
           The footer owns the media poll now that it is the one media surface (the card it replaced
-          lived on home and polled only there). */}
-      <MediaFooter ha={ha.ha} mac={device?.mac} />
+          lived on home and polled only there) - and the search drawer, which runs on the footer's
+          Music Assistant socket. */}
+      <MediaFooter ha={ha.ha} mac={device?.mac} ip={device?.ip} search={searchOpen} onSearchClose={() => setSearchOpen(false)} />
 
       {/* `blocked` waits for the splash to leave: while it is up, the verdict is its story to tell,
           and the toast's job is to keep the fix reachable afterwards. */}

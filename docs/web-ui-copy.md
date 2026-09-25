@@ -42,7 +42,7 @@ labelled User and Assist rather than heard and said).
 | `calibrate` | Calibration editor, offset row | Adjust until the reading matches a trusted instrument in the same room. The correction is stored on the device and survives restarts. |
 | `led_ring` | LED ring | The ring the assistant animates. Colour and brightness set here are the resting state - the device still overrides both while it is listening, thinking or reporting an error. |
 | `timers` | Timers card | Timers set by voice, held on the device - they keep counting and still ring if Home Assistant goes away. Voice is also how they are managed: name one when you set it ("set a pizza timer for ten minutes"), pause or cancel it the same way. |
-| `ma_connect` | Media footer, Music Assistant panel | Connecting this page straight to your Music Assistant server makes the controls instant and unlocks anything Home Assistant cannot relay. Create a long-lived token in Music Assistant under Settings, then your profile, and paste it here with the server's address. Both stay in this browser only - the device never sees them. |
+| `ma_connect` | Media footer, Music Assistant panel | Connecting this page straight to your Music Assistant server makes the controls instant and unlocks search. Find your server below, then create a long-lived token in Music Assistant under Settings, then your profile, and paste it here. Both are remembered by this browser and, behind your sign-in, on this device - so your other browsers and phones connect without re-entering them. |
 
 The media drawer and the players drawer carried `media` and `media_group` hints on their title rows until
 September 2026, when the titles were cut (the artwork names one drawer, the speaker rows the other), and
@@ -522,6 +522,40 @@ the notch archives it directly, so it never reaches the badge. `HINTS.notif` car
 | `ma_disconnect_btn` | Disconnect |
 | `ma_connected` | Connected to Music Assistant |
 | `ma_error` | Could not connect. Check the address and token, and that this browser can reach the server. |
+| `ma_scan_btn` | Find my server |
+| `ma_scanning` | Scanning your network… %s |
+| `ma_scan_none` | No Music Assistant server found. It may be on another network or a non-standard port - enter its address above. |
+| `ma_scan_https` | Scanning needs this page on its local http address; enter the server's address above instead. |
+
+The search drawer (Plan 20), behind the top bar's magnifying glass. It rides the direct Music
+Assistant connection only, so its empty states carry the honest work: what search needs, and where
+to set it up. `search_kind` is the singular on each row's sub-line ("Track · Oliver Tree"), one
+entry per media type; the plural forms below serve both the filter pills and the section heads.
+
+| `search_open` | Search music |
+| `search_title` | Search Music Assistant |
+| `search_ph` | Search Music Assistant… |
+| `search_clear` | Clear search |
+| `search_recent` | Recent searches |
+| `search_forget` | Forget this search |
+| `search_searching` | Searching… |
+| `search_none` | Nothing found for “%s”. |
+| `search_more` | Show more |
+| `search_all` / `search_track` / `search_artist` / `search_album` / `search_playlist` / `search_radio` / `search_podcast` / `search_audiobook` | All / Tracks / Artists / Albums / Playlists / Radio / Podcasts / Audiobooks |
+| `search_play_now` | Play now |
+| `search_play_now_sub` | replaces queue |
+| `search_play_next` | Play next |
+| `search_add` | Add to queue |
+| `search_playing` | Playing |
+| `search_queued` | Queued |
+| `search_play_failed` | Music Assistant couldn't play that. |
+| `search_play_failed_sub` | Try again in a moment. |
+| `search_target` | Plays on *(followed by the speaker or group name)* |
+| `search_via` | via Music Assistant |
+| `search_need_ma_t` | Search needs Music Assistant |
+| `search_need_ma_b` | Connect this browser to your Music Assistant server to search and play music. The address and token are set once and remembered here. |
+| `search_setup_btn` | Set up connection |
+| `search_connecting` | Connecting to Music Assistant… |
 | `zi_first` | Tap the map to place the first corner. |
 | `zi_more` | Keep tapping. A zone needs at least 3 corners. |
 | `zi_adjust` | Drag a corner to reshape. Drag the middle to move the shape. Tap a corner to select it. |

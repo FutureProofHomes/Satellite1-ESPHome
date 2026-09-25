@@ -192,11 +192,13 @@ export const HINTS = {
   // owner cut the titles themselves: the artwork names the media drawer and the speaker rows name
   // the players drawer, so the ⓘ had nowhere left to sit.
 
-  // The Music Assistant connection panel. What the token is, where it comes from, and where it goes -
-  // which is only this browser, a fact worth stating because pasting tokens into web pages should
-  // make people ask.
+  // The Music Assistant connection panel. What the token is, where it comes from, and where it
+  // goes - stated plainly because pasting tokens into web pages should make people ask. The
+  // where-it-goes sentence changed in September 2026 when the device grew its stored copy (owner
+  // request: one setup per device, not one per browser): the token now lives on the device too,
+  // behind the same sign-in as everything else here.
   ma_connect:
-    "Connecting this page straight to your Music Assistant server makes the controls instant and unlocks anything Home Assistant cannot relay. Create a long-lived token in Music Assistant under Settings, then your profile, and paste it here with the server's address. Both stay in this browser only - the device never sees them.",
+    "Connecting this page straight to your Music Assistant server makes the controls instant and unlocks search. Find your server below, then create a long-lived token in Music Assistant under Settings, then your profile, and paste it here. Both are remembered by this browser and, behind your sign-in, on this device - so your other browsers and phones connect without re-entering them.",
 
   heap: "Internal RAM still available. Audio buffers and the network stack allocate from it, and it runs out long before PSRAM does.",
 
@@ -497,6 +499,70 @@ export const TEXT = {
   ma_disconnect_btn: "Disconnect",
   ma_connected: "Connected to Music Assistant",
   ma_error: "Could not connect. Check the address and token, and that this browser can reach the server.",
+
+  /* The server scan inside the connection panel (September 2026): browsers cannot browse mDNS, so
+     the button sweeps the device's own subnet on Music Assistant's port and verifies each answer
+     over the server's own hello. The failure lines own the two honest limits: a server on another
+     network or a non-standard port is invisible to the sweep, and a page served over https cannot
+     open the plain-http probes the sweep is made of. */
+  ma_scan_btn: "Find my server",
+  ma_scanning: "Scanning your network\u2026 %s",
+  ma_scan_none:
+    "No Music Assistant server found. It may be on another network or a non-standard port - enter its address above.",
+  ma_scan_https: "Scanning needs this page on its local http address; enter the server's address above instead.",
+
+  /* The search drawer (Plan 20), behind the top bar's magnifying glass. It rides the direct
+     Music Assistant socket only - the relay's fixed verbs cannot carry a search - so the empty
+     states below do the honest work of saying what the feature needs and where to set it up. */
+  search_open: "Search music",
+  search_title: "Search Music Assistant",
+  search_ph: "Search Music Assistant\u2026",
+  search_clear: "Clear search",
+  search_recent: "Recent searches",
+  search_forget: "Forget this search",
+  search_searching: "Searching\u2026",
+  search_none: "Nothing found for \u201c%s\u201d.",
+  search_more: "Show more",
+  // The filter pills and the section heads over grouped results - one vocabulary for both.
+  search_all: "All",
+  search_track: "Tracks",
+  search_artist: "Artists",
+  search_album: "Albums",
+  search_playlist: "Playlists",
+  search_radio: "Radio",
+  search_podcast: "Podcasts",
+  search_audiobook: "Audiobooks",
+  // The singular on each row's sub-line ("Track · Oliver Tree"), keyed by the API's media_type.
+  search_kind: {
+    track: "Track",
+    artist: "Artist",
+    album: "Album",
+    playlist: "Playlist",
+    radio: "Radio",
+    podcast: "Podcast",
+    audiobook: "Audiobook",
+  },
+  // The tapped row's three verbs. "replaces queue" under Play now states the one consequence a
+  // person cannot see coming; the other two say where in the queue the pick lands by name.
+  search_play_now: "Play now",
+  search_play_now_sub: "replaces queue",
+  search_play_next: "Play next",
+  search_add: "Add to queue",
+  // The transient confirmation on a row whose command the server accepted, per verb.
+  search_playing: "Playing",
+  search_queued: "Queued",
+  search_play_failed: "Music Assistant couldn't play that.",
+  search_play_failed_sub: "Try again in a moment.",
+  // The footer naming where a pick will play: this speaker, or the first group member +N. The
+  // "via" clause credits the tier so a failure has an address.
+  search_target: "Plays on",
+  search_via: "via Music Assistant",
+  // The not-connected empty state, and the connecting/error moments of a configured socket.
+  search_need_ma_t: "Search needs Music Assistant",
+  search_need_ma_b:
+    "Connect this browser to your Music Assistant server to search and play music. The address and token are set once and remembered here.",
+  search_setup_btn: "Set up connection",
+  search_connecting: "Connecting to Music Assistant\u2026",
 
   /* The Presence route: zone editing, gate thresholds, and the no-sensor card. The zi_* strings are
      the one instruction line under the plot, swapped by what the person is doing right now - one short
