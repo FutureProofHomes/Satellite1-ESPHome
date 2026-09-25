@@ -351,12 +351,38 @@ void TAS2780::activate() {
       (TAS2780_MODE_CTRL_BOP_SRC__PVDD_UVLO & ~TAS2780_MODE_CTRL_MODE_MASK) | TAS2780_MODE_CTRL_MODE__ACTIVE_MUTED;
   this->enable_loop();
 
-  // The TAS SAR ADC only provides valid supply measurements while active.
-  delay(100);
+  // The TAS SAR ADC only provides valid supply measurements after 100 ms of active operation.
+  this->activation_pending_ = true;
+  this->set_timeout("finish_activation", 100, [this]() { this->finish_activation_(); });
+}
+
+void TAS2780::finish_activation_() {
+  constexpr uint8_t bootstrap_power_mode = 0;
+  constexpr uint8_t fallback_power_mode = 2;
   SupplyVoltages voltages;
-  if (!this->read_supply_voltages_(&voltages)) {
-    ESP_LOGE(TAG, "Couldn't read supply voltages; returning TAS2780 to software shutdown");
-    this->deactivate();
+  const bool supply_read = this->read_supply_voltages_(&voltages);
+  const bool valid_supply_read =
+      supply_read &&
+      (voltages.pvdd >= TAS2780_POWER_MODE2_MIN_PVDD ||
+       (voltages.vbat1s > TAS2780_EXTERNAL_VBAT1S_MIN && voltages.vbat1s <= TAS2780_EXTERNAL_VBAT1S_MAX));
+  if (!valid_supply_read) {
+    if (this->power_mode_ == fallback_power_mode) {
+      ESP_LOGE(TAG, "Couldn't read valid supply voltages in PWR_MODE:%d; returning TAS2780 to software shutdown",
+               fallback_power_mode);
+      this->deactivate();
+      return;
+    }
+    // Older boards without external 5 V VBAT1S cannot produce a valid mode-0 supply sample.
+    ESP_LOGW(TAG, "PWR_MODE:%d bootstrap produced no valid supply sample; trying PWR_MODE:%d", bootstrap_power_mode,
+             fallback_power_mode);
+    this->log_error_states();
+    this->power_mode_ = fallback_power_mode;
+    this->init();
+    this->write_mute_();
+    this->reg(TAS2780_MODE_CTRL) =
+        (TAS2780_MODE_CTRL_BOP_SRC__PVDD_UVLO & ~TAS2780_MODE_CTRL_MODE_MASK) | TAS2780_MODE_CTRL_MODE__ACTIVE_MUTED;
+    this->enable_loop();
+    this->set_timeout("finish_activation", 100, [this]() { this->finish_activation_(); });
     return;
   }
 
@@ -380,10 +406,13 @@ void TAS2780::activate() {
   this->reg(TAS2780_MODE_CTRL) =
       (TAS2780_MODE_CTRL_BOP_SRC__PVDD_UVLO & ~TAS2780_MODE_CTRL_MODE_MASK) | TAS2780_MODE_CTRL_MODE__ACTIVE;
   this->active_ = true;
+  this->activation_pending_ = false;
 }
 
 void TAS2780::deactivate() {
   ESP_LOGD(TAG, "Dectivating TAS2780");
+  this->cancel_timeout("finish_activation");
+  this->activation_pending_ = false;
   // set to software shutdown
   this->reg(TAS2780_MODE_CTRL) =
       (TAS2780_MODE_CTRL_BOP_SRC__PVDD_UVLO & ~TAS2780_MODE_CTRL_MODE_MASK) | TAS2780_MODE_CTRL_MODE__SFTW_SHTDWN;
@@ -411,14 +440,28 @@ bool TAS2780::read_adc12_(uint8_t msb_reg, uint8_t lsb_reg, uint16_t *raw) {
 bool TAS2780::read_supply_voltages_(SupplyVoltages *voltages) {
   uint16_t vbat_raw;
   uint16_t pvdd_raw;
-  if (!this->write_byte(TAS2780_PAGE_SELECT, 0x00) || !this->read_byte(TAS2780_MODE_CTRL, &voltages->mode_ctrl) ||
-      !this->read_adc12_(TAS2780_VBAT_MSB, TAS2780_VBAT_LSB, &vbat_raw) ||
+  if (!this->write_byte(TAS2780_PAGE_SELECT, 0x00) || !this->read_byte(TAS2780_MODE_CTRL, &voltages->mode_ctrl)) {
+    ESP_LOGE(TAG, "TAS2780 I2C supply read failed");
+    return false;
+  }
+  const uint8_t operational_mode = voltages->mode_ctrl & TAS2780_MODE_CTRL_MODE_MASK;
+  if (operational_mode != TAS2780_MODE_CTRL_MODE__ACTIVE && operational_mode != TAS2780_MODE_CTRL_MODE__ACTIVE_MUTED) {
+    ESP_LOGW(TAG, "Skipping supply sample because TAS2780 is not active (MODE_CTRL 0x%02X)", voltages->mode_ctrl);
+    if (operational_mode == TAS2780_MODE_CTRL_MODE__SFTW_SHTDWN) {
+      this->active_ = false;
+      this->disable_loop();
+    }
+    return false;
+  }
+  if (!this->read_adc12_(TAS2780_VBAT_MSB, TAS2780_VBAT_LSB, &vbat_raw) ||
       !this->read_adc12_(TAS2780_PVDD_MSB, TAS2780_PVDD_LSB, &pvdd_raw)) {
     ESP_LOGE(TAG, "TAS2780 I2C supply read failed");
     return false;
   }
   voltages->vbat1s = static_cast<float>(vbat_raw) / 128.0f;
   voltages->pvdd = static_cast<float>(pvdd_raw) / 64.0f;
+  this->last_supply_voltages_ = *voltages;
+  this->last_supply_sample_valid_ = true;
   ESP_LOGD(TAG, "MODE_CTRL: 0x%02X; VBAT1S: %.3f V; PVDD: %.3f V", voltages->mode_ctrl, voltages->vbat1s,
            voltages->pvdd);
   return true;
@@ -528,11 +571,27 @@ void TAS2780::loop() {
     if (curr_mode == 2) {
       ESP_LOGD(TAG, "Current Mode: SOFTWARE_SHUTDOWN (PWR_MODE: %d)", this->power_mode_);
       this->log_error_states();
+      this->active_ = false;
+      this->disable_loop();
     }
   }
 }
 
-void TAS2780::dump_config() {}
+void TAS2780::dump_config() {
+  ESP_LOGCONFIG(TAG, "TAS2780:");
+  LOG_I2C_DEVICE(this);
+  ESP_LOGCONFIG(TAG, "  Active: %s", YESNO(this->active_));
+  ESP_LOGCONFIG(TAG, "  Activation pending: %s", YESNO(this->activation_pending_));
+  ESP_LOGCONFIG(TAG, "  Power mode: %u", this->power_mode_);
+  ESP_LOGCONFIG(TAG, "  Muted: %s", YESNO(this->is_muted_));
+  if (this->last_supply_sample_valid_) {
+    ESP_LOGCONFIG(TAG, "  Last supply sample: MODE_CTRL 0x%02X, VBAT1S %.3f V, PVDD %.3f V",
+                  this->last_supply_voltages_.mode_ctrl, this->last_supply_voltages_.vbat1s,
+                  this->last_supply_voltages_.pvdd);
+  } else {
+    ESP_LOGCONFIG(TAG, "  Last supply sample: unavailable");
+  }
+}
 
 bool TAS2780::set_mute_off() {
   this->is_muted_ = false;
