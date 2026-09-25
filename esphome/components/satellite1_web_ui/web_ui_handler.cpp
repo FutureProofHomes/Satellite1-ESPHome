@@ -189,6 +189,10 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
       return Route::HA_SELECT;
     if (url == "/api/sat1/ma/refresh")
       return Route::MA_REFRESH;
+    // Before the /api/sat1/ma/ prefix below, which would otherwise swallow this exact path and
+    // relay "cfg" to Home Assistant as a command.
+    if (url == "/api/sat1/ma/cfg")
+      return Route::MA_CFG_SET;
     // A prefix like the media commands: the verb rides the path as /api/sat1/ma/<cmd>. Tested after
     // the refresh above, which would otherwise match the prefix too.
     if (strncmp(url_buf, "/api/sat1/ma/", 13) == 0)
@@ -250,6 +254,8 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
     return Route::HA;
   if (url == "/api/sat1/ma")
     return Route::MA;
+  if (url == "/api/sat1/ma/cfg")
+    return Route::MA_CFG;
   if (url == "/api/sat1/sel")
     return Route::SEL;
 #ifdef USE_MICRO_WAKE_WORD
@@ -394,6 +400,12 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
     case Route::MA_SET:
       this->handle_ma_set_(request);
       break;
+    case Route::MA_CFG:
+      this->handle_ma_cfg_(request);
+      break;
+    case Route::MA_CFG_SET:
+      this->handle_ma_cfg_set_(request);
+      break;
     case Route::SEL:
       this->handle_sel_(request);
       break;
@@ -441,7 +453,10 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
 }
 
 void WebUIHandler::handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (match_route_(request) != Route::SEL_SET)
+  // The two JSON-body POSTs share one buffer and one discipline; everything else parses query
+  // parameters and never needs a body.
+  const Route route = match_route_(request);
+  if (route != Route::SEL_SET && route != Route::MA_CFG_SET)
     return;
 
   // Cleared on the first chunk rather than after the last, so a connection dropped mid-body cannot
@@ -2076,6 +2091,87 @@ void WebUIHandler::handle_ma_set_(AsyncWebServerRequest *request) {
   // Queued, not done. The app resyncs after the round trip and believes what comes back - none of
   // these calls captures a response, so there is nothing else to believe.
   request->send(200, "application/json", "{\"queued\":1}");
+}
+
+/// Reads `"key":"value"` out of a JSON body, in the selection walkers' dialect: no parser, and a
+/// deliberately narrow shape. A value containing a quote or a backslash is refused rather than
+/// unescaped - the two strings stored here are a server address and a base64url-flavoured token,
+/// and neither has any business containing either character. Control characters are refused for
+/// the same reason. Absent key reports false; an empty value ("") reports true, because empty is
+/// how the frontend says "forget it".
+static bool json_string_value(const std::string &body, const char *key, std::string &out, size_t max_len) {
+  const std::string needle = std::string("\"") + key + "\":\"";
+  const size_t at = body.find(needle);
+  if (at == std::string::npos)
+    return false;
+  const size_t start = at + needle.size();
+  const size_t end = body.find('"', start);
+  if (end == std::string::npos || end - start > max_len)
+    return false;
+  for (size_t i = start; i < end; i++) {
+    const unsigned char c = static_cast<unsigned char>(body[i]);
+    if (c < 0x20 || c == '\\' || c > 0x7e)
+      return false;
+  }
+  out.assign(body, start, end - start);
+  return true;
+}
+
+void WebUIHandler::ma_cfg_load_() {
+  if (this->ma_cfg_loaded_)
+    return;
+  this->ma_cfg_loaded_ = true;
+  this->ma_cfg_pref_ = global_preferences->make_preference<MaCfgBlob>(fnv1_hash("satellite1_web_ui_ma_cfg"));
+  if (!this->ma_cfg_pref_.load(&this->ma_cfg_)) {
+    memset(&this->ma_cfg_, 0, sizeof(this->ma_cfg_));
+    return;
+  }
+  // A blob from flash is data, not a promise: terminate both fields whatever was stored.
+  this->ma_cfg_.url[sizeof(this->ma_cfg_.url) - 1] = '\0';
+  this->ma_cfg_.token[sizeof(this->ma_cfg_.token) - 1] = '\0';
+}
+
+void WebUIHandler::handle_ma_cfg_(AsyncWebServerRequest *request) {
+  this->ma_cfg_load_();
+  // Plain concatenation is sound here: the set handler below refuses quotes, backslashes and
+  // control characters on the way in, so nothing stored can break the JSON on the way out.
+  std::string json = "{\"url\":\"";
+  json += this->ma_cfg_.url;
+  json += "\",\"token\":\"";
+  json += this->ma_cfg_.token;
+  json += "\"}";
+  request->send(200, "application/json", json.c_str());
+}
+
+void WebUIHandler::handle_ma_cfg_set_(AsyncWebServerRequest *request) {
+  if (this->body_ == "!" || this->body_.empty()) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  std::string url;
+  std::string token;
+  const bool ok = json_string_value(this->body_, "url", url, sizeof(MaCfgBlob::url) - 1) &&
+                  json_string_value(this->body_, "token", token, sizeof(MaCfgBlob::token) - 1);
+  this->body_.clear();
+  if (!ok) {
+    // Includes the too-long case: a token past the blob's bound stays browser-local, and the
+    // frontend treats this store as a convenience rather than a requirement.
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  this->ma_cfg_load_();
+  // Saved only on change - the selection store's flash-wear discipline. The save runs on the
+  // httpd task, which SessionGate::regenerate() already established as acceptable for a write
+  // this rare (once per setup, not per session).
+  if (strcmp(this->ma_cfg_.url, url.c_str()) != 0 || strcmp(this->ma_cfg_.token, token.c_str()) != 0) {
+    memset(&this->ma_cfg_, 0, sizeof(this->ma_cfg_));
+    strncpy(this->ma_cfg_.url, url.c_str(), sizeof(this->ma_cfg_.url) - 1);
+    strncpy(this->ma_cfg_.token, token.c_str(), sizeof(this->ma_cfg_.token) - 1);
+    this->ma_cfg_pref_.save(&this->ma_cfg_);
+  }
+  request->send(200, "application/json", "{\"ok\":1}");
 }
 
 bool WebUIHandler::take_ma_write(MaWrite &out) {

@@ -41,6 +41,8 @@
 // For millis_64() in wake_test_active() - the 64-bit clock every deadline here compares against.
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
+// For the stored Music Assistant connection (ESPPreferenceObject) - see MaCfgBlob below.
+#include "esphome/core/preferences.h"
 
 #include "esphome/components/web_server_base/web_server_base.h"
 
@@ -515,6 +517,8 @@ class WebUIHandler : public AsyncWebHandler {
     MA,
     MA_REFRESH,
     MA_SET,
+    MA_CFG,
+    MA_CFG_SET,
     SEL,
     SEL_SET,
     MUTE_HOLD,
@@ -588,6 +592,16 @@ class WebUIHandler : public AsyncWebHandler {
   /// The MA twin of ha_payload_names_, over the members payload, for entities the big payload does
   /// not carry. Same find-with-quotes, same reasons.
   bool ma_payload_names_(const std::string &entity);
+  /// GET/POST /api/sat1/ma/cfg - the browser-held Music Assistant connection (server address and
+  /// long-lived token), stored on the device so every signed-in browser shares one setup instead
+  /// of each phone re-asking for the token (owner request, September 2026). Behind the session
+  /// gate like every /api/sat1 read; the same trust class as the Web UI Password the device
+  /// already publishes to Home Assistant's roster.
+  void handle_ma_cfg_(AsyncWebServerRequest *request);
+  void handle_ma_cfg_set_(AsyncWebServerRequest *request);
+  /// Loads the stored connection once, lazily: the first request that needs it pays the flash
+  /// read, and a device whose owner never connects the tier never touches the preference at all.
+  void ma_cfg_load_();
   void handle_sel_(AsyncWebServerRequest *request);
   void handle_sel_set_(AsyncWebServerRequest *request);
   /// The tune-time held mute a peer's tuner asks for - see the component's loop() for the hold's
@@ -749,6 +763,21 @@ class WebUIHandler : public AsyncWebHandler {
   /// buffer is cleared at index 0 so a connection that died mid-body cannot leave a fragment behind to
   /// be parsed as the front of the next one.
   std::string body_;
+
+  /// The stored Music Assistant connection. Fixed-size because that is what ESPPreferenceObject
+  /// stores (the selection blob's reasoning). The token bound is generous for MA's long-lived
+  /// JWTs (a few hundred characters in practice); a token past it simply stays browser-local -
+  /// the frontend treats the device copy as a convenience, never a requirement. Read and written
+  /// on the httpd task, which is where every request for it lives: writes are one-per-setup rare,
+  /// and SessionGate::regenerate() already writes NVS from this task (the wake word path's
+  /// defer-to-loop rule protects the inference task, which has no stake here).
+  struct MaCfgBlob {
+    char url[104];
+    char token[560];
+  };
+  MaCfgBlob ma_cfg_{};
+  ESPPreferenceObject ma_cfg_pref_;
+  bool ma_cfg_loaded_{false};
 
 #ifdef USE_MICRO_WAKE_WORD
   micro_wake_word::MicroWakeWord *mww_{nullptr};
