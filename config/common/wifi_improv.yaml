@@ -5,10 +5,14 @@ wifi:
     - delay: 5s  # Gives time for improv results to be transmitted
     - ble.disable:
     - lambda: id(improv_ble_in_progress) = false;
-    - script.execute: control_leds
-    - script.execute: set_wifi_connection_str
+    # network_setup_completed must be set after ble.disable (it gates the voice assistant's
+    # on_client_connected wait) but before control_leds, so the init-state repaint sees the
+    # network as up and shows the blue Twinkle instead of solid warm white. The ethernet
+    # on_connect handler in common/ethernet.yaml uses this same ordering.
     - lambda: |-
         id(network_setup_completed) = true;
+    - script.execute: control_leds
+    - script.execute: set_wifi_connection_str
 
   on_disconnect:
     - script.execute: control_leds
