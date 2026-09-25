@@ -356,15 +356,21 @@ void TAS2780::activate() {
   this->set_timeout("finish_activation", 100, [this]() { this->finish_activation_(); });
 }
 
+int TAS2780::select_power_mode_(const SupplyVoltages &voltages) const {
+  if (voltages.pvdd >= TAS2780_POWER_MODE2_MIN_PVDD)
+    return 2;
+  // External VBAT1S from 2.7 V through 2.9 V requires separate OCP programming.
+  if (voltages.vbat1s > TAS2780_EXTERNAL_VBAT1S_MIN && voltages.vbat1s <= TAS2780_EXTERNAL_VBAT1S_MAX)
+    return 0;
+  return -1;
+}
+
 void TAS2780::finish_activation_() {
   constexpr uint8_t bootstrap_power_mode = 0;
   constexpr uint8_t fallback_power_mode = 2;
   SupplyVoltages voltages;
   const bool supply_read = this->read_supply_voltages_(&voltages);
-  const bool valid_supply_read =
-      supply_read &&
-      (voltages.pvdd >= TAS2780_POWER_MODE2_MIN_PVDD ||
-       (voltages.vbat1s > TAS2780_EXTERNAL_VBAT1S_MIN && voltages.vbat1s <= TAS2780_EXTERNAL_VBAT1S_MAX));
+  const bool valid_supply_read = supply_read && this->select_power_mode_(voltages) >= 0;
   if (!valid_supply_read) {
     if (this->power_mode_ == fallback_power_mode) {
       ESP_LOGE(TAG, "Couldn't read valid supply voltages in PWR_MODE:%d; returning TAS2780 to software shutdown",
@@ -386,17 +392,13 @@ void TAS2780::finish_activation_() {
     return;
   }
 
-  // External VBAT1S from 2.7 V through 2.9 V requires separate OCP programming.
-  uint8_t selected_power_mode;
-  if (voltages.pvdd >= TAS2780_POWER_MODE2_MIN_PVDD) {
-    selected_power_mode = 2;
-  } else if (voltages.vbat1s > TAS2780_EXTERNAL_VBAT1S_MIN && voltages.vbat1s <= TAS2780_EXTERNAL_VBAT1S_MAX) {
-    selected_power_mode = 0;
-  } else {
+  const int selection = this->select_power_mode_(voltages);
+  if (selection < 0) {
     ESP_LOGW(TAG, "No valid TAS2780 power mode for VBAT1S %.3f V and PVDD %.3f V", voltages.vbat1s, voltages.pvdd);
     this->deactivate();
     return;
   }
+  const auto selected_power_mode = static_cast<uint8_t>(selection);
   ESP_LOGD(TAG, "Selecting PWR_MODE:%d", selected_power_mode);
   if (selected_power_mode != this->power_mode_) {
     this->power_mode_ = selected_power_mode;
@@ -437,7 +439,7 @@ bool TAS2780::read_adc12_(uint8_t msb_reg, uint8_t lsb_reg, uint16_t *raw) {
   return true;
 }
 
-bool TAS2780::read_supply_voltages_(SupplyVoltages *voltages) {
+bool TAS2780::read_supply_voltages_(SupplyVoltages *voltages, bool quiet) {
   uint16_t vbat_raw;
   uint16_t pvdd_raw;
   if (!this->write_byte(TAS2780_PAGE_SELECT, 0x00) || !this->read_byte(TAS2780_MODE_CTRL, &voltages->mode_ctrl)) {
@@ -462,8 +464,10 @@ bool TAS2780::read_supply_voltages_(SupplyVoltages *voltages) {
   voltages->pvdd = static_cast<float>(pvdd_raw) / 64.0f;
   this->last_supply_voltages_ = *voltages;
   this->last_supply_sample_valid_ = true;
-  ESP_LOGD(TAG, "MODE_CTRL: 0x%02X; VBAT1S: %.3f V; PVDD: %.3f V", voltages->mode_ctrl, voltages->vbat1s,
-           voltages->pvdd);
+  if (!quiet) {
+    ESP_LOGD(TAG, "MODE_CTRL: 0x%02X; VBAT1S: %.3f V; PVDD: %.3f V", voltages->mode_ctrl, voltages->vbat1s,
+             voltages->pvdd);
+  }
   return true;
 }
 
@@ -573,8 +577,47 @@ void TAS2780::loop() {
       this->log_error_states();
       this->active_ = false;
       this->disable_loop();
+      return;
     }
   }
+
+  // The supply reconcile: re-check the rails every 5 s while active, and re-run activation when
+  // they no longer match the selected power mode. The activation-time sample is taken exactly once,
+  // ~100 ms into an activation, and on a cold boot that can land before the USB-PD source has
+  // ramped VBUS to the negotiated voltage - measured on hardware (September 2026): a 20 V contract
+  // with an activation sample of PVDD 4.66 V locked PWR_MODE 0, and nothing ever measured again, so
+  // the speaker ran at reduced output until the next output switch or reboot. A PD hard reset is
+  // the same story in reverse: VBUS legitimately drops to 5 V and returns, on the source's schedule
+  // rather than ours. Trigger-ordering patches in YAML cannot see either transition, so the driver
+  // heals itself instead.
+  //
+  // Two consecutive mismatched samples (10 s) are required before acting, so a rail hovering at the
+  // PWR_MODE 2 threshold cannot flap the amp. The re-selection goes through activate() - the whole
+  // existing bootstrap-measure-select path, fallbacks included - and costs one brief muted window,
+  // paid only when the supply genuinely changed.
+  if (!this->active_ || this->activation_pending_)
+    return;
+  const uint32_t now = millis();
+  if (now - this->supply_check_ms_ < 5000)
+    return;
+  this->supply_check_ms_ = now;
+
+  SupplyVoltages voltages;
+  if (!this->read_supply_voltages_(&voltages, true)) {
+    this->supply_mismatches_ = 0;
+    return;
+  }
+  const int desired = this->select_power_mode_(voltages);
+  if (desired < 0 || desired == this->power_mode_) {
+    this->supply_mismatches_ = 0;
+    return;
+  }
+  if (++this->supply_mismatches_ < 2)
+    return;
+  this->supply_mismatches_ = 0;
+  ESP_LOGI(TAG, "Supply changed (VBAT1S %.3f V, PVDD %.3f V): re-selecting power mode (PWR_MODE:%d -> PWR_MODE:%d)",
+           voltages.vbat1s, voltages.pvdd, this->power_mode_, desired);
+  this->activate();
 }
 
 void TAS2780::dump_config() {
