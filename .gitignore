@@ -24,5 +24,6 @@ sdkconfig.esp32-s3-idf
 /wake-word-benchmark/
 /Docker/firmware_server/shared-folder
 /plans
+/web-ui-screenshots
 
 **/.DS_Store
