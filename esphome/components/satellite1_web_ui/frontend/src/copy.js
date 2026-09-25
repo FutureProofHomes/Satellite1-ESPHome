@@ -182,6 +182,30 @@ export const HINTS = {
   speaker_channel:
     "Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want.",
 
+  /* The Speaker amplifier card's title. Sets the frame the four row hints below rely on: one chip,
+     three levels that multiply together, and only one of them is yours to set here. */
+  speaker_amp:
+    "The chip that drives the built-in speaker. What you hear is three levels multiplied together: the power gain mode the amplifier picks from your USB-C supply, the digital volume the firmware computes from your sliders, and the analog gain set below.",
+
+  /* The Power gain mode row. What each state gives them, and that it is measured rather than set -
+     the two facts that stop this row being read as a broken control. The supply link is the
+     surprising thing: the row exists so "why is my speaker quieter than the video's" has an answer
+     a customer can act on (a better USB-C brick). */
+  amp_mode:
+    "Picked automatically from the measured power supply - it is a reading, not a setting. High gain: a 9 V or higher USB-PD supply is connected and the speaker can reach full loudness. Low gain: the device is on a plain 5 V supply, so maximum loudness is reduced. Off: the amplifier is shut down, normally because line out is selected. A supply that negotiates 9 V or more (the USB-C Power Supply row in the Device card above) is what unlocks High gain.",
+
+  /* The Digital volume row. Read-only on purpose, and the hint says where the writable levers are
+     so nobody hunts for a handle on this row. */
+  amp_dvc:
+    "How far open the amplifier's digital volume control is right now - the level the firmware computes from the volume buttons, Voice Volume Override and ducking. Shown so you can see what the amplifier is actually being fed; it is managed automatically and has no handle here. To change it, use the volume controls.",
+
+  /* The Analog gain slider. The default is named because the row offers the full range, and "where
+     was it before I touched it" must never require support - the notch on the track marks it and
+     the drag snaps to it, and this hint says so in words. The limiter sentence is what makes the
+     full range offerable at all. */
+  amp_gain:
+    "The amplifier's output-level ceiling, applied on top of the digital volume. The notch on the track is the factory default, 15 dBV - the right everyday setting, and the slider snaps to it. Higher values make everything louder but can add distortion, and on a 5 V supply the chip's built-in limiter will duck the sound to protect the power rail. Lower it if the speaker distorts at high volume.",
+
   led_ring:
     "The ring the assistant animates. Colour and brightness set here are the resting state - the device still overrides both while it is listening, thinking or reporting an error.",
 
@@ -210,6 +234,12 @@ export const HINTS = {
   esp_temp:
     "The ESP32 chip's own temperature, not the room's. It reads well above ambient inside the sealed case, so warm is normal; sustained readings above 80 \u00b0C / 176 \u00b0F are worth investigating. The room's temperature is on the home page.",
   reset: "Why the device last restarted. 'USB peripheral' means it was flashed. 'Power glitch' or 'Brownout' points at the power supply rather than at the firmware.",
+
+  /* Under Last Restart, whose hint points a "Brownout" here. The speaker consequence is the fact a
+     customer can act on, and it is why the row exists at all. The ~ gets a sentence because the
+     current is the one number here that is a promise rather than a measurement. */
+  usb_power:
+    "What the USB-C power supply agreed to deliver. Chargers that speak USB Power Delivery negotiate a voltage and the most current they will supply at it - the ~ marks that ceiling: the device draws only what it needs, usually far less. 5 V is a plain supply that negotiated nothing. 9 V or more is what lets the speaker amplifier run at High gain - the Speaker amplifier card just below.",
 
   xmos: "The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's.",
 

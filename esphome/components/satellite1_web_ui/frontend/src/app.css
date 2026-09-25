@@ -1563,6 +1563,24 @@ input[type="range"]:disabled {
 .slider input {
   width: 116px;
 }
+/* The notch's positioning context - the input alone, so the mark cannot drift into the readout. */
+.slider-rail {
+  position: relative;
+  display: flex;
+}
+/* The default-value notch (Slider's `snap`): a hairline standing proud of the 6px track, muted so
+   it reads as a landmark rather than a second thumb. pointer-events off - it marks the spot, the
+   detent in Slider is what makes landing on it easy. */
+.slider-notch {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+  border-radius: 1px;
+  background: var(--fg-4);
+  pointer-events: none;
+}
 .slider-val {
   /* A minimum, not a width: 62px keeps the percentage readouts from shifting the track as their
      digit count changes, while the worded zero states - "follow media", "follow device" - get to be

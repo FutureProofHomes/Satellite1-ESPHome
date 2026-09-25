@@ -203,6 +203,12 @@ class Satellite1WebUI : public Component {
   void set_sendspin_media_player(media_player::MediaPlayer *mp) { this->handler_.set_sendspin_media_player(mp); }
 #endif
 
+#ifdef USE_SAT1_WEB_UI_AMP
+  /// The speaker amplifier behind GET /api/sat1/amp. From generated code, so it is set long before
+  /// the listener accepts anything; without it the route does not exist at all.
+  void set_speaker_amp(tas2780::TAS2780 *amp) { this->handler_.set_speaker_amp(amp); }
+#endif
+
 #ifdef USE_SAT1_WEB_UI_SENDSPIN
   /// The hub itself, beyond the media_player entity above, for what the entity model cannot say:
   /// track metadata with an artwork URL, controller state with shuffle/repeat and the server's

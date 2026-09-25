@@ -221,6 +221,14 @@ satellite1_web_ui:
   # playing.
   media_player_id: external_media_player
 
+  # The speaker amplifier, for GET /api/sat1/amp - the Diagnostics route's Speaker amplifier card. An
+  # audio_dac is not an entity, so the TAS2780's power mode (High gain from a USB-PD supply, Low
+  # gain from 5 V) and its digital volume level ride neither /events nor the entity REST API; the
+  # endpoint is the only window the app has onto them. The analog gain knob is different - it IS an
+  # entity (amp_gain_level in common/speaker.yaml, mapped under numbers: below), because it is a
+  # setting to persist rather than a reading to poll.
+  speaker_amp_id: speaker_dac
+
   # The sounds the routing feature mirrors to third-party speakers, served at
   # GET /api/sat1/sounds/<name> straight from the audio_file bytes in flash (session-gate exempt;
   # the fetcher is a Sonos or Cast with no session). The keys are the URL tails the calls in
@@ -434,6 +442,9 @@ satellite1_web_ui:
       voice_override: tts_volume
       remote_tts_volume: remote_tts_volume
       duck_volume: duck_area_volume
+      # The TAS2780's analog output level, on the Speaker amplifier card beside the read-only amp
+      # state GET /api/sat1/amp reports. The index (0-20) travels; the app renders it as dBV.
+      amp_gain: amp_gain_level
 
     # No `texts:` block. The routing target list used to be here, as a text entity the tree wrote a
     # comma-separated list into on every change - and that entity caps at 255 characters, which is

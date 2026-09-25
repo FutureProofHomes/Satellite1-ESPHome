@@ -58,9 +58,9 @@ Five routes, all on the hash, in this nav order:
 |---|---|
 | `#/home` | Sensor readings with tap-to-calibrate, media, the Assistant card (phase, transcript, mute, voice volume override), timers, LED ring |
 | `#/wake-word` | Which wake words the device answers to, sensitivity, wake chime, and the stop word |
-| `#/audio` | TTS routing and area ducking as a tree over your Home Assistant areas, then the speaker's own wiring |
+| `#/audio` | TTS routing and area ducking as a tree over your Home Assistant areas |
 | `#/presence` | Live radar plot or gate energies, and the radar's own settings |
-| `#/diagnostics` | Memory, firmware, live logs, and maintenance actions |
+| `#/diagnostics` | Memory, the USB-C power contract, the Speaker amplifier card (power gain mode and digital volume read-only, the analog gain slider, channel and line-out), firmware, live logs, and maintenance actions |
 
 `#/home` and `#/audio` were `#/controls` and `#/config` until the September 2026 rename pass, which
 also gave the wake words card its own `#/wake-word` route; the old hashes still resolve to the new
@@ -86,6 +86,7 @@ only the handful of things `web_server` has no concept of get custom endpoints.
 |---|---|
 | `GET /api/sat1/state` | Device facts and the entity-name table |
 | `GET /api/sat1/voice` | Assistant phase, timers, transcript ring |
+| `GET /api/sat1/amp` | The speaker amplifier's power gain mode and digital volume level |
 | `GET /api/sat1/ha` | The cached Home Assistant area and player tree |
 | `GET`/`POST /api/sat1/sel` | The routing and ducking selection |
 | `GET /api/sat1/login/nonce`, `POST /api/sat1/login` | Challenge-response sign-in; also accepts a `key` |

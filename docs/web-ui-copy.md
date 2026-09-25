@@ -119,6 +119,12 @@ looking at a third of them was the more expensive problem.
 | `loop` | Longest loop | The longest single pass through the main loop since the last reading. Tens of milliseconds is normal; sustained hundreds means something is blocking, and audio will stutter first. |
 | `esp_temp` | ESP32 Temp | The ESP32 chip's own temperature, not the room's. It reads well above ambient inside the sealed case, so warm is normal; sustained readings above 80 °C / 176 °F are worth investigating. The room's temperature is on the home page. |
 | `reset` | Last restart | Why the device last restarted. 'USB peripheral' means it was flashed. 'Power glitch' or 'Brownout' points at the power supply rather than at the firmware. |
+| `usb_power` | USB-C Power Supply | What the USB-C power supply agreed to deliver. Chargers that speak USB Power Delivery negotiate a voltage and the most current they will supply at it - the ~ marks that ceiling: the device draws only what it needs, usually far less. 5 V is a plain supply that negotiated nothing. 9 V or more is what lets the speaker amplifier run at High gain - the Speaker amplifier card just below. |
+| `speaker_amp` | Speaker amplifier card title | The chip that drives the built-in speaker. What you hear is three levels multiplied together: the power gain mode the amplifier picks from your USB-C supply, the digital volume the firmware computes from your sliders, and the analog gain set below. |
+| `amp_mode` | Speaker amplifier, Power gain mode | Picked automatically from the measured power supply - it is a reading, not a setting. High gain: a 9 V or higher USB-PD supply is connected and the speaker can reach full loudness. Low gain: the device is on a plain 5 V supply, so maximum loudness is reduced. Off: the amplifier is shut down, normally because line out is selected. A supply that negotiates 9 V or more (the USB-C Power Supply row in the Device card above) is what unlocks High gain. |
+| `amp_dvc` | Speaker amplifier, Digital volume | How far open the amplifier's digital volume control is right now - the level the firmware computes from the volume buttons, Voice Volume Override and ducking. Shown so you can see what the amplifier is actually being fed; it is managed automatically and has no handle here. To change it, use the volume controls. |
+| `amp_gain` | Speaker amplifier, Analog gain | The amplifier's output-level ceiling, applied on top of the digital volume. The notch on the track is the factory default, 15 dBV - the right everyday setting, and the slider snaps to it. Higher values make everything louder but can add distortion, and on a 5 V supply the chip's built-in limiter will duck the sound to protect the power rail. Lower it if the speaker distorts at high volume. |
+| `speaker_channel` | Speaker amplifier, Channel | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
 | `launch` | Launch card title | Scan the code with a phone, or paste the link into a Home Assistant dashboard button, and that browser lands here already signed in - no password, no button press. The code carries the device's current network address, so any phone on your network can scan it; the link carries the device's permanent name, the right form to paste somewhere that keeps it. Anyone who has either can sign in with it, so treat them like the password. Sign out everywhere revokes them and every session, then issues a new one. |
 | `ha_ingress` | Home Assistant card title | Puts your Satellite1s in Home Assistant's sidebar, proxied through Home Assistant itself - so it works wherever Home Assistant does, on your local network or over a public https address. hass_ingress is a third-party integration, not part of this firmware. The YAML covers every Satellite1 Home Assistant knows about: this device is the one visible "Satellite1 Fleet" entry, the rest sit hidden behind it, and the device switcher reaches them all from inside the panel. Anyone who can open the panel reaches the devices' sign-in pages through it; the YAML limits the panel to admin users - remove the require_admin line to show it to everyone. |
 | `xmos` | XMOS firmware, and the XMOS Recovery card title | The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's. |
@@ -340,10 +346,11 @@ no job left. Only `det_just_now` survives, in the dots' popovers.
 ### Audio
 
 The route was called Config until the September 2026 rename pass. Mute microphones and Assistant
-volume left for the home page, and the wake words card became the Wake Word route above, so what
-remains is where sound goes: the two trees first, and Audio Output last - channel and line-out are
-wiring you set once at install, where the trees are revisited whenever the household's speakers
-change.
+volume left for the home page, the wake words card became the Wake Word route above, and the
+speaker's own wiring - the old Audio Output card, grown into Speaker amplifier - moved to
+Diagnostics under the Device card (owner call, September 2026), where it sits beside the USB-C
+Power Supply reading that decides the amp's gain mode. What remains here is where sound goes: the
+two trees.
 
 Two controls here still write to entities in `config/common/tts_routing.yaml` and
 `config/common/area_ducking.yaml`, so their wording has to agree with what Home Assistant shows. The
@@ -352,7 +359,6 @@ that selection has.
 
 | Key | Where | Text |
 | --- | --- | --- |
-| `speaker_channel` | Audio Output, Channel | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
 | `remote_routing` | Audio routing card title | Plays this device's audio on other speakers as well as this one: the assistant's spoken answers, sign-in prompts, ringing timers, and the wake chime if you turn that on below. Tick a room to include every player in it, or open the room and pick players. Local Speaker is this device's own speaker - untick it and answers play only where you have chosen. |
 | `area_ducking` | Area ducking card title | Turns other speakers down while the assistant listens and answers, then puts them back where they were. Tick a room to cover every player in it. |
 | `remote_tts_volume` | Remote TTS volume | How loud answers are on the remote speakers. This device's own level is Voice Volume Override, on the home page. Sonos reads the level from the announcement itself; anything else has its volume set for the answer and put back afterwards. |
@@ -776,12 +782,25 @@ edit:
 - The five route names in the nav drawer — `Home`, `Wake Word`, `Audio`, `Presence`, `Diagnostics`, in
   that order — which are the same strings as the routes themselves. The drawer has no heading; the
   device name is in the bar above it.
-- `Connected` and `Nothing plugged in` on Audio Output's Line out row, and the three volume sliders'
+- `Connected` and `Nothing plugged in` on Speaker amplifier's Line out row, and the three volume sliders'
   zero readouts: `follow media` on Voice Volume Override, `follow device` on Remote TTS volume (zero means
   "leave every target's volume alone", per tts_routing.yaml), and `mute` on Duck volume — deliberately
   not "follow device", because area_ducking.yaml is explicit that zero is literal there: ducked players
   are set to 0% for the length of the interaction. All are readouts of a value rather than descriptions
   of a control.
+- The Speaker amplifier card's own readouts: the Analog gain slider speaks dBV, with the factory
+  default (15 dBV) marked as a notch on the track that the drag snaps to rather than named in the
+  readout — "where was it before I touched it" never needs support, and the hint spells the number
+  out. Digital volume reads `Muted` instead of a misleading `0%` while the DVC mute is engaged, and
+  Power gain mode words its states as `High gain · Running from the USB-PD supply`, `Low gain ·
+  Running from the 5 V rail`, `Off · Line out selected or amplifier shut down` and `Measuring… ·
+  Sampling the power supply` — an unexpected mode shows raw as `PWR_MODE N` so a future firmware
+  that uses one reaches the screen without an app release.
+- The USB-C Power Supply row re-words the entity it reads: the Home Assistant sensor keeps the
+  firmware's contract string (`3.25A (max) @ 20V`, untouched because automations may parse it), while
+  the app shows `20V @ 3.25A~` as the headline with the wattage spelled out beneath (`65 watts`) — the
+  trailing ~ carries what `(max)` meant: the current is the charger's ceiling, not a live draw. A
+  contract string the app does not recognise shows raw rather than hiding.
 
 The wake word switch labels are not copy at all: they are the wake words themselves, read from the device
 at `GET /api/sat1/wakewords`, which reports each model's friendly name from the manifest it was built from.

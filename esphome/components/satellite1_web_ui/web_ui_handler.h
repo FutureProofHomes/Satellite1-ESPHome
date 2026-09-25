@@ -37,6 +37,10 @@
 #include "esphome/components/crash_report/crash_report.h"
 #endif
 
+#ifdef USE_SAT1_WEB_UI_AMP
+#include "esphome/components/tas2780/tas2780.h"
+#endif
+
 #include "esphome/core/entity_base.h"
 // For millis_64() in wake_test_active() - the 64-bit clock every deadline here compares against.
 #include "esphome/core/hal.h"
@@ -477,6 +481,14 @@ class WebUIHandler : public AsyncWebHandler {
   void set_crash_report(crash_report::CrashReport *cr) { this->crash_report_ = cr; }
 #endif
 
+#ifdef USE_SAT1_WEB_UI_AMP
+  /// Set from generated code, before the listener accepts anything. The speaker amplifier is the
+  /// third thing web_server cannot cover (after media players and wake words): an audio_dac is not
+  /// an entity, so its power mode and digital volume level ride neither /events nor the entity
+  /// REST API, and GET /api/sat1/amp is the only way the app's Speaker amplifier card sees them.
+  void set_speaker_amp(tas2780::TAS2780 *amp) { this->speaker_amp_ = amp; }
+#endif
+
   // NOLINTNEXTLINE(readability-identifier-naming)
   bool canHandle(AsyncWebServerRequest *request) const override;
   // NOLINTNEXTLINE(readability-identifier-naming)
@@ -542,6 +554,9 @@ class WebUIHandler : public AsyncWebHandler {
 #ifdef USE_SAT1_WEB_UI_SENDSPIN
     MEDIA_ART,
 #endif
+#endif
+#ifdef USE_SAT1_WEB_UI_AMP
+    AMP,
 #endif
 #ifdef USE_SAT1_WEB_UI_SOUNDS
     SOUND,
@@ -618,6 +633,11 @@ class WebUIHandler : public AsyncWebHandler {
   void handle_wake_cutoff_set_(AsyncWebServerRequest *request);
   void handle_wake_tune_set_(AsyncWebServerRequest *request);
   void handle_wake_clear_set_(AsyncWebServerRequest *request);
+#endif
+#ifdef USE_SAT1_WEB_UI_AMP
+  /// GET /api/sat1/amp: the TAS2780's power mode, activity and digital volume level, for the
+  /// Diagnostics route's Speaker amplifier card. Session-gated like every /api/sat1 read.
+  void handle_amp_(AsyncWebServerRequest *request);
 #endif
 #ifdef USE_SAT1_CRASH_REPORT
   /// The crash history and its metadata as JSON; the two big payloads live on routes of their own.
@@ -824,6 +844,10 @@ class WebUIHandler : public AsyncWebHandler {
 
 #ifdef USE_SAT1_CRASH_REPORT
   crash_report::CrashReport *crash_report_{nullptr};
+#endif
+
+#ifdef USE_SAT1_WEB_UI_AMP
+  tas2780::TAS2780 *speaker_amp_{nullptr};
 #endif
 
 #ifdef USE_VOICE_ASSISTANT

@@ -276,6 +276,10 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
     return Route::MEDIA_ART;
 #endif
 #endif
+#ifdef USE_SAT1_WEB_UI_AMP
+  if (url == "/api/sat1/amp")
+    return Route::AMP;
+#endif
 #ifdef USE_SAT1_WEB_UI_SOUNDS
   // A prefix like MEDIA_SET's: the sound's name rides the path. Exempt in the session gate for the
   // same reason the PWA assets are - the fetcher is a Sonos or a Cast retrieving a mirrored timer
@@ -427,6 +431,11 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
       this->handle_media_art_(request);
       break;
 #endif
+#endif
+#ifdef USE_SAT1_WEB_UI_AMP
+    case Route::AMP:
+      this->handle_amp_(request);
+      break;
 #endif
 #ifdef USE_SAT1_WEB_UI_SOUNDS
     case Route::SOUND:
@@ -2357,6 +2366,50 @@ void WebUIHandler::handle_sound_(AsyncWebServerRequest *request) {
 }
 
 #endif  // USE_SAT1_WEB_UI_SOUNDS
+
+#ifdef USE_SAT1_WEB_UI_AMP
+
+/// The speaker amplifier's live state, for the Diagnostics route's Speaker amplifier card.
+///
+/// Shape: {"mode":2,"active":1,"pending":0,"dvc":74,"muted":0}
+///
+///   mode     the TAS2780 power mode finish_activation_() picked from the measured supplies:
+///            2 = PVDD (a high-voltage USB-PD contract, full output), 0 = the 5 V rail (reduced
+///            output). Raw rather than pre-worded, so a mode this firmware learns to use later
+///            reaches the app without a device release in between.
+///   active   whether the amp is running at all - line-out selection and XMOS flashing both shut
+///            it down, and `mode` is only current while this is 1.
+///   pending  the ~100 ms activation window while the SAR ADC settles and the mode is still being
+///            chosen; the card words this as measuring rather than showing the stale mode.
+///   dvc      how far open the digital volume control is, 0-100: the level the firmware computed
+///            from the volume slider, voice override and ducking - what the amp is actually fed.
+///   muted    the DVC mute (0xC9), so the card can say "Muted" instead of a misleading 0%.
+///
+/// Read from the httpd task without a lock, deliberately: every field is an aligned byte-or-less
+/// member the ESP32 cannot tear, the same contract as handle_media_'s reads. Worst case is a value
+/// one main-loop iteration old, which the card's next poll corrects.
+void WebUIHandler::handle_amp_(AsyncWebServerRequest *request) {
+  if (this->speaker_amp_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  // A plain stack buffer like handle_media_'s core: the body is bounded at well under 96 bytes, so
+  // one snprintf and one send cover it, whatever state the heap is in.
+  char body[96];
+  const int len = snprintf(body, sizeof(body), R"({"mode":%d,"active":%d,"pending":%d,"dvc":%d,"muted":%d})",
+                           static_cast<int>(this->speaker_amp_->power_mode()),
+                           this->speaker_amp_->is_active() ? 1 : 0,
+                           this->speaker_amp_->activation_pending() ? 1 : 0, this->speaker_amp_->dvc_percent(),
+                           this->speaker_amp_->is_muted() ? 1 : 0);
+  if (len <= 0 || static_cast<size_t>(len) >= sizeof(body)) {
+    request->send(500, "application/json", "{\"ok\":0}");
+    return;
+  }
+  request->send(200, "application/json", body);
+}
+
+#endif  // USE_SAT1_WEB_UI_AMP
 
 #ifdef USE_SAT1_CRASH_REPORT
 

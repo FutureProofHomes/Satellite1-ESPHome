@@ -38,6 +38,14 @@ try:
     from esphome.components.crash_report import CrashReport
 except ImportError:
     CrashReport = None
+
+# Optional again: without the TAS2780 in the build, GET /api/sat1/amp does not exist and the
+# Diagnostics route's Speaker amplifier card renders without its live readings. The class lives in
+# the platform module (audio_dac.py) because tas2780 is an audio_dac platform, not a component.
+try:
+    from esphome.components.tas2780.audio_dac import tas2780 as TAS2780
+except ImportError:
+    TAS2780 = None
 from esphome.components.sendspin import (
     SendspinHub,
     request_controller_support,
@@ -85,6 +93,7 @@ CONF_VOICE_PHASE = "voice_phase"
 CONF_MEDIA_PLAYER_ID = "media_player_id"
 CONF_SENDSPIN_MEDIA_PLAYER_ID = "sendspin_media_player_id"
 CONF_SENDSPIN_HUB_ID = "sendspin_hub_id"
+CONF_SPEAKER_AMP_ID = "speaker_amp_id"
 CONF_ON_HA_REFRESH = "on_ha_refresh"
 CONF_ON_HA_SELECT = "on_ha_select"
 CONF_ON_MA_REFRESH = "on_ma_refresh"
@@ -216,6 +225,16 @@ CONFIG_SCHEMA = cv.All(
             # compiles; the endpoints answer 404 without them.
             cv.Optional(CONF_MEDIA_PLAYER_ID): cv.use_id(media_player.MediaPlayer),
             cv.Optional(CONF_SENDSPIN_MEDIA_PLAYER_ID): cv.use_id(media_player.MediaPlayer),
+            # The speaker amplifier, for GET /api/sat1/amp: an audio_dac is not an entity, so its
+            # power mode and digital volume level ride neither /events nor the entity REST API,
+            # and the endpoint is the only way the app's Speaker amplifier card sees them.
+            # Optional so a build without the TAS2780 still compiles; the route then answers 404
+            # and the card's live readings never render.
+            **(
+                {cv.Optional(CONF_SPEAKER_AMP_ID): cv.use_id(TAS2780)}
+                if TAS2780 is not None
+                else {}
+            ),
             # The Sendspin hub itself, beyond the media_player entity above. The protocol carries
             # far more than the entity model can express - track metadata with an artwork URL,
             # controller state with shuffle/repeat and the server's supported-command list, and an
@@ -435,6 +454,12 @@ async def to_code(config):
         # The matching role requests happen in _request_sendspin_roles at validation time.
         cg.add_define("USE_SAT1_WEB_UI_SENDSPIN", True)
         cg.add(var.set_sendspin_hub(await cg.get_variable(config[CONF_SENDSPIN_HUB_ID])))
+
+    if CONF_SPEAKER_AMP_ID in config:
+        # A define for the sendspin hub's reason: without the TAS2780 in the build its header does
+        # not exist, so the handler must not include it.
+        cg.add_define("USE_SAT1_WEB_UI_AMP", True)
+        cg.add(var.set_speaker_amp(await cg.get_variable(config[CONF_SPEAKER_AMP_ID])))
 
     if CONF_ON_SELECTION_CHANGE in config:
         await automation.build_automation(

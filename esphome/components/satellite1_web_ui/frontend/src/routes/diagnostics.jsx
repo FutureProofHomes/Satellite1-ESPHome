@@ -13,7 +13,7 @@ import { changePassword, logoutAll, mdnsLooksBroken, qrSignInLink, signInLink } 
 import { BASE, entity, entityPath, pathFor, post, request, requestJson } from "../lib/device.js";
 import { qrSvgPath } from "../lib/qr.js";
 import { takeIntent, toast } from "../lib/toast.js";
-import { Btn, Card, Chevron, Confirm, Fact, Missing, N_DIAG, ni, Row, Toggle } from "../ui.jsx";
+import { Btn, Card, Chevron, Confirm, Fact, Missing, N_AUDIO, N_DIAG, ni, Row, Select, Slider, Toggle } from "../ui.jsx";
 
 const kb = (n) => `${Math.round(n / 1024)} KB`;
 const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
@@ -35,6 +35,27 @@ const uptime = (s) => {
 function Device({ ctx }) {
   const d = ctx.device;
   const espTemp = entity(ctx, "esp_temp");
+  const usb = entity(ctx, "usb_power");
+  // The entity publishes the FUSB302B's contract string ("3.25A (max) @ 20V") - the same string
+  // Home Assistant shows, kept intact there because automations may read it. This row re-words it
+  // to the owner's format (September 2026): "20V @ 3.25A~" as the headline - voltage first because
+  // it decides the amp's gain mode, the trailing ~ carrying what "(max)" meant (the charger's
+  // ceiling, not a live draw) - and the wattage spelled out underneath, because watts are how
+  // people know their chargers. A string the regex does not recognise shows raw rather than
+  // hiding, so a future contract format degrades to the old rendering instead of a missing row.
+  const usbFact = (() => {
+    const raw = usb?.value;
+    if (raw == null || raw === "") return null;
+    const m = /^([\d.]+)A \(max\) @ (\d+)V$/.exec(raw);
+    if (!m) return { value: raw };
+    const amps = Number(m[1]);
+    const volts = Number(m[2]);
+    const watts = volts * amps;
+    return {
+      value: `${volts}V @ ${amps}A~`,
+      sub: `${Number.isInteger(watts) ? watts : watts.toFixed(1)} watts`,
+    };
+  })();
   // Follows the home page's temperature unit toggle, so the app never shows mixed units. The tone
   // thresholds stay computed on the °C value the entity publishes.
   const unitF = entity(ctx, "temp_unit_f");
@@ -66,6 +87,12 @@ function Device({ ctx }) {
         )}
         <Fact label="Uptime" value={uptime(d.uptime)} />
         <Fact label="Last restart" value={d.reset} hint={HINTS.reset} />
+        {/* Entity-backed and conditional like ESP32 Temp above, and placed by Last Restart on purpose:
+            that row's hint already points a "Brownout" at the power supply, and this is the row that
+            says which supply the device actually negotiated. Published on every powered outcome
+            including the plain-5V timeout - so an absent value means a build without the PD sensor,
+            not a 5V supply. */}
+        {usbFact && <Fact label="USB-C Power Supply" value={usbFact.value} sub={usbFact.sub} hint={HINTS.usb_power} />}
         {/* The address and MAC hang off this one rather than sitting in a strip of their own along the
             bottom of the card, which is where they were and where they described nothing in particular. */}
         <Fact
@@ -79,6 +106,127 @@ function Device({ ctx }) {
           }
         />
       </div>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Speaker amplifier                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The amplifier's live state and its wiring, one card, right under Device (owner call, September
+ * 2026 - it lived on the Audio route for a day): the Power gain mode row is decided by the USB-C
+ * Power Supply reading in the card above, and the two belong on one screen. It absorbed the Audio
+ * route's old Audio Output card on the way - the Channel select and the Line out row moved in
+ * verbatim under three amplifier rows.
+ *
+ * The live readings come from GET /api/sat1/amp, polled every 2 s while the card is on screen: an
+ * audio_dac is not an entity, so they cannot ride /events, and a dedicated poll keeps them off the
+ * state payload every tab receives. The analog gain slider is different - a real number entity (a
+ * setting to persist, not a reading), through the entity map like every other slider.
+ *
+ * Voice Volume Override stays on the home page's Assistant card - the owner wants it under the
+ * transcript it sets the level for - and the Digital volume row here is deliberately read-only:
+ * it shows the level the firmware computed FROM those sliders, so someone chasing "why is it
+ * quiet" can see what the amp is actually being fed.
+ */
+function SpeakerAmp({ ctx }) {
+  const [amp, setAmp] = useState(null);
+
+  // The useVoice pattern: poll while mounted, stop when not. A null answer (404 on a build without
+  // the TAS2780, or a dropped poll) leaves the last reading standing rather than blanking rows -
+  // the next poll corrects it, and the stream-lost banner covers a device that is actually gone.
+  useEffect(() => {
+    let live = true;
+    let timer = null;
+    const tick = async () => {
+      try {
+        const json = await requestJson("/api/sat1/amp");
+        if (json && live) setAmp(json);
+      } catch {
+        // Same as the voice poll: not worth surfacing, the next one is two seconds away.
+      }
+      if (live) timer = setTimeout(tick, 2000);
+    };
+    tick();
+    return () => {
+      live = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+
+  const chan = entity(ctx, "speaker_channel");
+  const lineOut = entity(ctx, "line_out");
+  // Existence from the key table (the payload arrives a beat later over /events), value from the
+  // payload - the same split config.jsx's useEntity wrapper draws for the Audio route's sliders.
+  const gainExists = !!ctx.device?.e?.amp_gain;
+  const gain = entity(ctx, "amp_gain");
+  if (!amp && !chan && !lineOut && !gainExists) return null;
+
+  /* The mode, worded rather than numbered. `pending` first: during the ~100 ms activation window
+     the reported mode is the bootstrap's, and "measuring" is the truth. `active` next, because a
+     line-out selection or an XMOS flash shuts the amp down and the stale mode would lie. The two
+     modes this firmware selects get names; anything else shows raw so a future firmware that uses
+     PWR_MODE 1 or 3 reaches the screen without an app release. */
+  const mode = !amp
+    ? null
+    : amp.pending
+      ? { v: "Measuring\u2026", d: "Sampling the power supply" }
+      : !amp.active
+        ? { v: "Off", d: "Line out selected or amplifier shut down" }
+        : amp.mode === 2
+          ? { v: "High gain", d: "Running from the USB-PD supply" }
+          : amp.mode === 0
+            ? { v: "Low gain", d: "Running from the 5 V rail" }
+            : { v: `PWR_MODE ${amp.mode}`, d: null };
+
+  return (
+    <Card title="Speaker amplifier" icon={N_AUDIO} hint={HINTS.speaker_amp}>
+      {mode && (
+        <Row label="Power gain mode" hint={HINTS.amp_mode}>
+          <span class="dim">
+            {mode.v}
+            {mode.d && <span class="xs"> &middot; {mode.d}</span>}
+          </span>
+        </Row>
+      )}
+      {amp && (
+        <Row label="Digital volume" hint={HINTS.amp_dvc}>
+          <span class="dim">{amp.muted ? "Muted" : `${amp.dvc}%`}</span>
+        </Row>
+      )}
+      {gainExists && (
+        <Row label="Analog gain" hint={HINTS.amp_gain}>
+          <Slider
+            value={gain ? Number(gain.value ?? gain.state) : 0}
+            min={gain?.min_value ?? 0}
+            max={gain?.max_value ?? 20}
+            step={gain?.step ?? 1}
+            // The index travels; dBV is what the readout speaks (11-21 dBV in half-dBV steps). The
+            // factory default (index 8, 15 dBV) is the notch on the track the drag snaps to - the
+            // "(default)" tag the readout used to carry, said in geometry instead of words (owner
+            // call, September 2026). The hint still names it for anyone who wants it spelled out.
+            snap={8}
+            format={(v) => `${(11 + v / 2).toFixed(1)} dBV`}
+            onCommit={(v) => post(pathFor(ctx, "amp_gain", "set", { value: v }))}
+          />
+        </Row>
+      )}
+      {chan && (
+        <Row label="Channel" hint={HINTS.speaker_channel}>
+          <Select
+            value={chan.value}
+            options={chan.option}
+            onChange={(v) => post(`${pathFor(ctx, "speaker_channel", "set")}?option=${encodeURIComponent(v)}`)}
+          />
+        </Row>
+      )}
+      {lineOut && (
+        <Row label="Line out">
+          <span class="dim">{lineOut.value ? "Connected" : "Nothing plugged in"}</span>
+        </Row>
+      )}
     </Card>
   );
 }
@@ -1245,7 +1393,10 @@ export function Diagnostics({ ctx }) {
     <>
       {ctx.device && ctx.device.ha === false && <p class="banner">{TEXT.ha_disconnected_detail}</p>}
       <Device ctx={ctx} />
-      {/* Right under Device, whose Last Restart row is the question this card answers. */}
+      {/* Right under Device, per the owner: its Power gain mode row is decided by the USB-C Power
+          Supply reading a few rows up, and the pair tell one story about the power brick. */}
+      <SpeakerAmp ctx={ctx} />
+      {/* Under Device too in spirit - its Last Restart row is the question this card answers. */}
       <CrashCard ctx={ctx} reveal={intent?.card === "crash"} />
       <Firmware ctx={ctx} />
       <Launch ctx={ctx} />

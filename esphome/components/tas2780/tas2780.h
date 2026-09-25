@@ -22,6 +22,25 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   void activate();
   void deactivate();
   bool is_active() const { return this->active_; }
+  /// The power mode finish_activation_() selected from the measured supplies: 2 when PVDD carries a
+  /// high-voltage USB-PD contract (full output), 0 when running from the 5 V VBAT1S rail (reduced
+  /// output). Meaningful while is_active(); between activations it holds the last selection. Read
+  /// by the web UI's /api/sat1/amp endpoint from the httpd task - a plain aligned byte, safe to
+  /// read cross-task the way web_server reads entity state.
+  uint8_t power_mode() const { return this->power_mode_; }
+  /// True during the ~100 ms activation window while the SAR ADC settles and the mode above is
+  /// still being chosen.
+  bool activation_pending() const { return this->activation_pending_; }
+  /// How far open the digital volume control is, 0-100: the mapped fraction write_volume_() last
+  /// programmed the DVC register from (volume through the configured range), 0 when muted. The
+  /// number a person should read as "what the amp is actually being fed", which is why it is the
+  /// post-range value rather than the raw slider position.
+  int dvc_percent() const {
+    if (this->is_muted_)
+      return 0;
+    const float level = this->volume_ * (this->vol_range_max_ - this->vol_range_min_) + this->vol_range_min_;
+    return static_cast<int>(level * 100.0f + 0.5f);
+  }
   void update_register();
   void log_error_states();
 

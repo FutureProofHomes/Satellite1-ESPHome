@@ -1,15 +1,17 @@
 /**
  * The Audio route (route id "audio"; this file keeps its historical name from when it was Config):
- * where this device's sound goes - remote routing, area ducking, and the speaker's own wiring at the
- * bottom. The September 2026 information-architecture pass emptied the rest out: Mute microphones and
- * Voice Volume Override went to the home page's Assistant card, and the wake words card became the Wake
- * Word route (routes/wakewords.jsx).
+ * where this device's sound goes - remote routing and area ducking. The September 2026
+ * information-architecture pass emptied the rest out: Mute microphones and Voice Volume Override
+ * went to the home page's Assistant card, the wake words card became the Wake Word route
+ * (routes/wakewords.jsx), and the speaker's own wiring - the old Audio Output card, grown into
+ * Speaker amplifier - moved to Diagnostics under the Device card (owner call, September 2026),
+ * where it sits beside the USB-C Power Supply reading that decides the amp's gain mode.
  *
  * Two kinds of control live here and they are stored differently, which is worth knowing before
- * reading further. The sliders, toggles and the channel select write to real ESPHome entities, exactly
- * as they always did. The two trees write the device's own selection at /api/sat1/sel, which is not an
- * entity at all - it used to be, and a text entity caps at 255 characters, which is about half of what
- * one area's worth of players needs.
+ * reading further. The sliders and toggles write to real ESPHome entities, exactly as they always
+ * did. The two trees write the device's own selection at /api/sat1/sel, which is not an entity at
+ * all - it used to be, and a text entity caps at 255 characters, which is about half of what one
+ * area's worth of players needs.
  *
  * The two switches Home Assistant still shows for this - "Route TTS To All Area Players" and "Duck All
  * Area Players" - are projections of that selection rather than separate settings. Ticking this
@@ -25,7 +27,7 @@ import { useEffect } from "preact/hooks";
 import { HINTS, TEXT } from "../copy.js";
 import { HA_NEVER, entity, haBlocked, haSyncOnce, haTooOld, pathFor, post } from "../lib/device.js";
 import { TargetTree } from "../tree.jsx";
-import { Card, Missing, N_AUDIO, Row, Select, Slider, Toggle } from "../ui.jsx";
+import { Card, Missing, Row, Select, Slider, Toggle } from "../ui.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Reading and writing the entity-backed controls                      */
@@ -49,43 +51,6 @@ function writeSwitch(ctx, key, next) {
 function writeNumber(ctx, key, value) {
   const p = pathFor(ctx, key, "set", { value });
   if (p) post(p);
-}
-
-/* ------------------------------------------------------------------ */
-/* This device's own audio settings                                     */
-/* ------------------------------------------------------------------ */
-
-/**
- * This device's own speaker: how it is wired.
- *
- * Voice Volume Override moved to the home page's Assistant card in the September 2026 rename pass - the
- * owner wants it under the transcript it sets the level for. That re-separates it from Remote
- * routing's "Remote TTS volume" (the pair the plan says must never be confused for each other), so
- * the hints carry the whole burden of telling them apart: each says which speakers it moves.
- */
-function AudioOutput({ ctx }) {
-  const chan = entity(ctx, "speaker_channel");
-  const lineOut = entity(ctx, "line_out");
-  if (!chan && !lineOut) return null;
-
-  return (
-    <Card title="Audio Output" icon={N_AUDIO}>
-      {chan && (
-        <Row label="Channel" hint={HINTS.speaker_channel}>
-          <Select
-            value={chan.value}
-            options={chan.option}
-            onChange={(v) => post(`${pathFor(ctx, "speaker_channel", "set")}?option=${encodeURIComponent(v)}`)}
-          />
-        </Row>
-      )}
-      {lineOut && (
-        <Row label="Line out">
-          <span class="dim">{lineOut.value ? "Connected" : "Nothing plugged in"}</span>
-        </Row>
-      )}
-    </Card>
-  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -326,11 +291,9 @@ export function Config({ ctx }) {
 
   return (
     <>
-      {/* The selection endpoint gates the two trees and nothing else. It used to return early for the
-          whole route, which was true when every card here was about the selection; Audio Output is
-          this device's own settings and has no reason to disappear because a different endpoint
-          failed. Still distinct from a device that is not there: the shell is up, so this is the
-          selection specifically. */}
+      {/* The selection endpoint gates the two trees, which since the Speaker amplifier card's move
+          to Diagnostics is the whole route. Still distinct from a device that is not there: the
+          shell is up, so this is the selection specifically. */}
       {sel ? (
         <>
           {/* The sel_failed banner that led here is gone with the amber banners: a refused selection
@@ -341,10 +304,6 @@ export function Config({ ctx }) {
       ) : (
         <Missing what={selError ? "the saved selection" : "settings"} />
       )}
-
-      {/* Last on the route, per the owner: channel and line-out are wiring you set once when the device
-          is installed, where the two trees above are revisited whenever the household's speakers change. */}
-      <AudioOutput ctx={ctx} />
     </>
   );
 }

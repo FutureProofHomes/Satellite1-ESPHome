@@ -64,6 +64,43 @@ speaker:
     sample_rate: 48000
     bits_per_sample: 16
 
+number:
+  # The TAS2780's analog output level (AMP_LEVEL): index 0-20 maps to 11-21 dBV in 0.5 dBV steps,
+  # and the app's Speaker amplifier card renders it in dBV. The chip's own default - index 8,
+  # 15 dBV - is the value every device has always shipped with, so it is the initial value here and
+  # the level the app marks "(default)". The full range is offered deliberately: the TAS2780's
+  # limiter and brown-out prevention own supply safety, so the top of the range distorts or ducks
+  # under a 5 V supply rather than harming anything.
+  #
+  # `internal: true`, a web-UI-only control like the display-unit switches: an amplifier gain knob
+  # in every Home Assistant dashboard is an invitation to automation nobody asked for. The web
+  # server's include_internal is what still carries it to the app.
+  #
+  # set_action stores the level on the component and writes the register; every amp activation
+  # re-runs init(), which ends in update_register() and re-applies the stored member - so the
+  # restored value survives reboots, power-mode changes and XMOS flashes with no extra wiring.
+  # At boot the restore fires before the amp is set up, which is fine for the same reason: the
+  # early register write lands on a chip about to be reset, and the member re-applies at
+  # activation.
+  - platform: template
+    id: amp_gain_level
+    name: "Speaker Amp Analog Gain"
+    icon: "mdi:amplifier"
+    entity_category: config
+    internal: true
+    min_value: 0
+    max_value: 20
+    step: 1
+    mode: slider
+    update_interval: never
+    optimistic: true
+    restore_value: true
+    initial_value: 8
+    set_action:
+      - tas2780.update_config:
+          id: speaker_dac
+          amp_level_idx: !lambda "return (uint8_t) x;"
+
 select:
   - platform: template
     name: Speaker channel output

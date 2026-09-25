@@ -440,34 +440,61 @@ export const rangeFill = (shown, min, max) => `--p:${(((shown - min) / (max - mi
  * `onPreview` is the escape hatch for controls whose effect is drawn elsewhere on the page - the
  * radar's detection-range ring follows the drag through it. It must be local-state-only in the
  * caller; the device still hears nothing until release.
+ *
+ * `snap` marks a value as the control's home: a notch on the track, and a detent the drag
+ * magnetizes to. The Analog gain slider is the one user - its default matters and lives mid-range,
+ * where nothing else on the track says "this is where it was before you touched it".
  */
-export function Slider({ value, min, max, step, disabled, format, onCommit, onPreview }) {
+export function Slider({ value, min, max, step, disabled, format, onCommit, onPreview, snap }) {
   const [local, setLocal] = useState(null);
   const [base, hold] = useHeld(value, step || 1);
   const shown = local ?? base;
 
+  /* The detent: a value one step from `snap` becomes `snap` - but only when arriving from further
+     away, i.e. sweeping past. Coming FROM the snap point (|shown - snap| <= step already) nothing
+     is coerced, which is what keeps every neighbouring value reachable: an arrow key or a slow
+     drag off the notch steps to the adjacent value instead of being pulled straight back. */
+  const detent = (v) => {
+    if (snap == null) return v;
+    const s = step || 1;
+    return Math.abs(v - snap) <= s && Math.abs(shown - snap) > s ? snap : v;
+  };
+
+  /* Where the notch sits over the drawn track. A thumb on a native range travels between half its
+     own width from either end (22px thumb - see app.css), so a bare percentage would drift off the
+     thumb's true stop by up to 11px mid-track; the calc accounts for it. Hidden while the value is
+     ON the notch - a hairline across the thumb marks nothing the position doesn't already say. */
+  const snapFrac = snap == null ? 0 : (snap - min) / (max - min || 1);
+
   return (
     <div class="slider">
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={shown}
-        disabled={disabled}
-        style={rangeFill(shown, min, max)}
-        onInput={(e) => {
-          const v = Number(e.currentTarget.value);
-          setLocal(v);
-          if (onPreview) onPreview(v);
-        }}
-        onChange={(e) => {
-          const v = Number(e.currentTarget.value);
-          hold(v);
-          setLocal(null);
-          onCommit(v);
-        }}
-      />
+      <div class="slider-rail">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={shown}
+          disabled={disabled}
+          style={rangeFill(shown, min, max)}
+          onInput={(e) => {
+            const v = detent(Number(e.currentTarget.value));
+            setLocal(v);
+            if (onPreview) onPreview(v);
+          }}
+          onChange={(e) => {
+            // The displayed value, not the event's: the detent may have coerced the display while
+            // the pointer sat a step off it, and committing what the eye saw is the contract.
+            const v = local ?? Number(e.currentTarget.value);
+            hold(v);
+            setLocal(null);
+            onCommit(v);
+          }}
+        />
+        {snap != null && shown !== snap && (
+          <span class="slider-notch" style={`left: calc(11px + (100% - 22px) * ${snapFrac.toFixed(3)})`} />
+        )}
+      </div>
       <span class="slider-val num">{format ? format(shown) : shown}</span>
     </div>
   );
