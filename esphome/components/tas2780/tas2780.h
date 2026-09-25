@@ -46,8 +46,15 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
 
   void set_power_mode_(const uint8_t power_mode);
   void finish_activation_();
+  /// The power mode a given pair of supply rails calls for: 2 when PVDD carries a high-voltage
+  /// USB-PD contract, 0 for a valid external 5 V VBAT1S, -1 when neither rail qualifies. One
+  /// ladder shared by finish_activation_() and the loop() reconcile, so the two can never
+  /// disagree about what a measurement means.
+  int select_power_mode_(const SupplyVoltages &voltages) const;
   bool read_adc12_(uint8_t msb_reg, uint8_t lsb_reg, uint16_t *raw);
-  bool read_supply_voltages_(SupplyVoltages *voltages);
+  /// `quiet` suppresses the per-sample debug line - the loop() reconcile polls every 5 s, and a
+  /// standing debug drumbeat would bury the log; the activation path keeps its sample visible.
+  bool read_supply_voltages_(SupplyVoltages *voltages, bool quiet = false);
   bool write_mute_();
   bool write_volume_();
 
@@ -56,6 +63,9 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   bool activation_pending_{false};
   bool last_supply_sample_valid_{false};
   SupplyVoltages last_supply_voltages_{};
+  /// The loop() reconcile's clock and debounce - see the comment there.
+  uint32_t supply_check_ms_{0};
+  uint8_t supply_mismatches_{0};
   uint8_t power_mode_{2};
   uint8_t amp_level_{8};
   float vol_range_min_{.3};
