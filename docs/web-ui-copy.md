@@ -660,6 +660,120 @@ device otherwise only re-asks Home Assistant five seconds after the native API c
 switcher also asks for a sync each time it opens, so its availability dots are at most a couple of
 seconds old.
 
+## The onboarding wizard (`setup_*`)
+
+What a factory-fresh device shows instead of the login screen. The flow is browser-first (owner
+design, September 26 2026): the captive-portal sheet that pops when a phone joins the setup WiFi
+gets exactly one page - a launcher whose one button opens the customer's real browser at the same
+address - because the sheet closes itself the moment the device leaves the setup network. In the
+browser the customer picks their WiFi, is redirected to `http://<name>.local` when the device
+reaches the home network, chooses a Connect Mode there, and (for Home Assistant) adds the device in
+HA while the page waits and advances itself to the login screen. Copy rules (owner, September 26
+2026): short sentences, one instruction each, no browser ever named ("your browser", whatever the
+phone's default is), no emojis. The wizard only exists while the device is un-onboarded; a customer
+who sets up through Home Assistant's BLE flow instead never sees any of it.
+
+The joining copy is the load-bearing part: `setup_wait` promises the redirect - real for a browser
+tab, which survives the network hop, and probed against both the device's .local name and its
+station IP (Android browsers cannot resolve .local; the IP is captured during the brief AP+STA
+overlap after the join). `setup_wait_fallback` keeps the address on screen for a customer who
+stayed in the captive sheet, which dies with the AP. The network-gone warning box was removed
+(owner request, September 26 2026) - the probes carry the happy path and the address carries the
+rest.
+
+| Key | Text |
+| --- | --- |
+| `setup_title` | Set up your Satellite1 |
+| `setup_launch_copy` | Your Satellite1 is ready to meet your home. |
+| `setup_launch_prep` | Getting your setup ready… |
+| `setup_launch_btn` | Setup Satellite1 |
+| `setup_launch_retry` | If this page opens here again instead of your browser, wait for Done to appear in the corner and tap the button once more. |
+| `setup_launch_fallback` | You can also open your browser and go to *(the address renders live beside it)* |
+| `setup_launch_here` | Continue here instead |
+
+The launcher is one tap; its machinery runs itself. iOS opens other apps' URL schemes from the
+captive sheet but not the browser's own, so on load the page asks the device to answer the OS
+connectivity probes "online" for ninety seconds and reloads itself through `?setup=prime` - a real
+navigation, which is what makes the sheet re-check and flip to its connected state (Cancel becomes
+Done), the one state whose links open in the real browser. The reloaded page holds a quiet
+`setup_launch_prep` beat for five seconds while that lands, then offers the one button: a plain
+absolute link the now-satisfied sheet hands over - possibly underneath the sheet until Done is
+tapped. On Android the button fires an intent at the default browser directly instead. A tap the
+sheet keeps for itself carries `?setup=go`, which routes past the launcher to the network list
+instead of looping - and a customer who completes WiFi in-sheet that way is still safe: adding the
+device in Home Assistant counts as choosing Home Assistant (the device completes onboarding on API
+attach even with the chooser never reached).
+| `setup_pick` | Choose your WiFi network |
+| `setup_pick_hint` | 2.4 GHz networks only - if your WiFi has separate names for 2.4 and 5 GHz, pick the 2.4 GHz one. |
+| `setup_rescan` | Scan again |
+| `setup_scanning` | Looking for networks… |
+| `setup_no_networks` | No networks found yet. 2.4 GHz networks only - move the device closer to your router and scan again. |
+| `setup_other_network` | Join another network… |
+| `setup_ssid_placeholder` | Network name |
+| `setup_wifi_pw_placeholder` | WiFi password |
+| `setup_wifi_pw_open` | This network has no password. |
+| `setup_join` | Join |
+| `setup_row_connected` | Connected |
+| `setup_join_short` | WiFi passwords are at least 8 characters. |
+| `setup_join_failed` | The device didn't accept that. Check the name and password and try again. |
+| `setup_joining` | Connecting to %s… |
+| `setup_wait` | Please wait while your Satellite1 connects to your network. You'll be redirected to finish setting up. |
+| `setup_wait_fallback` | If nothing happens after it connects, join your home WiFi and open |
+| `setup_slow` | Still trying. If this takes much longer, the password may have been wrong - go back and re-enter it. |
+| `setup_back` | Back |
+| `setup_mode_title` | How will your Satellite1 connect? |
+| `setup_mode_sub` | More ways to connect are on the way. |
+| `setup_mode_nexus_local` | Nexus AI Basestation |
+| `setup_mode_nexus_local_sub` | Connect to your 100% private Nexus AI Basestation |
+| `setup_mode_ha` | Home Assistant |
+| `setup_mode_ha_sub` | Connect to your Home Assistant server |
+| `setup_mode_soon` | Coming soon |
+| `setup_mode_selected` | Selected |
+| `setup_mode_failed` | Couldn't save the choice. Check the connection and try again. |
+| `setup_hac_title` | Connect to Home Assistant |
+| `setup_hac_mode_label` | Connect mode: |
+| `setup_hac_change` | Change |
+| `setup_hac_copy` | In your Home Assistant, go to **Settings → Devices & Services**. Your Satellite1 is waiting under **Discovered** — tap **Add** and follow the steps. *(stored as alternating plain/bold segments)* |
+| `setup_hac_disc` | Discovered |
+| `setup_hac_ignore` | Ignore |
+| `setup_hac_add` | Add |
+| `setup_hac_open` | Open Home Assistant |
+| `setup_hac_web` | No Home Assistant app? Open it in your browser instead. *(a visible link, never an automatic fallback - iOS's open-in-app dialog defeated every timer-based one)* |
+| `setup_hac_wait` | Waiting for Home Assistant… this page continues on its own once your Satellite1 is added. |
+| `setup_act_title` | One last Home Assistant setting |
+| `setup_act_intro` | This setting lets your Satellite1 speak announcements and route audio through Home Assistant. |
+| `setup_act_wait` | Waiting for the setting… this page continues on its own once it's allowed. |
+| `setup_act_skip` | Skip for now |
+
+The Connect Mode chooser is no longer a wizard step (owner decision, September 26 2026: a decision
+screen with one live option is ceremony). The wizard lands directly on the HA connect step, which
+records `mode=ha` itself and states the mode as a fact - `setup_hac_mode_label` plus a
+`setup_hac_change` link that opens the chooser for the curious. The chooser holds two cards: the
+Nexus AI Basestation as visible-but-disabled roadmap (the device refuses its id at the endpoint
+too, so a stale bundle cannot persist a mode no firmware implements) and Home Assistant, wearing
+the Selected badge as the one that exists. The cloud modes (Nexus Cloud, Claude Cloud, OpenAI
+Cloud) left the roadmap the same day.
+
+There is no create-password step in any flow (owner decision, September 25-26 2026). The connect
+step at `#/home-assistant-connect` shows instructions, a live recreation of Home Assistant's
+Discovered card wearing this device's real name and the ESPHome mark, and an Open Home Assistant
+button that opens the companion app (`homeassistant://navigate/config/integrations`, via the
+shared tap in `lib/openha.js`) with the web redirect as a visible link. The device completes
+onboarding itself the moment the Home Assistant API attaches.
+
+The ending then forks on the actions verdict (`setup_act_*`, owner request September 26 2026):
+allowed goes straight to the login screen; blocked - the fresh-device default, since Home
+Assistant ships the "Allow the device to perform Home Assistant actions" checkbox off - lands on
+the `#/home-assistant-actions` step first, which speaks the blocked card's exact three steps (the
+shared cogStep renderer in ui.jsx keeps the surfaces identical), offers the same Open Home
+Assistant button, and advances by itself: ticking the box reloads the config entry, the API
+reconnects, the device's probe answers, and the poll sees the verdict flip within a second.
+"Skip for now" never traps; the post-login splash card remains the fallback for skippers and for
+BLE-provisioned devices. Either way the hand-over mounts the login screen with a VoiceTap pairing
+window ALREADY OPENING (the wizard's magical ending) - and with the checkbox ticked first, that
+window speaks the 4-digit code instead of falling back to the wake-word challenge, which was the
+point of moving the step.
+
 ## The verdict splash, the fix drawer, and the blocked toast
 
 The splash is the overlay that holds the app's first paint after sign-in (or straight away for a
@@ -679,14 +793,16 @@ and the `_unnamed` hedge ("unless you renamed it") is honest, while a device tha
 holds the real name and gets the short form. In both, `%c` is where the guide draws the mdi:cog
 glyph inline - the same icon Home Assistant puts on the device's row, matched by sight - and `%s`
 is the device's name. `blocked_open_ha` (centred, so it lines up with Continue into one action
-column) carries two URLs: on phones a tap tries the companion app's own scheme first
-(`homeassistant://navigate/config/integrations/integration/esphome`), which opens the app directly
-at the integrations page with no interstitial tab and no internet needed; if no app claims it - or
-on a desktop - it falls back to the My Home Assistant redirect
-(`my.home-assistant.io/redirect/integration/?domain=esphome`), which opens the user's own
-installation at the same page. Home Assistant has no URL that lands on the Configure dialog itself,
-so the last two taps stay written out. The web fallback needs the browser to have internet; without
-it, the steps stand alone.
+column) carries two URLs: on phones a tap opens the companion app's own scheme
+(`homeassistant://navigate/config/integrations`), which lands on Settings -> Devices & Services
+with no interstitial tab and no internet needed; on desktops the anchor opens the My Home
+Assistant redirect (`my.home-assistant.io/redirect/integrations/`) to the same place, and phones
+without the app take the visible `blocked_open_ha_web` link to it. Devices & Services rather than
+the ESPHome integration's own page (owner decision, September 26 2026 - the deep link read as
+being dumped somewhere unexpected, and every Open Home Assistant button in the app lands on the
+same familiar place now); step 1's written path picks up from exactly there. Home Assistant has no
+URL that lands on the Configure dialog itself, so the last taps stay written out. The web fallback
+needs the browser to have internet; without it, the steps stand alone.
 
 The watching line under the button is one row beside a small spinning ring (the boot ring at text
 size - spinning reads "actively checking" where the old breathing dot read as merely alive):
@@ -715,6 +831,7 @@ on the blocked and too-old cards, where Home Assistant itself is fine, and the p
 | `blocked_step2_unnamed` | step 2, firmware-name fallback | Tap the %c cog next to this device - %s, unless you renamed it. |
 | `blocked_step3` | step 3 | Tick “Allow the device to perform Home Assistant actions”, then Submit. |
 | `blocked_open_ha` | link button, centred | Open Home Assistant |
+| `blocked_open_ha_web` | link under the button | No app? Open it in your browser instead. |
 | `blocked_watching` | watching line, beside the small ring | Advances automatically - or |
 | `blocked_recheck` | inline link ending the watching line | manually check again |
 | `blocked_check` | button on the slow card | Check again |
