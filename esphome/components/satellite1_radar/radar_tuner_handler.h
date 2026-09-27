@@ -84,6 +84,7 @@ class RadarTunerHandler : public AsyncWebHandler {
     LD2450_LIVE,
     SAVE,
     REBOOT,
+    PREFLIGHT,
   };
 
   static Route match_route_(AsyncWebServerRequest *request);
@@ -97,6 +98,7 @@ class RadarTunerHandler : public AsyncWebHandler {
   void handle_ld2450_live_(AsyncWebServerRequest *request);
   void handle_save_(AsyncWebServerRequest *request);
   void handle_reboot_(AsyncWebServerRequest *request);
+  void handle_preflight_(AsyncWebServerRequest *request);
 
   LD2410Handler *ld2410_{nullptr};
   LD2450Handler *ld2450_{nullptr};

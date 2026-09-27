@@ -131,6 +131,15 @@ static void send_error_(AsyncWebServerRequest *request, int code, const char *me
   request->send(code, "application/json", message);
 }
 
+/// The same refusal at debug level, for the one 404 that is an expected answer rather than a
+/// fault: the app probes both config endpoints on every Presence mount to discover which module
+/// is fitted, and the absent module's 404 is the probe working. Logged at W it rode the log
+/// stream into a "Warning from radar_tuner" toast on every mount of the page.
+static void send_error_quiet_(AsyncWebServerRequest *request, int code, const char *message) {
+  ESP_LOGD(TAG_RT, "%d %s", code, message);
+  request->send(code, "application/json", message);
+}
+
 static bool parse_bool_field_(cJSON *root, const char *name, bool &out, bool &present) {
   present = false;
   cJSON *item = cJSON_GetObjectItemCaseSensitive(root, name);
@@ -201,6 +210,19 @@ RadarTunerHandler::Route RadarTunerHandler::match_route_(AsyncWebServerRequest *
     return Route::NONE;
   }
 
+  if (method == HTTP_OPTIONS) {
+    // The CORS preflight, for a peer Satellite1's page remote-controlling this device: its config
+    // writes are cross-origin POSTs with a JSON content type, which the browser will not send
+    // until an OPTIONS on the same path is answered with CORS headers. Nothing else claims these
+    // (the session gate preflights only /api/sat1/*), and an unanswered preflight is a bare 404
+    // with no CORS headers - the browser then blocks the POST and every remote radar write fails.
+    // Prefix-matched like the gate's own namespace check, so a new endpoint here cannot re-open
+    // the same hole by being forgotten in a route list.
+    if (strncmp(url_buf, "/api/v1/", 8) == 0)
+      return Route::PREFLIGHT;
+    return Route::NONE;
+  }
+
   return Route::NONE;
 }
 
@@ -248,6 +270,9 @@ void RadarTunerHandler::handleRequest(AsyncWebServerRequest *request) {
     case Route::REBOOT:
       this->handle_reboot_(request);
       break;
+    case Route::PREFLIGHT:
+      this->handle_preflight_(request);
+      break;
     case Route::NONE:
       break;
   }
@@ -258,7 +283,8 @@ void RadarTunerHandler::handleRequest(AsyncWebServerRequest *request) {
 
 void RadarTunerHandler::handle_ld2410_get_config_(AsyncWebServerRequest *request) {
   if (ld2410_ == nullptr) {
-    send_error_(request, 404, "{\"error\":\"LD2410 handler unavailable\"}");
+    // Quiet: this is the module-discovery probe's expected answer on an LD2450 device.
+    send_error_quiet_(request, 404, "{\"error\":\"LD2410 handler unavailable\"}");
     return;
   }
 
@@ -445,7 +471,8 @@ void RadarTunerHandler::handle_ld2410_live_(AsyncWebServerRequest *request) {
 
 void RadarTunerHandler::handle_ld2450_get_config_(AsyncWebServerRequest *request) {
   if (ld2450_ == nullptr) {
-    send_error_(request, 404, "{\"error\":\"LD2450 handler unavailable\"}");
+    // Quiet: this is the module-discovery probe's expected answer on an LD2410 device.
+    send_error_quiet_(request, 404, "{\"error\":\"LD2450 handler unavailable\"}");
     return;
   }
 
@@ -627,6 +654,19 @@ void RadarTunerHandler::handle_reboot_(AsyncWebServerRequest *request) {
   ESP_LOGI(TAG_RT, "Reboot requested by tuner UI");
   send_json_(request, "{\"status\":\"ok\"}");
   App.safe_reboot();
+}
+
+void RadarTunerHandler::handle_preflight_(AsyncWebServerRequest *request) {
+  // No auth check: a preflight carries no credentials by spec and this discloses nothing - it only
+  // tells the browser it may send the real request, which then meets the session gate like any
+  // other. The wildcard origin matches the handler's own data responses above; the key rides the
+  // query string on remote requests, so nothing here depends on cookies crossing origins.
+  httpd_resp_set_status(*request, "204 No Content");
+  httpd_resp_set_hdr(*request, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(*request, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  httpd_resp_set_hdr(*request, "Access-Control-Allow-Headers", "Content-Type");
+  httpd_resp_set_hdr(*request, "Access-Control-Max-Age", "600");
+  httpd_resp_send(*request, nullptr, 0);
 }
 
 }  // namespace satellite1_radar
