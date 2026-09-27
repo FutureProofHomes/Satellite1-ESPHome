@@ -1,6 +1,19 @@
 wifi:
   id: wifi_id
   # enable_on_boot: False
+
+  # The web onboarding path, beside BLE Improv: an unprovisioned device broadcasts an open SSID
+  # (no password key = open network; the ssid defaults to the device name, MAC suffix included,
+  # so ten factory devices in one room stay tellable apart). ESPHome brings the AP up immediately
+  # when no station credentials exist and tears it down once the station connects - the same
+  # lifecycle window BLE Improv advertises in. A phone joining it lands on the device's own web
+  # app (the captive_portal block below is what makes that automatic), where the setup wizard in
+  # satellite1_web_ui scans, joins, and walks the Connect Mode choice. On a provisioned device the
+  # AP only returns after ap_timeout (default 90s) of failed reconnects - and the session gate
+  # keeps the provisioning endpoints locked then, so a bystander cannot rewrite a working device's
+  # credentials during a router outage.
+  ap: {}
+
   on_connect:
     - delay: 5s  # Gives time for improv results to be transmitted
     - ble.disable:
@@ -18,6 +31,14 @@ wifi:
     - script.execute: control_leds
     - script.execute: set_wifi_connection_str
     - ble.enable:
+
+# The DNS half of the web onboarding path: while the AP above is up, every DNS name resolves to the
+# device, and the OS connectivity probes (/hotspot-detect.html, /generate_204 and friends) reach the
+# shared web server - where the session gate answers them with a redirect to "/", which is what makes
+# the phone pop its captive-portal sheet already showing the setup wizard. The stock portal page this
+# component would serve at "/" is never reached: satellite1_web_ui registers its handler ahead of this
+# one (see Satellite1WebUI::get_setup_priority) and answers the root with the real app.
+captive_portal:
 
 improv_serial:
 esp32_improv:

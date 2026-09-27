@@ -397,6 +397,17 @@ class WebUIHandler : public AsyncWebHandler {
   /// answer, and a hold overtaking a stale release re-arms cleanly. Runs on the main loop.
   int8_t take_mute_hold_request() { return this->mute_hold_req_.exchange(-1, std::memory_order_relaxed); }
 
+#ifdef USE_WIFI
+  /// Hands back the pending wizard join, if one arrived since the last call. One slot, newest
+  /// wins: two submits before the loop turns are one decision, and the later one is the customer's.
+  /// Runs on the main loop; the endpoint filled the slot on the httpd task under the same lock.
+  bool take_wifi_join(std::string &ssid, std::string &password);
+
+  /// True once, if a browser asked for a rescan since the last call - the same exchange shape as
+  /// the refresh flags above, and for the same httpd-task/main-loop split.
+  bool take_wifi_scan_request() { return this->wifi_scan_requested_.exchange(false); }
+#endif
+
 #ifdef USE_MEDIA_PLAYER
   /// Both set from generated setup code, before the listener accepts anything.
   ///
@@ -534,6 +545,15 @@ class WebUIHandler : public AsyncWebHandler {
     SEL,
     SEL_SET,
     MUTE_HOLD,
+#ifdef USE_WIFI
+    // The setup wizard's provisioning trio. Reachable without a session only while the device is
+    // un-onboarded - the session gate owns that exemption (and its host check); this handler just
+    // serves whoever the gate let through, which after onboarding means a signed-in browser (the
+    // future "change WiFi" surface, for free).
+    WIFI_SCAN,    // GET  /api/sat1/wifi/scan (?refresh=1 asks the main loop for a rescan)
+    WIFI_STATUS,  // GET  /api/sat1/wifi/status
+    WIFI_JOIN,    // POST /api/sat1/wifi/join (ssid, password - deferred to the main loop)
+#endif
 #ifdef USE_MICRO_WAKE_WORD
     WAKE_WORDS,
 #ifndef USE_SAT1_MWW_LOADER
@@ -617,6 +637,20 @@ class WebUIHandler : public AsyncWebHandler {
   /// Loads the stored connection once, lazily: the first request that needs it pays the flash
   /// read, and a device whose owner never connects the tier never touches the preference at all.
   void ma_cfg_load_();
+#ifdef USE_WIFI
+  /// GET /api/sat1/wifi/scan: the networks the last scan saw, deduplicated by SSID (a mesh
+  /// answers once per node) and read straight from the wifi component's own result vector - the
+  /// same read captive_portal's stock /config.json does from this task. ?refresh=1 queues a
+  /// rescan for the main loop; the wizard polls and picks up fresh results on a later read.
+  void handle_wifi_scan_(AsyncWebServerRequest *request);
+  /// GET /api/sat1/wifi/status: station connected or not, its IP, the current SSID, whether the
+  /// AP is still up, and the device's mDNS hostname - which is what the wizard's handoff step
+  /// shows before the AP (and this very connection) drops.
+  void handle_wifi_status_(AsyncWebServerRequest *request);
+  /// POST /api/sat1/wifi/join: validates and parks the credentials for the main loop, which is
+  /// where save_wifi_sta must run (it writes NVS and drives the wifi state machine).
+  void handle_wifi_join_(AsyncWebServerRequest *request);
+#endif
   void handle_sel_(AsyncWebServerRequest *request);
   void handle_sel_set_(AsyncWebServerRequest *request);
   /// The tune-time held mute a peer's tuner asks for - see the component's loop() for the hold's
@@ -841,6 +875,17 @@ class WebUIHandler : public AsyncWebHandler {
   /// drained by the component's loop through take_mute_hold_request(). See handle_mute_hold_.
   std::atomic<int8_t> mute_hold_req_{-1};
   bool mute_hold_available_{false};
+
+#ifdef USE_WIFI
+  /// The wizard's parked join: credentials written on the httpd task, drained on the main loop -
+  /// strings under the lock, the flag the cross-task signal. One slot because two joins in one
+  /// loop turn are one decision (see take_wifi_join).
+  Mutex wifi_join_lock_;
+  std::string wifi_join_ssid_;
+  std::string wifi_join_password_;
+  std::atomic<bool> wifi_join_pending_{false};
+  std::atomic<bool> wifi_scan_requested_{false};
+#endif
 
 #ifdef USE_SAT1_CRASH_REPORT
   crash_report::CrashReport *crash_report_{nullptr};

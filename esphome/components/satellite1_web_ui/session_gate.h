@@ -77,6 +77,18 @@ enum class LoginMode : uint8_t { BUTTON = 0, CODE = 1, SEQ = 2 };
 /// with their own abandoned request.
 enum class LoginResult : uint8_t { APPROVED = 0, EXPIRED = 1, DENIED = 2, CANCELLED = 3 };
 
+/// The Connect Modes the onboarding wizard offers. HA is today's whole behaviour - the device
+/// pairs with a Home Assistant instance and the web app is its local face. The Nexus AI
+/// Basestation is announced-but-not-built (the roadmap trimmed to it alone, owner decision,
+/// September 26 2026 - the cloud modes left the list): the wizard shows it as coming soon, and
+/// the mode endpoint refuses it, so no device can be persisted into a mode no firmware implements
+/// yet. The API string stays "nexus_local"; only the display name changed.
+enum ConnectMode : uint8_t {
+  CONNECT_MODE_NONE = 0,  ///< Not onboarded: the setup wizard's exemptions are open.
+  CONNECT_MODE_HA = 1,
+  CONNECT_MODE_NEXUS_LOCAL = 2,
+};
+
 /**
  * The session gate: cookie auth in front of every handler on the shared web server, plus the
  * login endpoints that mint the cookie.
@@ -149,6 +161,40 @@ class SessionGate : public AsyncWebHandler {
   /// Bumps the generation counter: every cookie and sign-in link everywhere dies instantly. The
   /// caller stays signed in because the endpoint answers with a fresh cookie.
   void regenerate();
+
+  /* ---- Onboarding (the AP-mode setup wizard's device half). ---- */
+
+  /// Whether onboarding has completed - a Connect Mode chosen through the wizard, or the
+  /// autocomplete below. While false, the wifi provisioning endpoints and the setup endpoints are
+  /// reachable without a session; the moment it turns true they fall behind the gate like
+  /// everything else. An atomic because route_ reads it on the httpd task per request while the
+  /// autocomplete writes it from the main loop.
+  bool onboarding_done() const { return this->ob_done_.load(std::memory_order_relaxed); }
+
+  /// The network connected and the wizard was not mid-flight: complete onboarding silently as
+  /// Home Assistant Connect. This is what keeps every non-wizard provisioning path - BLE Improv,
+  /// serial Improv, developer builds with baked-in credentials, fleet devices taking this
+  /// firmware as an update - behaving exactly as it did before the wizard existed. Main loop.
+  void autocomplete_onboarding();
+
+  /// The polled form the component's loop() runs: autocomplete the moment the station or ethernet
+  /// is up. In the loop rather than a YAML on_connect so it covers builds whose network block this
+  /// repository never sees - the Device Builder path injects wifi: at adoption time. The done
+  /// check first keeps the steady state at one relaxed atomic load per iteration.
+  void autocomplete_onboarding_if_connected();
+
+  /// The wizard path's own completion, also polled from the component's loop(): a wizard that
+  /// chose Home Assistant Connect finishes the moment the Home Assistant API actually attaches -
+  /// there is no password step anymore (owner decision, September 25 2026), so the device noticing
+  /// HA is the last thing that has to happen. The wizard's browser sees it on its next
+  /// setup/status poll and moves the customer to the login screen.
+  void complete_onboarding_if_ha_connected();
+
+  /// The wizard submitted WiFi credentials (POST /api/sat1/wifi/join, drained through the
+  /// component's loop): persist that fact so the connect that follows - and any reboot mid-flow -
+  /// resumes the wizard at the Connect Mode step instead of autocompleting past it. A no-op on an
+  /// onboarded device, whose authorized wifi/join must not reopen the wizard. Main loop.
+  void mark_wizard_in_progress();
 
   /* ---- The device-presence approvals, called from YAML on the main loop. ---- */
 
@@ -227,6 +273,10 @@ class SessionGate : public AsyncWebHandler {
     WHOAMI,      // GET  /api/sat1/whoami
     PASSWORD,    // POST /api/sat1/password (requires a valid session AND the current password)
     PREFLIGHT,   // OPTIONS /api/sat1/...
+    SETUP_STATUS,   // GET  /api/sat1/setup/status (public: is the wizard pending, and where is it)
+    SETUP_MODE,     // POST /api/sat1/setup/mode (wizard only; refused once onboarded)
+    SETUP_BROWSER,  // POST /api/sat1/setup/browser (wizard only; opens the captive sheet's way out)
+    CAPTIVE,        // Any unauthorized GET while the captive portal runs: redirect to "/"
   };
 
   GateRoute route_(AsyncWebServerRequest *request) const;
@@ -263,6 +313,20 @@ class SessionGate : public AsyncWebHandler {
   void handle_whoami_(AsyncWebServerRequest *request);
   void handle_password_(AsyncWebServerRequest *request);
   void handle_preflight_(AsyncWebServerRequest *request);
+  void handle_setup_status_(AsyncWebServerRequest *request);
+  void handle_setup_mode_(AsyncWebServerRequest *request);
+  /// The launcher's escape: for the next PORTAL_PASS window the OS connectivity probes get their
+  /// expected "online" answers, which flips the captive sheet into its connected state - the one
+  /// state from which a tapped absolute link opens in the real browser instead of in the sheet.
+  /// See handle_captive_ for the mechanism and the source it is built on.
+  void handle_setup_browser_(AsyncWebServerRequest *request);
+  /// The captive-portal answer for the OS connectivity probes (and any other URL a captive-sheet
+  /// browser wanders to): a 302 to this device's root, which is what tells iOS/Android "captive"
+  /// and lands their sheet on the web app instead of on ESPHome's stock portal page.
+  void handle_captive_(AsyncWebServerRequest *request);
+  /// Whether the captive portal is running right now - AP up, DNS hijack live. False in builds
+  /// without the component.
+  static bool captive_portal_active_();
   void deny_(AsyncWebServerRequest *request);
 
   /// Answers through the raw httpd API rather than ESPHome's response path, for two reasons that
@@ -318,6 +382,36 @@ class SessionGate : public AsyncWebHandler {
   } __attribute__((packed));
   SessionSecret secret_{};
   ESPPreferenceObject pref_;
+
+  /// The onboarding record, one NVS blob: which Connect Mode was chosen (ConnectMode), whether
+  /// onboarding is complete, and whether the web wizard is mid-flight (it submitted WiFi
+  /// credentials and the Connect Mode step is still owed). Restored at setup; absent on every
+  /// device built before the wizard existed, which reads as un-onboarded and is healed by the
+  /// autocomplete on the first network connect.
+  struct OnboardState {
+    uint8_t mode;
+    uint8_t done;
+    uint8_t wizard;
+    uint8_t reserved;
+  } __attribute__((packed));
+  ESPPreferenceObject onboard_pref_;
+
+  /// The live copies, atomics because the endpoints read and write them on the httpd task while
+  /// the autocomplete and the wizard flag run on the main loop. Persisted through save_onboard_,
+  /// which reassembles the blob from these.
+  std::atomic<uint8_t> ob_mode_{0};
+  std::atomic<bool> ob_done_{false};
+  std::atomic<bool> ob_wizard_{false};
+
+  void save_onboard_();
+
+  /// The captive sheet's pass window: while it holds, handle_captive_ answers the OS probes
+  /// "online" instead of redirecting, so the sheet flips to connected and its links open in the
+  /// real browser. Plain members, not atomics: set by the setup/browser endpoint and read by the
+  /// captive handler, both on the single httpd task. The bool carries "was a window ever set" so
+  /// the timestamp math stays wrap-safe signed differences, the pw_lock_ idiom.
+  bool portal_pass_set_{false};
+  uint32_t portal_pass_until_{0};
 
   /// The one token every cookie and sign-in link carries, as lowercase hex. Computed at setup and
   /// on password/generation change, compared constant-time per request.

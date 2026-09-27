@@ -201,6 +201,10 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
       return Route::SEL_SET;
     if (url == "/api/sat1/mutehold")
       return Route::MUTE_HOLD;
+#ifdef USE_WIFI
+    if (url == "/api/sat1/wifi/join")
+      return Route::WIFI_JOIN;
+#endif
 #ifdef USE_SAT1_MWW_LOADER
     // Before the bare path below would ever match: these are prefixes of nothing, but the bare
     // /api/sat1/wakewords is a prefix of these, so exact-match order matters to nobody - listed
@@ -258,6 +262,12 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
     return Route::MA_CFG;
   if (url == "/api/sat1/sel")
     return Route::SEL;
+#ifdef USE_WIFI
+  if (url == "/api/sat1/wifi/scan")
+    return Route::WIFI_SCAN;
+  if (url == "/api/sat1/wifi/status")
+    return Route::WIFI_STATUS;
+#endif
 #ifdef USE_MICRO_WAKE_WORD
   if (url == "/api/sat1/wakewords")
     return Route::WAKE_WORDS;
@@ -419,6 +429,17 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
     case Route::MUTE_HOLD:
       this->handle_mute_hold_(request);
       break;
+#ifdef USE_WIFI
+    case Route::WIFI_SCAN:
+      this->handle_wifi_scan_(request);
+      break;
+    case Route::WIFI_STATUS:
+      this->handle_wifi_status_(request);
+      break;
+    case Route::WIFI_JOIN:
+      this->handle_wifi_join_(request);
+      break;
+#endif
 #ifdef USE_MEDIA_PLAYER
     case Route::MEDIA:
       this->handle_media_(request);
@@ -655,6 +676,144 @@ static void write_json_string(ChunkWriter &w, const std::string &text) {
   }
   w.print("\"");
 }
+
+#ifdef USE_WIFI
+void WebUIHandler::handle_wifi_scan_(AsyncWebServerRequest *request) {
+  auto *wifi = wifi::global_wifi_component;
+  if (wifi == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  // ?refresh=1 queues a rescan for the main loop (start_scanning drives the wifi state machine
+  // and must not run here). The wizard keeps polling this endpoint and picks the fresh results
+  // up on a later read - the same read-what-is-there model captive_portal's stock page uses.
+  if (auto *refresh = request->getParam("refresh"); refresh != nullptr && refresh->value() == "1")
+    this->wifi_scan_requested_.store(true);
+
+  // The currently-configured station, so the wizard can mark the row the device is already on.
+  // Copied out of the by-value get_sta() before the loop; a StringRef into that temporary would
+  // dangle past this statement.
+  const bool connected = wifi->is_connected();
+  const std::string current_ssid{wifi->get_sta().get_ssid().c_str()};
+
+  begin_chunked_json(*request);
+  ChunkWriter w{*request};
+  w.print(R"({"aps":[)");
+
+  const auto &results = wifi->get_scan_result();
+  bool first = true;
+  size_t emitted = 0;
+  for (size_t i = 0; i < results.size(); i++) {
+    const auto &r = results[i];
+    // Hidden entries carry no name a person could pick; the wizard's manual-SSID field covers
+    // them. The cap keeps a dense apartment block from turning the payload into a phone book.
+    if (r.get_is_hidden() || r.get_ssid().empty())
+      continue;
+    if (emitted >= 30)
+      break;
+    // Deduplicate by SSID - a mesh answers once per node, and the person is choosing a network,
+    // not an access point. First occurrence wins; the results arrive strongest-first often enough
+    // that this is also the best RSSI in practice, and the number is advisory either way.
+    bool dup = false;
+    for (size_t j = 0; j < i; j++) {
+      if (strcmp(results[j].get_ssid().c_str(), r.get_ssid().c_str()) == 0) {
+        dup = true;
+        break;
+      }
+    }
+    if (dup)
+      continue;
+    w.printf(R"(%s{"ssid":)", first ? "" : ",");
+    // Through the escaper: an SSID is 32 arbitrary bytes somebody else chose.
+    write_json_string(w, std::string(r.get_ssid().c_str()));
+    w.printf(R"(,"rssi":%d,"sec":%d,"conn":%d})", static_cast<int>(r.get_rssi()), r.get_with_auth() ? 1 : 0,
+             connected && current_ssid == r.get_ssid().c_str() ? 1 : 0);
+    first = false;
+    emitted++;
+  }
+  w.print("]}");
+  w.finish();
+}
+
+void WebUIHandler::handle_wifi_status_(AsyncWebServerRequest *request) {
+  auto *wifi = wifi::global_wifi_component;
+  if (wifi == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  // The station's own addresses, not network::get_ip_addresses(): while the AP is still up the
+  // general list carries 192.168.4.1, which is exactly the address the handoff step must not show.
+  char ip_buf[network::IP_ADDRESS_BUFFER_SIZE] = "";
+  if (wifi->is_connected()) {
+    for (auto &addr : wifi->get_ip_addresses()) {
+      if (addr.is_set() && addr != network::IPAddress(0, 0, 0, 0)) {
+        addr.str_to(ip_buf);
+        break;
+      }
+    }
+  }
+  const std::string sta_ssid{wifi->get_sta().get_ssid().c_str()};
+
+  begin_chunked_json(*request);
+  ChunkWriter w{*request};
+  // `host` is the mDNS name the handoff URL is built from - the address that stays true after
+  // DHCP moves the IP. `has_sta` false plus `connected` false is "nothing submitted yet"; true
+  // plus false is "trying" (or the credentials were wrong - the wizard's timeout owns that call,
+  // because the firmware itself retries forever by design).
+  w.printf(R"({"connected":%d,"has_sta":%d,"ap":%d,"ip":"%s","host":"%s","ssid":)", wifi->is_connected() ? 1 : 0,
+           wifi->has_sta() ? 1 : 0, wifi->is_ap_active() ? 1 : 0, ip_buf, App.get_name().c_str());
+  write_json_string(w, sta_ssid);
+  w.print("}");
+  w.finish();
+}
+
+void WebUIHandler::handle_wifi_join_(AsyncWebServerRequest *request) {
+  if (wifi::global_wifi_component == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  auto *ssid = request->getParam("ssid");
+  auto *password = request->getParam("password");
+  const std::string pw = password != nullptr ? password->value() : "";
+  // The radio's own limits: an SSID is 1-32 bytes, a WPA passphrase 8-63 characters (64 hex for a
+  // raw PSK), and empty means an open network. 1-7 is refused here, with a distinct shape, because
+  // the join would fail slowly and mysteriously where the wizard can say "too short" now.
+  if (ssid == nullptr || ssid->value().empty() || ssid->value().size() > 32 || pw.size() > 64 ||
+      (!pw.empty() && pw.size() < 8)) {
+    request->send(400, "application/json", "{\"ok\":0,\"invalid\":1}");
+    return;
+  }
+
+  {
+    LockGuard guard{this->wifi_join_lock_};
+    this->wifi_join_ssid_ = ssid->value();
+    this->wifi_join_password_ = pw;
+  }
+  // Flag last, so the loop never sees it set without the strings beside it.
+  this->wifi_join_pending_.store(true);
+
+  // The handoff facts ride the accept, because this response may be the last one this connection
+  // ever delivers: the device is about to join the home network and drop the AP under the wizard.
+  begin_chunked_json(*request);
+  ChunkWriter w{*request};
+  w.printf(R"({"ok":1,"host":"%s"})", App.get_name().c_str());
+  w.finish();
+}
+
+bool WebUIHandler::take_wifi_join(std::string &ssid, std::string &password) {
+  if (!this->wifi_join_pending_.exchange(false))
+    return false;
+  LockGuard guard{this->wifi_join_lock_};
+  ssid = this->wifi_join_ssid_;
+  password = this->wifi_join_password_;
+  // The password was a secret the moment it was typed; nothing keeps a parked copy.
+  this->wifi_join_ssid_.clear();
+  this->wifi_join_password_.clear();
+  return true;
+}
+#endif  // USE_WIFI
 
 #ifdef USE_MICRO_WAKE_WORD
 void WebUIHandler::push_wake_detection(const std::string &word) {

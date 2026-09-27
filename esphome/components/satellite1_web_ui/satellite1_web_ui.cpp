@@ -5,6 +5,12 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
+#include "esphome/components/network/util.h"
+
+#ifdef USE_WIFI
+#include "esphome/components/wifi/wifi_component.h"
+#endif
+
 namespace esphome {
 namespace satellite1_web_ui {
 
@@ -88,6 +94,21 @@ void Satellite1WebUI::loop() {
   while (elapsed > seen && !this->max_loop_ms_.compare_exchange_weak(seen, elapsed, std::memory_order_relaxed)) {
   }
 
+  // The onboarding autocomplete, here rather than in a wifi/ethernet on_connect automation so it
+  // covers every build the component ships in - the ESPHome Device Builder path in particular gets
+  // its wifi: block injected at adoption time, where no YAML of ours could hang a hook. The rule:
+  // a network that came up without the setup wizard mid-flight (BLE Improv, serial Improv, baked-in
+  // credentials, a fleet device taking this firmware as an update) means onboarding is implicitly
+  // Home Assistant Connect - exactly the behaviour every one of those paths had before the wizard
+  // existed. network::is_connected() is station/ethernet truth; the setup AP does not count.
+  // Idempotent and cheap (one atomic read) once onboarding is done.
+  this->gate_.autocomplete_onboarding_if_connected();
+
+  // The wizard path's completion: Home Assistant chosen and its API now attached means onboarding
+  // is over - there is no password step (owner decision, September 25 2026), so this is the event
+  // the connect step's browser is polling setup/status for.
+  this->gate_.complete_onboarding_if_ha_connected();
+
   // The pairing window's lifecycle: expiry, the offline quiet-period judgement, and the open/close
   // events that drive the announcement and the LED. Triggers fire here rather than from the
   // endpoints because the endpoints run on the httpd task and what these start are scripts.
@@ -117,6 +138,33 @@ void Satellite1WebUI::loop() {
   SelectWrite pending;
   if (this->handler_.take_select_write(pending))
     this->ha_select_trigger_.trigger(pending.entity, pending.option);
+
+#ifdef USE_WIFI
+  // The setup wizard's deferred wifi work, both on the main loop because both drive the wifi
+  // component's state machine (and save_wifi_sta writes NVS besides).
+  //
+  // The rescan, floored at ten seconds: a scan hops the radio off the AP channel and the wizard's
+  // own phone feels it, so refresh spamming coalesces into one real scan. Skipped once the
+  // station is connected - the connected state machine owns its own scans (roaming), and the
+  // wizard past the join step has no network list on screen anyway.
+  if (this->handler_.take_wifi_scan_request() && wifi::global_wifi_component != nullptr &&
+      !wifi::global_wifi_component->is_connected() &&
+      (now - this->wifi_scan_at_ >= 10000 || this->wifi_scan_at_ == 0)) {
+    this->wifi_scan_at_ = now;
+    wifi::global_wifi_component->start_scanning();
+  }
+
+  // The parked join. The wizard flag goes first, so the connect this starts finds it set and the
+  // autocomplete above stands aside - the Connect Mode step is still owed.
+  {
+    std::string join_ssid, join_password;
+    if (this->handler_.take_wifi_join(join_ssid, join_password) && wifi::global_wifi_component != nullptr) {
+      this->gate_.mark_wizard_in_progress();
+      ESP_LOGI(TAG, "Setup wizard joining WiFi network '%s'", join_ssid.c_str());
+      wifi::global_wifi_component->save_wifi_sta(join_ssid, join_password);
+    }
+  }
+#endif
 
 #ifdef USE_SWITCH
   // The tune-time held mute: a peer's tuner is measuring its wake word a room away and asked this

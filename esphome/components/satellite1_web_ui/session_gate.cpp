@@ -15,6 +15,16 @@
 #include "esphome/components/api/api_server.h"
 #endif
 
+// For the captive-portal redirect that pops the phone's setup sheet: the gate answers the OS
+// connectivity probes itself (see handle_captive_), and it needs to know whether the portal's DNS
+// hijack is live and where the AP is.
+#ifdef USE_CAPTIVE_PORTAL
+#include "esphome/components/captive_portal/captive_portal.h"
+#ifdef USE_WIFI
+#include "esphome/components/wifi/wifi_component.h"
+#endif
+#endif
+
 #include <esp_http_server.h>
 #include <esp_random.h>
 #include <mbedtls/md.h>
@@ -28,6 +38,9 @@ static const char *const TAG_SG = "web_ui.auth";
 /// The NVS slot for the salt and generation. A fixed constant rather than a hash of anything
 /// runtime, so the same device keeps the same sessions across renames and reflashes.
 static constexpr uint32_t SG_PREF_HASH = 0x53415431;  // "SAT1"
+
+/// The onboarding record's slot, same fixed-constant reasoning.
+static constexpr uint32_t SG_ONBOARD_PREF_HASH = 0x53415432;  // "SAT2"
 
 static const char *const SESSION_COOKIE = "sat1_session";
 static const char *const PAIR_COOKIE = "sat1_pair";
@@ -174,6 +187,83 @@ void SessionGate::setup() {
   }
 
   this->compute_token_();
+
+  // The onboarding record. Absent - a factory device, or a fleet device taking this firmware as
+  // an update - reads as un-onboarded: the setup wizard's exemptions open, and the network
+  // autocomplete (or the wizard itself) is what closes them.
+  this->onboard_pref_ = global_preferences->make_preference<OnboardState>(SG_ONBOARD_PREF_HASH);
+  OnboardState ob{};
+  if (this->onboard_pref_.load(&ob)) {
+    this->ob_mode_.store(ob.mode);
+    this->ob_done_.store(ob.done != 0);
+    this->ob_wizard_.store(ob.wizard != 0);
+  }
+  if (!this->ob_done_.load()) {
+    ESP_LOGI(TAG_SG, "Onboarding %s; setup wizard endpoints are open",
+             this->ob_wizard_.load() ? "mid-flight (wizard has provisioned WiFi)" : "not completed");
+  }
+}
+
+void SessionGate::save_onboard_() {
+  OnboardState ob{};
+  ob.mode = this->ob_mode_.load();
+  ob.done = this->ob_done_.load() ? 1 : 0;
+  ob.wizard = this->ob_wizard_.load() ? 1 : 0;
+  this->onboard_pref_.save(&ob);
+}
+
+void SessionGate::autocomplete_onboarding() {
+  if (this->ob_done_.load() || this->ob_wizard_.load())
+    return;
+  this->ob_mode_.store(CONNECT_MODE_HA);
+  this->ob_done_.store(true);
+  this->save_onboard_();
+  ESP_LOGI(TAG_SG, "Network provisioned outside the setup wizard; onboarding completed as Home Assistant Connect");
+}
+
+void SessionGate::autocomplete_onboarding_if_connected() {
+  if (this->ob_done_.load(std::memory_order_relaxed) || this->ob_wizard_.load(std::memory_order_relaxed))
+    return;
+  // Station or ethernet with an address - the setup AP does not count as connected here, which is
+  // exactly right: an unprovisioned device stays un-onboarded however long it broadcasts.
+  if (network::is_connected())
+    this->autocomplete_onboarding();
+}
+
+void SessionGate::complete_onboarding_if_ha_connected() {
+  if (this->ob_done_.load(std::memory_order_relaxed))
+    return;
+  // Two states wait on this. The explicit one: the wizard chose Home Assistant (mode is 1 exactly
+  // when setup/mode accepted "ha"). The implicit one: the wizard provisioned WiFi but never
+  // reached the Connect Mode step - the captive sheet closing at join time is the documented way
+  // that happens (hardware, September 26 2026) - and then the customer added the device in Home
+  // Assistant anyway. Adding it IS the choice: leaving the device un-onboarded forever over a
+  // skipped chooser would be ceremony beating intent. Every other un-onboarded state belongs to
+  // the autocomplete above or to a wizard step still ahead of the join.
+  const uint8_t mode = this->ob_mode_.load(std::memory_order_relaxed);
+  const bool implicit = mode == CONNECT_MODE_NONE && this->ob_wizard_.load(std::memory_order_relaxed);
+  if (mode != CONNECT_MODE_HA && !implicit)
+    return;
+#ifdef USE_API
+  if (api::global_api_server != nullptr && api::global_api_server->is_connected()) {
+    this->ob_mode_.store(CONNECT_MODE_HA);
+    this->ob_done_.store(true);
+    this->ob_wizard_.store(false);
+    this->save_onboard_();
+    ESP_LOGI(TAG_SG, "Home Assistant connected; onboarding complete%s",
+             implicit ? " (mode implied by the add - the wizard never reached the chooser)" : "");
+  }
+#endif
+}
+
+void SessionGate::mark_wizard_in_progress() {
+  // Never on an onboarded device: its wifi/join is an authorized re-provision, and reopening the
+  // wizard would put the setup surface back on the open air the next time the AP falls back.
+  if (this->ob_done_.load() || this->ob_wizard_.load())
+    return;
+  this->ob_wizard_.store(true);
+  this->save_onboard_();
+  ESP_LOGI(TAG_SG, "Setup wizard provisioned WiFi; holding onboarding open for the Connect Mode step");
 }
 
 void SessionGate::compute_token_() {
@@ -252,6 +342,23 @@ SessionGate::GateRoute SessionGate::route_(AsyncWebServerRequest *request) const
       return GateRoute::LOGOUT_ALL;
     if (url == "/api/sat1/password")
       return GateRoute::PASSWORD;
+    // The wizard's own endpoint, always the gate's to answer: while un-onboarded it is the setup
+    // surface (the handler checks the host header, the pairing endpoints' DNS-rebinding defense);
+    // once onboarded it answers a flat refusal rather than 404, so a stale wizard tab learns the
+    // truth instead of retrying. There is no setup/password anymore - onboarding's last step is
+    // the device noticing Home Assistant (complete_onboarding_if_ha_connected), and the web UI
+    // password stays the generated one until the customer changes it from inside the app.
+    if (url == "/api/sat1/setup/mode")
+      return GateRoute::SETUP_MODE;
+    if (url == "/api/sat1/setup/browser")
+      return GateRoute::SETUP_BROWSER;
+    // WiFi provisioning, exempt only while un-onboarded - the wizard has no session to offer yet.
+    // Host-checked for the same rebinding reason as the pairing endpoints: after the join succeeds
+    // the device sits on the home LAN with these still open until the wizard finishes, and a
+    // rebound page must not be able to walk it onto another network. Once onboarded this falls
+    // through to the authorized_ check like any other write.
+    if (!this->onboarding_done() && url == "/api/sat1/wifi/join")
+      return this->pairing_host_ok_(request) ? GateRoute::PASS : GateRoute::DENY;
   } else if (method == HTTP_GET) {
     if (url == "/api/sat1/login/nonce")
       return GateRoute::NONCE;
@@ -259,11 +366,41 @@ SessionGate::GateRoute SessionGate::route_(AsyncWebServerRequest *request) const
       return GateRoute::POLL;
     if (url == "/api/sat1/whoami")
       return GateRoute::WHOAMI;
+    // Public like whoami, and as cheap: one flag and a mode byte. The SPA reads it before the
+    // session probe to decide between the setup wizard and the login screen, so it must answer
+    // before any session exists - and after onboarding it keeps answering ({"setup":0}), which is
+    // what lets the app skip the wizard without a second probe shape.
+    if (url == "/api/sat1/setup/status")
+      return GateRoute::SETUP_STATUS;
     if (exempt_(url_buf, url.size()))
       return GateRoute::PASS;
+    // The wizard's reads, exempt while un-onboarded with the same host check as the join above.
+    if (!this->onboarding_done() &&
+        (url == "/api/sat1/wifi/scan" || url == "/api/sat1/wifi/status")) {
+      return this->pairing_host_ok_(request) ? GateRoute::PASS : GateRoute::DENY;
+    }
   }
 
-  return this->authorized_(request) ? GateRoute::PASS : GateRoute::DENY;
+  if (this->authorized_(request))
+    return GateRoute::PASS;
+
+  // While the captive portal's DNS hijack is live, every name a joined phone resolves lands here -
+  // including the OS connectivity probes (/hotspot-detect.html, /generate_204, /connecttest.txt).
+  // A 401 would read as "internet up, credentials needed" and no sheet would open; the 302 to "/"
+  // is what says "captive" and points the sheet at the web app. Everything real was already
+  // routed above this line, so the redirect can never shadow the SPA, the wizard endpoints or an
+  // authorized session - and it also swallows captive_portal's own unauthenticated /wifisave and
+  // /config.json, which on an onboarded device (AP fallback during a router outage) would
+  // otherwise let a bystander rewrite working credentials.
+  //
+  // The API namespace and the event stream keep their 401 even then: fetch() follows a redirect
+  // silently, so a 302 on /api/sat1/* would hand the app the SPA's own HTML as a 200 - the boot
+  // probe would read that as a session and mount against a device that refuses everything. A
+  // browser probe never asks under /api/, so the sheet loses nothing.
+  if (method == HTTP_GET && captive_portal_active_() && strncmp(url_buf, "/api/", 5) != 0 && url != "/events")
+    return GateRoute::CAPTIVE;
+
+  return GateRoute::DENY;
 }
 
 bool SessionGate::cookie_valid_(AsyncWebServerRequest *request) const {
@@ -339,12 +476,32 @@ void SessionGate::handleRequest(AsyncWebServerRequest *request) {
     case GateRoute::PREFLIGHT:
       this->handle_preflight_(request);
       break;
+    case GateRoute::SETUP_STATUS:
+      this->handle_setup_status_(request);
+      break;
+    case GateRoute::SETUP_MODE:
+      this->handle_setup_mode_(request);
+      break;
+    case GateRoute::SETUP_BROWSER:
+      this->handle_setup_browser_(request);
+      break;
+    case GateRoute::CAPTIVE:
+      this->handle_captive_(request);
+      break;
     case GateRoute::DENY:
       this->deny_(request);
       break;
     case GateRoute::PASS:
       break;
   }
+}
+
+bool SessionGate::captive_portal_active_() {
+#ifdef USE_CAPTIVE_PORTAL
+  return captive_portal::global_captive_portal != nullptr && captive_portal::global_captive_portal->is_active();
+#else
+  return false;
+#endif
 }
 
 /* ---- Responses ----------------------------------------------------------------------------- */
@@ -798,6 +955,151 @@ void SessionGate::handle_password_(AsyncWebServerRequest *request) {
   char body[96];
   snprintf(body, sizeof(body), R"({"ok":1,"key":"%s"})", this->token_hex_);
   this->send_json_(request, "200 OK", body, true, false, nullptr, true);
+}
+
+/* ---- Onboarding: the setup wizard's endpoints ------------------------------------------------ */
+
+void SessionGate::handle_setup_status_(AsyncWebServerRequest *request) {
+  // Public by design, like whoami, and for the same caller: a browser that has no session yet and
+  // must decide between the wizard and the login screen. `setup` is the whole verdict; `wizard`
+  // says the WiFi step already happened (resume past the network list); `name` is the mDNS
+  // hostname the handoff URL is built from and `fn` the friendly display name (MAC suffix
+  // included, exactly what Home Assistant's Discovered card shows) - both the identical strings
+  // whoami already serves, `fn` escaped for the same reason. `ha` is whether the Home Assistant
+  // API is attached, which is what the wizard's connect step polls for.
+  //
+  // lan_cors, because the joining step reads this endpoint *cross-origin*: the wizard page on the
+  // setup AP's origin probes http://<name>.local/api/sat1/setup/status to learn the moment the
+  // phone can reach the device on the home network, and redirects there. The endpoint faces
+  // unauthenticated callers by design, so widening who may read the response adds nothing a
+  // direct LAN client did not already have.
+#ifdef USE_API
+  const bool ha = api::global_api_server != nullptr && api::global_api_server->is_connected();
+#else
+  const bool ha = false;
+#endif
+  // The actions-checkbox verdict (0 unknown, 1 allowed, 2 blocked, 3 HA too old to answer), from
+  // the same wired function the window-mode selection reads. The wizard's haactions step polls it
+  // to know when the customer has ticked the box - the tick reloads the config entry, the API
+  // reconnects, the probe answers, and this flips to 1 within a second. A four-value int about
+  // the customer's own Home Assistant: whoami-class disclosure.
+  const int actions = this->ha_actions_fn_ ? this->ha_actions_fn_() : 0;
+  char fn[96];
+  json_escape_(App.get_friendly_name().c_str(), fn, sizeof(fn));
+  char body[256];
+  snprintf(body, sizeof(body), R"({"setup":%d,"mode":%u,"wizard":%d,"ha":%d,"actions":%d,"name":"%s","fn":"%s"})",
+           this->ob_done_.load() ? 0 : 1, static_cast<unsigned>(this->ob_mode_.load()),
+           this->ob_wizard_.load() ? 1 : 0, ha ? 1 : 0, actions, App.get_name().c_str(), fn);
+  this->send_json_(request, "200 OK", body, false, false, nullptr, true);
+}
+
+void SessionGate::handle_setup_mode_(AsyncWebServerRequest *request) {
+  // Refused flat once onboarded - a stale wizard tab must learn the wizard is over, not retry.
+  if (this->ob_done_.load()) {
+    this->send_json_(request, "409 Conflict", R"({"ok":0,"done":1})", false, false, nullptr);
+    return;
+  }
+  // The pairing endpoints' DNS-rebinding defense: after the WiFi step the device sits on the home
+  // LAN with this endpoint sessionless until the wizard finishes, and a rebound page necessarily
+  // carries its registered hostname in Host.
+  if (!this->pairing_host_ok_(request)) {
+    this->send_json_(request, "403 Forbidden", R"({"ok":0,"host":0})", false, false, nullptr);
+    return;
+  }
+  auto *mode = request->getParam("mode");
+  if (mode == nullptr) {
+    this->send_json_(request, "400 Bad Request", R"({"ok":0})", false, false, nullptr);
+    return;
+  }
+  if (mode->value() == "ha") {
+    // Chosen but not done: completion belongs to complete_onboarding_if_ha_connected, which fires
+    // when the Home Assistant API actually attaches - so a reboot between the choice and the add
+    // resumes the wizard at the connect step with the choice remembered.
+    this->ob_mode_.store(CONNECT_MODE_HA);
+    this->save_onboard_();
+    ESP_LOGI(TAG_SG, "Connect Mode chosen: Home Assistant");
+    this->send_json_(request, "200 OK", R"({"ok":1})", false, false, nullptr);
+    return;
+  }
+  if (mode->value() == "nexus_local") {
+    // The Nexus AI Basestation: announced but not built. Refusing here rather than
+    // accepting-and-ignoring is what keeps a device from being persisted into a mode no firmware
+    // implements yet.
+    this->send_json_(request, "409 Conflict", R"({"ok":0,"soon":1})", false, false, nullptr);
+    return;
+  }
+  this->send_json_(request, "400 Bad Request", R"({"ok":0})", false, false, nullptr);
+}
+
+/// How long one "Setup Satellite1" tap holds the captive sheet's way out open. Long enough for the
+/// sheet to re-probe (it re-checks within seconds of page activity, worst case ~40s) and for the
+/// customer's second tap; short enough that an abandoned attempt re-arms the popup for the next
+/// phone that joins the AP.
+static constexpr uint32_t SG_PORTAL_PASS_MS = 90000;
+
+void SessionGate::handle_setup_browser_(AsyncWebServerRequest *request) {
+  // Wizard-only, like the other setup endpoints: an onboarded device's fallback AP keeps its
+  // captive behaviour intact for everyone.
+  if (this->ob_done_.load()) {
+    this->send_json_(request, "409 Conflict", R"({"ok":0,"done":1})", false, false, nullptr);
+    return;
+  }
+  if (!this->pairing_host_ok_(request)) {
+    this->send_json_(request, "403 Forbidden", R"({"ok":0,"host":0})", false, false, nullptr);
+    return;
+  }
+  this->portal_pass_set_ = true;
+  this->portal_pass_until_ = millis() + SG_PORTAL_PASS_MS;
+  ESP_LOGI(TAG_SG, "Captive sheet pass window open for %us (launcher tapped)",
+           static_cast<unsigned>(SG_PORTAL_PASS_MS / 1000));
+  this->send_json_(request, "200 OK", R"({"ok":1})", false, false, nullptr);
+}
+
+void SessionGate::handle_captive_(AsyncWebServerRequest *request) {
+  // The launcher's escape, first: while a pass window holds, the OS connectivity probes get the
+  // answers they expect from the open internet - Apple's literal Success page, Android's empty
+  // 204. That flips the captive sheet into its "connected" state, which is the ONE state from
+  // which a tapped absolute link opens in the real browser instead of inside the sheet (the
+  // mechanism hotel portals have ridden since iOS 9; Apple's own URL scheme notably does NOT open
+  // Safari from the sheet, which is why the launcher cannot simply deep-link its way out). The
+  // wizard's launcher POSTs setup/browser on its first tap, then offers the absolute link.
+  if (this->portal_pass_set_ && static_cast<int32_t>(this->portal_pass_until_ - millis()) > 0) {
+    char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+    request->url_to(url_buf);
+    if (strstr(url_buf, "generate_204") != nullptr || strstr(url_buf, "gen_204") != nullptr) {
+      httpd_resp_set_status(*request, "204 No Content");
+      httpd_resp_send(*request, nullptr, 0);
+      return;
+    }
+    // Apple's WISPr checker matches on a body containing "Success"; this is the exact document
+    // captive.apple.com serves. Everything else (ncsi.txt, connecttest.txt, stray sheet
+    // navigations) gets the same answer - phones are the audience here, and over-answering "you
+    // are online" costs nothing the pass window did not already decide.
+    httpd_resp_set_status(*request, "200 OK");
+    httpd_resp_set_type(*request, "text/html");
+    static const char SUCCESS[] = "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>";
+    httpd_resp_send(*request, SUCCESS, HTTPD_RESP_USE_STRLEN);
+    return;
+  }
+
+  // Absolute, to the AP's own address, rather than a bare "/": the probe's Host header is
+  // captive.apple.com or connectivitycheck.gstatic.com, and while the DNS hijack would resolve a
+  // relative redirect right back here, the sheet's URL bar then lies about where it is. The stack
+  // buffer is safe because httpd_resp_send below happens before this frame unwinds.
+  // Sized for the buffer str_to fills (IPv6-wide) plus the scheme and slash, so -Wformat-truncation
+  // can prove the snprintf below always fits.
+  char loc[network::IP_ADDRESS_BUFFER_SIZE + 10] = "/";
+#if defined(USE_CAPTIVE_PORTAL) && defined(USE_WIFI)
+  if (wifi::global_wifi_component != nullptr) {
+    char ip_buf[network::IP_ADDRESS_BUFFER_SIZE];
+    wifi::global_wifi_component->wifi_soft_ap_ip().str_to(ip_buf);
+    snprintf(loc, sizeof(loc), "http://%s/", ip_buf);
+  }
+#endif
+  httpd_resp_set_status(*request, "302 Found");
+  httpd_resp_set_hdr(*request, "Location", loc);
+  httpd_resp_set_hdr(*request, "Cache-Control", "no-store");
+  httpd_resp_send(*request, nullptr, 0);
 }
 
 /* ---- The pairing window --------------------------------------------------------------------- */

@@ -63,11 +63,15 @@ template<typename S> void append_minified_jinja(S &out, const char *src, size_t 
 /**
  * Serves the on-device web app from PROGMEM as a handler on ESPHome's shared web server.
  *
- * The whole component exists at setup_priority::WIFI (250) for one reason: registration order is
- * what decides who answers "/". WebServerBase::add_handler appends to a vector that
+ * The whole component exists at setup_priority::WIFI + 2 (252) for one reason: registration order
+ * is what decides who answers "/". WebServerBase::add_handler appends to a vector that
  * AsyncWebServer::request_handler_ walks in order, first canHandle wins, and WebServer claims "/"
  * unconditionally at web_server.cpp:2339. WebServer::get_setup_priority() is WIFI - 1.0f = 249, so
- * anything above that registers first and takes the root.
+ * anything above that registers first and takes the root. The +2 (it was exactly WIFI, 250) exists
+ * for the captive portal: while active it claims *every* GET, and its handler registers from
+ * CaptivePortal::start() inside the wifi component's own setup at 250 - so this component must
+ * have registered before wifi sets up, or the onboarding AP would serve ESPHome's stock portal
+ * page at "/" instead of the app the setup wizard lives in.
  *
  * Registering from setup() rather than from codegen is load bearing, not stylistic.
  * WebServerBase::add_handler wraps a handler in AuthMiddlewareHandler only if credentials_.is_set()
@@ -81,7 +85,7 @@ class Satellite1WebUI : public Component {
   void setup() override;
   void loop() override;
   void dump_config() override;
-  float get_setup_priority() const override { return setup_priority::WIFI; }
+  float get_setup_priority() const override { return setup_priority::WIFI + 2.0f; }
 
   void set_index(const uint8_t *gz, size_t gz_len) { this->handler_.set_index(gz, gz_len); }
   void set_etag(const char *etag) { this->handler_.set_etag(etag); }
@@ -338,6 +342,13 @@ class Satellite1WebUI : public Component {
   /// cadence of their own while the footer is expanded, several tabs can do it at once, and each sync
   /// is an action call - so requests inside the window ride the sync already in flight.
   uint32_t ma_refresh_at_{0};
+
+#ifdef USE_WIFI
+  /// The last time loop() started a wizard-requested rescan, for the floor it applies: a scan
+  /// hops the radio off the AP channel and every AP client (the wizard's phone included) feels
+  /// it, so one every ten seconds is as often as "refresh" may cost anything.
+  uint32_t wifi_scan_at_{0};
+#endif
 
   /// Our loop() runs once per main-loop iteration, so the gap between two calls is the main loop
   /// period. That makes the loop-time readout free, where the debug: component would cost a sensor
