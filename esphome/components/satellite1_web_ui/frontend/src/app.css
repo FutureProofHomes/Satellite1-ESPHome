@@ -4037,6 +4037,320 @@ polyline.draft {
 }
 
 /* ---------------------------------------------------------------- */
+/* The onboarding wizard (setup.jsx)                                */
+/* ---------------------------------------------------------------- */
+
+/* The wizard wears the login screen's frame (.login, .login-card); everything here is only what
+   the login screen never needed - a network list, the handoff card, the Connect Mode cards. Sized
+   for the captive-portal sheet, which is a phone screen minus its own chrome. */
+
+/* The launcher: the captive sheet's one page. Centered and generous - it is a single decision, and
+   the button is the page. */
+.setup-launch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+}
+.setup-launch-btn {
+  width: 100%;
+  justify-content: center;
+  padding: 15px;
+  font-size: 1.02rem;
+  font-weight: 650;
+  border-radius: 12px;
+}
+/* The 2.4GHz note above the network list: the hint register, but left-aligned with the list it
+   annotates rather than centered like the form footnotes. */
+.setup-pick-hint {
+  text-align: left;
+}
+/* The WiFi key's masking: password dots on a type="text" input, which is the whole point - the
+   field is not an account credential, and password managers (which key on type="password") were
+   covering the Join button with save-this and strong-password sheets mid-onboarding.
+   -webkit-text-security is non-standard but shipped everywhere that matters (WebKit and Blink
+   forever, Gecko since 2025); a browser without it shows the key in the clear, which is how every
+   router admin page ships anyway. */
+.wifi-mask {
+  -webkit-text-security: disc;
+}
+.setup-copy {
+  margin: 0;
+  color: var(--fg-2);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+.setup-copy.warn {
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.setup-head {
+  font-weight: 650;
+  font-size: 0.95rem;
+}
+.setup-head.ok {
+  color: var(--ok);
+}
+/* The network list: one bordered column, rows separated by rules, the tapped row growing its join
+   form underneath. Capped and scrolling so a dense block's thirty networks cannot push the join
+   button off a phone screen. */
+.wifi-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow-y: auto;
+  max-height: 44dvh;
+}
+.wifi-row + .wifi-row {
+  border-top: 1px solid var(--line);
+}
+.wifi-hit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  text-align: left;
+}
+.wifi-row.on .wifi-hit {
+  background: var(--bg-sunk);
+}
+.wifi-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wifi-bars {
+  width: 16px;
+  height: 14px;
+  flex: none;
+  fill: var(--fg-3);
+}
+.wifi-lock {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--fg-3);
+}
+/* The join form, inside the picked row and under the manual-SSID toggle alike. */
+.wifi-join {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+.setup-other {
+  align-self: flex-start;
+}
+/* The handoff card: the one instruction that must survive the page losing its network, dressed to
+   read as "important" without reading as "error". */
+.setup-handoff {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  padding: 12px;
+  text-align: left;
+}
+.setup-url {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: var(--accent);
+  word-break: break-all;
+  user-select: all;
+}
+/* The Connect Mode cards: one column, whole-card buttons, the coming-soon four dimmed but present -
+   visible roadmap, not clickable promises. Home Assistant wears .sel: the accent border says
+   "this is the one that exists", matching its Selected badge. */
+.setup-modes {
+  /* Grid, not flex, after two rounds with iOS Safari (hardware, September 25-26 2026): the enabled
+     Home Assistant card rendered content-width while the disabled cards filled the row. WebKit's
+     internal "button box" sizes ENABLED flex-item buttons to their content and shrugged off both
+     width: 100% and appearance: none in the flex layout; a single-track grid sizes the track, not
+     the button, and the min-width below is the belt to that suspender. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  /* The other half of the iOS fight above: kill the native button appearance (disabled buttons
+     take a different UA path, which is why only the live card ever misbehaved), then state the
+     width both ways - min-width is what overrules an intrinsic preferred size where width alone
+     loses. margin: 0 drops Safari's default button margins while we are reset-ing. */
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  min-width: 100%;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--bg-sunk);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.mode-card.sel {
+  border-color: var(--accent);
+}
+.mode-card:not(:disabled):hover {
+  border-color: var(--accent);
+}
+.mode-card:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.mode-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 650;
+  font-size: 0.92rem;
+}
+.mode-sub {
+  color: var(--fg-3);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+/* The Home Assistant connect step: the Discovered mock (HA's own card, recreated live so it wears
+   this device's real name), the deep-link button and the waiting row. The mock is deliberately
+   sunken-on-elevated: it is a picture of another app's UI, not one of ours. */
+.ha-wrap {
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--bg-sunk);
+  padding: 14px 14px 12px;
+}
+.ha-disc {
+  margin: 0 0 10px 2px;
+  font-size: 0.94rem;
+  font-weight: 600;
+}
+.ha-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-elev);
+  padding: 16px 14px 10px;
+}
+.ha-kebab {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  color: var(--fg-3);
+  font-size: 1.05rem;
+}
+.ha-logo {
+  width: 52px;
+  height: 52px;
+}
+.ha-name {
+  font-size: 0.9rem;
+  text-align: center;
+}
+.ha-sub {
+  font-size: 0.82rem;
+  color: var(--fg-3);
+}
+/* Home Assistant's own amber, both themes tuned for contrast on our surfaces - the point of the
+   mock is recognisability, and HA's action color is half of what makes the card read as HA's. */
+.ha-btns {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-top: 8px;
+}
+.ha-ignore {
+  color: #e65100;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.ha-add {
+  background: rgba(230, 81, 0, 0.12);
+  color: #e65100;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 7px 18px;
+  border-radius: 999px;
+}
+[data-theme="dark"] .ha-ignore,
+[data-theme="dark"] .ha-add {
+  color: #ffa726;
+}
+[data-theme="dark"] .ha-add {
+  background: rgba(255, 152, 0, 0.16);
+}
+.setup-hac-open {
+  width: 100%;
+  justify-content: center;
+  padding: 11px;
+  font-weight: 650;
+}
+/* The mode-as-a-fact line that replaced the chooser step: quiet, one row, with the Change link
+   riding the same .linkish dress the fix drawer's inline actions wear. */
+.setup-mode-line {
+  color: var(--fg-3);
+  font-size: 0.82rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.setup-mode-line b {
+  color: var(--fg);
+  font-weight: 600;
+}
+/* The visible browser-path alternative under an Open Home Assistant button - a link by design,
+   never an automatic navigation (lib/openha.js documents the dialog race that rule closed). Worn
+   by the wizard's connect step and the fix drawer alike. */
+.setup-alt-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.78rem;
+}
+.fix-open-alt {
+  text-align: center;
+}
+.setup-wait-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+.setup-wait-row .login-pulse {
+  flex: none;
+  margin-top: 3px;
+}
+.setup-wait-row span:last-child {
+  color: var(--fg-3);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  text-align: left;
+}
+
+/* ---------------------------------------------------------------- */
 /* The Launch card on Diagnostics                                   */
 /* ---------------------------------------------------------------- */
 

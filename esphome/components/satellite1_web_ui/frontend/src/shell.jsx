@@ -39,8 +39,10 @@ import {
 } from "./lib/device.js";
 import { archiveAllNotifs, archiveNotif, listNotifs, notifCount, setNotifDevice, subscribeNotifs } from "./lib/notif.js";
 import { setSparkDevice, sparkRecord } from "./lib/sparkhist.js";
+import { setupStatus } from "./lib/setup.js";
 import { dismissToast, subscribeToasts, tapToast, toast, toastIntent } from "./lib/toast.js";
 import { LoginScreen } from "./login.jsx";
+import { SetupWizard } from "./setup.jsx";
 import { MediaFooter } from "./media.jsx";
 import { FixDrawer, Splash } from "./splash.jsx";
 import { Config } from "./routes/config.jsx";
@@ -1123,10 +1125,16 @@ function NotifDrawer({ onFix, onClose }) {
  * the login screen and the app.
  */
 export function App() {
-  // "boot" while the redirect probe and session check run, then "login" or "in".
+  // "boot" while the redirect probe and session check run, then "setup", "login" or "in".
   const [phase, setPhase] = useState("boot");
   // The sign-in key, held only long enough for the dual-origin priming in AppInner, then dropped.
   const primeKey = useRef(null);
+  // The onboarding facts from /api/sat1/setup/status, held for the wizard when phase is "setup".
+  const setupInfo = useRef(null);
+  // The wizard's magical ending: its hand-over mounts the login screen with a VoiceTap pairing
+  // window already opening. State rather than a ref so the ordinary login paths (sign-out, a lost
+  // session) render without it - it is cleared the moment a sign-in succeeds.
+  const [autoPair, setAutoPair] = useState(false);
   // The remote-control target: null when the app is talking to the device that serves it, or
   // { base, key } when the switcher has pointed it at a peer (single-origin device switching - the
   // iOS home-screen app must never navigate cross-origin, or Safari wraps the peer in its in-app
@@ -1159,6 +1167,17 @@ export function App() {
 
   useEffect(() => {
     (async () => {
+      // The onboarding check, before everything - including the smart redirect, which on the setup
+      // AP would spend 2.5 seconds probing a .local name inside a captive sheet that may not
+      // resolve it. One cheap same-origin read: onboarding pending means the wizard IS the page,
+      // whatever session or key the URL carries. Unreachable or onboarded falls through to the
+      // normal boot, which is the right answer for both.
+      const setup = await setupStatus();
+      if (setup?.setup === 1) {
+        setupInfo.current = setup;
+        setPhase("setup");
+        return;
+      }
       if (await maybeRedirectLocal()) return; // The page is navigating away; render nothing.
       const urlKey = takeUrlKey();
       if (urlKey) {
@@ -1203,10 +1222,26 @@ export function App() {
   }, []);
 
   if (phase === "boot") return null;
+  if (phase === "setup") {
+    return (
+      <SetupWizard
+        status={setupInfo.current}
+        onDone={() => {
+          // The magical ending: onboarding just completed (the device noticed Home Assistant), so
+          // the login screen opens a VoiceTap pairing window by itself - the ring breathes, one
+          // press signs the customer in.
+          setAutoPair(true);
+          setPhase("login");
+        }}
+      />
+    );
+  }
   if (phase === "login") {
     return (
       <LoginScreen
+        autoPair={autoPair}
         onSignedIn={(key) => {
+          setAutoPair(false);
           primeKey.current = key || null;
           setPhase("in");
         }}

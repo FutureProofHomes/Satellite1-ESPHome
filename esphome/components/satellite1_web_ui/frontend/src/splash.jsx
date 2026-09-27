@@ -25,7 +25,8 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { TEXT } from "./copy.js";
 import { deviceIdentity, haBlocked, haTooOld } from "./lib/device.js";
-import { Logo, useDrawer, useSheetDrag } from "./ui.jsx";
+import { openHomeAssistant } from "./lib/openha.js";
+import { cogStep, Logo, useDrawer, useSheetDrag } from "./ui.jsx";
 
 /**
  * What the splash should show right now, from the same ctx AppInner hands every route.
@@ -62,50 +63,10 @@ const MIN_MS = 500;
  *  transition is off and this is just the unmount delay behind an already-invisible overlay. */
 const FADE_MS = 500;
 
-/**
- * The Open Home Assistant tap, on phones only: try the companion app's own homeassistant:// scheme,
- * which lands inside the app at the integrations page - one hop, no interstitial tab, no internet
- * needed - and fall back to the My Home Assistant web redirect if nothing claims it. "Nothing
- * claimed it" is read off the page still being visible when the timer fires: an app switch hides
- * the page (and freezes timers - the elapsed check catches one sleeping through the switch and
- * firing on the way back). Desktops skip all of this and let the anchor open the web redirect in a
- * new tab as before; the scheme is a phone thing, and some desktop browsers greet an unclaimed one
- * with their own error dialog.
- */
-function openHomeAssistant(e) {
-  if (!/iphone|ipad|ipod|android/i.test(navigator.userAgent)) return;
-  e.preventDefault();
-  const at = Date.now();
-  setTimeout(() => {
-    if (document.hidden || Date.now() - at > 2500) return;
-    // No app took the tap. The gesture window has passed on some browsers, so if the popup is
-    // refused, walk this tab over instead - Back returns to the device.
-    const w = window.open(TEXT.blocked_open_ha_url, "_blank");
-    if (!w) location.assign(TEXT.blocked_open_ha_url);
-  }, 1400);
-  location.href = TEXT.blocked_open_ha_app_url;
-}
-
-/** The cog in step 2: the same mdi:cog glyph Home Assistant draws on the device's row, inline so
- *  the customer matches it by sight instead of by the word "cog". */
-const Cog = () => (
-  <svg class="fix-cog" viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z" />
-  </svg>
-);
-
-/** Step 2's renderer: the string's %c becomes the cog, %s the device's name. Kept as markers in
- *  copy.js so the sentence stays reviewable as one piece of text there. */
-const step2 = (tpl, name) => {
-  const [before, after] = tpl.split("%c");
-  return (
-    <>
-      {before}
-      <Cog />
-      {after.replace("%s", name)}
-    </>
-  );
-};
+/* The Open Home Assistant tap moved to lib/openha.js when the onboarding wizard grew the same
+   button, and the cog step renderer to ui.jsx (cogStep) when the wizard grew the same checkbox
+   walk-through (September 26 2026) - both surfaces land on Settings -> Devices & Services and
+   speak the identical steps, and sharing the code is what keeps them from drifting. */
 
 /**
  * The checkbox walk-through, shared verbatim by the splash's blocked card and the fix drawer so the
@@ -119,14 +80,24 @@ function BlockedGuide({ name, named, haRefresh, haRefreshing }) {
       <p class="splash-b">{TEXT.blocked_body}</p>
       <ol class="fix-steps">
         <li>{TEXT.blocked_step1}</li>
-        <li>{step2(named ? TEXT.blocked_step2 : TEXT.blocked_step2_unnamed, name)}</li>
+        <li>{cogStep(named ? TEXT.blocked_step2 : TEXT.blocked_step2_unnamed, name)}</li>
         <li>{TEXT.blocked_step3}</li>
       </ol>
       {/* The href is the My Home Assistant web redirect, but on phones the click intercepts and
-          tries the companion app first - see openHomeAssistant above, and blocked_open_ha's note in
-          copy.js for why neither can land on the Configure dialog itself. */}
-      <a class="btn solid fix-open" href={TEXT.blocked_open_ha_url} target="_blank" rel="noreferrer" onClick={openHomeAssistant}>
+          opens the companion app instead - see lib/openha.js, and blocked_open_ha's note in
+          copy.js for why neither can land on the Configure dialog itself. The web path is the
+          visible link below, never an automatic fallback (the dialog race openha.js documents). */}
+      <a
+        class="btn solid fix-open"
+        href={TEXT.blocked_open_ha_url}
+        target="_blank"
+        rel="noreferrer"
+        onClick={(e) => openHomeAssistant(e, TEXT.blocked_open_ha_app_url)}
+      >
         {TEXT.blocked_open_ha}
+      </a>
+      <a class="setup-alt-link fix-open-alt" href={TEXT.blocked_open_ha_url} target="_blank" rel="noreferrer">
+        {TEXT.blocked_open_ha_web}
       </a>
       {/* One row: a small ring (spinning = actively watching, where the old breathing dot read as
           merely alive) and a sentence that leads with the auto-advance, with the manual check inside

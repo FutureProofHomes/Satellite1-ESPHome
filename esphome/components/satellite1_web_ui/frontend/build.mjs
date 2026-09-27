@@ -40,6 +40,11 @@ const js = await esbuild.build({
   format: "iife",
   jsx: "automatic",
   jsxImportSource: "preact",
+  // Small images imported from JS become data URIs inside the one-document bundle. Only the
+  // onboarding wizard's ESPHome logo (~4.8KB PNG -> ~6.5KB base64) uses this; anything bigger
+  // belongs in codegen assets like the no-sensor photo, where it costs flash instead of the
+  // gzipped budget (base64 of compressed pixels barely gzips).
+  loader: { ".png": "dataurl" },
 });
 
 const css = await esbuild.build({

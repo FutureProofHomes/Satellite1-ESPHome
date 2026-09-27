@@ -46,7 +46,7 @@ const SeqChips = ({ seq, p }) => (
   </div>
 );
 
-export function LoginScreen({ onSignedIn }) {
+export function LoginScreen({ onSignedIn, autoPair }) {
   // null = idle; otherwise {s, mode, left} mirroring the poll, plus the local "error" state.
   const [pair, setPair] = useState(null);
   const [pw, setPw] = useState("");
@@ -146,6 +146,17 @@ export function LoginScreen({ onSignedIn }) {
     // leaving an abandoned window that refuses the next click as busy for up to a minute.
     pairCancel();
   };
+
+  /* The onboarding wizard's magical ending (owner request, September 26 2026): when this screen is
+     the hand-over from a just-completed setup, the pairing window opens itself - the customer
+     returns from tapping Add in Home Assistant to a breathing ring and a page that says press the
+     button (or speak the code, when Home Assistant can announce one). One press and they are in.
+     Mount-once on purpose: a cancelled window falls back to the ordinary screen, exactly as if the
+     device button had been the plan all along. */
+  useEffect(() => {
+    if (autoPair) startPair();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submitPw = async (e) => {
     e.preventDefault();

@@ -353,6 +353,114 @@ export const TEXT = {
   // The side nav's sign-out: this browser only, unlike Diagnostics' sign-out-everywhere.
   logout: "Sign out",
 
+  /* The onboarding wizard (setup.jsx): what a factory-fresh device shows the phone that joined its
+     setup WiFi. Written for someone unboxing their first smart-home device: short sentences, one
+     instruction each, no jargon the box didn't use, no browser ever named (owner rule, September 26
+     2026 - "your browser", whatever the phone's default is), and no emojis. The captive-portal
+     sheet gets exactly one page - the launcher - because the sheet closes itself the moment the
+     device leaves the setup network; everything real runs in the customer's own browser, which
+     survives that hop and gets redirected across it. */
+  setup_title: "Set up your Satellite1",
+  // The launcher: the captive sheet's one page, one tap (setup.jsx documents the mechanism - the
+  // page primes its own way out on load, holds a "getting ready" beat while the sheet catches up,
+  // then offers the one button whose link the now-satisfied sheet hands to the real browser). The
+  // fallback line, with the address rendered live beside it, is the guarantee for whatever refuses
+  // to cooperate.
+  setup_launch_copy: "Your Satellite1 is ready to meet your home.",
+  setup_launch_prep: "Getting your setup ready\u2026",
+  setup_launch_btn: "Setup Satellite1",
+  setup_launch_retry:
+    "If this page opens here again instead of your browser, wait for Done to appear in the corner and tap the button once more.",
+  setup_launch_fallback: "You can also open your browser and go to",
+  setup_launch_here: "Continue here instead",
+  setup_pick: "Choose your WiFi network",
+  // The 2.4 GHz note, moved from the retired welcome step to the list it applies to.
+  setup_pick_hint:
+    "2.4 GHz networks only - if your WiFi has separate names for 2.4 and 5 GHz, pick the 2.4 GHz one.",
+  setup_rescan: "Scan again",
+  setup_scanning: "Looking for networks\u2026",
+  setup_no_networks: "No networks found yet. 2.4 GHz networks only - move the device closer to your router and scan again.",
+  setup_other_network: "Join another network\u2026",
+  setup_ssid_placeholder: "Network name",
+  setup_wifi_pw_placeholder: "WiFi password",
+  setup_wifi_pw_open: "This network has no password.",
+  setup_join: "Join",
+  // The row chip for the network the device is already on - the resumed-wizard case.
+  setup_row_connected: "Connected",
+  setup_join_short: "WiFi passwords are at least 8 characters.",
+  setup_join_failed: "The device didn't accept that. Check the name and password and try again.",
+  /* The joining step. The wizard tries to carry the customer across the network gap itself - it
+     probes the device's home-network address and redirects the moment it answers - so the lead
+     copy promises the redirect (owner's wording, September 25 2026). The address stays rendered
+     beside the fallback line because one path cannot be automated: the iOS captive-portal sheet
+     closes itself when the setup network drops, and the address is what survives. */
+  setup_joining: "Connecting to %s\u2026",
+  setup_wait:
+    "Please wait while your Satellite1 connects to your network. You'll be redirected to finish setting up.",
+  setup_wait_fallback: "If nothing happens after it connects, join your home WiFi and open",
+  // ~45s of polling with no connect: the honest read is a wrong password, and the fix is a retry -
+  // the device itself never gives up, so the wizard has to be the one to say it.
+  setup_slow:
+    "Still trying. If this takes much longer, the password may have been wrong - go back and re-enter it.",
+  setup_back: "Back",
+  /* The Connect Mode chooser, no longer a wizard step (owner decision, September 26 2026: a
+     decision screen with one live option is ceremony). The wizard lands on the HA connect step,
+     which states the mode as a fact - the mode-line strings below - and this chooser waits behind
+     its Change link with two cards: the Basestation as visible roadmap, Home Assistant as the one
+     that exists, wearing the Selected treatment. The cloud modes left the roadmap the same day. */
+  setup_mode_title: "How will your Satellite1 connect?",
+  setup_mode_sub: "More ways to connect are on the way.",
+  setup_mode_nexus_local: "Nexus AI Basestation",
+  setup_mode_nexus_local_sub: "Connect to your 100% private Nexus AI Basestation",
+  setup_mode_ha: "Home Assistant",
+  setup_mode_ha_sub: "Connect to your Home Assistant server",
+  setup_mode_soon: "Coming soon",
+  setup_mode_selected: "Selected",
+  setup_mode_failed: "Couldn't save the choice. Check the connection and try again.",
+  // The HA connect step's mode line: the fact plus the door back to the chooser.
+  setup_hac_mode_label: "Connect mode:",
+  setup_hac_change: "Change",
+  /* The Home Assistant connect step (#/home-assistant-connect). The copy is segments rather than
+     one string because the JSX bolds the UI nouns (Settings -> Devices & Services, Discovered,
+     Add) - alternate entries render bold, starting plain. The mock card below the copy shows
+     exactly what to look for, with this device's real name on it. */
+  setup_hac_title: "Connect to Home Assistant",
+  setup_hac_copy: [
+    "In your Home Assistant, go to ",
+    "Settings \u2192 Devices & Services",
+    ". Your Satellite1 is waiting under ",
+    "Discovered",
+    " \u2014 tap ",
+    "Add",
+    " and follow the steps.",
+  ],
+  setup_hac_disc: "Discovered",
+  setup_hac_ignore: "Ignore",
+  setup_hac_add: "Add",
+  setup_hac_open: "Open Home Assistant",
+  // The button's two landings (lib/openha.js): on phones the companion app's scheme - it lands on
+  // Settings -> Devices & Services, where the Discovered card lives, and needs no internet - and
+  // on desktops the anchor's own My Home Assistant web redirect. The web path is also offered as
+  // the visible link below the button, never as an automatic fallback (openha.js documents the
+  // dialog race that hijacked the tab). The fix drawer's pair (blocked_open_ha_*) carries the
+  // identical targets - every Open Home Assistant button lands on Devices & Services (owner
+  // decision, September 26 2026; the integration-page deep link read as being dumped somewhere
+  // unexpected).
+  setup_hac_app_url: "homeassistant://navigate/config/integrations",
+  setup_hac_web_url: "https://my.home-assistant.io/redirect/integrations/",
+  setup_hac_web: "No Home Assistant app? Open it in your browser instead.",
+  setup_hac_wait: "Waiting for Home Assistant\u2026 this page continues on its own once your Satellite1 is added.",
+  /* The actions step (#/home-assistant-actions), between the HA add and the login hand-over (owner
+     request, September 26 2026): the checkbox used to appear as a post-sign-in card - one more
+     thing past the finish line - and its unticked default is also why a first VoiceTap fell back
+     to the wake-word challenge. The three steps reuse the blocked card's strings verbatim; only
+     the framing here is the wizard's own. */
+  setup_act_title: "One last Home Assistant setting",
+  setup_act_intro:
+    "This setting lets your Satellite1 speak announcements and route audio through Home Assistant.",
+  setup_act_wait: "Waiting for the setting\u2026 this page continues on its own once it's allowed.",
+  setup_act_skip: "Skip for now",
+
   /* The Launch section on Diagnostics. */
   launch_copy: "Copy link",
   launch_copied: "Copied",
@@ -932,18 +1040,24 @@ export const TEXT = {
   blocked_step2: "Tap the %c cog next to %s.",
   blocked_step2_unnamed: "Tap the %c cog next to this device - %s, unless you renamed it.",
   blocked_step3: "Tick \u201CAllow the device to perform Home Assistant actions\u201D, then Submit.",
-  // Two URLs behind one button - see openHomeAssistant in splash.jsx for the handoff. The app URL
-  // is the companion app's own scheme, tried first on phones because it lands inside the app
-  // directly (the My Home Assistant redirect always stops at an interstitial tab first - owner hit
-  // it on iOS, September 2026) and needs no internet. The https redirect stays as the anchor's real
-  // href and the fallback: desktops, and phones without the app. Neither can land on the Configure
-  // dialog itself - Home Assistant has no URL for an options flow, and the device-page link would
-  // need a registry id that rides the exact payload a blocked device cannot fetch - so steps 2 and
-  // 3 cover the last two taps. The web redirect needs the browser to have internet; without it the
+  // Two URLs behind one button - see lib/openha.js for the handoff. The app URL is the companion
+  // app's own scheme, used on phones because it lands inside the app directly (the My Home
+  // Assistant redirect always stops at an interstitial tab first - owner hit it on iOS, September
+  // 2026) and needs no internet. The https redirect stays as the anchor's real href for desktops,
+  // and as the visible blocked_open_ha_web link for phones without the app - visible, never
+  // automatic, after the timer-based fallback hijacked the tab under iOS's open-in-app dialog
+  // (owner report, September 26 2026; openha.js documents the race).
+  //
+  // Both land on Settings -> Devices & Services, NOT the ESPHome integration's own page: the
+  // deep-link into the integration read as being dumped somewhere unexpected (owner report,
+  // September 26 2026), and every Open Home Assistant button in the app goes to the same familiar
+  // place now - the wizard's pair below these use identical targets. Step 1's written path picks
+  // up from exactly there. The web redirect needs the browser to have internet; without it the
   // written steps stand alone. The device itself serves nothing external either way.
   blocked_open_ha: "Open Home Assistant",
-  blocked_open_ha_url: "https://my.home-assistant.io/redirect/integration/?domain=esphome",
-  blocked_open_ha_app_url: "homeassistant://navigate/config/integrations/integration/esphome",
+  blocked_open_ha_web: "No app? Open it in your browser instead.",
+  blocked_open_ha_url: "https://my.home-assistant.io/redirect/integrations/",
+  blocked_open_ha_app_url: "homeassistant://navigate/config/integrations",
   // One row beside a small spinner, and the manual escape rides inside the sentence as a link
   // instead of standing as its own button (owner, September 2026). "Advances automatically" leads
   // because it is the fact people missed when the sentence led with "watching"; the trigger goes
