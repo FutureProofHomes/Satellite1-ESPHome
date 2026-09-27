@@ -636,9 +636,15 @@ export function useRadar(enabled) {
     setConfig({ ...config, ...patch });
     setBusy(true);
     try {
+      // No JSON content-type header, deliberately: with it, a remote-control write is a non-simple
+      // CORS request and the browser preflights OPTIONS /api/v1/... first - a path only fixed
+      // firmware answers, so writes against a peer on older firmware would all fail (the write-
+      // failed toast on every Presence change after a device switch). Without it the body rides as
+      // text/plain, a simple request no browser preflights, and the device parses it identically:
+      // anything not form-urlencoded streams through handleBody into cJSON. The /api/sat1/sel
+      // write keeps its JSON header because the session gate preflights that whole namespace.
       const r = await request(`/api/v1/${kind}/config`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
