@@ -61,11 +61,12 @@ audio_file:
     file: ${center_button_triple_press_sound_file}
   - id: center_button_long_press_sound
     file: ${center_button_long_press_sound_file}
-  # Half a second of true silence, 8kHz mono, ~8KB of flash. The remote sync guard in
-  # tts_routing.yaml enqueues it 1-4 times behind a routed response so the announcement pipeline
-  # stays in ANNOUNCING past the remote targets' playback skew - which is the one lever YAML has
-  # over when the assistant reopens the microphone. See tts_routing.yaml for why a clip and not a
-  # delay.
+  # A fifth of a second of true silence, 8kHz mono, ~3KB of flash (0.2s granularity replaced the
+  # original 0.5s clip when the whole guard scale moved - owner decision, September 26 2026). The
+  # remote sync guard in tts_routing.yaml enqueues it 1-10 times behind a routed response so the
+  # announcement pipeline stays in ANNOUNCING past the remote targets' playback skew - which is
+  # the one lever YAML has over when the assistant reopens the microphone. See tts_routing.yaml
+  # for why a clip and not a delay.
   - id: routing_guard_silence_sound
     file: sounds/routing_guard_silence.wav
 

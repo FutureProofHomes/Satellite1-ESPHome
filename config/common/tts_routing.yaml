@@ -479,7 +479,7 @@ select:
   # opens the moment the local audio ends, a lagging target is still speaking the answer, and this
   # device transcribes its own response as a human reply - the AEC only cancels the local speaker.
   #
-  # Carried out by the guard in on_end below, which enqueues a 0.5s embedded silence clip once per
+  # Carried out by the guard in on_end below, which enqueues a 0.2s embedded silence clip once per
   # step: the upstream voice_assistant starts the mic the moment the media player leaves ANNOUNCING
   # and exposes no delay knob, so occupying the announcement pipeline is the one YAML-reachable
   # lever - and everything else that needs "the response is still out there" (the un-duck, the
@@ -488,6 +488,12 @@ select:
   # exists for assist-satellite targets (VoiceAssistantAnnounceFinished) and Music Assistant, but a
   # Sonos AudioClip is invisible to Home Assistant end to end, so one Sonos target forces a fixed
   # floor regardless.
+  #
+  # The whole scale moved from 0.5s steps (0.5-2s, default 1s) to 0.2s steps with a 0.2s default
+  # (owner decision, September 26 2026): the old default held every routed VoiceTap sign-in and
+  # continued conversation a full second past drain, and snappy beats safe-by-margin for targets
+  # on the same LAN. Fielded devices that explicitly stored an old index restore onto the new
+  # scale as a shorter value (index-persisted; one tap to re-pick).
   #
   # The guard only engages when a listen window actually follows: a continued conversation (the
   # vendored component's continue_conversation flag, Home Assistant's own verdict, readable via
@@ -501,11 +507,17 @@ select:
     entity_category: config
     optimistic: true
     restore_value: true
-    initial_option: "1s"
+    initial_option: "0.2s"
     options:
-      - "0.5s"
+      - "0.2s"
+      - "0.4s"
+      - "0.6s"
+      - "0.8s"
       - "1s"
-      - "1.5s"
+      - "1.2s"
+      - "1.4s"
+      - "1.6s"
+      - "1.8s"
       - "2s"
 
 button:
@@ -1528,7 +1540,7 @@ voice_assistant:
     # cover this). The prompt was just routed; the local copy is about to start playing, and the
     # mic opens the moment the announcement pipeline drains. So: wait for the local player to be
     # ANNOUNCING - the enqueue must land BEHIND the playing prompt, and enqueueing before the
-    # component's own play call would be cleared by it - then append one 0.5s silence clip per
+    # component's own play call would be cleared by it - then append one 0.2s silence clip per
     # step of the Remote Sync Guard select, exactly the on_end guard's arithmetic. The mic then
     # opens after prompt + guard, past the lagging targets' recital of the code. Runs once per
     # prompt, re-prompts included, because each turn's announce passes through here. The prompt is
@@ -1547,9 +1559,9 @@ voice_assistant:
                 media_player.is_announcing: external_media_player
               then:
                 - lambda: |-
-                    // The options are ordered 0.5s/1s/1.5s/2s, so index+1 is the number of 0.5s
-                    // clips - the same mapping the on_end guard uses.
-                    int n = 2;  // 1s, the default and the fallback for an unrestored select
+                    // The options are ordered 0.2s through 2s in 0.2s steps, so index+1 is the
+                    // number of 0.2s clips - the same mapping the on_end guard uses.
+                    int n = 1;  // 0.2s, the default and the fallback for an unrestored select
                     const auto guard_idx = id(remote_sync_guard).active_index();
                     if (guard_idx.has_value()) {
                       n = static_cast<int>(guard_idx.value()) + 1;
@@ -1562,14 +1574,14 @@ voice_assistant:
                           .set_announcement(true)
                           .perform();
                     }
-                    ESP_LOGD("tts_routing", "sign-in sync guard: %d x 0.5s silence enqueued behind the prompt", n);
+                    ESP_LOGD("tts_routing", "sign-in sync guard: %d x 0.2s silence enqueued behind the prompt", n);
 
   on_end:
     - if:
         condition:
           lambda: 'return id(tts_routing_to_remote);'
         then:
-          # The remote sync guard: 0.5s of embedded silence enqueued once per step of the Remote
+          # The remote sync guard: 0.2s of embedded silence enqueued once per step of the Remote
           # Sync Guard select (see the select above for the whole design), so the announcement
           # pipeline stays in ANNOUNCING past the targets' playback skew. The continued-conversation
           # listen, the un-duck and the stop windows all gate on that state, so this one enqueue
@@ -1587,11 +1599,11 @@ voice_assistant:
           # before on_end; consumed by the component only after) or the voice sign-in's pending
           # window, kept as the explicit belt-and-braces test for that flow. A routed one-shot
           # answer skips the enqueue entirely: no mic opens, so there is nothing to guard, and the
-          # 0.5-2s of held ducking and "announcing" state it used to pay disappear. (The literal
+          # 0.2-2s of held ducking and "announcing" state it used to pay disappear. (The literal
           # trailing-"?" heuristic was rejected: LLM agents continue without one, a "?" does not
           # guarantee continuation, and >500-char responses are truncated before any trigger sees
           # the text.) If a very short response has already drained, the silence plays as its own
-          # 0.5-2s announcement of nothing - harmless, and the guard still covers the remote tail.
+          # 0.2-2s announcement of nothing - harmless, and the guard still covers the remote tail.
           - if:
               condition:
                 lambda: |-
@@ -1599,9 +1611,10 @@ voice_assistant:
                          (id(va).get_continue_conversation() || id(web_ui_app)->login_voice_pending());
               then:
                 - lambda: |-
-                    // The options are ordered 0.5s/1s/1.5s/2s, so index+1 is the number of 0.5s
-                    // clips - which is why reordering them in the select would change durations.
-                    int n = 2;  // 1s, the default and the fallback for an unrestored select
+                    // The options are ordered 0.2s through 2s in 0.2s steps, so index+1 is the
+                    // number of 0.2s clips - which is why reordering them in the select would
+                    // change durations.
+                    int n = 1;  // 0.2s, the default and the fallback for an unrestored select
                     const auto guard_idx = id(remote_sync_guard).active_index();
                     if (guard_idx.has_value()) {
                       n = static_cast<int>(guard_idx.value()) + 1;
@@ -1614,7 +1627,7 @@ voice_assistant:
                           .set_announcement(true)
                           .perform();
                     }
-                    ESP_LOGD("tts_routing", "remote sync guard: %d x 0.5s silence enqueued", n);
+                    ESP_LOGD("tts_routing", "remote sync guard: %d x 0.2s silence enqueued", n);
           # The local pipeline still received the TTS URL, so wait for it to drain before clearing
           # the flag or the tail of the response leaks out at chime level.
           - wait_until:
