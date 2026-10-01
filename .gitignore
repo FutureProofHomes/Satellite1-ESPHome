@@ -14,6 +14,8 @@ build/
 /components
 node_modules/
 managed_components/
+# The web UI v2 preview build (frontend/build.mjs v2); only dist/ is embedded
+esphome/components/satellite1_web_ui/dist-v2/
 sdkconfig.esp32-idf
 sdkconfig.esp32-s3-idf
 

@@ -23,7 +23,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const dist = join(here, "..", "dist");
+
+// `node build.mjs v2` builds the replacement UI in v2/ into ../dist-v2/, which is git-ignored: the
+// committed dist/ is what CI's drift check and the firmware embed, and it stays the shipping UI
+// until v2 replaces src/ outright.
+const v2 = process.argv[2] === "v2";
+const srcDir = v2 ? "v2" : "src";
+const dist = join(here, "..", v2 ? "dist-v2" : "dist");
 
 const shared = {
   bundle: true,
@@ -36,10 +42,13 @@ const shared = {
 
 const js = await esbuild.build({
   ...shared,
-  entryPoints: ["src/main.jsx"],
+  entryPoints: [v2 ? "v2/main.tsx" : "src/main.jsx"],
   format: "iife",
   jsx: "automatic",
   jsxImportSource: "preact",
+  // The v2 screens are ported from a React design; preact/compat stands in for React at a fraction
+  // of its size.
+  ...(v2 && { alias: { react: "preact/compat", "react-dom": "preact/compat" } }),
   // Small images imported from JS become data URIs inside the one-document bundle. Only the
   // onboarding wizard's ESPHome logo (~4.8KB PNG -> ~6.5KB base64) uses this; anything bigger
   // belongs in codegen assets like the no-sensor photo, where it costs flash instead of the
@@ -49,20 +58,20 @@ const js = await esbuild.build({
 
 const css = await esbuild.build({
   ...shared,
-  entryPoints: ["src/app.css"],
+  entryPoints: [`${srcDir}/app.css`],
 });
 
 // HTML comments are stripped before the CSS and JS go in, and not after: minified JS can legitimately
 // contain "<!--" inside a string literal, and a regex run over the assembled document could eat it.
 // esbuild already drops comments from both other languages, so without this the only developer prose
 // that reaches flash would be whatever is in index.html - which is where the least obvious code lives.
-const html = readFileSync(join(here, "src", "index.html"), "utf8")
+const html = readFileSync(join(here, srcDir, "index.html"), "utf8")
   .replace(/\n?[ \t]*<!--[\s\S]*?-->/g, "")
   .replace("/*%CSS%*/", () => css.outputFiles[0].text.trimEnd())
   .replace("/*%JS%*/", () => js.outputFiles[0].text.trimEnd());
 
 if (html.includes("%CSS%") || html.includes("%JS%")) {
-  throw new Error("src/index.html is missing a /*%CSS%*/ or /*%JS%*/ placeholder");
+  throw new Error(`${srcDir}/index.html is missing a /*%CSS%*/ or /*%JS%*/ placeholder`);
 }
 
 mkdirSync(dist, { recursive: true });
@@ -81,4 +90,4 @@ writeFileSync(join(dist, "index.html"), html);
 // way.
 const gz = gzipSync(html, { level: 9 }).length;
 const pct = ((gz / 53248) * 100).toFixed(0);
-console.log(`dist/index.html  ${html.length} B raw  ${gz} B gzipped  (${pct}% of the 52KB target)`);
+console.log(`${v2 ? "dist-v2" : "dist"}/index.html  ${html.length} B raw  ${gz} B gzipped  (${pct}% of the 52KB target)`);
