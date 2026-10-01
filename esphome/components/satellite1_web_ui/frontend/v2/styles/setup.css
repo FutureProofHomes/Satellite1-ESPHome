@@ -1,0 +1,22 @@
+/* The setup wizard's states the design's demo never had to draw. */
+
+/* The WiFi key field is type="text" so password managers leave it alone; this keeps the dots.
+   A browser without -webkit-text-security shows the key in the clear, as router pages do. */
+.wifi-mask { -webkit-text-security: disc; }
+
+/* The Discovered card is a picture of what to look for in Home Assistant, not a control. */
+.wiz-disc { pointer-events: none; }
+
+.wiz-ssid { min-width: 0; overflow-wrap: anywhere; }
+
+/* The wizard inherits the tab pane's fixed height (.app > .control), so a step taller than the
+   screen - a long scan, the Home Assistant steps on a small phone - overflows it and the page
+   scrolls. The logo is the one item that would shrink instead. */
+.control.setup.wiz > .wiz-logo { flex-shrink: 0; }
+
+/* The answer to "I've added it" while Home Assistant has not attached yet. */
+.wiz-not-yet { margin: 10px 0 0; text-align: center; }
+
+/* The launcher's button is a link (the captive sheet hands absolute links to the real browser), so
+   it wears .wiz-btn, whose top margin the design's <button> never had. */
+.wiz-center > .wiz-btn { margin-top: 0; }
