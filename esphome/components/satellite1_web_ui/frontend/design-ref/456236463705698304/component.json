@@ -1,0 +1,25 @@
+{
+  "component": {
+    "id": "454824273882783744",
+    "projectId": "454801646963294208",
+    "selectedRevisionId": "456236463705698304",
+    "baseRevisionId": "456236463705698304",
+    "generatedName": "bright-bay-2850",
+    "name": "Satellite1 Voice Orb UI"
+  },
+  "constraints": {
+    "allowedPaths": [
+      "src/App.tsx",
+      "src/index.css",
+      "src/components/generated/**",
+      "assets/**"
+    ],
+    "disallowedMutations": [
+      "package.json",
+      "vite.config.*",
+      "src/main.tsx",
+      "node_modules",
+      "package manager lockfiles"
+    ]
+  }
+}
