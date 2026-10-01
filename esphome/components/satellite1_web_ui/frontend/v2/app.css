@@ -294,7 +294,10 @@ html, body, #root {
   display: flex !important;
   flex-direction: column !important;
   background: var(--bg) !important;
-  --mbar-h: 83px;
+  /* The media bar's height without the safe area: 8px padding twice, the 44px row, the volume row's
+     2px margin and 32px slider, and the 1px top border. Short of it, every scrolling page's end
+     slides under the bar. */
+  --mbar-h: 95px;
   --tabs-h: 52px;
 }
 
