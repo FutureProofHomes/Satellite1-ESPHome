@@ -371,7 +371,6 @@ export function Satellite1Now({
   }, []);
   const navLayer = tab === 'SETTINGS' ? 1 : 0;
   const [sheet, setSheet] = useState<Sheet>(null);
-  const [playing, setPlaying] = useState(true);
   // The gate is up from the first signed-in render and gone for good once it fades; the fix is the
   // same screen reopened on demand.
   const [gateDone, setGateDone] = useState(false);
@@ -529,7 +528,7 @@ export function Satellite1Now({
       }}><div className="tabs-layer tabs-main">{TABS.map(item => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => go(item, item === 'SETTINGS' ? lastSub.current : undefined)}>{item === 'NOW' ? 'HOME' : item}</button>)}</div><div className="tabs-layer tabs-sub"><button className="tabs-back" aria-label="Back to main menu" onClick={() => {
             lastSub.current = 'device-info';
             go('NOW');
-          }}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m10 4-5 4 5 4" /></svg></button><div className="tabs-sub-scroll">{SETTINGS_ROUTES.map(r => <button key={r.slug} className={'tabs-sub-pill' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{r.label}</button>)}</div></div></div></nav><MediaBar ctx={ctx} playing={playing} setPlaying={setPlaying} />
+          }}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m10 4-5 4 5 4" /></svg></button><div className="tabs-sub-scroll">{SETTINGS_ROUTES.map(r => <button key={r.slug} className={'tabs-sub-pill' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{r.label}</button>)}</div></div></div></nav><MediaBar ctx={ctx} />
     <Sheet kind={sheet} close={() => setSheet(null)}>{sheet === 'device' && <DeviceSheet ctx={ctx} label={label} area={area} remote={remote} localMac={localMac} onRemote={onRemote} onLocal={onLocal} onSignOut={signOut} />}{sheet === 'notice' && <Notice onAct={t => {
           setSheet(null);
           runAct(t, openFix);
