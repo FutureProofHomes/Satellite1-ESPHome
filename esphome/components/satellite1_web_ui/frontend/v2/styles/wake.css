@@ -1,5 +1,5 @@
-/* The Wake Word tab's states the design's mock never had to draw. WakeTab's own stylesheet lands
-   after this one (it rides in the page), so every override here outranks its rule on specificity. */
+/* The Wake Word tab's states the design's mock never had to draw. Every override here outranks the
+   design's rule on specificity, not just order, so it holds wherever that rule sits. */
 
 p.ww-note.warn { color: #ffb35e; }
 p.ww-note.err { color: #ff7185; }
