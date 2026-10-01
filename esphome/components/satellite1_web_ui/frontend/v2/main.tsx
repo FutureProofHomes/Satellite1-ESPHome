@@ -7,6 +7,6 @@
  */
 import { render } from 'preact';
 
-import { Satellite1Now } from './components/Satellite1Now';
+import { App } from './App';
 
-render(<Satellite1Now />, document.getElementById('root')!);
+render(<App />, document.getElementById('root')!);

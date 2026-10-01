@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { BASE } from '../../src/lib/device.js';
 import { RadarIcon } from '../icons';
 import { MSlider } from './MSlider';
+import type { Ctx } from '../ctx';
 const HINTS = {
   presence: 'Presence is sensed by mmWave radar, not heard — the microphones play no part in it.',
   distance_unit: 'Display only. The module keeps measuring in centimetres either way.',
@@ -438,10 +439,12 @@ function StatusPills({
   </div>;
 }
 export function PresenceTab({
+  ctx,
   onGoDevice
 }: {
+  ctx: Ctx;
   onGoDevice?: () => void;
-} = {}) {
+}) {
   void onGoDevice;
   const [radarConnected, setRadarConnected] = useState(false);
   const [radarModel, setRadarModel] = useState<'LD2450' | 'LD2410'>('LD2450');

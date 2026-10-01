@@ -18,7 +18,7 @@
  */
 import * as esbuild from "esbuild";
 import { gzipSync } from "node:zlib";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -56,9 +56,20 @@ const js = await esbuild.build({
   loader: { ".png": "dataurl" },
 });
 
+// v2 keeps the design's stylesheet whole in app.css and puts each area's additions in its own
+// styles/<area>.css, appended after it in name order so they win ties against the design's rules.
+const v2Styles = v2 ? readdirSync(join(here, "v2", "styles")).filter((f) => f.endsWith(".css")).sort() : [];
 const css = await esbuild.build({
   ...shared,
-  entryPoints: [`${srcDir}/app.css`],
+  ...(v2
+    ? {
+        stdin: {
+          contents: ["./app.css", ...v2Styles.map((f) => `./styles/${f}`)].map((p) => `@import "${p}";`).join("\n"),
+          resolveDir: join(here, "v2"),
+          loader: "css",
+        },
+      }
+    : { entryPoints: ["src/app.css"] }),
 });
 
 // HTML comments are stripped before the CSS and JS go in, and not after: minified JS can legitimately

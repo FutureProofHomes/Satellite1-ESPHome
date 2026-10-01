@@ -1,43 +1,59 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import ESPHOME_LOGO from '../../assets/esphome-logo.png';
-import { AlertTriangle, Info, XCircle, Clock, X, LogOut, ChevronDown } from '../icons';
-import { VoiceOrb } from './VoiceOrb';
-import { MediaBar } from './MediaBar';
-import { WakeTab } from './WakeTab';
-import { PresenceTab } from './PresenceTab';
+import { TEXT } from '../../src/copy.js';
+import { logout, peerLogin, primeOtherOrigin, probePeer, putPanelHandoff } from '../../src/lib/auth.js';
+import { deviceIdentity, entity, haBlocked, onLogAlert, onWriteError, peerOrigin, proxied, useDeviceState, useEvents, useHaData, useSelection } from '../../src/lib/device.js';
+import { archiveAllNotifs, archiveNotif, listNotifs, notifCount, setNotifDevice, subscribeNotifs } from '../../src/lib/notif.js';
+import { setSparkDevice, sparkRecord } from '../../src/lib/sparkhist.js';
+import { dismissToast, subscribeToasts, tapToast, toast, toastIntent } from '../../src/lib/toast.js';
+import type { Ctx, Orb, Tab } from '../ctx';
+import { AlertTriangle, Info, XCircle, Clock, X, LogOut } from '../icons';
+import { parseRoute, routeHash } from '../lib/routes.js';
 import { AudioTab } from './AudioTab';
+import { Icon, useTheme } from './bits';
 import { DiagnosticsTab, SETTINGS_ROUTES } from './DiagnosticsTab';
-type Tab = 'NOW' | 'WAKE' | 'PRESENCE' | 'AUDIO' | 'SETTINGS' | 'SETUP';
+import { HaGate } from './HaGate';
+import { HomeTab } from './HomeTab';
+import { MediaBar } from './MediaBar';
+import { PresenceTab } from './PresenceTab';
+import { WakeTab } from './WakeTab';
 type Sheet = 'media' | 'device' | 'notice' | null;
-const DEV_TOASTS = true;
-type Timer = {
-  id: string;
-  label: string;
-  total: number;
-  remaining: number;
-};
 type ToastKind = 'info' | 'warn' | 'error' | 'timer';
+/** lib/toast.js's visible toast, and lib/notif.js's history row: the same anatomy. */
 type Toast = {
-  id: string;
-  kind: ToastKind;
-  message: string;
-  duration?: number;
+  id: number;
+  kind: string;
+  title: string;
+  sub?: string;
+  count?: number;
+  go?: string;
+  intent?: unknown;
+  act?: string;
 };
+type Remote = { base: string; key: string } | null;
+const TABS: Tab[] = ['NOW', 'WAKE', 'PRESENCE', 'AUDIO', 'SETTINGS'];
 const TOAST_ICONS = {
   info: Info,
   warn: AlertTriangle,
   error: XCircle,
   timer: Clock
 };
-const fmtTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+/** The store's kinds in the design's palette. "ok" has no colour of its own there and wears info's. */
+const pillKind = (k: string): ToastKind => k === 'err' ? 'error' : k === 'warn' || k === 'timer' ? k : 'info';
+
+/**
+ * The header's toast: a view of whatever lib/toast.js says is visible. The store owns the timing,
+ * the queue and the ×N coalescing; the pill only draws, swipes and reports taps.
+ */
 function ToastPill({
   toast,
   onDismiss,
+  onTap,
   leaving = false
 }: {
   toast: Toast;
-  onDismiss: (id: string) => void;
+  onDismiss: (id: number) => void;
+  onTap?: () => void;
   leaving?: boolean;
 }) {
   const pillRef = useRef<HTMLDivElement>(null);
@@ -45,11 +61,6 @@ function ToastPill({
   const [swipeDx, setSwipeDx] = useState(0);
   const [swiping, setSwiping] = useState(false);
   const [dismissed, setDismissed] = useState(false);
-  useEffect(() => {
-    if (leaving) return;
-    const t = setTimeout(() => onDismiss(toast.id), toast.duration ?? 4000);
-    return () => clearTimeout(t);
-  }, [toast.id, toast.duration, onDismiss, leaving]);
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (leaving || dismissed || (e.target as HTMLElement).closest('.toast-x')) return;
     startX.current = e.clientX;
@@ -69,160 +80,169 @@ function ToastPill({
       setDismissed(true);
       setSwipeDx(dx > 0 ? 400 : -400);
       setTimeout(() => onDismiss(toast.id), 250);
-    } else setSwipeDx(0);
+    } else {
+      setSwipeDx(0);
+      if (Math.abs(dx) < 6 && !(e.target as HTMLElement).closest('.toast-x')) onTap?.();
+    }
   };
-  const Ico = TOAST_ICONS[toast.kind];
-  return <div ref={pillRef} className={`header-toast-pill toast-${toast.kind}${leaving ? ' leaving' : ' entering'}`} role="status" style={{
+  const kind = pillKind(toast.kind);
+  const Ico = TOAST_ICONS[kind];
+  const label = (toast.count ?? 0) > 1 ? `${toast.title} \u00d7${toast.count}` : toast.title;
+  return <div ref={pillRef} className={`header-toast-pill toast-${kind}${leaving ? ' leaving' : ' entering'}`} role="status" title={toast.sub || undefined} style={{
     transform: `translateX(${swipeDx}px)`,
     opacity: dismissed ? 0 : Math.max(0.3, 1 - Math.abs(swipeDx) / 200),
     transition: swiping ? 'none' : 'transform 240ms ease, opacity 240ms ease',
     touchAction: 'pan-y',
     userSelect: 'none',
-    cursor: 'grab'
+    cursor: onTap && (toast.go || toast.act) ? 'pointer' : 'grab'
   }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
       <Ico size={18} className="toast-icon" aria-hidden="true" />
-      <span className="toast-msg">{toast.message}</span>
-      <button type="button" className="toast-x" aria-label="Dismiss" onClick={() => onDismiss(toast.id)}><X size={14} /></button>
+      <span className="toast-msg">{label}</span>
+      <button type="button" className="toast-x" aria-label={TEXT.dismiss} onClick={() => onDismiss(toast.id)}><X size={14} /></button>
     </div>;
 }
-const art = 'https://storage.googleapis.com/storage.magicpath.ai/component-assets/454802455327313920/454809714925146112/ecc89c59771f06b4c2fa7960733c67a3eb86e4e4fb31599723751ffb6e85f432.png';
-const transcript = [{
-  who: 'assistant',
-  text: 'Good evening. The room is calm.'
-}, {
-  who: 'user',
-  text: 'Set a timer for ten minutes.'
-}, {
-  who: 'assistant',
-  text: 'Ten minutes, starting now.'
-}, {
-  who: 'assistant',
-  text: 'Anything else?'
-}, {
-  who: 'assistant',
-  text: "Your timer is set. I'll let you know when the ten minutes are up."
-}, {
-  who: 'user',
-  text: 'Also dim the living room lights to 40 percent.'
-}, {
-  who: 'assistant',
-  text: "Done, living room lights are now at 40%. Anything else you'd like me to adjust?"
-}, {
-  who: 'user',
-  text: "That's all for now, thanks."
-}];
-const peers = [{
-  name: 'Kitchen Satellite',
-  meta: 'Wi‑Fi · LD2450 · present',
-  state: 'UP'
-}, {
-  name: 'Office Satellite',
-  meta: 'Ethernet · LD2410 · no presence',
-  state: 'UP'
-}, {
-  name: 'Bedroom Satellite',
-  meta: 'Offline',
-  state: 'OFFLINE'
-}];
-const logs = [{
-  l: 'I',
-  t: '12:04:21  voice pipeline ready'
-}, {
-  l: 'D',
-  t: '12:04:19  radar target updated x=42 y=128'
-}, {
-  l: 'W',
-  t: '12:03:55  Wi‑Fi signal -52 dBm'
-}, {
-  l: 'I',
-  t: '12:03:51  media player connected'
-}, {
-  l: 'E',
-  t: '11:58:02  chime retry succeeded'
-}];
-function walk(seed: number, n: number, base: number, amp: number) {
-  let s = seed;
-  let v = base;
-  const out: number[] = [];
-  for (let i = 0; i < n; i++) {
-    s = s * 1103515245 + 12345 & 0x7fffffff;
-    v += (s / 0x7fffffff - 0.5) * amp;
-    out.push(v);
+
+/** The pages v1's #/diagnostics cards became, for history rows recorded before the switch. */
+const CARD_PAGE: Record<string, string> = {
+  log: '#/settings/logs',
+  crash: '#/settings/logs',
+  firmware: '#/settings/updates'
+};
+
+/**
+ * What a tapped toast or history row does - one path for both, so the two can never act
+ * differently on the same entry. "fix" opens the walk-through; anything else navigates with its
+ * intent riding lib/toast.js's handoff. Standing on the destination already fires no hashchange,
+ * so that page hears a window event instead.
+ */
+function runAct(t: Toast, onFix: () => void) {
+  if (t.act === 'fix') {
+    onFix();
+    return;
   }
-  return out;
+  let go = t.go;
+  if (!go) return;
+  if (/^#\/diagnostics\/?$/.test(go)) go = CARD_PAGE[(t.intent as { card?: string } | undefined)?.card ?? ''] ?? '#/settings/device';
+  if (t.intent) toastIntent(t.intent);
+  if (location.hash === go || `${location.hash}/` === go) window.dispatchEvent(new CustomEvent('toast-intent'));
+  else location.hash = go;
 }
-const SPARKS: Record<string, number[]> = {
-  temp: walk(7, 24, 21.4, 0.35),
-  humidity: walk(13, 24, 46, 1.6),
-  lux: walk(29, 24, 180, 28)
-};
-const SPARK_MAP: Record<string, {
-  pts: number[];
-  seed: string;
-}> = {
-  temp: {
-    pts: SPARKS.temp,
-    seed: 'local:temp'
-  },
-  humidity: {
-    pts: SPARKS.humidity,
-    seed: 'local:humidity'
-  },
-  light: {
-    pts: SPARKS.lux,
-    seed: 'local:lux'
-  }
-};
+
+/**
+ * Every event that raises a toast, watched here because the shell lives exactly as long as one
+ * device's session (it remounts per remote-control target, which resets the once-per-session
+ * guards for a genuinely different device).
+ */
+function useToastSources({
+  connected,
+  blocked,
+  device,
+  states
+}: {
+  connected: boolean;
+  blocked: boolean;
+  device: any;
+  states: Record<string, any>;
+}) {
+  useEffect(() => onWriteError(() => toast({
+    kind: 'err',
+    key: 'write',
+    ttl: 6000,
+    title: TEXT.write_failed,
+    sub: TEXT.write_failed_go,
+    go: '#/settings/logs',
+    intent: { card: 'log' }
+  })), []);
+  useEffect(() => onLogAlert(({ lvl, tag, text, at }: { lvl: string; tag: string; text: string; at: number }) => {
+    const err = lvl !== 'W';
+    toast({
+      kind: err ? 'err' : 'warn',
+      // Per level and component, so ten wifi warnings are one toast wearing ×10.
+      key: `log-${err ? 'E' : 'W'}-${tag}`,
+      ttl: 6000,
+      title: (err ? TEXT.log_toast_err : TEXT.log_toast_warn).replace('%s', tag || TEXT.log_toast_dev),
+      sub: TEXT.write_failed_go,
+      go: '#/settings/logs',
+      intent: { card: 'log', level: err ? 'E' : 'W', line: { at, text } }
+    });
+  }), []);
+  // The nudge, on the rising edge only: once on entering a blocked app, again only if it re-enters.
+  useEffect(() => {
+    if (blocked) toast({
+      kind: 'warn',
+      key: 'blocked',
+      ttl: 8000,
+      title: TEXT.blocked_toast_t,
+      sub: TEXT.blocked_toast_s,
+      act: 'fix'
+    });
+  }, [blocked]);
+  // A sticky while the stream is down, resolved by its own reconnect, and one moment on the way
+  // back. `sawDown` is apart from the handle because a ✕'d sticky's recovery is still news.
+  const lost = useRef<{ resolve: () => void } | null>(null);
+  const sawDown = useRef(false);
+  useEffect(() => {
+    if (!connected) {
+      sawDown.current = true;
+      if (!lost.current) lost.current = toast({
+        kind: 'warn',
+        key: 'stream',
+        title: TEXT.stream_lost,
+        sub: TEXT.write_failed_go,
+        go: '#/settings/logs',
+        intent: { card: 'log' }
+      });
+    } else {
+      lost.current?.resolve();
+      lost.current = null;
+      if (sawDown.current) {
+        sawDown.current = false;
+        toast({ kind: 'ok', key: 'stream-ok', ttl: 4000, title: TEXT.stream_back });
+      }
+    }
+  }, [connected]);
+  // A crash count that moves mid-session: the device just rebooted from a crash under us. Seeded on
+  // the first reading, because history is the crash card's story.
+  const crashSeen = useRef<number | null>(null);
+  const crash = device?.crash;
+  useEffect(() => {
+    if (crash == null) return;
+    if (crashSeen.current != null && crash > crashSeen.current) toast({
+      kind: 'err',
+      key: 'crash',
+      ttl: 12000,
+      title: TEXT.crash_toast_t,
+      sub: TEXT.crash_toast_s,
+      go: '#/settings/logs',
+      intent: { card: 'crash' }
+    });
+    crashSeen.current = crash;
+  }, [crash]);
+  const updTold = useRef(false);
+  const upd = device?.e?.firmware ? states[device.e.firmware] : undefined;
+  const updState = upd?.state;
+  useEffect(() => {
+    if (updTold.current || updState !== 'UPDATE AVAILABLE') return;
+    updTold.current = true;
+    toast({
+      kind: 'info',
+      key: 'update',
+      ttl: 10000,
+      title: TEXT.update_toast_t.replace('%s', upd.value || ''),
+      sub: TEXT.update_toast_s,
+      go: '#/settings/updates',
+      intent: { card: 'firmware' }
+    });
+    // upd.value rides updState: the entity publishes both in one message.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [updState]);
+}
 function hexToRgba(hex: string, a: number): string {
   if (!hex.startsWith('#')) return `color-mix(in srgb, ${hex} ${Math.round(a * 100)}%, transparent)`;
   const h = hex.replace('#', '');
   const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
   const n = parseInt(full, 16);
   return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
-}
-function Spark({
-  pts,
-  seed
-}: {
-  pts: number[];
-  seed: string;
-}) {
-  const lo = Math.min(...pts);
-  const hi = Math.max(...pts);
-  const amp = Math.max(hi - lo, 1e-6);
-  const X = (i: number) => i / (pts.length - 1) * 100;
-  const Y = (v: number) => 88 - (v - lo) / amp * 62;
-  let line = `M ${X(0)} ${Y(pts[0])}`;
-  for (let i = 1; i < pts.length; i++) {
-    const mx = (X(i - 1) + X(i)) / 2;
-    const my = (Y(pts[i - 1]) + Y(pts[i])) / 2;
-    line += ` Q ${X(i - 1)} ${Y(pts[i - 1])} ${mx} ${my}`;
-  }
-  line += ` L ${X(pts.length - 1)} ${Y(pts[pts.length - 1])}`;
-  const fill = `${line} L 100 100 L 0 100 Z`;
-  const gid = `spkg-${seed}`.replace(/[^a-zA-Z0-9-]/g, '-');
-  return <svg className="spark" viewBox="0 0 100 100" preserveAspectRatio="none" pointerEvents="none" aria-hidden="true"><defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--orb-a)" stopOpacity="0.22" /><stop offset="1" stopColor="var(--orb-a)" stopOpacity="0" /></linearGradient></defs><path d={fill} fill={`url(#${gid})`} stroke="none" /><path d={line} fill="none" stroke="var(--orb-a)" strokeOpacity={0.5} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" /></svg>;
-}
-function Icon({
-  name,
-  size = 18
-}: {
-  name: string;
-  size?: number;
-}) {
-  const paths: Record<string, string> = {
-    bell: 'M5 8a4 4 0 0 1 8 0c0 4 2 4 2 5H3c0-1 2-1 2-5Zm3 8h2',
-    sun: 'M8 1v2m0 10v2M1 8h2m10 0h2M3 3l1.5 1.5m7 7L13 13M13 3l-1.5 1.5m-7 7L3 13M11 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
-    moon: 'M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5a5.8 5.8 0 1 0 7.1 7.1Z',
-    play: 'm6 4 8 4-8 4V4Z',
-    pause: 'M6 4v8m4-8v8',
-    chevron: 'm5 7 3 3 3-3',
-    x: 'm4 4 8 8m0-8-8 8',
-    plus: 'M8 3v10M3 8h10',
-    search: 'm11 11 3 3M6.8 11a4.2 4.2 0 1 1 0-8.4 4.2 4.2 0 0 1 0 8.4Z',
-    mic: 'M8 2a2 2 0 0 1 2 2v4a2 2 0 0 1-4 0V4a2 2 0 0 1 2-2Zm-4 6a4 4 0 0 0 8 0m-4 4v3m-2 0h4'
-  };
-  return <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name] || paths.plus} /></svg>;
 }
 function Sheet({
   kind,
@@ -284,97 +304,37 @@ function Sheet({
       }, 250);
     }} />{children}</aside>], document.body);
 }
-function SensorDrawer({
-  onClose,
-  children
-}: {
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  const panelRef = useRef<HTMLDivElement>(null);
-  const dragStartY = useRef<number | null>(null);
-  useEffect(() => {
-    document.body.classList.add('has-drawer');
-    return () => document.body.classList.remove('has-drawer');
-  }, []);
-  return createPortal([<div key="scrim" className="scrim sensor-scrim" onClick={onClose} />, <div key="panel" ref={panelRef} className="sheet sensor-sheet" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
-      <div className="handle" style={{
-      touchAction: 'none',
-      cursor: 'grab'
-    }} role="button" aria-label="Close" onPointerDown={e => {
-      if (window.innerWidth >= 1024) return;
-      dragStartY.current = e.clientY;
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      if (panelRef.current) panelRef.current.style.transition = 'none';
-    }} onPointerMove={e => {
-      if (dragStartY.current === null) return;
-      const dy = Math.max(0, e.clientY - dragStartY.current);
-      if (panelRef.current) {
-        panelRef.current.style.transform = `translateX(-50%) translateY(${dy}px)`;
-        panelRef.current.style.opacity = String(Math.max(0, 1 - dy / 200));
-      }
-    }} onPointerUp={e => {
-      if (dragStartY.current === null) return;
-      const dy = Math.max(0, e.clientY - dragStartY.current);
-      if (dy > 80) {
-        if (panelRef.current) {
-          panelRef.current.style.transition = 'transform .22s ease, opacity .22s ease';
-          panelRef.current.style.transform = 'translateX(-50%) translateY(120%)';
-          panelRef.current.style.opacity = '0';
-          setTimeout(onClose, 210);
-        } else onClose();
-      } else {
-        if (panelRef.current) {
-          panelRef.current.style.transition = 'transform .22s ease, opacity .22s ease';
-          panelRef.current.style.transform = 'translateX(-50%)';
-          panelRef.current.style.opacity = '1';
-        }
-        if (dy < 6) onClose();
-      }
-      dragStartY.current = null;
-      setTimeout(() => {
-        if (panelRef.current) {
-          panelRef.current.style.transition = '';
-          panelRef.current.style.transform = '';
-          panelRef.current.style.opacity = '';
-        }
-      }, 250);
-    }} />
-    
-      {children}
-    </div>], document.body);
+const ORB_KEY = 'sat1.orb';
+const ORB_DEFAULT: Orb = { a: '#a78bfa', b: '#818cf8' };
+function readOrb(): Orb {
+  try {
+    const o = JSON.parse(localStorage.getItem(ORB_KEY) || 'null');
+    if (typeof o?.a === 'string' && typeof o?.b === 'string') return o;
+  } catch {
+    /* private mode or a hand-edited value: the default stands */
+  }
+  return ORB_DEFAULT;
 }
-function Calibration({
-  label,
-  value,
-  unit,
-  close
+
+/**
+ * The signed-in app: one device's session. Owns the data hooks every tab reads through ctx, the
+ * hash route, the toast and notification surfaces, the device switcher and the Home Assistant gate.
+ */
+export function Satellite1Now({
+  primeKey,
+  remote,
+  localMac,
+  onRemote,
+  onLocal,
+  onAuthLost
 }: {
-  label: string;
-  value: string;
-  unit: string;
-  close: () => void;
+  primeKey: { current: string | null };
+  remote: Remote;
+  localMac: string | null;
+  onRemote: (target: { base: string; key: string }, mac: string | null) => void;
+  onLocal: () => void;
+  onAuthLost: () => void;
 }) {
-  return <div className="sensor-drawer-body"><div><span className="eyebrow">CALIBRATION · {label}</span><strong>{value}{unit}</strong></div><div className="spark"><svg viewBox="0 0 180 32" preserveAspectRatio="none"><polyline points="0,22 12,18 24,21 38,11 52,16 68,8 84,14 100,6 116,13 132,9 148,12 164,4 180,8" /></svg></div><div className="cal-actions"><button>−</button><span>offset 0</span><button>+</button><button className="done" onClick={close}>Done</button></div></div>;
-}
-function TempPopup({
-  offset,
-  setOffset,
-  unit,
-  setUnit,
-  close
-}: {
-  offset: number;
-  setOffset: (v: number) => void;
-  unit: 'C' | 'F';
-  setUnit: (v: 'C' | 'F') => void;
-  close: () => void;
-}) {
-  const c = 21.4 + offset;
-  const shown = unit === 'C' ? `${c.toFixed(1)}°C` : `${(c * 9 / 5 + 32).toFixed(1)}°F`;
-  return <div className="sensor-drawer-body temp-pop" aria-label="Temperature settings"><div><span className="eyebrow">CALIBRATION · Temperature</span><strong>{shown}</strong></div><div className="spark"><svg viewBox="0 0 180 32" preserveAspectRatio="none"><polyline points="0,20 12,19 24,17 38,18 52,14 68,15 84,12 100,13 116,10 132,12 148,9 164,10 180,8" /></svg></div><div className="temp-row"><span>Offset</span><div className="stepper"><button aria-label="Decrease offset" onClick={() => setOffset(Math.max(-5, +(offset - 0.5).toFixed(1)))}>−</button><b>{offset > 0 ? '+' : ''}{offset.toFixed(1)}°</b><button aria-label="Increase offset" onClick={() => setOffset(Math.min(5, +(offset + 0.5).toFixed(1)))}>+</button></div></div><div className="temp-row"><span>Fahrenheit</span><button role="switch" aria-checked={unit === 'F'} aria-label="Use Fahrenheit" className={'switch ' + (unit === 'F' ? 'on' : '')} onClick={() => setUnit(unit === 'C' ? 'F' : 'C')}><i /></button></div><div className="cal-actions"><button className="done" onClick={close}>Done</button></div></div>;
-}
-export function Satellite1Now() {
   const appRef = useRef<HTMLElement>(null);
   const headerRef = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
@@ -386,170 +346,153 @@ export function Satellite1Now() {
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
   }, []);
-  const [session, setSession] = useState(true);
-  const [password, setPassword] = useState('');
-  const [bad, setBad] = useState(false);
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [tab, setTab] = useState<Tab>('NOW');
-  const [settingsSubRoute, setSettingsSubRoute] = useState<string>('device-info');
-  const [navLayer, setNavLayer] = useState<0 | 1>(0);
+  const [theme, toggleTheme] = useTheme();
+  const [route, setRoute] = useState(() => parseRoute(location.hash));
+  useEffect(() => {
+    // A v1 bookmark or an unknown hash is rewritten in place to the page it resolved to, so the
+    // address bar never disagrees with what is on screen.
+    const on = () => {
+      const r = parseRoute(location.hash);
+      const canon = routeHash(r.tab, r.sub ?? undefined);
+      if (location.hash && location.hash !== canon) history.replaceState(null, '', canon);
+      setRoute(r);
+    };
+    on();
+    window.addEventListener('hashchange', on);
+    return () => window.removeEventListener('hashchange', on);
+  }, []);
+  const tab = route.tab as Tab;
+  const sub: string | null = route.sub;
+  // Settings remembers its page across a trip to another tab, as the design's own state did.
+  const lastSub = useRef('device-info');
+  if (sub) lastSub.current = sub;
+  const go = useCallback((t: Tab, s?: string) => {
+    location.hash = routeHash(t, s);
+  }, []);
+  const navLayer = tab === 'SETTINGS' ? 1 : 0;
   const [sheet, setSheet] = useState<Sheet>(null);
   const [playing, setPlaying] = useState(true);
-  const [listening, setListening] = useState(false);
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [timers, setTimers] = useState<Timer[]>([{
-    id: 't1',
-    label: 'Timer 1',
-    total: 600,
-    remaining: 581
-  }]);
-  const timerSeq = useRef(1);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [phase, setPhase] = useState<'in' | 'ha_blocked'>('in');
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const addToast = useCallback((t: Omit<Toast, 'id'>) => {
-    setToasts(v => [...v, {
-      ...t,
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-    }]);
-  }, []);
-  const dismissToast = useCallback((id: string) => setToasts(v => v.filter(t => t.id !== id)), []);
-  const [displayedToast, setDisplayedToast] = useState<Toast | null>(null);
-  const [leavingToast, setLeavingToast] = useState<Toast | null>(null);
-  const displayedRef = useRef<Toast | null>(null);
+  // The gate is up from the first signed-in render and gone for good once it fades; the fix is the
+  // same screen reopened on demand.
+  const [gateDone, setGateDone] = useState(false);
+  const [fixOpen, setFixOpen] = useState(false);
+
+  // Settings wants fresh heap and loop figures; everywhere else the only thing that goes stale is
+  // the Home Assistant dot, worth one request every ten seconds.
+  const { device, deviceError } = useDeviceState(tab === 'SETTINGS' ? 2000 : 10000);
+  const events = useEvents();
+  const ha = useHaData();
+  const selection = useSelection();
+
+  // Dual-origin cookie priming, once the state payload names the other entrance. Never while
+  // remote: `device` is the peer's there.
   useEffect(() => {
-    const next = toasts.length ? toasts[toasts.length - 1] : null;
-    const cur = displayedRef.current;
-    if (next?.id === cur?.id) return;
-    if (cur && next) {
-      setLeavingToast(cur);
-      setTimeout(() => setLeavingToast(l => l?.id === cur.id ? null : l), 300);
+    if (remote || !primeKey.current || !device) return;
+    primeOtherOrigin(primeKey.current, device.name, device.ip);
+    primeKey.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [device, primeKey]);
+  useEffect(() => {
+    if (deviceError === 'HTTP 401') onAuthLost();
+  }, [deviceError, onAuthLost]);
+  const mac = device?.mac;
+  useEffect(() => {
+    if (mac) {
+      setNotifDevice(mac);
+      setSparkDevice(mac);
     }
-    displayedRef.current = next;
-    setDisplayedToast(next);
-  }, [toasts]);
-  useEffect(() => {
-    if (!DEV_TOASTS) return;
-    const a = setTimeout(() => addToast({
-      kind: 'info',
-      message: 'Satellite connected'
-    }), 1500);
-    const b = setTimeout(() => addToast({
-      kind: 'warn',
-      message: 'Microphone sensitivity is low'
-    }), 3000);
-    const c = setTimeout(() => addToast({
-      kind: 'timer',
-      message: 'Timer 1 has ended'
-    }), 5000);
-    return () => {
-      clearTimeout(a);
-      clearTimeout(b);
-      clearTimeout(c);
-    };
-  }, [addToast]);
-  const addTimer = () => {
-    timerSeq.current += 1;
-    const n = timerSeq.current;
-    setTimers(v => [...v, {
-      id: `t${n}-${Date.now()}`,
-      label: `Timer ${n}`,
-      total: 60,
-      remaining: 60
-    }]);
+  }, [mac]);
+  const ctx: Ctx = {
+    device,
+    deviceError,
+    ...events,
+    ...ha,
+    ...selection,
+    onShowFix: () => setFixOpen(true),
+    tab,
+    sub,
+    go
   };
-  const removeTimer = (id: string) => setTimers(v => v.filter(t => t.id !== id));
-  void addTimer;
-  const [notify, setNotify] = useState(2);
-  const [audioOpen, setAudioOpen] = useState(true);
-  const [zones, setZones] = useState(0);
-  const [loginVoice, setLoginVoice] = useState(false);
-  const [unit, setUnit] = useState<'C' | 'F'>('C');
-  const [offset, setOffset] = useState(0);
-  const [orbFrom, setOrbFrom] = useState('#a78bfa');
-  const [orbTo, setOrbTo] = useState('#818cf8');
-  const handleDone = useCallback(() => setTab('NOW'), []);
-  const onOrbColor = useCallback((f: string, t: string) => {
-    setOrbFrom(f);
-    setOrbTo(t);
+
+  // The sensor sparklines accrue on every tab, not only while Home is open: the change effects
+  // catch a moved value, and the 60s beat keeps flat periods accruing points.
+  const sparkTemp = Number(entity(ctx, 'temp')?.value);
+  const sparkHum = Number(entity(ctx, 'humidity')?.value);
+  const sparkLux = Number(entity(ctx, 'lux')?.value);
+  useEffect(() => sparkRecord('temp', sparkTemp), [sparkTemp]);
+  useEffect(() => sparkRecord('humidity', sparkHum), [sparkHum]);
+  useEffect(() => sparkRecord('lux', sparkLux), [sparkLux]);
+  const sparkNow = useRef<Record<string, number>>({});
+  sparkNow.current = { temp: sparkTemp, humidity: sparkHum, lux: sparkLux };
+  useEffect(() => {
+    const t = setInterval(() => {
+      const s = sparkNow.current;
+      for (const k in s) sparkRecord(k, s[k]);
+    }, 60000);
+    return () => clearInterval(t);
+  }, []);
+  const { name: label, area } = deviceIdentity(device, ha.ha);
+  useEffect(() => {
+    if (label) document.title = label;
+  }, [label]);
+
+  // The store's visible toast, and a ghost of the one leaving so its exit can animate.
+  const [cur, setCur] = useState<Toast | null>(null);
+  const [ghost, setGhost] = useState<Toast | null>(null);
+  const prevToast = useRef<Toast | null>(null);
+  useEffect(() => subscribeToasts(setCur), []);
+  useEffect(() => {
+    const was = prevToast.current;
+    prevToast.current = cur;
+    if (was && (!cur || cur.id !== was.id)) {
+      setGhost(was);
+      const t = setTimeout(() => setGhost(null), 300);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [cur]);
+  // `blocked` waits for the gate to leave: while it stands, the verdict is its story to tell.
+  useToastSources({
+    connected: events.connected,
+    blocked: gateDone && haBlocked(ha.ha),
+    device,
+    states: events.states
+  });
+  const [notifN, setNotifN] = useState(notifCount);
+  useEffect(() => subscribeNotifs(() => setNotifN(notifCount())), []);
+  const bellLabel = notifN > 0 ? `${TEXT.notif_bell} (${notifN})` : TEXT.notif_bell;
+
+  const [orb, setOrb] = useState<Orb>(readOrb);
+  const onOrbColor = useCallback((a: string, b: string) => {
+    setOrb(o => o.a === a && o.b === b ? o : { a, b });
+    try {
+      localStorage.setItem(ORB_KEY, JSON.stringify({ a, b }));
+    } catch {
+      /* the choice holds for this session */
+    }
   }, []);
   const orbVars = {
-    '--orb-a': orbFrom,
-    '--orb-b': orbTo,
-    '--orb-a20': hexToRgba(orbFrom, 0.2),
-    '--orb-a35': hexToRgba(orbFrom, 0.35),
-    '--orb-a55': hexToRgba(orbFrom, 0.55)
+    '--orb-a': orb.a,
+    '--orb-b': orb.b,
+    '--orb-a20': hexToRgba(orb.a, 0.2),
+    '--orb-a35': hexToRgba(orb.a, 0.35),
+    '--orb-a55': hexToRgba(orb.a, 0.55)
   } as React.CSSProperties;
-  const tempC = 21.4 + offset;
-  const tempText = unit === 'C' ? `${Math.round(tempC)}°C` : `${Math.round(tempC * 9 / 5 + 32)}°F`;
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
-  useEffect(() => {
-    intervalRef.current = setInterval(() => {
-      setTimers(v => v.some(t => t.remaining > 0) ? v.map(t => t.remaining > 0 ? {
-        ...t,
-        remaining: t.remaining - 1
-      } : t) : v);
-    }, 1000);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, []);
-  const toggleTheme = () => setTheme(v => v === 'dark' ? 'light' : 'dark');
-  const logout = () => {
+  const signOut = async () => {
     setSheet(null);
-    setLoginVoice(false);
-    setPassword('');
-    setSession(false);
+    await logout();
+    location.reload();
   };
-  if (!session) return <main className="auth auth-screen" data-theme={theme}><div className="auth-brand"><Logo cls="login-logo" /><span className="auth-eyebrow">SATELLITE1</span><h1 className="auth-headline"><span className="auth-line white">Your home.</span><span className="auth-line violet">Your voice.</span><span className="auth-line white">Your AI.</span></h1></div><div className="auth-panel"><div className="auth-form">{loginVoice ? <section className="voice-login"><div className="voice-pulse"><Icon name="mic" size={28} /></div><span className="eyebrow">LISTENING · 01:58</span><div className="challenge"><b>Hey Jarvis</b><b>Okay Nabu</b><b>Stop</b><b>Satellite</b></div><button className="text-button" onClick={() => setSession(true)}>Complete sign in</button></section> : <div className="auth-stack"><button className="voicetap-btn" onClick={() => setLoginVoice(true)}><svg className="voicetap-icon" width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 2a2 2 0 0 1 2 2v4a2 2 0 0 1-4 0V4a2 2 0 0 1 2-2Zm-4 6a4 4 0 0 0 8 0m-4 4v3m-2 0h4" /></svg><span>Sign in with VoiceTap</span></button><div className="or"><span>or use the password</span></div><form onSubmit={e => {
-            e.preventDefault();
-            password ? setSession(true) : setBad(true);
-          }}><input aria-label="Password" type="password" placeholder="Password" value={password} onChange={e => {
-              setPassword(e.target.value);
-              setBad(false);
-            }} />{bad && <p className="error">Enter a password to continue.</p>}<button className="secondary wide">Sign in</button></form><button className="link" onClick={() => {
-            setTab('SETUP');
-            setSession(true);
-          }}>First time? Set up your device</button></div>}</div></div><button className="theme-toggle auth-theme" onClick={toggleTheme} aria-label="Toggle theme"><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button><div className="login-dev">satellite1-a4c2f8</div></main>;
-  if (tab === 'SETUP') return <main className="app setup-fullscreen" data-theme={theme} style={orbVars}><SetupWizard onDone={handleDone} /></main>;
-  if (phase === 'ha_blocked') return <div className="ha-block-screen" data-theme={theme}>
-      <div className="ha-block-card">
-        <AlertTriangle size={40} className="ha-block-icon" />
-        <h2 className="ha-block-title">Can't reach Home Assistant</h2>
-        <p className="ha-block-body">The satellite lost its connection to Home Assistant. Check your network and HA server status.</p>
-        <button className="ha-block-btn primary" onClick={() => setPhase('in')}>Retry</button>
-        <button className="ha-block-btn ghost" onClick={() => {
-        setPhase('in');
-        setTab('SETTINGS');
-        setNavLayer(1);
-      }}>Open Device Settings</button>
-      </div>
-    </div>;
-  const activeToast = displayedToast;
-  return <main className="app" ref={appRef} data-theme={theme} style={orbVars}><header ref={headerRef} className={`app-header${activeToast ? ' toast-active' : ''}`}><div className="header-left"><div className="header-device-slot"><button className="device-chip" onClick={() => setSheet('device')}><span className="dot" /> <span>Living Room</span><small>192.168.4.31</small></button></div><div className="header-toast-slot" aria-live="polite">{leavingToast && <ToastPill key={`leaving-${leavingToast.id}`} toast={leavingToast} leaving onDismiss={() => {}} />}{activeToast && <ToastPill key={`active-${activeToast.id}`} toast={activeToast} onDismiss={dismissToast} />}</div></div><div className="header-actions"><button className="icon-button" onClick={() => setSheet('notice')}><Icon name="bell" /><b>{notify}</b></button><button className="theme-toggle" onClick={toggleTheme}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button></div></header>
-    <div key={tab} className="tab-content-enter">{tab === 'NOW' && <section className="now now-compact"><div className="now-left" style={{
-          width: '100%'
-        }}><div className="pills">{[['temp', tempText, 'Temperature'], ['humidity', '46%', 'Humidity'], ['light', '182 lx', 'Light'], ['presence', 'Still', 'Presence']].map(([key, val, label]) => <div key={key}>{key === 'presence' ? <a className="sensor" href="/presence" onClick={e => {
-                e.preventDefault();
-                window.history.pushState({}, '', '/presence');
-                setTab('PRESENCE');
-              }} style={{
-                textDecoration: 'none'
-              }}><strong>{val}</strong><small>{label} ›</small></a> : <button className={'sensor ' + (expanded === key ? 'active' : '')} onClick={() => setExpanded(expanded === key ? null : key)} style={{
-                height: "87.29px"
-              }}>{SPARK_MAP[key] && <Spark pts={SPARK_MAP[key].pts} seed={SPARK_MAP[key].seed} />}<strong style={{
-                  height: "33.1px"
-                }}>{val}</strong><small style={{
-                  paddingTop: "0px"
-                }}>{label}</small><ChevronDown size={10} className="sensor-caret" aria-hidden="true" /></button>}
-            {expanded === key && (key === 'temp' ? <SensorDrawer onClose={() => setExpanded(null)}><TempPopup offset={offset} setOffset={setOffset} unit={unit} setUnit={setUnit} close={() => setExpanded(null)} /></SensorDrawer> : <SensorDrawer onClose={() => setExpanded(null)}><Calibration label={label} value={val} unit="" close={() => setExpanded(null)} /></SensorDrawer>)}</div>)}</div><VoiceOrb onColorChange={onOrbColor} /></div><div className="now-right"><section className="transcript transcript-tall">{transcript.map((line, i) => <p key={i} className={line.who}>{line.text}</p>)}</section><div className="timer-list">{timers.map(t => <div key={t.id} className={'timer-pill' + (t.remaining === 0 ? ' done' : '')}><Clock size={15} aria-hidden="true" /><span className="timer-pill-label">{t.label}</span><strong className="timer-pill-time">{fmtTime(t.remaining)}</strong><button type="button" className="timer-pill-x" aria-label={`Cancel ${t.label}`} onClick={() => removeTimer(t.id)}><X size={14} /></button></div>)}</div></div></section>}
-    {tab !== 'NOW' && <ControlPanel key={tab} tab={tab} audioOpen={audioOpen} setAudioOpen={setAudioOpen} zones={zones} setZones={setZones} onDone={handleDone} onGoDevice={() => {
-        setTab('SETTINGS');
-        setNavLayer(1);
-      }} onSimulateHaBlock={() => setPhase('ha_blocked')} settingsSubRoute={settingsSubRoute} setSettingsSubRoute={setSettingsSubRoute} />}</div>
-    <nav className="side-nav" aria-label="Sections">{(['NOW', 'WAKE', 'PRESENCE', 'AUDIO', 'SETTINGS'] as Tab[]).map(item => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => setTab(item)}><span>{item === 'NOW' ? 'HOME' : item}</span></button>)}{tab === 'SETTINGS' && <div className="side-sub" role="list">{SETTINGS_ROUTES.map(r => <button key={r.slug} role="listitem" className={'side-sub-item' + (settingsSubRoute === r.slug ? ' on' : '')} onClick={() => setSettingsSubRoute(r.slug)}>{r.label}</button>)}</div>}<div className="side-nav-foot" style={{
+  const haText = device?.ha ? TEXT.ha_connected : TEXT.ha_disconnected;
+  const openFix = () => setFixOpen(true);
+  const activeToast = cur;
+  return <main className="app" ref={appRef} data-theme={theme} style={orbVars}><header ref={headerRef} className={`app-header${activeToast ? ' toast-active' : ''}`}><div className="header-left"><div className="header-device-slot"><button className="device-chip" onClick={() => setSheet('device')}><span className={'dot' + (device?.ha ? '' : ' off')} title={haText} /> <span>{label || 'Satellite1'}</span><small>{device?.ip || '\u00a0'}{remote ? ` · ${TEXT.remote_tag}` : ''}</small></button></div><div className="header-toast-slot" aria-live="polite">{ghost && <ToastPill key={`leaving-${ghost.id}`} toast={ghost} leaving onDismiss={() => {}} />}{activeToast && <ToastPill key={`active-${activeToast.id}`} toast={activeToast} onDismiss={dismissToast} onTap={() => {
+              tapToast(activeToast.id);
+              runAct(activeToast, openFix);
+            }} />}</div></div><div className="header-actions"><button className="icon-button" onClick={() => setSheet('notice')} aria-label={bellLabel} title={bellLabel}><Icon name="bell" />{notifN > 0 && <b>{notifN > 99 ? '99+' : notifN}</b>}</button><button className="theme-toggle" onClick={toggleTheme} aria-label={theme === 'dark' ? TEXT.theme_to_light : TEXT.theme_to_dark}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button></div></header>
+    <div key={tab} className="tab-content-enter">{tab === 'NOW' && <HomeTab ctx={ctx} orb={orb} onOrbColor={onOrbColor} />}
+    {tab !== 'NOW' && <ControlPanel key={tab} tab={tab} sub={sub} ctx={ctx} />}</div>
+    <nav className="side-nav" aria-label="Sections">{TABS.map(item => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => go(item, item === 'SETTINGS' ? lastSub.current : undefined)}><span>{item === 'NOW' ? 'HOME' : item}</span></button>)}{tab === 'SETTINGS' && <div className="side-sub" role="list">{SETTINGS_ROUTES.map(r => <button key={r.slug} role="listitem" className={'side-sub-item' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{r.label}</button>)}</div>}<div className="side-nav-foot" style={{
         marginTop: 'auto',
         padding: '12px 8px 88px',
         borderTop: '1px solid var(--line)',
@@ -561,10 +504,10 @@ export function Satellite1Now() {
           fontWeight: 600,
           color: 'var(--text)',
           opacity: 0.85
-        }}>Living Room Satellite</span><span style={{
+        }}>{label || 'Satellite1'}</span><span style={{
           fontSize: 11,
           color: 'var(--muted)'
-        }}>192.168.4.31 · Firmware 25.9.4</span><button type="button" onClick={logout} style={{
+        }}>{[device?.ip, device?.fw && `Firmware ${device.fw}`].filter(Boolean).join(' · ')}</span><button type="button" onClick={signOut} style={{
           marginTop: 10,
           alignSelf: 'flex-start',
           display: 'inline-flex',
@@ -583,23 +526,179 @@ export function Satellite1Now() {
       translate: "0px -8px"
     }}><div className="tabs-track" style={{
         transform: navLayer === 0 ? 'translateX(0%)' : 'translateX(-50%)'
-      }}><div className="tabs-layer tabs-main">{(['NOW', 'WAKE', 'PRESENCE', 'AUDIO', 'SETTINGS'] as Tab[]).map(item => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => {
-            setTab(item);
-            if (item === 'SETTINGS') setNavLayer(1);else setNavLayer(0);
-          }}>{item === 'NOW' ? 'HOME' : item}</button>)}</div><div className="tabs-layer tabs-sub"><button className="tabs-back" aria-label="Back to main menu" onClick={() => {
-            setTab('NOW');
-            setNavLayer(0);
-            setSettingsSubRoute('device-info');
-          }}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m10 4-5 4 5 4" /></svg></button><div className="tabs-sub-scroll">{SETTINGS_ROUTES.map(r => <button key={r.slug} className={'tabs-sub-pill' + (settingsSubRoute === r.slug ? ' on' : '')} onClick={() => setSettingsSubRoute(r.slug)}>{r.label}</button>)}</div></div></div></nav><MediaBar playing={playing} setPlaying={setPlaying} />
-    <Sheet kind={sheet} close={() => setSheet(null)}>{sheet === 'device' && <DeviceSheet onLogout={logout} />}{sheet === 'notice' && <Notice notify={notify} setNotify={setNotify} />}</Sheet>
+      }}><div className="tabs-layer tabs-main">{TABS.map(item => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => go(item, item === 'SETTINGS' ? lastSub.current : undefined)}>{item === 'NOW' ? 'HOME' : item}</button>)}</div><div className="tabs-layer tabs-sub"><button className="tabs-back" aria-label="Back to main menu" onClick={() => {
+            lastSub.current = 'device-info';
+            go('NOW');
+          }}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m10 4-5 4 5 4" /></svg></button><div className="tabs-sub-scroll">{SETTINGS_ROUTES.map(r => <button key={r.slug} className={'tabs-sub-pill' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{r.label}</button>)}</div></div></div></nav><MediaBar ctx={ctx} playing={playing} setPlaying={setPlaying} />
+    <Sheet kind={sheet} close={() => setSheet(null)}>{sheet === 'device' && <DeviceSheet ctx={ctx} label={label} area={area} remote={remote} localMac={localMac} onRemote={onRemote} onLocal={onLocal} onSignOut={signOut} />}{sheet === 'notice' && <Notice onAct={t => {
+          setSheet(null);
+          runAct(t, openFix);
+        }} />}</Sheet>
+    {!gateDone && <HaGate ctx={ctx} onDone={() => setGateDone(true)} />}
+    {fixOpen && <HaGate ctx={ctx} fix onDone={() => setFixOpen(false)} />}
   </main>;
 }
+const hostOf = (u: unknown) => String(u || '').replace(/^https?:\/\//, '').replace(/[/:].*$/, '');
+const isUp = (d: any[]) => d[6] === 1 || d[6] === '1';
+const radarModel = (r: unknown) => r === 2450 || r === 2410 ? `LD${r}` : '';
+const netName = (n: unknown) => n === 'e' ? 'Ethernet' : n === 'w' ? 'Wi\u2011Fi' : '';
+/** "LD2450 · present", or nothing for a device whose firmware sends no radar fields. */
+const radarText = (r: unknown, present: unknown) => {
+  const m = radarModel(r);
+  return m && `${m} · ${present === 1 || present === true ? 'present' : 'no presence'}`;
+};
+
+/**
+ * The device switcher (src/shell.jsx's SwitcherSheet in the design's sheet): this device on top,
+ * then every other Satellite1 the Home Assistant payload lists, online first. The roster is the
+ * `dev` block on /api/sat1/ha - row fields [model, name, area, mac, sw, url, up, pw, net, radar,
+ * present] - so nothing here discovers anything; a jump signs in to the peer first and, when the
+ * peer's firmware allows it, retargets this app instead of navigating.
+ */
 function DeviceSheet({
-  onLogout
+  ctx,
+  label,
+  area,
+  remote,
+  localMac,
+  onRemote,
+  onLocal,
+  onSignOut
 }: {
-  onLogout: () => void;
+  ctx: Ctx;
+  label: string;
+  area: string;
+  remote: Remote;
+  localMac: string | null;
+  onRemote: (target: { base: string; key: string }, mac: string | null) => void;
+  onLocal: () => void;
+  onSignOut: () => void;
 }) {
-  return <div className="device-sheet"><span className="eyebrow">DEVICE SWITCHER</span><h2>Living Room Satellite</h2><p className="muted">192.168.4.31 · <span className="green">●</span> LD2450 · Wi‑Fi</p><div className="peer-list">{peers.map(peer => <a href="#" key={peer.name} className={peer.state === 'OFFLINE' ? 'offline' : ''}><span className="dot" /><span><b>{peer.name}</b><small>{peer.meta}</small></span><Icon name="chevron" /></a>)}</div><button type="button" onClick={onLogout} style={{
+  const { device, ha, haRefresh, states } = ctx;
+  const hash = routeHash(ctx.tab, ctx.sub ?? undefined);
+  const mac = (device?.mac || '').toLowerCase();
+  // Re-sync the roster on open, then on a 5s beat while the last answer came on rung 1 (the fast
+  // statistics path; rung 2 costs ~3s a call and would sit on the queue the jump needs).
+  const haNow = useRef(ha);
+  haNow.current = ha;
+  useEffect(() => {
+    let busy = false;
+    const sync = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        await haRefresh();
+      } finally {
+        busy = false;
+      }
+    };
+    sync();
+    const t = setInterval(() => {
+      if (document.hidden || haNow.current?.rung !== 1) return;
+      sync();
+    }, 5000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const roster: any[][] = ha?.d?.dev || [];
+  const peers = roster.filter(d => /satellite1/i.test(d?.[0] || '') && (d?.[3] || '').toLowerCase() !== mac).sort((x, y) => `${x[2]}\u0000${x[1]}`.localeCompare(`${y[2]}\u0000${y[1]}`));
+  const ordered = [...peers.filter(isUp), ...peers.filter(d => !isUp(d))];
+
+  // This device's own tags read the live stream rather than the cached roster, so its presence
+  // lights the moment the radar does. While remote these are the controlled peer's own.
+  const mineRow = roster.find(d => (d?.[3] || '').toLowerCase() === mac);
+  const netLive = String(states?.[device?.e?.network]?.value || '');
+  const myNet = netLive.startsWith('Eth') ? 'e' : netLive.startsWith('WiFi') ? 'w' : mineRow?.[8];
+  const modLive = String(states?.[device?.e?.radar_module]?.value || '').toLowerCase();
+  const myRadar = modLive.includes('2450') ? 2450 : modLive.includes('2410') ? 2410 : mineRow?.[9];
+  const presLive = states?.['binary_sensor/Room Presence'] || states?.['binary_sensor/Presence'];
+  const myPres = presLive ? presLive.value === true || presLive.state === 'ON' : mineRow?.[10];
+  const myLit = !!radarModel(myRadar) && (myPres === 1 || myPres === true);
+  const peerHref = (base: string) => `${String(base).replace(/\/+$/, '')}/${hash}`;
+
+  // The seamless jump: sign in to the peer before leaving so its page opens as the app, and try the
+  // single-origin switch first. Anything that declines falls back to plain navigation; the href
+  // stays real underneath for middle-click and open-in-new-tab.
+  const jump = async (e: React.MouseEvent, url: string, pw: string | undefined) => {
+    if (!pw || e.button !== 0 || e.metaKey || e.ctrlKey) return;
+    e.preventDefault();
+    const origin = String(url).replace(/\/+$/, '');
+    const peer = await peerLogin(origin, pw);
+    if (!peer) {
+      location.href = peerHref(url);
+      return;
+    }
+    if (await probePeer(origin, peer.key)) {
+      onRemote({ base: origin, key: peer.key }, remote ? null : mac);
+      return;
+    }
+    const base = location.hostname.endsWith('.local') && peer.name && /^[a-z0-9-]+$/i.test(peer.name) ? `http://${peer.name}.local${location.port ? `:${location.port}` : ''}` : origin;
+    location.href = `${base}/?key=${peer.key}${hash}`;
+  };
+  const isHome = (d: any[]) => !!remote && !!localMac && (d?.[3] || '').toLowerCase() === localMac;
+  const meta = (d: any[], url: string) => isHome(d) ? TEXT.switcher_home : !isUp(d) ? 'Offline' : [d[2], hostOf(url), netName(d[8]), radarText(d[9], d[10])].filter(Boolean).join(' · ');
+  const peerRow = (d: any[]) => {
+    const url = peerOrigin(d);
+    const up = isUp(d);
+    const cls = up ? '' : 'offline';
+    const body = <><span className="dot" title={up ? TEXT.peer_up : TEXT.peer_down} /><span><b>{d[1]}</b><small>{meta(d, url)}</small></span><Icon name="chevron" /></>;
+    if (isHome(d)) return <a key={d[3]} className={cls} href={`${location.origin}${location.pathname}${hash}`} onClick={e => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey) return;
+      e.preventDefault();
+      onLocal();
+    }}>{body}</a>;
+    // Behind the ingress proxy a peer's plain-http origin is out of reach, but its own ingress
+    // panel is not: same origin as this page, at "/" plus the slug of its mDNS hostname.
+    if (url && proxied) {
+      let peerSlug = '';
+      try {
+        const h = new URL(String(d?.[5] || '')).hostname.replace(/\.local$/i, '');
+        if (h && !/^\d+\.\d+\.\d+\.\d+$/.test(h) && !h.includes(':')) peerSlug = h.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      } catch {
+        /* no configuration_url on this row; the mac derivation below */
+      }
+      if (!peerSlug) {
+        // HA usually records the IP, which names no panel - but the fleet's hostnames are
+        // <base>-<last six hex of mac>, so the peer's is this device's base plus its suffix.
+        const ownName = String(device?.name || '').toLowerCase();
+        const ownSuffix = mac.replace(/[^a-z0-9]/g, '').slice(-6);
+        const peerSuffix = String(d?.[3] || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(-6);
+        if (ownSuffix.length === 6 && peerSuffix.length === 6 && ownName.endsWith(ownSuffix)) peerSlug = (ownName.slice(0, -6) + peerSuffix).replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      }
+      if (peerSlug) {
+        // Flat panels live at /<slug>, nested ones at /<parent>/<slug>; HA 404s an unregistered
+        // route, so one HEAD probe of the flat path decides.
+        const goPanel = async (e: React.MouseEvent) => {
+          if (e.button !== 0 || e.metaKey || e.ctrlKey) return;
+          e.preventDefault();
+          let target = `/${peerSlug}`;
+          try {
+            const r = await fetch(target, { method: 'HEAD', cache: 'no-store', signal: AbortSignal.timeout(3000) });
+            if (r.status === 404) {
+              const seg = window.top!.location.pathname.split('/')[1] || '';
+              if (seg && seg !== peerSlug) target = `/${seg}/${peerSlug}`;
+            }
+          } catch {
+            /* an unanswerable probe changes nothing: the flat link is the best guess standing */
+          }
+          const pw = d?.[7];
+          if (pw) putPanelHandoff(peerSlug, pw);
+          try {
+            window.top!.location.href = target;
+          } catch {
+            location.href = target;
+          }
+        };
+        return <a key={d[3]} className={cls} href={`/${peerSlug}`} target="_top" onClick={goPanel}>{body}</a>;
+      }
+      return <a key={d[3]} className={cls} href={peerHref(url)} target="_blank" rel="noopener">{body}</a>;
+    }
+    return url ? <a key={d[3]} className={cls} href={peerHref(url)} onClick={e => jump(e, url, d[7])}>{body}</a> : <a key={d[3]} className={cls + ' nolink'}>{body}</a>;
+  };
+  const ownMeta = [area, device?.ip].filter(Boolean).join(' · ');
+  const ownRadar = radarModel(myRadar);
+  const ownNet = netName(myNet);
+  return <div className="device-sheet"><span className="eyebrow">DEVICE SWITCHER</span><h2>{label || 'This device'}</h2><p className="muted">{ownMeta}{ownRadar && <>{ownMeta ? ' · ' : ''}<span className={myLit ? 'green' : 'dim'} title={myLit ? TEXT.presence_on : TEXT.presence_off}>●</span> {ownRadar}</>}{ownNet && ` · ${ownNet}`}</p><div className="peer-list">{ordered.map(peerRow)}</div>{peers.length === 0 && <div className="empty">{haBlocked(ha) ? TEXT.no_devices_blocked : TEXT.no_devices}</div>}<button type="button" onClick={onSignOut} style={{
       marginTop: 10,
       alignSelf: 'flex-start',
       display: 'inline-flex',
@@ -615,310 +714,43 @@ function DeviceSheet({
       color: 'var(--muted)'
     }}><LogOut size={14} aria-hidden="true" /><span>Sign out</span></button></div>;
 }
-function Notice({
-  notify,
-  setNotify
-}: {
-  notify: number;
-  setNotify: (v: number) => void;
-}) {
-  const [filter, setFilter] = useState('All');
-  return <div className="notice-sheet"><div className="sheet-top"><span className="eyebrow">NOTIFICATIONS</span><button onClick={() => setNotify(0)}>Clear all</button></div><div className="filters">{['All', 'Info', 'Warnings', 'Errors', 'Archive'].map(x => <button className={filter === x ? 'active' : ''} key={x} onClick={() => setFilter(x)}>{x}</button>)}</div>{filter !== 'Archive' && notify > 0 ? <><article className="notice info"><b>INFO</b><strong>Firmware 25.9.4 is available</strong><small>14m ago · update ready</small></article><article className="notice warn"><b>WARN ×3</b><strong>Warning from wifi</strong><small>3h ago · signal fluctuating</small></article></> : <div className="empty">Nothing here yet.</div>}</div>;
+
+/** "just now", "12m ago", "3h ago" - the history covers 24 hours, so hours are the ceiling. */
+function ago(ts: number) {
+  const m = Math.round((Date.now() - ts) / 60000);
+  if (m < 1) return TEXT.notif_now;
+  return TEXT.notif_ago.replace('%s', m < 60 ? `${m}m` : `${Math.floor(m / 60)}h`);
+}
+const FILTERS: [string, string][] = [['all', TEXT.notif_all], ['info', TEXT.notif_info], ['warn', TEXT.notif_warn], ['err', TEXT.notif_err], ['arch', TEXT.notif_arch]];
+const KIND_LABEL: Record<string, string> = { err: 'ERROR', warn: 'WARN', info: 'INFO', ok: 'INFO' };
+
+/**
+ * The bell's sheet: lib/notif.js's past 24 hours. Pending entries are left out - their toast is
+ * still on screen and may yet be tapped. A tap archives the row and acts as the toast would have.
+ */
+function Notice({ onAct }: { onAct: (t: Toast) => void }) {
+  const [filter, setFilter] = useState('all');
+  const [, bump] = useState(0);
+  useEffect(() => subscribeNotifs(() => bump(n => n + 1)), []);
+  const rows = (listNotifs() as (Toast & { ts: number; state: string })[]).filter(e => e.state !== 'pending' && (filter === 'arch' ? e.state === 'archived' : e.state !== 'archived' && (filter === 'all' || filter === (e.kind === 'ok' ? 'info' : e.kind))));
+  return <div className="notice-sheet"><div className="sheet-top"><span className="eyebrow">{TEXT.notif_title.toUpperCase()}</span><button onClick={() => archiveAllNotifs()}>{TEXT.notif_clear}</button></div><div className="filters">{FILTERS.map(([id, text]) => <button className={filter === id ? 'active' : ''} key={id} onClick={() => setFilter(id)}>{text}</button>)}</div>{rows.length ? rows.map(e => <article key={e.id} className={`notice ${e.kind === 'ok' ? 'info' : e.kind}${e.state === 'archived' ? ' archived' : ''}`} role="button" tabIndex={0} onClick={() => {
+      if (e.state !== 'archived') archiveNotif(e.id);
+      onAct(e);
+    }} onKeyDown={k => {
+      if (k.key === 'Enter') (k.currentTarget as HTMLElement).click();
+    }}><b>{KIND_LABEL[e.kind] || 'INFO'}{(e.count ?? 0) > 1 ? ` \u00d7${e.count}` : ''}</b><strong>{e.title}</strong><small>{[ago(e.ts), e.sub].filter(Boolean).join(' · ')}</small></article>) : <div className="empty">{filter === 'arch' ? TEXT.notif_empty_arch : TEXT.notif_empty}</div>}<p className="notice-foot">{TEXT.notif_foot}</p></div>;
 }
 function ControlPanel({
   tab,
-  audioOpen,
-  setAudioOpen,
-  zones,
-  setZones,
-  onDone,
-  onGoDevice,
-  onSimulateHaBlock,
-  settingsSubRoute,
-  setSettingsSubRoute
+  sub,
+  ctx
 }: {
   tab: Tab;
-  audioOpen: boolean;
-  setAudioOpen: (v: boolean) => void;
-  zones: number;
-  setZones: (v: number) => void;
-  onDone: () => void;
-  onGoDevice: () => void;
-  onSimulateHaBlock: () => void;
-  settingsSubRoute: string;
-  setSettingsSubRoute: (v: string) => void;
+  sub: string | null;
+  ctx: Ctx;
 }) {
-  if (tab === 'WAKE') return <WakeTab />;
-  if (tab === 'PRESENCE') return <PresenceTab onGoDevice={onGoDevice} />;
-  if (tab === 'AUDIO') return <AudioTab />;
-  if (tab === 'SETTINGS') return <DiagnosticsTab onSimulateHaBlock={onSimulateHaBlock} subRoute={settingsSubRoute} onSubRouteChange={setSettingsSubRoute} />;
-  return <SetupWizard onDone={onDone} />;
+  if (tab === 'WAKE') return <WakeTab ctx={ctx} />;
+  if (tab === 'PRESENCE') return <PresenceTab ctx={ctx} onGoDevice={() => ctx.go('SETTINGS', 'device-info')} />;
+  if (tab === 'AUDIO') return <AudioTab ctx={ctx} />;
+  return <DiagnosticsTab ctx={ctx} subRoute={sub || 'device-info'} onSubRouteChange={s => ctx.go('SETTINGS', s)} />;
 }
-type WizStep = 'launcher' | 'network' | 'joining' | 'mode' | 'haconnect' | 'haactions';
-const WIZ_ORDER: WizStep[] = ['launcher', 'network', 'joining', 'mode', 'haconnect', 'haactions'];
-const WIZ_NETWORKS = [{
-  ssid: 'Davis Home',
-  rssi: -48,
-  sec: 1
-}, {
-  ssid: 'Davis Home Guest',
-  rssi: -52,
-  sec: 1
-}, {
-  ssid: 'HP-Print-A7',
-  rssi: -71,
-  sec: 0
-}, {
-  ssid: 'NETGEAR-2G',
-  rssi: -84,
-  sec: 1
-}];
-const BAR_IDX = [{
-  id: 'b0',
-  i: 0
-}, {
-  id: 'b1',
-  i: 1
-}, {
-  id: 'b2',
-  i: 2
-}, {
-  id: 'b3',
-  i: 3
-}];
-const HAC_COPY = [{
-  id: 'c0',
-  t: 'In your Home Assistant, go to ',
-  b: false
-}, {
-  id: 'c1',
-  t: 'Settings → Devices & Services',
-  b: true
-}, {
-  id: 'c2',
-  t: '. Your Satellite1 is waiting under ',
-  b: false
-}, {
-  id: 'c3',
-  t: 'Discovered',
-  b: true
-}, {
-  id: 'c4',
-  t: ' — tap ',
-  b: false
-}, {
-  id: 'c5',
-  t: 'Add',
-  b: true
-}, {
-  id: 'c6',
-  t: ' and follow the steps.',
-  b: false
-}];
-const barsOf = (rssi: number) => rssi >= -55 ? 4 : rssi >= -66 ? 3 : rssi >= -77 ? 2 : rssi >= -88 ? 1 : 0;
-const Bars = ({
-  rssi
-}: {
-  rssi: number;
-}) => {
-  const n = barsOf(rssi);
-  return <svg className="wifi-bars" viewBox="0 0 16 14" aria-hidden="true">
-      {BAR_IDX.map(_mpRecord => {
-      const {
-        id,
-        i
-      } = _mpRecord;
-      return <rect key={id} x={i * 4} y={11 - i * 3} width="2.6" height={3 + i * 3} rx="1" opacity={i < n ? 1 : 0.25} />;
-    })}
-    </svg>;
-};
-const LockIcon = () => <svg className="wifi-lock" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
-    <rect x="2.4" y="5.2" width="7.2" height="5" rx="1.2" />
-    <path d="M4 5V3.6a2 2 0 0 1 4 0V5" />
-  </svg>;
-function SetupWizard({
-  onDone
-}: {
-  onDone: () => void;
-}) {
-  const onDoneRef = useRef(onDone);
-  useEffect(() => {
-    onDoneRef.current = onDone;
-  }, [onDone]);
-  const [step, setStep] = useState<WizStep>('launcher');
-  const [prep, setPrep] = useState(true);
-  const [count, setCount] = useState(3);
-  const [open, setOpen] = useState<string | null>(null);
-  const [pw, setPw] = useState('');
-  const [err, setErr] = useState('');
-  const [manual, setManual] = useState(false);
-  const [mSsid, setMSsid] = useState('');
-  const [ssid, setSsid] = useState('');
-  const [joinPw, setJoinPw] = useState('');
-  const [slow, setSlow] = useState(false);
-  useEffect(() => {
-    if (step !== 'launcher') return;
-    setPrep(true);
-    setCount(3);
-    const t = setTimeout(() => setPrep(false), 1200);
-    return () => clearTimeout(t);
-  }, [step]);
-  useEffect(() => {
-    if (step !== 'launcher' || prep || count <= 0) return;
-    const t = setTimeout(() => setCount(c => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [step, prep, count]);
-  useEffect(() => {
-    if (step !== 'joining') return;
-    setSlow(false);
-    if (/wrong/i.test(joinPw)) {
-      const t = setTimeout(() => setSlow(true), 7000);
-      return () => clearTimeout(t);
-    }
-    const t = setTimeout(() => setStep('haconnect'), 6000);
-    return () => clearTimeout(t);
-  }, [step, joinPw]);
-  useEffect(() => {
-    if (step === 'haconnect') {
-      const t = setTimeout(() => setStep('haactions'), 12000);
-      return () => clearTimeout(t);
-    }
-    if (step === 'haactions') {
-      const t = setTimeout(() => onDoneRef.current(), 12000);
-      return () => clearTimeout(t);
-    }
-  }, [step]);
-  const join = (name: string, secured: boolean) => {
-    if (!name.trim()) {
-      setErr('Enter a network name.');
-      return;
-    }
-    if (secured && pw.length < 8) {
-      setErr('WiFi passwords are at least 8 characters.');
-      return;
-    }
-    setErr('');
-    setSsid(name);
-    setJoinPw(pw);
-    setStep('joining');
-  };
-  const idx = WIZ_ORDER.indexOf(step) + 1;
-  const openHA = (e: React.MouseEvent) => e.preventDefault();
-  return <section className="control setup wiz">
-      <span className="eyebrow">SETUP · {String(idx).padStart(2, '0')} / 06</span>
-      <Logo cls="wiz-logo" />
-      <h1 className="wiz-h">Set up your Satellite1</h1>
-      <div className="wiz-glass">
-        {step === 'launcher' && <div className="wiz-center">
-            <p className="wiz-p">Your Satellite1 is ready to meet your home.</p>
-            {prep ? <div className="wiz-wait"><span className="wiz-pulse" /><span>Getting your setup ready…</span></div> : count > 0 ? <div className="wiz-wait"><span className="wiz-count">{count}</span><span>Almost there…</span></div> : <button className="primary wide" onClick={() => setStep('network')}>Setup Satellite1</button>}
-          </div>}
-        {step === 'network' && <div>
-            <h1 className="wiz-h">Choose your WiFi network</h1>
-            <p className="wiz-hint">2.4 GHz networks only - if your WiFi has separate names for 2.4 and 5 GHz, pick the 2.4 GHz one.</p>
-            <ul className="wiz-nets">
-              {WIZ_NETWORKS.map(n => <li key={n.ssid} className={open === n.ssid ? 'open' : ''}>
-                  <button className="wiz-net" onClick={() => {
-              setOpen(open === n.ssid ? null : n.ssid);
-              setPw('');
-              setErr('');
-              setManual(false);
-            }}>
-                    <Bars rssi={n.rssi} /><span className="wiz-ssid">{n.ssid}</span>{n.sec ? <LockIcon /> : null}
-                  </button>
-                  {open === n.ssid && <form className="wiz-form" onSubmit={e => {
-              e.preventDefault();
-              join(n.ssid, !!n.sec);
-            }}>
-                      {n.sec ? <input type="password" aria-label="WiFi password" placeholder="WiFi password" value={pw} onChange={e => setPw(e.target.value)} autoFocus /> : <p className="wiz-hint">This network has no password.</p>}
-                      {err && <p className="error">{err}</p>}
-                      <button className="primary wide" type="submit">Join</button>
-                    </form>}
-                </li>)}
-            </ul>
-            <div className="wiz-row">
-              <button className="text-button" onClick={() => {
-            setManual(!manual);
-            setOpen(null);
-            setPw('');
-            setErr('');
-          }}>Join another network…</button>
-              <button className="text-button">Scan again</button>
-            </div>
-            {manual && <form className="wiz-form" onSubmit={e => {
-          e.preventDefault();
-          join(mSsid, true);
-        }}>
-                <input aria-label="Network name" placeholder="Network name" value={mSsid} onChange={e => setMSsid(e.target.value)} />
-                <input type="password" aria-label="WiFi password" placeholder="WiFi password" value={pw} onChange={e => setPw(e.target.value)} />
-                {err && <p className="error">{err}</p>}
-                <button className="primary wide" type="submit">Join</button>
-              </form>}
-          </div>}
-        {step === 'joining' && <div className="wiz-center">
-            <h1 className="wiz-h">Connecting to {ssid}…</h1>
-            <span className="wiz-pulse lg" />
-            <p className="wiz-p">Please wait while your Satellite1 connects to your network. You'll be redirected to finish setting up.</p>
-            <p className="wiz-hint">If nothing happens after it connects, join your home WiFi and open <code>http://satellite1-a4c2f8.local</code></p>
-            {slow && <div className="wiz-slow"><p>Still trying. If this takes much longer, the password may have been wrong - go back and re-enter it.</p><button className="secondary" onClick={() => setStep('network')}>Back</button></div>}
-          </div>}
-        {step === 'mode' && <div>
-            <h1 className="wiz-h">How will your Satellite1 connect?</h1>
-            <p className="wiz-hint">More ways to connect are on the way.</p>
-            <button className="wiz-mode" disabled><span><b>Nexus AI Basestation</b><small>Connect to your 100% private Nexus AI Basestation</small></span><em className="wiz-badge">Coming soon</em></button>
-            <button className="wiz-mode on" onClick={() => setStep('haconnect')}><span><b>Home Assistant</b><small>Connect to your Home Assistant server</small></span><em className="wiz-badge on">Selected</em></button>
-          </div>}
-        {step === 'haconnect' && <div>
-            <h1 className="wiz-h">Connect to Home Assistant</h1>
-            <p className="wiz-hint wiz-instruction"><span>Connect mode: <b>Home Assistant</b> · </span><button className="text-button wiz-inline" onClick={() => setStep('mode')}>Change</button></p>
-            <p className="wiz-p">{HAC_COPY.map(s => s.b ? <strong key={s.id}>{s.t}</strong> : <span key={s.id}>{s.t}</span>)}</p>
-            <div className="wiz-disc">
-              <div className="wiz-disc-header">
-                <span className="wiz-disc-title">Discovered</span>
-              </div>
-              <div className="wiz-disc-card">
-                <button className="wiz-disc-dots" aria-label="More options">···</button>
-                <img className="wiz-disc-logo" src={ESPHOME_LOGO} alt="ESPHome" />
-                <span className="wiz-disc-name">Satellite1 A4C2F8 (satellite1-a4c2f8)</span>
-                <span className="wiz-disc-int">ESPHome</span>
-                <div className="wiz-disc-actions">
-                  <button className="wiz-disc-ignore">Ignore</button>
-                  <button className="wiz-disc-add">Add</button>
-                </div>
-              </div>
-            </div>
-            <a href="homeassistant://navigate/config/integrations" className="primary wide wiz-btn" onClick={openHA}>Open Home Assistant</a>
-            <button className="secondary wide" onClick={() => setStep('haactions')}>I've added it in Home Assistant</button>
-            <a href="http://homeassistant.local:8123/config/integrations" className="link wiz-center-link" onClick={openHA}>No Home Assistant app? Open it in your browser instead.</a>
-            <div className="wiz-wait"><span className="wiz-pulse" /><span>Waiting for Home Assistant… this page continues on its own once your Satellite1 is added.</span></div>
-          </div>}
-        {step === 'haactions' && <div>
-            <h1 className="wiz-h">One last Home Assistant setting</h1>
-            <p className="wiz-p">This setting lets your Satellite1 speak announcements and route audio through Home Assistant.</p>
-            <ol className="wiz-steps">
-              <li><span className="wiz-step-body"><span>In Home Assistant, open </span><strong>Settings {'\u203A'} Devices &amp; services {'\u203A'} ESPHome</strong><span>.</span></span></li>
-              <li><span className="wiz-step-body"><span>Tap the </span><span className="glyph" aria-label="cog">{'\u2699'}</span><span> cog next to this device — </span><strong>Satellite1 A4C2F8</strong><span>, unless you renamed it.</span></span></li>
-              <li><span className="wiz-step-body"><span>Tick </span><strong>{'\u201C'}Allow the device to perform Home Assistant actions{'\u201D'}</strong><span>, then Submit.</span></span></li>
-            </ol>
-            <a href="homeassistant://navigate/config/integrations/integration/esphome" className="primary wide wiz-btn" onClick={openHA}>Open Home Assistant</a>
-            <div className="wiz-wait"><span className="wiz-pulse" /><span>Waiting for the setting… this page continues on its own once it's allowed.</span></div>
-            <button className="text-button wiz-center-link" onClick={onDone}>Skip for now</button>
-          </div>}
-      </div>
-      <div className="login-dev">satellite1-a4c2f8</div>
-    </section>;
-}
-const Logo = ({
-  cls = 'login-logo'
-}: {
-  cls?: string;
-}) => <svg className={cls} viewBox="0 0 79.375 79.375" fill="none" stroke="currentColor" strokeLinecap="square" aria-hidden="true">
-    <g transform="matrix(1.6754,0,0,1.6754,84.9754,-16.4554)" strokeWidth="1.31">
-      <path d="m -45.44,31.52 11,-10.96 11,10.96 v 16.25 l -5.82,.01" />
-      <path d="m -27.49,20.19 10.94,9.29 v 18.3 l 8.35,.03 V 29.29 l -10.94,-9.66 -1.92,1.73" />
-      <path strokeWidth="1.36" d="m -32.25,47.75 c 0,-7.27 -5.89,-13.42 -13.16,-13.42 h 0 c -.05,0 -.1,0 -.15,.01" />
-      <path strokeWidth="1.36" d="m -36.31,47.73 c .01,-.12 .01,-.12 .01,-.24 0,-5.03 -4.08,-9.11 -9.11,-9.11 l 0,0 c -.05,0 -.1,0 -.15,.01" />
-      <path strokeWidth="1.36" d="m -40.36,47.8 c .01,-.12 .01,-.18 .01,-.31 0,-2.8 -2.27,-5.06 -5.06,-5.06 l 0,0 c -.05,0 -.1,0 -.15,.01" />
-      <path strokeWidth="1.36" d="m -45.41,46.48 a 1.01,1.01 0 0 0 -.15,.01 v 1.38 h 1.09 a 1.01,1.01 0 0 0 .07,-.37 1.01,1.01 0 0 0 -1.01,-1.01 z" />
-    </g>
-  </svg>;

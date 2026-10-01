@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { MSlider } from './MSlider';
+import type { Ctx } from '../ctx';
 const DEVICE = {
   name: 'satellite1-a4c2f8',
   label: 'Living Room Satellite',
@@ -765,10 +766,12 @@ export const SETTINGS_ROUTES = [{
   label: 'Community'
 }];
 export function DiagnosticsTab({
+  ctx,
   onSimulateHaBlock,
   subRoute = 'device-info',
   onSubRouteChange
 }: {
+  ctx: Ctx;
   onSimulateHaBlock?: () => void;
   subRoute?: string;
   onSubRouteChange?: (v: string) => void;

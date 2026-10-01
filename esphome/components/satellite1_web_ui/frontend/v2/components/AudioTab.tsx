@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { MSlider } from './MSlider';
+import type { Ctx } from '../ctx';
 type Row4 = [string, string, number, number];
 const HA_AREAS = [{
   i: 'living_room',
@@ -422,7 +423,11 @@ function AreaDucking() {
       </div>
     </div>;
 }
-export function AudioTab() {
+export function AudioTab({
+  ctx
+}: {
+  ctx: Ctx;
+}) {
   return <section className="control au-tab au-route">
       <span className="eyebrow">AUDIO · ROUTING</span>
       <h1><span>Sound, </span><em>directed.</em></h1>

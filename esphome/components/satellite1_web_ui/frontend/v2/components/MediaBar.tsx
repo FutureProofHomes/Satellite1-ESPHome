@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import type { Ctx } from '../ctx';
 const ART = 'https://storage.googleapis.com/storage.magicpath.ai/component-assets/454802455327313920/454809714925146112/ecc89c59771f06b4c2fa7960733c67a3eb86e4e4fb31599723751ffb6e85f432.png';
 const TRACKS = [{
   id: 't1',
@@ -289,9 +290,11 @@ function SearchDrawer({
   </div>;
 }
 export function MediaBar({
+  ctx,
   playing,
   setPlaying
 }: {
+  ctx: Ctx;
   playing: boolean;
   setPlaying: (v: boolean) => void;
 }) {

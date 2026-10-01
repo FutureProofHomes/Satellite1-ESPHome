@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import { ArrowRight, ChevronDown, Check } from '../icons';
+import type { Ctx } from '../ctx';
 type MarkKind = 'fire' | 'near' | 'room' | 'you';
 interface Mark {
   id: string;
@@ -908,7 +909,11 @@ function WordDrawer({
     </div>
   </div>], document.body);
 }
-export function WakeTab() {
+export function WakeTab({
+  ctx
+}: {
+  ctx: Ctx;
+}) {
   const [slots, setSlots] = useState<Slot[]>(INITIAL_SLOTS);
   const [stopOn, setStopOn] = useState(true);
   const [stopCut, setStopCut] = useState(75);
