@@ -1,39 +1,28 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Dispatch, PointerEvent as RPointerEvent, ReactNode, SetStateAction } from 'react';
 import { createPortal } from 'react-dom';
-import { BASE } from '../../src/lib/device.js';
+import { HINTS, PRESENCE, TEXT } from '../../src/copy.js';
+import { BASE, entity, pathFor, post, RADAR_LIVE_MS, useRadar } from '../../src/lib/device.js';
 import { RadarIcon } from '../icons';
+import { clampShift, direction, distLabel, feetOn, gateArray, gateLabel, inPolygon, labelPoint, nearest, presenceLabel, rangeLabel, realTargets, shapeBody, stepTrails } from '../lib/presence.js';
 import { MSlider } from './MSlider';
 import type { Ctx } from '../ctx';
-const HINTS = {
-  presence: 'Presence is sensed by mmWave radar, not heard — the microphones play no part in it.',
-  distance_unit: 'Display only. The module keeps measuring in centimetres either way.',
-  radar_range: 'Targets beyond this ring are ignored. Zero is the module\u2019s full 6 m reach.',
-  radar_stability: 'How much a reading is smoothed before it counts. Higher holds still rooms steadier.',
-  radar_timeout: 'How long presence holds after the last detection before the room reads clear.',
-  radar_multi: 'Track up to three people at once instead of the strongest target only.',
-  radar_bt: 'The module\u2019s own Bluetooth radio, used by the vendor app. Off is the right answer once this page exists.',
-  radar_zones: 'Zones turn coordinates into rooms: occupancy publishes per zone. The exclusion area silences a fan or curtain.',
-  zone_excl: 'An exclusion area is ignored outright — a fan, a curtain, a pet bed. The zone slots stay free.',
-  gate_move: 'How much movement the radar sees at each distance, live. Drag a notch to set the trigger level for that distance — anything above it counts as a person moving.',
-  gate_still: 'How much tiny motion — like breathing — the radar sees at each distance, live. Drag a notch to set the trigger level — anything above it counts as a person holding still.',
-  gate_max_move: 'The farthest distance that counts for movement. Rows past it dim in the chart above and are ignored.',
-  gate_max_still: 'The farthest distance that counts for stillness. Rows past it dim in the chart above and are ignored.',
-  radar_resolution: 'How finely distance is split into the nine rows above: 0.75m steps reach the whole room, 0.2m steps reach less far but with more detail up close. Changing it changes what each row means, so re-check your levels after.'
-};
-const TEXT = {
-  zi_first: 'Tap the map to place the first corner.',
-  zi_more: 'Keep tapping — a zone needs at least three corners.',
-  zi_selected: 'Drag the corner to move it, or remove it below.',
-  zi_adjust: 'Drag corners to adjust, tap one to select it — or drag the middle to move the whole shape.',
-  zones_set: 'Tap a zone on the map or below to edit it.',
-  zones_none: 'No zones yet — presence publishes for the whole field of view.'
-};
+
+/**
+ * Presence, on satellite1_radar's own JSON API rather than entities: the radar's settings live in
+ * the module's config behind /api/v1/<module>/config, as v1's route reads them. useRadar owns the
+ * probe, the chained live poll (only while this tab is mounted), the optimistic writes, the
+ * LD2410's /apply and the debounced flash save.
+ */
+
 const PLOT_HALF_W = 400;
 const PLOT_DEPTH = 640;
 const FOV_X = Math.sin(60 * Math.PI / 180) * PLOT_DEPTH;
 const FOV_Y = Math.cos(60 * Math.PI / 180) * PLOT_DEPTH;
+/** The handler stores at most this many corners per polygon and refuses the whole POST past it. */
 const MAX_POINTS = 8;
+const TRAIL_LEN = 6;
+const GLIDE = `transform ${RADAR_LIVE_MS}ms linear`;
 const RINGS = [{
   id: 'r200',
   r: 200
@@ -48,6 +37,9 @@ type Pt = {
   x: number;
   y: number;
 };
+type Target = Pt & {
+  i: number;
+};
 type Edit = {
   from: number | 'x' | null;
   which: number | 'x';
@@ -55,38 +47,20 @@ type Edit = {
   sel: number | null;
   hist: Pt[][];
 } | null;
-const polygonPoints = (pts: Pt[]) => pts.map(p => `${p.x},${p.y}`).join(' ');
-const labelPoint = (pts: Pt[]) => ({
-  x: pts.reduce((a, p) => a + p.x, 0) / pts.length,
-  y: pts.reduce((a, p) => a + p.y, 0) / pts.length
-});
-const inPolygon = (p: Pt, poly: Pt[]) => {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const a = poly[i];
-    const b = poly[j];
-    if (a.y > p.y !== b.y > p.y && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
-  }
-  return inside;
+type Radar = ReturnType<typeof useRadar>;
+type Pill = {
+  l: string;
+  v: string;
+  exp?: boolean;
 };
-function useWanderingTarget() {
-  const [t, setT] = useState({
-    x: -40,
-    y: 210
-  });
-  useEffect(() => {
-    let k = 0;
-    const timer = setInterval(() => {
-      k += 0.25;
-      setT({
-        x: Math.round(Math.sin(k / 3.1) * 150 - 30),
-        y: Math.round(250 + Math.sin(k / 4.7) * 110 + Math.cos(k / 2.3) * 30)
-      });
-    }, 250);
-    return () => clearInterval(timer);
-  }, []);
-  return t;
-}
+type ViewProps = {
+  ctx: Ctx;
+  radar: Radar;
+  isFt: boolean;
+  setFt: ((v: boolean) => void) | null;
+};
+const num = (v: unknown) => Number(v) || 0;
+const polygonPoints = (pts: Pt[]) => pts.map(p => `${p.x},${p.y}`).join(' ');
 let _openHintSetter: ((v: boolean) => void) | null = null;
 function HintBtn({
   text
@@ -155,21 +129,49 @@ function HintBtn({
 }
 function Switch({
   on,
-  onChange
+  onChange,
+  label,
+  disabled
 }: {
   on: boolean;
   onChange: (v: boolean) => void;
+  label: string;
+  disabled?: boolean;
 }) {
-  return <button role="switch" aria-checked={on} onClick={() => onChange(!on)} className={`pr-switch${on ? ' on' : ''}`}>
+  return <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)} className={`pr-switch${on ? ' on' : ''}`}>
       <span className="pr-switch-thumb" />
     </button>;
+}
+
+/**
+ * Slider writes, sent only when the value changed. MSlider commits on every pointer-up and key-up,
+ * Tab landing on it included, and each commit here is a config POST (and an /apply on the LD2410).
+ * A previewed field has already been patched locally, so it is compared with its pre-drag value.
+ */
+function useSettings(config: any, write: (patch: any) => unknown, preview: (patch: any) => void) {
+  const before = useRef<Record<string, unknown>>({});
+  return {
+    preview: (k: string, v: unknown) => {
+      if (!(k in before.current)) before.current[k] = config[k];
+      preview({
+        [k]: v
+      });
+    },
+    commit: (k: string, v: unknown) => {
+      const was = k in before.current ? before.current[k] : config[k];
+      delete before.current[k];
+      if (v !== was) write({
+        [k]: v
+      });
+    }
+  };
 }
 function Plot({
   zones,
   exclusion,
   range,
-  target,
-  trail,
+  targets,
+  trails,
   edit,
   setEdit,
   onOpen,
@@ -178,8 +180,8 @@ function Plot({
   zones: Pt[][];
   exclusion: Pt[];
   range: number;
-  target: Pt;
-  trail: Pt[];
+  targets: Target[];
+  trails: Record<number, Pt[]>;
   edit: Edit;
   setEdit: Dispatch<SetStateAction<Edit>>;
   onOpen: (which: number | 'x') => void;
@@ -220,6 +222,7 @@ function Plot({
       if (exclusion.length > 2 && inPolygon(p, exclusion)) onOpen('x');
       return;
     }
+    e.preventDefault();
     preRef.current = edit.points.map(q => ({
       ...q
     }));
@@ -250,12 +253,7 @@ function Plot({
     if (dragRef.current === null || !edit) return;
     const p = toPoint(e);
     if (dragRef.current === 'all') {
-      let dx = p.x - lastRef.current.x;
-      let dy = p.y - lastRef.current.y;
-      const xs = edit.points.map(q => q.x);
-      const ys = edit.points.map(q => q.y);
-      dx = Math.max(-PLOT_HALF_W - Math.min(...xs), Math.min(PLOT_HALF_W - Math.max(...xs), dx));
-      dy = Math.max(-Math.min(...ys), Math.min(PLOT_DEPTH - Math.max(...ys), dy));
+      const [dx, dy] = clampShift(edit.points, p.x - lastRef.current.x, p.y - lastRef.current.y, PLOT_HALF_W, PLOT_DEPTH);
       if (dx === 0 && dy === 0) return;
       movedRef.current = true;
       changedRef.current = true;
@@ -371,129 +369,174 @@ function Plot({
         <circle cx="0" cy="0" r={range} fill="rgba(96,165,250,0.04)" stroke="none" />
         <circle cx="0" cy="0" r={range} fill="none" stroke="#60a5fa" strokeWidth="2" opacity="0.85" />
       </g>}
-      {trail.slice(1).map((p, i) => {
-        const age = i + 1;
-        const opacity = 1 - age / 6.5;
-        const r = Math.max(4, 14 - age * 1.8);
-        return <g key={`tr${age}`} style={{
-          transform: `translate(${p.x}px,${p.y}px)`,
-          transition: 'transform 0.25s linear'
+      {targets.map(t => <g key={`t${t.i}`}>
+        {(trails[t.i] || []).slice(1).map((p, j) => {
+          const age = j + 1;
+          const opacity = 1 - age / 6.5;
+          const r = Math.max(4, 14 - age * 1.8);
+          return <g key={`tr${age}`} style={{
+            transform: `translate(${p.x}px,${p.y}px)`,
+            transition: GLIDE
+          }}>
+            <circle cx="0" cy="0" r={r * 2.2} fill="rgba(96,165,250,0.12)" style={{
+              opacity
+            }} />
+            <circle cx="0" cy="0" r={r} fill="#60a5fa" style={{
+              opacity: opacity * 0.7
+            }} />
+          </g>;
+        })}
+        <g style={{
+          transform: `translate(${t.x}px,${t.y}px)`,
+          transition: GLIDE
         }}>
-          <circle cx="0" cy="0" r={r * 2.2} fill="rgba(96,165,250,0.12)" style={{
-            opacity
+          <circle className="pr-tgt-halo" cx="0" cy="0" r="42" fill="rgba(96,165,250,0.10)" />
+          <circle cx="0" cy="0" r="26" fill="rgba(96,165,250,0.22)" filter="url(#pr-glowf)" />
+          <circle cx="0" cy="0" r="11" fill="#60a5fa" style={{
+            filter: 'drop-shadow(0 0 8px rgba(96,165,250,0.9))'
           }} />
-          <circle cx="0" cy="0" r={r} fill="#60a5fa" style={{
-            opacity: opacity * 0.7
-          }} />
-        </g>;
-      })}
-      <g style={{
-        transform: `translate(${target.x}px,${target.y}px)`,
-        transition: 'transform 0.25s linear'
-      }}>
-        <circle className="pr-tgt-halo" cx="0" cy="0" r="42" fill="rgba(96,165,250,0.10)" />
-        <circle cx="0" cy="0" r="26" fill="rgba(96,165,250,0.22)" filter="url(#pr-glowf)" />
-        <circle cx="0" cy="0" r="11" fill="#60a5fa" style={{
-          filter: 'drop-shadow(0 0 8px rgba(96,165,250,0.9))'
-        }} />
-        <circle cx="-3" cy="-3" r="3.5" fill="rgba(255,255,255,0.7)" />
-      </g>
+          <circle cx="-3" cy="-3" r="3.5" fill="rgba(255,255,255,0.7)" />
+        </g>
+      </g>)}
       {RINGS.map(r => <text key={r.id} className="pr-tick" x="14" y={Math.min(r.r + 26, PLOT_DEPTH - 10)}>
         {isFt ? `${Math.round(r.r / 30.48 * 10) / 10} ft` : `${r.r / 100}m`}
       </text>)}
     </svg>
   </div>;
 }
+
+/** The status row. The Distance pill opens the unit switch, and only when the firmware has one. */
 function StatusPills({
-  target,
+  pills,
   isFt,
-  setIsFt
+  setFt
 }: {
-  target: Pt;
+  pills: Pill[];
   isFt: boolean;
-  setIsFt: (v: boolean) => void;
+  setFt: ((v: boolean) => void) | null;
 }) {
   const [open, setOpen] = useState(false);
-  const d = Math.hypot(target.x, target.y);
-  const ang = Math.atan2(target.x, target.y) * 180 / Math.PI;
-  const dist = isFt ? `${(d / 30.48).toFixed(1)} ft` : `${(d / 100).toFixed(1)} m`;
   return <div className="pr-card">
     <div className="pr-pills">
-      <div className="pr-pill"><span className="pr-pill-v">Zone 1</span><span className="pr-pill-l">Presence</span></div>
-      <div className="pr-pill"><span className="pr-pill-v">1</span><span className="pr-pill-l">People</span></div>
-      <button type="button" className={`pr-pill${open ? ' open' : ''}`} style={{
-        cursor: 'pointer'
+      {pills.map(p => p.exp && setFt ? <button key={p.l} type="button" className={`pr-pill${open ? ' open' : ''}`} style={{
+        cursor: 'pointer',
+        minHeight: 44
       }} aria-expanded={open} onClick={() => setOpen(o => !o)}>
-        <span className="pr-pill-v">{dist}</span><span className="pr-pill-l">Distance ›</span>
-      </button>
-      <div className="pr-pill"><span className="pr-pill-v">{ang < -15 ? 'Left' : ang > 15 ? 'Right' : 'Ahead'}</span><span className="pr-pill-l">Direction</span></div>
+          <span className="pr-pill-v">{p.v}</span><span className="pr-pill-l">{`${p.l} ›`}</span>
+        </button> : <div key={p.l} className="pr-pill"><span className="pr-pill-v">{p.v}</span><span className="pr-pill-l">{p.l}</span></div>)}
     </div>
-    {open && <div className="pr-pill-expand">
+    {open && setFt && <div className="pr-pill-expand">
       <span>Feet</span>
       <HintBtn text={HINTS.distance_unit} />
       <span style={{
         flex: 1
       }} />
-      <Switch on={isFt} onChange={setIsFt} />
+      <Switch on={isFt} onChange={setFt} label="Feet" />
     </div>}
   </div>;
 }
-export function PresenceTab({
-  ctx,
+function CardHead({
+  title
+}: {
+  title: string;
+}) {
+  return <div className="pr-card-head">
+    <span className="pr-card-title">{title}</span>
+    <span className="pr-live-badge" title={`Polling every ${RADAR_LIVE_MS}ms`}>● live</span>
+    <span style={{
+      flex: 1
+    }} />
+    <HintBtn text={HINTS.presence} />
+  </div>;
+}
+
+/** `/api/v1/reboot` restarts the whole device, so this shows only when the module says it needs one. */
+function RestartRow({
+  busy,
+  onRestart
+}: {
+  busy: boolean;
+  onRestart: () => void;
+}) {
+  return <div className="pr-row pr-row-last">
+    <div className="pr-row-label pr-row-stack">
+      <span>Restart to apply</span>
+      <span className="pr-row-sub">Some of these settings only take effect after the device restarts.</span>
+    </div>
+    <button type="button" className="pr-btn" disabled={busy} onClick={onRestart}>Restart device</button>
+  </div>;
+}
+function Heading({
+  model,
+  children
+}: {
+  model?: string;
+  children: ReactNode;
+}) {
+  return <>
+    <span className="eyebrow">{model ? `PRESENCE · ${model}` : 'PRESENCE'}</span>
+    <h1>{children}</h1>
+  </>;
+}
+function Looking() {
+  return <section className="control pr-tab">
+    <Heading>The room, <em>mapped.</em></Heading>
+    <div className="pr-card"><p className="pr-wait" role="status">{'Looking for a radar module\u2026'}</p></div>
+  </section>;
+}
+function NoRadar({
   onGoDevice
 }: {
-  ctx: Ctx;
   onGoDevice?: () => void;
 }) {
-  void onGoDevice;
-  const [radarConnected, setRadarConnected] = useState(false);
-  const [radarModel, setRadarModel] = useState<'LD2450' | 'LD2410'>('LD2450');
-  const target = useWanderingTarget();
-  const [isFt, setIsFt] = useState(false);
-  const [cfg10, setCfg10] = useState<Ld2410Cfg>({
-    timeout: 30,
-    max_move_gate: 6,
-    max_still_gate: 6,
-    bluetooth: false,
-    res02: false,
-    gate_move_thresholds: [50, 50, 40, 30, 20, 15, 15, 15, 15],
-    gate_still_thresholds: [0, 0, 40, 40, 30, 30, 20, 20, 20]
-  });
-  const live10 = useLd2410Live(cfg10.res02 ? 20 : 75);
-  const [zones, setZones] = useState<Pt[][]>([[{
-    x: -260,
-    y: 90
-  }, {
-    x: 40,
-    y: 90
-  }, {
-    x: 40,
-    y: 330
-  }, {
-    x: -260,
-    y: 330
-  }], [], []]);
-  const [exclusion, setExclusion] = useState<Pt[]>([]);
+  return <section className="control pr-tab">
+    <Heading>The room, <em>mapped.</em></Heading>
+    <div className="pr-card pr-empty">
+      <RadarIcon size={40} className="pr-empty-icon" aria-hidden="true" />
+      <h2 className="pr-empty-title">No Radar Detected</h2>
+      <p className="pr-empty-body">
+        <span>{TEXT.no_sensor_lead}</span>
+        <a href={TEXT.no_sensor_docs_url} target="_blank" rel="noreferrer">{TEXT.no_sensor_docs}</a>
+        <span>{TEXT.no_sensor_mid}</span>
+        <a href={TEXT.no_sensor_buy_url} target="_blank" rel="noreferrer">{TEXT.no_sensor_buy}</a>
+        <span>.</span>
+      </p>
+      <img className="pr-promo" src={`${BASE}/ui/no-sensor.webp`} alt="Satellite1 with hidden mmWave radar sensor" />
+      {onGoDevice && <button type="button" className="pr-btn" style={{
+        width: '100%',
+        maxWidth: 280,
+        minHeight: 44,
+        background: 'transparent'
+      }} onClick={onGoDevice}>Device settings</button>}
+    </div>
+  </section>;
+}
+function LD2450View({
+  ctx,
+  radar,
+  isFt,
+  setFt
+}: ViewProps) {
+  const {
+    radarConfig: config,
+    radarLive,
+    radarBusy: busy,
+    radarWrite: write,
+    radarPreview,
+    radarReboot
+  } = radar;
   const [edit, setEdit] = useState<Edit>(null);
-  const [cfg, setCfg] = useState({
-    detection_range: 450,
-    stability: 3,
-    timeout: 30,
-    multi_target: true,
-    bluetooth: false
-  });
-  const [preview, setPreview] = useState<number | null>(null);
-  const [trail, setTrail] = useState<Pt[]>([]);
-  useEffect(() => {
-    setTrail(prev => {
-      if (prev[0]?.x === target.x && prev[0]?.y === target.y) return prev;
-      return [target, ...prev].slice(0, 6);
-    });
-  }, [target.x, target.y]);
+  const settings = useSettings(config, write, radarPreview);
+  const trailsRef = useRef<Record<number, Pt[]>>({});
+  const targets: Target[] = realTargets(radarLive);
+  trailsRef.current = stepTrails(trailsRef.current, targets, TRAIL_LEN);
+  const near = nearest(targets);
+  const zones: Pt[][] = config.zones || [];
+  const exclusion: Pt[] = config.exclusion || [];
   const defined = [0, 1, 2].filter(i => (zones[i] || []).length > 2);
   const hasExcl = exclusion.length > 2;
   const firstFree = [0, 1, 2].find(i => (zones[i] || []).length < 3);
-  const isExcl = edit && edit.which === 'x';
+  const isExcl = !!edit && edit.which === 'x';
   const zoneSlot = edit && typeof edit.from === 'number' ? edit.from : firstFree;
   const savable = edit && (edit.points.length === 0 || edit.points.length >= 3);
   const zoneBtns = defined.map(i => ({
@@ -501,102 +544,52 @@ export function PresenceTab({
     i
   }));
   const openShape = (which: number | 'x') => {
-    const src = which === 'x' ? exclusion : zones[which] || [];
+    const src: Pt[] = which === 'x' ? exclusion : zones[which] || [];
     setEdit({
       from: which,
       which,
       points: src.map(p => ({
-        ...p
+        x: p.x,
+        y: p.y
       })),
       sel: null,
       hist: []
     });
   };
-  const save = () => {
+  const save = async () => {
     if (!edit) return;
-    const zs = zones.map(z => z.map(p => ({
-      ...p
-    })));
-    let ex = exclusion.map(p => ({
-      ...p
-    }));
-    if (edit.from === 'x') ex = [];else if (typeof edit.from === 'number') zs[edit.from] = [];
-    if (edit.which === 'x') ex = edit.points;else zs[edit.which as number] = edit.points;
-    setZones(zs);
-    setExclusion(ex);
+    await write(shapeBody(config, edit.from, edit.which, edit.points));
     setEdit(null);
   };
-  const del = () => {
+  const del = async () => {
     if (!edit || edit.from == null) return;
-    const zs = zones.map(z => z.map(p => ({
-      ...p
-    })));
-    let ex = exclusion.map(p => ({
-      ...p
-    }));
-    if (edit.from === 'x') ex = [];else zs[edit.from] = [];
-    setZones(zs);
-    setExclusion(ex);
+    await write(shapeBody(config, edit.from, edit.from, []));
     setEdit(null);
   };
   const instruction = edit ? edit.points.length === 0 ? TEXT.zi_first : edit.points.length < 3 ? TEXT.zi_more : edit.sel != null ? TEXT.zi_selected : TEXT.zi_adjust : defined.length || hasExcl ? TEXT.zones_set : TEXT.zones_none;
-  if (!radarConnected) return <section className="control pr-tab">
-    <span className="eyebrow">PRESENCE</span>
-    <h1>The room, <em>mapped.</em></h1>
-    <div className="pr-card pr-empty">
-      <RadarIcon size={40} className="pr-empty-icon" aria-hidden="true" />
-      <h2 className="pr-empty-title">No Radar Detected</h2>
-      <p className="pr-empty-body">
-        <span>A presence sensor was not detected in your Sat1.{' '}</span>
-        <a href="https://docs.futureproofhomes.net/satellite1-presence-sensors/#connecting-mmwave-sensors" target="_blank" rel="noreferrer">Read our docs to learn more</a>
-        <span>, or purchase a presence sensor{' '}</span>
-        <a href="https://futureproofhomes.net/products/ld2450-mmwave-human-presence-sensor" target="_blank" rel="noreferrer">here</a>
-        <span>.</span>
-      </p>
-      <img className="pr-promo" src={`${BASE}/ui/no-sensor.webp`} alt="Satellite1 with hidden mmWave radar sensor" />
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        width: '100%',
-        maxWidth: 280
-      }}>
-        <button type="button" className="pr-btn pr-btn-solid" style={{
-          width: '100%',
-          minHeight: 44
-        }} onClick={() => {
-          setRadarModel('LD2450');
-          setRadarConnected(true);
-        }}>Simulate LD2450</button>
-        <button type="button" className="pr-btn" style={{
-          width: '100%',
-          minHeight: 44,
-          background: 'transparent'
-        }} onClick={() => {
-          setRadarModel('LD2410');
-          setRadarConnected(true);
-        }}>Simulate LD2410</button>
-      </div>
-    </div>
-  </section>;
-  if (radarModel === 'LD2410') return <LD2410View cfg={cfg10} setCfg={setCfg10} live={live10} isFt={isFt} setIsFt={setIsFt} onDisconnect={() => setRadarConnected(false)} />;
+  const pills: Pill[] = [{
+    l: 'Presence',
+    v: presenceLabel(config, ctx.states || {})
+  }, {
+    l: 'People',
+    v: String(targets.length)
+  }, {
+    l: 'Distance',
+    v: near ? distLabel(near.d, isFt) : '\u2014',
+    exp: true
+  }, {
+    l: 'Direction',
+    v: near ? direction(near) : '\u2014'
+  }];
   return <section className="control pr-tab">
-    <span className="eyebrow">PRESENCE · LD2450</span>
-    <h1>The room, <em>mapped.</em></h1>
+    <Heading model="LD2450">The room, <em>mapped.</em></Heading>
 
-    <StatusPills target={target} isFt={isFt} setIsFt={setIsFt} />
+    <StatusPills pills={pills} isFt={isFt} setFt={setFt} />
 
     <div className="pr-card">
-      <div className="pr-card-head">
-        <span className="pr-card-title">LD2450</span>
-        <span className="pr-live-badge">● live</span>
-        <span style={{
-          flex: 1
-        }} />
-        <HintBtn text={HINTS.presence} />
-      </div>
+      <CardHead title="LD2450" />
 
-      <Plot zones={zones} exclusion={exclusion} range={preview ?? cfg.detection_range} target={target} trail={trail} edit={edit} setEdit={setEdit} onOpen={openShape} isFt={isFt} />
+      <Plot zones={zones} exclusion={exclusion} range={num(config.detection_range)} targets={targets} trails={trailsRef.current} edit={edit} setEdit={setEdit} onOpen={openShape} isFt={isFt} />
 
       <p className="pr-instr">{instruction}</p>
 
@@ -611,46 +604,38 @@ export function PresenceTab({
           <span style={{
             flex: 1
           }} />
-          <Switch on={!!isExcl} onChange={v => setEdit(e => e && {
+          <Switch on={isExcl} label="Exclusion zone" disabled={busy || isExcl && zoneSlot === undefined} onChange={v => setEdit(e => e && {
             ...e,
-            which: v ? 'x' : zoneSlot ?? 0
+            which: v ? 'x' : zoneSlot as number
           })} />
         </div>
         <div className="pr-actions">
-          <button className="pr-btn" disabled={!edit || edit.hist.length === 0} onClick={() => setEdit(e => !e || e.hist.length === 0 ? e : {
+          <button type="button" className="pr-btn" disabled={edit.hist.length === 0} onClick={() => setEdit(e => !e || e.hist.length === 0 ? e : {
             ...e,
             points: e.hist[e.hist.length - 1],
             hist: e.hist.slice(0, -1),
             sel: null
           })}>Undo</button>
-          {edit.sel != null && <button className="pr-btn" onClick={() => setEdit(e => e && {
+          {edit.sel != null && <button type="button" className="pr-btn" onClick={() => setEdit(e => e && {
             ...e,
             points: e.points.filter((_, i) => i !== e.sel),
             sel: null,
             hist: [...e.hist, e.points]
           })}>Remove corner</button>}
-          <button className="pr-btn" onClick={() => setEdit(null)}>Cancel</button>
-          <button className="pr-btn pr-btn-solid" disabled={!savable} onClick={save}>Save</button>
-          {edit.from != null && <button className="pr-btn pr-btn-danger" onClick={del}>Delete</button>}
+          <button type="button" className="pr-btn" onClick={() => setEdit(null)}>Cancel</button>
+          <button type="button" className="pr-btn pr-btn-solid" disabled={!savable || busy} onClick={save}>Save</button>
+          {edit.from != null && <button type="button" className="pr-btn pr-btn-danger" disabled={busy} onClick={del}>Delete</button>}
         </div>
       </div> : <div className="pr-actions">
-        {zoneBtns.map(b => <button key={b.id} className="pr-btn" onClick={() => openShape(b.i)}>{`Zone ${b.i + 1}`}</button>)}
-        {hasExcl && <button className="pr-btn" onClick={() => openShape('x')}>Exclusion</button>}
-        {(firstFree !== undefined || !hasExcl) && <button className="pr-btn pr-btn-solid" onClick={() => {
-          if (firstFree !== undefined) setEdit({
-            from: null,
-            which: firstFree,
-            points: [],
-            sel: null,
-            hist: []
-          });else setEdit({
-            from: null,
-            which: 'x',
-            points: [],
-            sel: null,
-            hist: []
-          });
-        }}>Add zone</button>}
+        {zoneBtns.map(b => <button key={b.id} type="button" className="pr-btn" disabled={busy} onClick={() => openShape(b.i)}>{`Zone ${b.i + 1}`}</button>)}
+        {hasExcl && <button type="button" className="pr-btn" disabled={busy} onClick={() => openShape('x')}>Exclusion</button>}
+        {(firstFree !== undefined || !hasExcl) && <button type="button" className="pr-btn pr-btn-solid" disabled={busy} onClick={() => setEdit({
+          from: null,
+          which: firstFree ?? 'x',
+          points: [],
+          sel: null,
+          hist: []
+        })}>Add zone</button>}
         <HintBtn text={HINTS.radar_zones} />
       </div>}
     </div>
@@ -659,106 +644,52 @@ export function PresenceTab({
       <div className="pr-card-head"><span className="pr-card-title">Settings</span></div>
       <div className="pr-row">
         <div className="pr-row-label"><span>Detection range</span><HintBtn text={HINTS.radar_range} /></div>
-        <MSlider value={cfg.detection_range} min={0} max={600} step={10} ariaLabel="Detection range" format={v => v === 0 ? isFt ? '20 ft' : '6 m' : isFt ? `${(v / 30.48).toFixed(1)} ft` : `${v} cm`} onPreview={v => setPreview(v)} onCommit={v => {
-          setPreview(null);
-          setCfg(c => ({
-            ...c,
-            detection_range: v
-          }));
-        }} />
+        <MSlider value={num(config.detection_range)} min={0} max={600} step={10} ariaLabel="Detection range" format={v => rangeLabel(v, isFt)} onPreview={v => settings.preview('detection_range', v)} onCommit={v => settings.commit('detection_range', v)} />
       </div>
       <div className="pr-row">
         <div className="pr-row-label"><span>Stability</span><HintBtn text={HINTS.radar_stability} /></div>
-        <MSlider value={cfg.stability} min={0} max={10} step={1} ariaLabel="Stability" format={v => `${v}`} onPreview={v => setCfg(c => ({
-          ...c,
-          stability: v
-        }))} onCommit={v => setCfg(c => ({
-          ...c,
-          stability: v
-        }))} />
+        <MSlider value={num(config.stability)} min={0} max={10} step={1} ariaLabel="Stability" format={v => `${v}`} onCommit={v => settings.commit('stability', v)} />
       </div>
       <div className="pr-row">
         <div className="pr-row-label"><span>Timeout</span><HintBtn text={HINTS.radar_timeout} /></div>
-        <MSlider value={cfg.timeout} min={0} max={300} step={5} ariaLabel="Timeout" format={v => `${v} s`} onPreview={v => setCfg(c => ({
-          ...c,
-          timeout: v
-        }))} onCommit={v => setCfg(c => ({
-          ...c,
-          timeout: v
-        }))} />
+        <MSlider value={num(config.timeout)} min={0} max={300} step={5} ariaLabel="Timeout" format={v => `${v} s`} onCommit={v => settings.commit('timeout', v)} />
       </div>
       <div className="pr-row">
         <div className="pr-row-label"><span>Multi-target</span><HintBtn text={HINTS.radar_multi} /></div>
-        <Switch on={cfg.multi_target} onChange={v => setCfg(c => ({
-          ...c,
+        <Switch on={!!config.multi_target} label="Multi-target" onChange={v => write({
           multi_target: v
-        }))} />
+        })} />
       </div>
-      <div className="pr-row pr-row-last">
+      <div className={`pr-row${config.reboot_required ? '' : ' pr-row-last'}`}>
         <div className="pr-row-label"><span>Bluetooth</span><HintBtn text={HINTS.radar_bt} /></div>
-        <Switch on={cfg.bluetooth} onChange={v => setCfg(c => ({
-          ...c,
+        <Switch on={!!config.bluetooth} label="Bluetooth" onChange={v => write({
           bluetooth: v
-        }))} />
+        })} />
       </div>
+      {config.reboot_required && <RestartRow busy={busy} onRestart={radarReboot} />}
     </div>
-    <button type="button" className="text-button" style={{
-      alignSelf: 'center'
-    }} onClick={() => setRadarConnected(false)}>Disconnect radar</button>
   </section>;
 }
-type Ld2410Cfg = {
-  timeout: number;
-  max_move_gate: number;
-  max_still_gate: number;
-  bluetooth: boolean;
-  res02: boolean;
-  gate_move_thresholds: number[];
-  gate_still_thresholds: number[];
-};
-type Ld2410Live = {
-  move: number[];
-  still: number[];
-  state: string;
-  dist: number;
-};
 const GATE_ROWS = Array.from({
   length: 9
 }, (_, i) => ({
   id: `g${i}`,
   i
 }));
-function useLd2410Live(resCm: number) {
-  const [live, setLive] = useState<Ld2410Live>({
-    move: Array(9).fill(0) as number[],
-    still: Array(9).fill(0) as number[],
-    state: 'Still',
-    dist: 210
-  });
-  useEffect(() => {
-    let k = 0;
-    const timer = setInterval(() => {
-      k += 0.25;
-      const dist = Math.round(260 + Math.sin(k / 4.7) * 130 + Math.cos(k / 2.3) * 40);
-      const gi = Math.max(0, Math.min(8, Math.floor(dist / resCm)));
-      const moving = Math.sin(k / 3.4) > -0.35;
-      const gates = (peak: number, jitter: number) => Array.from({
-        length: 9
-      }, (_, i) => {
-        const spread = Math.exp(-Math.abs(i - gi) * 1.1);
-        return Math.min(100, Math.round(3 + Math.random() * 6 + (peak + Math.random() * jitter) * spread));
-      });
-      setLive({
-        move: moving ? gates(55, 30) : gates(8, 8),
-        still: moving ? gates(18, 12) : gates(45, 25),
-        state: moving ? 'Moving' : 'Still',
-        dist
-      });
-    }, 250);
-    return () => clearInterval(timer);
-  }, [resCm]);
-  return live;
-}
+const GATE_KEYS: Record<string, number> = {
+  ArrowLeft: -1,
+  ArrowDown: -1,
+  ArrowRight: 1,
+  ArrowUp: 1,
+  PageDown: -10,
+  PageUp: 10
+};
+
+/**
+ * One gate group: each row's bar is the live energy at that distance and its notch the trigger
+ * threshold. A drag or key run edits a local draft; release commits all nine values, the only
+ * shape the endpoint takes. Rows past the furthest gate still show energy but take no input.
+ */
 function GateGroup({
   kind,
   label,
@@ -766,8 +697,9 @@ function GateGroup({
   levels,
   thresholds,
   maxGate,
-  resCm,
+  fine,
   isFt,
+  busy,
   onCommit
 }: {
   kind: 'move' | 'still';
@@ -776,23 +708,34 @@ function GateGroup({
   levels: number[];
   thresholds: number[];
   maxGate: number;
-  resCm: number;
+  fine: boolean;
   isFt: boolean;
+  busy: boolean;
   onCommit: (t: number[]) => void;
 }) {
   const [draft, setDraft] = useState<number[] | null>(null);
   const [drag, setDrag] = useState<number | null>(null);
+  // Release can arrive before the press has re-rendered, so commit reads the draft from here.
+  const draftRef = useRef<number[] | null>(null);
   const vals = draft ?? thresholds;
-  const fmt = (cm: number) => isFt ? `${Math.round(cm / 30.48 * 10) / 10}` : `${Math.round(cm) / 100}`;
   const valAt = (e: RPointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     return Math.round(Math.max(0, Math.min(100, (e.clientX - r.left) / r.width * 100)));
   };
-  const set = (i: number, v: number) => setDraft(d => (d ?? thresholds).map((x, j) => j === i ? v : x));
-  const commit = () => {
-    if (draft) onCommit(draft);
+  const set = (i: number, f: (v: number) => number) => {
+    const next = (draftRef.current ?? thresholds).map((x, j) => j === i ? Math.max(0, Math.min(100, f(x))) : x);
+    draftRef.current = next;
+    setDraft(next);
+  };
+  const drop = () => {
+    draftRef.current = null;
     setDraft(null);
     setDrag(null);
+  };
+  const commit = () => {
+    const d = draftRef.current;
+    if (d && d.some((v, j) => v !== thresholds[j])) onCommit(d);
+    drop();
   };
   return <div className="pr-gates-g">
     <span className="pr-gates-label"><span>{label}</span><HintBtn text={hint} /></span>
@@ -801,23 +744,30 @@ function GateGroup({
       i
     }) => {
       const off = i > maxGate;
+      const band = gateLabel(i, fine, isFt);
       return <div key={id} className={`pr-gate${off ? ' off' : ''}`}>
-        <span className="pr-gate-n">{`${fmt(i * resCm)}–${fmt((i + 1) * resCm)}${isFt ? 'ft' : 'm'}`}</span>
-        <div className="pr-gate-track" role="slider" aria-label={`${label} threshold, row ${i + 1}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={vals[i]} tabIndex={off ? -1 : 0} onPointerDown={e => {
+        <span className="pr-gate-n">{band}</span>
+        <div className="pr-gate-track" role="slider" aria-label={`${label} threshold, ${band}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={vals[i]} aria-disabled={off || busy} tabIndex={off ? -1 : 0} onPointerDown={e => {
+          if (off || busy) return;
           e.currentTarget.setPointerCapture(e.pointerId);
+          const v = valAt(e);
           setDrag(i);
-          set(i, valAt(e));
+          set(i, () => v);
         }} onPointerMove={e => {
-          if (drag === i) set(i, valAt(e));
-        }} onPointerUp={commit} onPointerCancel={commit} onKeyDown={e => {
-          if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+          if (drag !== i) return;
+          const v = valAt(e);
+          set(i, () => v);
+        }} onPointerUp={commit} onPointerCancel={drop} onKeyDown={e => {
+          const by = GATE_KEYS[e.key];
+          if (by === undefined || off || busy) return;
           e.preventDefault();
-          const v = Math.max(0, Math.min(100, vals[i] + (e.key === 'ArrowRight' ? 1 : -1)));
-          onCommit(thresholds.map((x, j) => j === i ? v : x));
+          set(i, x => x + by);
+        }} onKeyUp={e => {
+          if (GATE_KEYS[e.key] !== undefined) commit();
         }}>
           <div className="pr-gate-rail">
             <div className={`pr-gate-fill pr-gate-fill-${kind}`} style={{
-              width: `${levels[i]}%`
+              width: `${Math.min(100, num(levels[i]))}%`
             }} />
           </div>
           {!off && <span className={`pr-gate-notch${drag === i ? ' dragging' : ''}`} style={{
@@ -829,118 +779,92 @@ function GateGroup({
   </div>;
 }
 function LD2410View({
-  cfg,
-  setCfg,
-  live,
+  ctx,
+  radar,
   isFt,
-  setIsFt,
-  onDisconnect
-}: {
-  cfg: Ld2410Cfg;
-  setCfg: Dispatch<SetStateAction<Ld2410Cfg>>;
-  live: Ld2410Live;
-  isFt: boolean;
-  setIsFt: (v: boolean) => void;
-  onDisconnect: () => void;
-}) {
-  const [distOpen, setDistOpen] = useState(false);
-  const resCm = cfg.res02 ? 20 : 75;
-  const dist = isFt ? `${(live.dist / 30.48).toFixed(1)} ft` : `${(live.dist / 100).toFixed(1)} m`;
+  setFt
+}: ViewProps) {
+  const {
+    radarConfig: config,
+    radarLive,
+    radarBusy: busy,
+    radarWrite: write,
+    radarPreview,
+    radarReboot
+  } = radar;
+  const settings = useSettings(config, write, radarPreview);
+  const fine = config.distance_resolution === '0.2m';
+  const states = ctx.states || {};
+  const target = states['text_sensor/Radar Target'];
+  const reading = states['sensor/Radar Detection Distance'] || states['sensor/Radar Moving Distance'];
+  const cm = reading ? Number(reading.value) : NaN;
+  const gates = radarLive && radarLive.gates || {};
+  const pills: Pill[] = [{
+    l: 'Presence',
+    v: target && target.value ? PRESENCE[target.value] || target.value : '\u2014'
+  }, {
+    l: 'Distance',
+    v: Number.isFinite(cm) && cm > 0 ? distLabel(cm, isFt) : '\u2014',
+    exp: true
+  }];
   return <section className="control pr-tab">
-    <span className="eyebrow">PRESENCE · LD2410</span>
-    <h1>The gate, <em>tuned.</em></h1>
+    <Heading model="LD2410">The gate, <em>tuned.</em></Heading>
+    <StatusPills pills={pills} isFt={isFt} setFt={setFt} />
     <div className="pr-card">
-      <div className="pr-pills">
-        <div className="pr-pill"><span className="pr-pill-v">{live.state}</span><span className="pr-pill-l">Presence</span></div>
-        <button type="button" className={`pr-pill${distOpen ? ' open' : ''}`} style={{
-          cursor: 'pointer',
-          minHeight: 44
-        }} aria-expanded={distOpen} onClick={() => setDistOpen(o => !o)}>
-          <span className="pr-pill-v">{dist}</span><span className="pr-pill-l">Distance ›</span>
-        </button>
-      </div>
-      {distOpen && <div className="pr-pill-expand">
-        <span>Feet</span>
-        <HintBtn text={HINTS.distance_unit} />
-        <span style={{
-          flex: 1
-        }} />
-        <Switch on={isFt} onChange={setIsFt} />
-      </div>}
-    </div>
-    <div className="pr-card">
-      <div className="pr-card-head">
-        <span className="pr-card-title">LD2410</span>
-        <span className="pr-live-badge">● live</span>
-        <span style={{
-          flex: 1
-        }} />
-        <HintBtn text={HINTS.presence} />
-      </div>
+      <CardHead title="LD2410" />
       <div className="pr-gates">
-        <GateGroup kind="move" label="Movement" hint={HINTS.gate_move} levels={live.move} thresholds={cfg.gate_move_thresholds} maxGate={cfg.max_move_gate} resCm={resCm} isFt={isFt} onCommit={t => setCfg(c => ({
-          ...c,
+        <GateGroup kind="move" label="Movement" hint={HINTS.gate_move} levels={gates.move || []} thresholds={gateArray(config.gate_move_thresholds)} maxGate={num(config.max_move_gate)} fine={fine} isFt={isFt} busy={busy} onCommit={t => write({
           gate_move_thresholds: t
-        }))} />
-        <GateGroup kind="still" label="Stillness" hint={HINTS.gate_still} levels={live.still} thresholds={cfg.gate_still_thresholds} maxGate={cfg.max_still_gate} resCm={resCm} isFt={isFt} onCommit={t => setCfg(c => ({
-          ...c,
+        })} />
+        <GateGroup kind="still" label="Stillness" hint={HINTS.gate_still} levels={gates.still || []} thresholds={gateArray(config.gate_still_thresholds)} maxGate={num(config.max_still_gate)} fine={fine} isFt={isFt} busy={busy} onCommit={t => write({
           gate_still_thresholds: t
-        }))} />
+        })} />
       </div>
-      <p className="pr-gates-hint">Each row is a band of distance. The bar shows what the radar sees there right now; drag the notch to set where it triggers. Dimmed rows are out of range and ignored. Changes save automatically.</p>
+      <p className="pr-gates-hint">{TEXT.gate_thresholds_help}</p>
     </div>
     <div className="pr-card">
       <div className="pr-card-head"><span className="pr-card-title">Settings</span></div>
       <div className="pr-row">
         <div className="pr-row-label"><span>Timeout</span><HintBtn text={HINTS.radar_timeout} /></div>
-        <MSlider value={cfg.timeout} min={0} max={300} step={5} ariaLabel="Timeout" format={v => `${v} s`} onPreview={v => setCfg(c => ({
-          ...c,
-          timeout: v
-        }))} onCommit={v => setCfg(c => ({
-          ...c,
-          timeout: v
-        }))} />
+        <MSlider value={num(config.timeout)} min={0} max={300} step={5} ariaLabel="Timeout" format={v => `${v} s`} onCommit={v => settings.commit('timeout', v)} />
       </div>
       <div className="pr-row">
         <div className="pr-row-label"><span>Furthest movement gate</span><HintBtn text={HINTS.gate_max_move} /></div>
-        <MSlider value={cfg.max_move_gate} min={0} max={8} step={1} ariaLabel="Furthest movement gate" format={v => `${v}`} onPreview={v => setCfg(c => ({
-          ...c,
-          max_move_gate: v
-        }))} onCommit={v => setCfg(c => ({
-          ...c,
-          max_move_gate: v
-        }))} />
+        <MSlider value={num(config.max_move_gate)} min={0} max={8} step={1} ariaLabel="Furthest movement gate" format={v => `${v}`} onPreview={v => settings.preview('max_move_gate', v)} onCommit={v => settings.commit('max_move_gate', v)} />
       </div>
       <div className="pr-row">
         <div className="pr-row-label"><span>Furthest stillness gate</span><HintBtn text={HINTS.gate_max_still} /></div>
-        <MSlider value={cfg.max_still_gate} min={0} max={8} step={1} ariaLabel="Furthest stillness gate" format={v => `${v}`} onPreview={v => setCfg(c => ({
-          ...c,
-          max_still_gate: v
-        }))} onCommit={v => setCfg(c => ({
-          ...c,
-          max_still_gate: v
-        }))} />
+        <MSlider value={num(config.max_still_gate)} min={0} max={8} step={1} ariaLabel="Furthest stillness gate" format={v => `${v}`} onPreview={v => settings.preview('max_still_gate', v)} onCommit={v => settings.commit('max_still_gate', v)} />
       </div>
       <div className="pr-row">
         <div className="pr-row-label"><span>Distance resolution</span><HintBtn text={HINTS.radar_resolution} /></div>
-        <MSlider value={cfg.res02 ? 0 : 1} min={0} max={1} step={1} ariaLabel="Distance resolution" format={v => v === 0 ? isFt ? '0.7 ft' : '0.2 m' : isFt ? '2.5 ft' : '0.75 m'} onPreview={v => setCfg(c => ({
-          ...c,
-          res02: v === 0
-        }))} onCommit={v => setCfg(c => ({
-          ...c,
-          res02: v === 0
-        }))} />
+        <MSlider value={fine ? 0 : 1} min={0} max={1} step={1} ariaLabel="Distance resolution" format={v => v === 0 ? isFt ? '0.7 ft' : '0.2 m' : isFt ? '2.5 ft' : '0.75 m'} onPreview={v => settings.preview('distance_resolution', v === 0 ? '0.2m' : '0.75m')} onCommit={v => settings.commit('distance_resolution', v === 0 ? '0.2m' : '0.75m')} />
       </div>
-      <div className="pr-row pr-row-last">
+      <div className={`pr-row${config.reboot_required ? '' : ' pr-row-last'}`}>
         <div className="pr-row-label"><span>Bluetooth</span><HintBtn text={HINTS.radar_bt} /></div>
-        <Switch on={cfg.bluetooth} onChange={v => setCfg(c => ({
-          ...c,
+        <Switch on={!!config.bluetooth} label="Bluetooth" onChange={v => write({
           bluetooth: v
-        }))} />
+        })} />
       </div>
+      {config.reboot_required && <RestartRow busy={busy} onRestart={radarReboot} />}
     </div>
-    <button type="button" className="text-button" style={{
-      alignSelf: 'center'
-    }} onClick={onDisconnect}>Disconnect radar</button>
   </section>;
+}
+export function PresenceTab({
+  ctx,
+  onGoDevice
+}: {
+  ctx: Ctx;
+  onGoDevice?: () => void;
+}) {
+  const radar = useRadar(true);
+  const unit = entity(ctx, 'distance_unit_ft');
+  const isFt = feetOn(unit);
+  const setFt = unit ? (v: boolean) => {
+    post(pathFor(ctx, 'distance_unit_ft', v ? 'turn_on' : 'turn_off')).catch(() => {});
+  } : null;
+  if (radar.radarKind === 'none') return <NoRadar onGoDevice={onGoDevice} />;
+  if (!radar.radarKind || !radar.radarConfig) return <Looking />;
+  if (radar.radarKind === 'ld2410') return <LD2410View ctx={ctx} radar={radar} isFt={isFt} setFt={setFt} />;
+  return <LD2450View ctx={ctx} radar={radar} isFt={isFt} setFt={setFt} />;
 }
