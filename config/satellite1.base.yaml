@@ -151,16 +151,36 @@ script:
       - media_player.stop:
           id: external_media_player
           announcement: false
+      # A connecting HTTP source is not active yet, so the first stop cannot
+      # see it. Keep hardware starts gated through the HTTP timeout, then stop
+      # again before granting the flasher direct access.
+      - delay: 5s
+      - media_player.stop:
+          id: external_media_player
+          announcement: true
+      - media_player.stop:
+          id: external_media_player
+          announcement: false
       # Mute line-out without changing the user's persisted mute preference.
       - lambda: id(line_out_dac).set_mute_on();
       - tas2780.deactivate:
       - lambda: id(tas2780_active) = false;
+      # Stop the complete buffered speaker graph, not only its I2S sink.
+      - speaker.stop: announcement_resampling_speaker
+      - speaker.stop: media_resampling_speaker
+      - speaker.stop: announcement_mixing_input
+      - speaker.stop: media_mixing_input
+      - delay: 250ms
       - speaker.stop: i2s_audio_speaker
       - wait_until:
           condition:
             lambda: |-
               return !id(mww).is_running() && !id(va).is_running() &&
                      id(sat1_mics).is_stopped() &&
+                     id(announcement_resampling_speaker).is_stopped() &&
+                     id(media_resampling_speaker).is_stopped() &&
+                     id(announcement_mixing_input).is_stopped() &&
+                     id(media_mixing_input).is_stopped() &&
                      id(i2s_audio_speaker).is_stopped() &&
                      !id(speaker_dac).is_active() && !id(speaker_dac).is_activation_pending() &&
                      id(line_out_dac).is_muted() &&
@@ -172,6 +192,10 @@ script:
             lambda: |-
               return !id(mww).is_running() && !id(va).is_running() &&
                      id(sat1_mics).is_stopped() &&
+                     id(announcement_resampling_speaker).is_stopped() &&
+                     id(media_resampling_speaker).is_stopped() &&
+                     id(announcement_mixing_input).is_stopped() &&
+                     id(media_mixing_input).is_stopped() &&
                      id(i2s_audio_speaker).is_stopped() &&
                      !id(speaker_dac).is_active() && !id(speaker_dac).is_activation_pending() &&
                      id(line_out_dac).is_muted() &&
