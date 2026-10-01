@@ -1,110 +1,127 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { HINTS, PRESENCE, TEXT } from '../../src/copy.js';
+import { entity, pathFor, post, useVoice } from '../../src/lib/device.js';
+import { sparkPoints } from '../../src/lib/sparkhist.js';
+import { sparkPaths } from '../../src/lib/sparkline.js';
 import type { Ctx, Orb } from '../ctx';
-import { ChevronDown, Clock, X } from '../icons';
-import { VoiceOrb } from './VoiceOrb';
+import { ChevronDown, Clock } from '../icons';
+import { clock, isOn, offsetSpec, offsetText, reading, stepOffset, timerLabel, timerLeft, transcriptTabs } from '../lib/orb.js';
+import { useHeld, VoiceOrb } from './VoiceOrb';
+type Sensor = {
+  id: string;
+  key: string;
+  offsetKey: string;
+  label: string;
+  unit: string;
+  digits: number;
+  step: number;
+  min: number;
+  max: number;
+  hint: string;
+};
+/** GET /api/sat1/voice's timer and transcript rows (web_ui_handler.cpp handle_voice_). */
 type Timer = {
   id: string;
-  label: string;
+  name: string;
   total: number;
-  remaining: number;
+  left: number;
+  active: boolean;
 };
-const fmtTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
-const transcript = [{
-  who: 'assistant',
-  text: 'Good evening. The room is calm.'
+type Line = {
+  heard: boolean;
+  at: number;
+  w: string;
+  text: string;
+};
+
+/**
+ * v1's sensor table (routes/controls.jsx). `step` is the display step: the offset stepper's floor
+ * and the sparkline's backfill amplitude. `min`/`max` stand in for a number payload without its range.
+ */
+const SENSORS: Sensor[] = [{
+  id: 'temp',
+  key: 'temp',
+  offsetKey: 'temp_offset',
+  label: 'Temperature',
+  unit: '\u00B0C',
+  digits: 1,
+  step: 0.1,
+  min: -20,
+  max: 20,
+  hint: HINTS.temp
 }, {
-  who: 'user',
-  text: 'Set a timer for ten minutes.'
+  id: 'humidity',
+  key: 'humidity',
+  offsetKey: 'humidity_offset',
+  label: 'Humidity',
+  unit: '%',
+  digits: 0,
+  step: 1,
+  min: -50,
+  max: 50,
+  hint: HINTS.humidity
 }, {
-  who: 'assistant',
-  text: 'Ten minutes, starting now.'
-}, {
-  who: 'assistant',
-  text: 'Anything else?'
-}, {
-  who: 'assistant',
-  text: "Your timer is set. I'll let you know when the ten minutes are up."
-}, {
-  who: 'user',
-  text: 'Also dim the living room lights to 40 percent.'
-}, {
-  who: 'assistant',
-  text: "Done, living room lights are now at 40%. Anything else you'd like me to adjust?"
-}, {
-  who: 'user',
-  text: "That's all for now, thanks."
+  id: 'light',
+  key: 'lux',
+  offsetKey: 'lux_offset',
+  label: 'Light',
+  unit: ' lx',
+  digits: 0,
+  step: 5,
+  min: -500,
+  max: 500,
+  hint: HINTS.lux
 }];
-function walk(seed: number, n: number, base: number, amp: number) {
-  let s = seed;
-  let v = base;
-  const out: number[] = [];
-  for (let i = 0; i < n; i++) {
-    s = s * 1103515245 + 12345 & 0x7fffffff;
-    v += (s / 0x7fffffff - 0.5) * amp;
-    out.push(v);
-  }
-  return out;
-}
-const SPARKS: Record<string, number[]> = {
-  temp: walk(7, 24, 21.4, 0.35),
-  humidity: walk(13, 24, 46, 1.6),
-  lux: walk(29, 24, 180, 28)
-};
-const SPARK_MAP: Record<string, {
-  pts: number[];
+type SparkData = {
+  pts: [number, number][];
+  amp: number;
   seed: string;
-}> = {
-  temp: {
-    pts: SPARKS.temp,
-    seed: 'local:temp'
-  },
-  humidity: {
-    pts: SPARKS.humidity,
-    seed: 'local:humidity'
-  },
-  light: {
-    pts: SPARKS.lux,
-    seed: 'local:lux'
-  }
 };
 function Spark({
   pts,
+  amp,
   seed
-}: {
-  pts: number[];
-  seed: string;
-}) {
-  const lo = Math.min(...pts);
-  const hi = Math.max(...pts);
-  const amp = Math.max(hi - lo, 1e-6);
-  const X = (i: number) => i / (pts.length - 1) * 100;
-  const Y = (v: number) => 88 - (v - lo) / amp * 62;
-  let line = `M ${X(0)} ${Y(pts[0])}`;
-  for (let i = 1; i < pts.length; i++) {
-    const mx = (X(i - 1) + X(i)) / 2;
-    const my = (Y(pts[i - 1]) + Y(pts[i])) / 2;
-    line += ` Q ${X(i - 1)} ${Y(pts[i - 1])} ${mx} ${my}`;
-  }
-  line += ` L ${X(pts.length - 1)} ${Y(pts[pts.length - 1])}`;
-  const fill = `${line} L 100 100 L 0 100 Z`;
+}: SparkData) {
+  const made = sparkPaths(pts, amp, seed);
+  if (!made) return null;
   const gid = `spkg-${seed}`.replace(/[^a-zA-Z0-9-]/g, '-');
-  return <svg className="spark" viewBox="0 0 100 100" preserveAspectRatio="none" pointerEvents="none" aria-hidden="true"><defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--orb-a)" stopOpacity="0.22" /><stop offset="1" stopColor="var(--orb-a)" stopOpacity="0" /></linearGradient></defs><path d={fill} fill={`url(#${gid})`} stroke="none" /><path d={line} fill="none" stroke="var(--orb-a)" strokeOpacity={0.5} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" /></svg>;
+  return <svg className="spark" viewBox="0 0 100 100" preserveAspectRatio="none" pointerEvents="none" aria-hidden="true"><defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--orb-a)" stopOpacity="0.22" /><stop offset="1" stopColor="var(--orb-a)" stopOpacity="0" /></linearGradient></defs><path d={made.fill} fill={`url(#${gid})`} stroke="none" /><path d={made.line} fill="none" stroke="var(--orb-a)" strokeOpacity={0.5} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" /></svg>;
+}
+function DrawerSpark({
+  pts,
+  amp,
+  seed
+}: SparkData) {
+  const made = sparkPaths(pts, amp, seed);
+  if (!made) return null;
+  return <div className="spark"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d={made.line} /></svg></div>;
 }
 function SensorDrawer({
+  label,
   onClose,
   children
 }: {
+  label: string;
   onClose: () => void;
   children: React.ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const dragStartY = useRef<number | null>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     document.body.classList.add('has-drawer');
-    return () => document.body.classList.remove('has-drawer');
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeRef.current();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.body.classList.remove('has-drawer');
+      document.removeEventListener('keydown', onKey);
+    };
   }, []);
-  return createPortal([<div key="scrim" className="scrim sensor-scrim" onClick={onClose} />, <div key="panel" ref={panelRef} className="sheet sensor-sheet" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
+  return createPortal([<div key="scrim" className="scrim sensor-scrim" onClick={onClose} />, <div key="panel" ref={panelRef} className="sheet sensor-sheet" role="dialog" aria-modal="true" aria-label={label} onClick={e => e.stopPropagation()}>
       <div className="handle" style={{
       touchAction: 'none',
       cursor: 'grab'
@@ -151,35 +168,187 @@ function SensorDrawer({
       {children}
     </div>], document.body);
 }
-function Calibration({
-  label,
-  value,
-  unit,
-  close
-}: {
-  label: string;
-  value: string;
-  unit: string;
-  close: () => void;
-}) {
-  return <div className="sensor-drawer-body"><div><span className="eyebrow">CALIBRATION · {label}</span><strong>{value}{unit}</strong></div><div className="spark"><svg viewBox="0 0 180 32" preserveAspectRatio="none"><polyline points="0,22 12,18 24,21 38,11 52,16 68,8 84,14 100,6 116,13 132,9 148,12 164,4 180,8" /></svg></div><div className="cal-actions"><button>−</button><span>offset 0</span><button>+</button><button className="done" onClick={close}>Done</button></div></div>;
+
+/**
+ * The calibration offset: a number entity whose value the sensor's filter adds, so the reading the
+ * sensor publishes is already corrected. Every press writes; the pressed value holds on screen until
+ * the device echoes it, so quick presses step on from each other rather than from a stale value.
+ */
+function useOffset(ctx: Ctx, s: Sensor) {
+  const off = entity(ctx, s.offsetKey);
+  const spec = offsetSpec(off, s);
+  const [offset, hold] = useHeld(Number(off?.value) || 0, spec.step / 2);
+  const bump = (dir: 1 | -1) => {
+    const next = stepOffset(offset, dir, spec.step, spec.min, spec.max);
+    if (next === offset) return;
+    hold(next);
+    post(`${pathFor(ctx, s.offsetKey, 'set')}?value=${next}`);
+  };
+  return {
+    offset,
+    bump,
+    atMin: offset <= spec.min,
+    atMax: offset >= spec.max
+  };
 }
 function TempPopup({
-  offset,
-  setOffset,
-  unit,
-  setUnit,
+  ctx,
+  s,
+  value,
+  spark,
   close
 }: {
-  offset: number;
-  setOffset: (v: number) => void;
-  unit: 'C' | 'F';
-  setUnit: (v: 'C' | 'F') => void;
+  ctx: Ctx;
+  s: Sensor;
+  value: unknown;
+  spark: SparkData;
   close: () => void;
 }) {
-  const c = 21.4 + offset;
-  const shown = unit === 'C' ? `${c.toFixed(1)}°C` : `${(c * 9 / 5 + 32).toFixed(1)}°F`;
-  return <div className="sensor-drawer-body temp-pop" aria-label="Temperature settings"><div><span className="eyebrow">CALIBRATION · Temperature</span><strong>{shown}</strong></div><div className="spark"><svg viewBox="0 0 180 32" preserveAspectRatio="none"><polyline points="0,20 12,19 24,17 38,18 52,14 68,15 84,12 100,13 116,10 132,12 148,9 164,10 180,8" /></svg></div><div className="temp-row"><span>Offset</span><div className="stepper"><button aria-label="Decrease offset" onClick={() => setOffset(Math.max(-5, +(offset - 0.5).toFixed(1)))}>−</button><b>{offset > 0 ? '+' : ''}{offset.toFixed(1)}°</b><button aria-label="Increase offset" onClick={() => setOffset(Math.min(5, +(offset + 0.5).toFixed(1)))}>+</button></div></div><div className="temp-row"><span>Fahrenheit</span><button role="switch" aria-checked={unit === 'F'} aria-label="Use Fahrenheit" className={'switch ' + (unit === 'F' ? 'on' : '')} onClick={() => setUnit(unit === 'C' ? 'F' : 'C')}><i /></button></div><div className="cal-actions"><button className="done" onClick={close}>Done</button></div></div>;
+  const {
+    offset,
+    bump,
+    atMin,
+    atMax
+  } = useOffset(ctx, s);
+  const unitF = entity(ctx, 'temp_unit_f');
+  const isF = isOn(unitF);
+  return <div className="sensor-drawer-body temp-pop" aria-label="Temperature settings"><div><span className="eyebrow">CALIBRATION · Temperature</span><strong>{reading(value, s.digits, s.unit, isF)}</strong></div><p className="muted cal-hint">{s.hint}</p><DrawerSpark {...spark} /><div className="temp-row"><span>Offset</span><div className="stepper"><button aria-label="Decrease offset" disabled={atMin} onClick={() => bump(-1)}>−</button><b>{offsetText(offset, s.digits, '°', isF)}</b><button aria-label="Increase offset" disabled={atMax} onClick={() => bump(1)}>+</button></div></div>{unitF && <div className="temp-row"><span>Fahrenheit</span><button role="switch" aria-checked={isF} aria-label="Use Fahrenheit" title={HINTS.temp_unit} className={'switch ' + (isF ? 'on' : '')} onClick={() => post(pathFor(ctx, 'temp_unit_f', isF ? 'turn_off' : 'turn_on'))}><i /></button></div>}<div className="cal-actions"><button className="done" onClick={close}>Done</button></div></div>;
+}
+function Calibration({
+  ctx,
+  s,
+  value,
+  spark,
+  close
+}: {
+  ctx: Ctx;
+  s: Sensor;
+  value: unknown;
+  spark: SparkData;
+  close: () => void;
+}) {
+  const {
+    offset,
+    bump,
+    atMin,
+    atMax
+  } = useOffset(ctx, s);
+  return <div className="sensor-drawer-body"><div><span className="eyebrow">CALIBRATION · {s.label}</span><strong>{reading(value, s.digits, s.unit)}</strong></div><p className="muted cal-hint">{s.hint}</p><DrawerSpark {...spark} /><div className="cal-actions"><button aria-label="Decrease offset" disabled={atMin} onClick={() => bump(-1)}>−</button><span>offset {offsetText(offset, s.digits, s.unit)}</span><button aria-label="Increase offset" disabled={atMax} onClick={() => bump(1)}>+</button><button className="done" onClick={close}>Done</button></div></div>;
+}
+
+/**
+ * Temperature, humidity and light, each opening its calibration drawer when the build has the
+ * offset entity behind it, and the radar's presence, which leaves for the Presence tab.
+ */
+function SensorPills({
+  ctx
+}: {
+  ctx: Ctx;
+}) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  if (!ctx.device) return <div className="pills">{[0, 1, 2, 3].map(i => <div key={i}><div className="sensor skel" aria-hidden="true" style={{
+        height: "87.29px"
+      }}><strong style={{
+          height: "33.1px"
+        }}>&nbsp;</strong><small style={{
+          paddingTop: "0px"
+        }}>&nbsp;</small><ChevronDown size={10} className="sensor-caret" /></div></div>)}</div>;
+  const isF = isOn(entity(ctx, 'temp_unit_f'));
+  const mac = String(ctx.device.mac || 'local').toLowerCase();
+  // Referenced by id: satellite1_radar registers it at runtime from a C++ literal, so it has no
+  // config id for the entity map to point at.
+  const presence = ctx.states['text_sensor/Radar Target'];
+  const module = entity(ctx, 'radar_module');
+  const close = () => setExpanded(null);
+  return <div className="pills">{SENSORS.map(s => {
+      const sensor = entity(ctx, s.key);
+      if (!sensor) return null;
+      const editable = !!entity(ctx, s.offsetKey);
+      const spark: SparkData = {
+        pts: sparkPoints(s.key),
+        amp: s.step,
+        seed: `${mac}:${s.key}`
+      };
+      const val = reading(sensor.value, 0, s.unit, s.id === 'temp' && isF);
+      const face = <><Spark {...spark} /><strong style={{
+          height: "33.1px"
+        }}>{val}</strong><small style={{
+          paddingTop: "0px"
+        }}>{s.label}</small></>;
+      return <div key={s.id}>{editable ? <button className={'sensor ' + (expanded === s.id ? 'active' : '')} aria-haspopup="dialog" aria-expanded={expanded === s.id} onClick={() => setExpanded(expanded === s.id ? null : s.id)} style={{
+          height: "87.29px"
+        }}>{face}<ChevronDown size={10} className="sensor-caret" aria-hidden="true" /></button> : <div className="sensor" style={{
+          height: "87.29px"
+        }}>{face}</div>}
+        {editable && expanded === s.id && <SensorDrawer label={`${s.label} calibration`} onClose={close}>{s.id === 'temp' ? <TempPopup ctx={ctx} s={s} value={sensor.value} spark={spark} close={close} /> : <Calibration ctx={ctx} s={s} value={sensor.value} spark={spark} close={close} />}</SensorDrawer>}</div>;
+    })}{presence && <div><a className="sensor" href="#/presence" title={[presence.value, module?.value ? `${module.value} settings` : 'Presence'].filter(Boolean).join(' \u2014 ')} onClick={e => {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+        e.preventDefault();
+        ctx.go('PRESENCE');
+      }} style={{
+        textDecoration: 'none'
+      }}><strong>{PRESENCE[presence.value as keyof typeof PRESENCE] || presence.value || '\u2014'}</strong><small>Presence ›</small></a></div>}</div>;
+}
+
+/**
+ * The last few exchanges, oldest at the top, with v1's per-wake-word tabs above them once two words
+ * have spoken. The newest word's tab opens by itself, and a hand-picked tab holds until a newer word
+ * fires. The box follows new lines unless the person has scrolled up to read.
+ */
+function Transcript({
+  lines
+}: {
+  lines: Line[];
+}) {
+  const [pick, setPick] = useState<string | null>(null);
+  const {
+    words,
+    tab,
+    shown
+  } = transcriptTabs(lines, pick);
+  const newest = words[0] || null;
+  const newestRef = useRef(newest);
+  useEffect(() => {
+    if (newest !== newestRef.current) {
+      newestRef.current = newest;
+      setPick(null);
+    }
+  }, [newest]);
+  const box = useRef<HTMLElement>(null);
+  const stuck = useRef(true);
+  const last = shown[shown.length - 1];
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (el && stuck.current) el.scrollTop = el.scrollHeight;
+  }, [shown.length, last?.text, tab]);
+  return <>{words.length > 1 && <div className="tt-tabs" role="tablist" aria-label="Transcript by wake word">{words.map(w => <button key={w} role="tab" aria-selected={w === tab} className={'tt-tab' + (w === tab ? ' on' : '')} onClick={() => setPick(w)}>{`“${w === 'stop' ? 'Stop' : w}”`}</button>)}</div>}<section ref={box} className="transcript transcript-tall" onScroll={e => {
+      const el = e.currentTarget;
+      stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
+    }}>{shown.length ? shown.map((l, i) => <p key={i} className={l.heard ? 'user' : 'assistant'}>{l.text}</p>) : <p className="transcript-empty">{TEXT.nothing_said}</p>}</section></>;
+}
+
+/**
+ * The device's timers, read-only: Home Assistant owns Assist timers and offers no way to cancel one
+ * from here, so they are managed by voice. The poll runs every second while one counts; between
+ * answers the shown time counts down from the last one so seconds never stall or skip.
+ */
+function Timers({
+  timers
+}: {
+  timers: Timer[];
+}) {
+  const polledAt = useMemo(() => Date.now(), [timers]);
+  const [now, setNow] = useState(Date.now);
+  const counting = timers.some(t => t.active);
+  useEffect(() => {
+    if (!counting) return;
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [counting]);
+  return <div className="timer-list">{timers.map(t => {
+      const left = timerLeft(t, polledAt, Math.max(now, polledAt));
+      return <div key={t.id} className={'timer-pill' + (left === 0 ? ' done' : '') + (t.active ? '' : ' paused')} title={HINTS.timers}><Clock size={15} aria-hidden="true" /><span className="timer-pill-label">{timerLabel(t)}{!t.active && <small> · paused</small>}</span><strong className="timer-pill-time">{clock(left)}</strong></div>;
+    })}</div>;
 }
 export function HomeTab({
   ctx,
@@ -190,43 +359,8 @@ export function HomeTab({
   orb: Orb;
   onOrbColor: (from: string, to: string) => void;
 }) {
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [timers, setTimers] = useState<Timer[]>([{
-    id: 't1',
-    label: 'Timer 1',
-    total: 600,
-    remaining: 581
-  }]);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [unit, setUnit] = useState<'C' | 'F'>('C');
-  const [offset, setOffset] = useState(0);
-  const tempC = 21.4 + offset;
-  const tempText = unit === 'C' ? `${Math.round(tempC)}°C` : `${Math.round(tempC * 9 / 5 + 32)}°F`;
-  useEffect(() => {
-    intervalRef.current = setInterval(() => {
-      setTimers(v => v.some(t => t.remaining > 0) ? v.map(t => t.remaining > 0 ? {
-        ...t,
-        remaining: t.remaining - 1
-      } : t) : v);
-    }, 1000);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, []);
-  const removeTimer = (id: string) => setTimers(v => v.filter(t => t.id !== id));
+  const voice = useVoice(true);
   return <section className="now now-compact"><div className="now-left" style={{
       width: '100%'
-    }}><div className="pills">{[['temp', tempText, 'Temperature'], ['humidity', '46%', 'Humidity'], ['light', '182 lx', 'Light'], ['presence', 'Still', 'Presence']].map(([key, val, label]) => <div key={key}>{key === 'presence' ? <a className="sensor" href="#/presence" onClick={e => {
-            e.preventDefault();
-            ctx.go('PRESENCE');
-          }} style={{
-            textDecoration: 'none'
-          }}><strong>{val}</strong><small>{label} ›</small></a> : <button className={'sensor ' + (expanded === key ? 'active' : '')} onClick={() => setExpanded(expanded === key ? null : key)} style={{
-            height: "87.29px"
-          }}>{SPARK_MAP[key] && <Spark pts={SPARK_MAP[key].pts} seed={SPARK_MAP[key].seed} />}<strong style={{
-              height: "33.1px"
-            }}>{val}</strong><small style={{
-              paddingTop: "0px"
-            }}>{label}</small><ChevronDown size={10} className="sensor-caret" aria-hidden="true" /></button>}
-        {expanded === key && (key === 'temp' ? <SensorDrawer onClose={() => setExpanded(null)}><TempPopup offset={offset} setOffset={setOffset} unit={unit} setUnit={setUnit} close={() => setExpanded(null)} /></SensorDrawer> : <SensorDrawer onClose={() => setExpanded(null)}><Calibration label={label} value={val} unit="" close={() => setExpanded(null)} /></SensorDrawer>)}</div>)}</div><VoiceOrb onColorChange={onOrbColor} /></div><div className="now-right"><section className="transcript transcript-tall">{transcript.map((line, i) => <p key={i} className={line.who}>{line.text}</p>)}</section><div className="timer-list">{timers.map(t => <div key={t.id} className={'timer-pill' + (t.remaining === 0 ? ' done' : '')}><Clock size={15} aria-hidden="true" /><span className="timer-pill-label">{t.label}</span><strong className="timer-pill-time">{fmtTime(t.remaining)}</strong><button type="button" className="timer-pill-x" aria-label={`Cancel ${t.label}`} onClick={() => removeTimer(t.id)}><X size={14} /></button></div>)}</div></div></section>;
+    }}><SensorPills ctx={ctx} /><VoiceOrb ctx={ctx} phase={voice?.phase} orb={orb} onOrbColor={onOrbColor} /></div><div className="now-right"><Transcript lines={voice?.transcript || []} /><Timers timers={voice?.timers || []} /></div></section>;
 }

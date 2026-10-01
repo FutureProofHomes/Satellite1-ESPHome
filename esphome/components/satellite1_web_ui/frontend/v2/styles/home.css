@@ -1,0 +1,18 @@
+/* ===== Home: transcript wake-word tabs ===== */
+.tt-tabs{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px;flex-shrink:0}
+.tt-tab{white-space:nowrap;font-size:11px;font-weight:600;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:7px 11px;min-height:36px;transition:color .18s,background .18s,border-color .18s}
+.tt-tab.on{background:var(--orb-a20,rgba(167,139,250,.18));border-color:transparent;color:var(--orb-a,var(--accent2))}
+.transcript p.transcript-empty{margin:auto;max-width:none;text-align:center;color:var(--muted);background:transparent}
+
+/* ===== Home: timers (read-only) ===== */
+.timer-pill{min-height:44px;padding-right:14px}
+.timer-pill-label small{color:var(--muted);font-size:11px}
+.timer-pill.paused .timer-pill-time{color:var(--muted)}
+
+/* ===== Home: sensor pills and calibration ===== */
+.pills .sensor.skel>*{visibility:hidden}
+.pills .sensor.skel{border-color:transparent;background:linear-gradient(90deg,var(--surface) 25%,var(--surface2) 50%,var(--surface) 75%) 0 0/200% 100%;animation:homeSkel 1.4s linear infinite}
+@keyframes homeSkel{to{background-position:-200% 0}}
+.sensor-drawer-body .cal-hint{margin:8px 0 0;line-height:1.45}
+.sensor-drawer-body .spark path{fill:none;stroke:var(--orb-a,var(--accent2));stroke-width:2;vector-effect:non-scaling-stroke}
+.stepper button:disabled,.cal-actions button:disabled{opacity:.4;cursor:default}
