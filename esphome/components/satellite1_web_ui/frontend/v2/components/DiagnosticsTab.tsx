@@ -4,6 +4,7 @@ import { entity, entityPath, pathFor, post, request } from '../../src/lib/device
 import { takeIntent } from '../../src/lib/toast.js';
 import type { Ctx } from '../ctx';
 import { ampMode, gainDbv, ingressYaml, kb, mb, uptime, usbFact } from '../lib/settings.js';
+import { MSlider } from './MSlider';
 import { DxCard, DxConfirm, DxFact, DxFacts, DxRow, DxSelect, DxToggle, useCopied } from './settings/dx';
 import { CrashCard, LogsCard } from './settings/Logs';
 import { AuthTokenCard, ChangePasswordCard } from './settings/Security';
@@ -192,7 +193,8 @@ function useAmp() {
 
 /**
  * The TAS2780's live state and its two user settings. The power gain mode follows the USB-C supply,
- * so it is a reading here, not a picker; the analog gain is shown read-only alongside it.
+ * so it is a reading here, not a picker. The analog gain is the person's to set; its notch is the
+ * factory default (index 8, 15 dBV).
  */
 function SpeakerAmpCard({
   ctx
@@ -217,7 +219,7 @@ function SpeakerAmpCard({
         </DxRow>}
       {amp && <DxRow label="Digital volume" hint={HINTS.amp_dvc}><span className="dx-dim">{amp.muted ? 'Muted' : `${amp.dvc}%`}</span></DxRow>}
       {gain && <DxRow label="Analog gain" hint={HINTS.amp_gain}>
-          <span className="dx-dim">{Number.isFinite(gainV) ? gainDbv(gainV) : '—'}</span>
+          <MSlider value={Number.isFinite(gainV) ? gainV : 0} min={gain.min_value ?? 0} max={gain.max_value ?? 20} step={gain.step ?? 1} snap={8} format={gainDbv} ariaLabel="Analog gain" onCommit={v => post(pathFor(ctx, 'amp_gain', 'set', { value: v }))} />
         </DxRow>}
       {chan && <DxRow label="Channel" hint={HINTS.speaker_channel}>
           <DxSelect value={chan.value} options={chan.option || []} label="Channel" onChange={v => v !== chan.value && post(`${pathFor(ctx, 'speaker_channel', 'set')}?option=${encodeURIComponent(v)}`)} />
