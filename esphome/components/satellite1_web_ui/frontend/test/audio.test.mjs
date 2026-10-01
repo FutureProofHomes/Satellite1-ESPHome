@@ -50,7 +50,7 @@ const loose = [
   ["media_player.cast", "Cast", 1, 1],
 ];
 
-test("Home Assistant states, in v1's order", () => {
+test("Home Assistant states, in precedence order", () => {
   assert.deepEqual(haProblem(null, true), { text: TEXT.ha_pending });
   assert.deepEqual(haProblem({ actions: 2, rung: 1, age: 3, d: {} }, true), { text: TEXT.ha_blocked, fix: true });
   assert.deepEqual(haProblem({ actions: 0, rung: -1, age: -1 }, true), { text: TEXT.ha_blocked, fix: true });

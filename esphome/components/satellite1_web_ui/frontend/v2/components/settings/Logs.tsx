@@ -19,7 +19,8 @@ export type LogIntent = {
   };
 } | null;
 
-/* ESPHome's own console palette, so nobody learns a second scheme; verbose alone stays grey. */
+/* ESPHome's own console palette, so nobody learns a second scheme. Verbose alone stays grey: it is
+   the chatter you filter out, and colouring it would leave nothing dim to compare against. */
 const LVL_CLASS: Record<string, string> = {
   E: 'dx-err',
   C: 'dx-err',
@@ -46,8 +47,10 @@ const partsOf = (l: LogLine) => {
 
 /**
  * The device's own log, live from /events. Registered as the log's reader while mounted, which
- * both lets new lines re-render it and silences the warning toasts for the person already reading.
- * A toast's intent seeds the level and names a line to scroll to and flash.
+ * both lets new lines re-render it and silences the warning toasts for the person already reading;
+ * the ring fills either way, which is what shows the recent past on arrival. A toast's intent seeds
+ * the level, so a warning's tap lands on the warnings rather than the debug firehose that buried
+ * them, and names a line to scroll to and flash.
  */
 export function LogsCard({
   ctx,
@@ -67,6 +70,8 @@ export function LogsCard({
   useEffect(() => logWatch(), []);
   const [level, setLevel] = useState(intent?.level || 'D');
   const [hl, setHl] = useState(intent?.line || null);
+  // An intent arriving while the card already stands: a write-failed toast, or a notification
+  // history row carrying a line. Log toasts cannot, being silenced while this card watches.
   useEffect(() => {
     if (intent?.level) setLevel(intent.level);
     if (intent?.line) setHl(intent.line);
@@ -86,7 +91,9 @@ export function LogsCard({
   }, [pausedRef]);
 
   // The panel scrolls itself rather than scrollIntoView, which would fight the page's own scroll to
-  // the card. A line that has left the ring falls back to the freshest view, unflashed.
+  // the card, and atBottom is parked so the live stream cannot yank the view away mid-flash. A line
+  // that has left the 1000-line ring (or never entered it, arriving while paused) falls back to the
+  // freshest view, unflashed rather than lighting a stranger.
   useEffect(() => {
     if (!hl) return undefined;
     const el = box.current?.querySelector<HTMLElement>('.dx-log-line.hl');
@@ -113,6 +120,8 @@ export function LogsCard({
       </div>
       <div className="dx-log" ref={box} onScroll={e => {
       const el = e.currentTarget;
+      // Slack, because a fractional scrollHeight on a zoomed display never lands exactly on the
+      // bottom, and the panel would stop following.
       atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
     }}>
         {lines.length === 0 && <p className="dx-muted dx-sm">{log.length === 0 ? 'Waiting for the device to say something.' : 'No lines match. Every line is filtered out.'}</p>}
@@ -145,8 +154,10 @@ export function LogsCard({
 
 /**
  * The crash history the firmware kept across reboots: GET /api/sat1/crash, re-read when the state
- * poll's crash count moves and after an erase. The pre-crash log is its own lazy read behind Show.
- * A build without crash_report answers 404, and the card is not drawn.
+ * poll's crash count moves (rarely - a new crash only arrives with a reboot) and after an erase.
+ * The pre-crash log is its own lazy read behind Show: 4KB that most visits never read. A build
+ * without crash_report answers 404, and the card is not drawn. Crash reports in docs/web-ui.md
+ * covers the capture layers and how to decode a dump.
  */
 export function CrashCard({
   ctx,
@@ -158,6 +169,7 @@ export function CrashCard({
   const [data, setData] = useState<any>(null);
   const [tail, setTail] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
+  // One backtrace open at a time: the addresses are for copying, and two walls of hex help nobody.
   const [openBt, setOpenBt] = useState(-1);
   const count = ctx.device?.crash;
   const load = () => requestJson('/api/sat1/crash').then((d: any) => d && setData(d)).catch(() => {});
@@ -170,7 +182,8 @@ export function CrashCard({
     setShowLog(next);
     if (next && tail === null) request('/api/sat1/crash/log').then((r: any) => setTail(r.ok ? r.text : '')).catch(() => setTail(''));
   };
-  // A raw fetch, because request() would decode the binary as text and corrupt it.
+  // A raw fetch, because request() would decode the binary as UTF-8 text and corrupt it; the
+  // session rides fetch's same-origin cookie, or apiUrl's key for a remote device.
   const downloadDump = () => fetch(apiUrl('/api/sat1/crash/dump.bin')).then(r => r.ok ? r.blob() : Promise.reject(new Error(String(r.status)))).then(b => saveBlob(b, `${ctx.device?.name || 'satellite1'}-coredump.bin`)).catch(() => {});
   const records: any[] = data.records || [];
   return <DxCard title={TEXT.crash_title} collapsible defaultOpen={true} forceOpen={reveal} hint={HINTS.crash} id="card-crash">

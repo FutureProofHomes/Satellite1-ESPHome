@@ -11,9 +11,10 @@ import { DxCard, DxConfirm, useCopied } from './dx';
  * The sign-in link and its QR, both carrying the key GET /api/sat1/state hands a signed-in browser.
  * The QR is built on the current IP (scanned live, and phones that cannot resolve mDNS still reach
  * it); the copyable link keeps the .local name, which survives DHCP - unless this browser has
- * proven it cannot resolve .local, where a .local link would be a dead end. "Sign out everywhere"
- * is the revocation: every session, link and QR dies, this browser is re-keyed in place, and the
- * next state poll carries the new key here.
+ * proven it cannot resolve .local, where a .local link would be a dead end. Both are bearer
+ * credentials, and "Sign out everywhere" beside them is what makes offering them defensible: every
+ * session, link and QR dies, this browser is re-keyed in place, and the next state poll carries
+ * the new key here. Ways to sign in, in docs/web-ui.md, has the full reasoning.
  */
 export function AuthTokenCard({
   ctx
@@ -47,8 +48,10 @@ export function AuthTokenCard({
 /**
  * The authenticated password change. The current password is proven with the login's nonce
  * challenge and never crosses the wire; the new one is checked against the firmware's own rule at
- * the moment of commitment, so nothing invalid leaves the browser. A success re-keys this browser
- * and signs out every other session.
+ * the moment of commitment, so a mismatch typed after the dialog opened is still caught and nothing
+ * invalid leaves the browser. A success re-keys this browser in place and kills every other
+ * session, pasted link and QR - the logout_all contract, which is why the submit goes through a
+ * confirm that says so. The Auth Token card picks up the new key on the next state poll.
  */
 function ChangePassword() {
   const [cur, setCur] = useState('');
@@ -105,7 +108,10 @@ function ChangePassword() {
       {err && <p className="dx-err" role="alert">{err}</p>}
     </div>;
 }
-/** Hidden on builds whose password is pinned in YAML, where a change would revert on the next boot. */
+/**
+ * Hidden on pw_fixed builds: a YAML-pinned fleet password is re-imposed on every boot, so a change
+ * would silently revert, and the device refuses one anyway.
+ */
 export function ChangePasswordCard({
   ctx
 }: {

@@ -1,11 +1,12 @@
 /**
- * What the shell hands every tab: the same object src/shell.jsx builds for the v1 routes, from the
- * hooks in src/lib/device.js, plus the router. Hooks only one tab needs (useVoice, useMedia,
- * useWakeSlots, useAssist, useRadar, useMaData) are called by that tab, as in v1, so their polls run
- * only while it is open.
+ * What the shell hands every tab: the results of the session-wide hooks in src/lib/device.js, plus
+ * the router. Those hooks run once per device session in src/components/Satellite1Now.tsx rather
+ * than per tab, so changing tabs never re-asks the device (or, behind it, Home Assistant) for data
+ * that changes hourly at most. Hooks only one tab needs (useVoice, useMedia, useWakeSlots, useAssist,
+ * useRadar, useMaData) are called by that tab, so their polls run only while it is open.
  *
- * Loose on purpose: the payloads are the device's, documented where device.js reads them, and the
- * v1 code that consumes them is plain JS.
+ * Loose on purpose: the payloads are the device's, documented where src/lib/device.js reads them,
+ * and the modules that produce them are plain JS.
  */
 export type Tab = 'NOW' | 'WAKE' | 'PRESENCE' | 'AUDIO' | 'SETTINGS';
 
@@ -29,11 +30,13 @@ export type Ctx = {
   haRefreshing: boolean;
   haRead: () => Promise<void>;
   haStale: boolean;
-  /** GET /api/sat1/sel: the speaker selection Audio edits. */
+  /** GET /api/sat1/sel: the speaker selection Audio edits. Read once per session: re-fetching it on
+   *  every tab change would be a chance for a stale copy to overwrite an edit just made. */
   sel: any;
   selError: string | null;
   selWrite: (next: any) => Promise<any>;
-  /** Opens the Home Assistant actions walk-through. */
+  /** Opens the Home Assistant actions walk-through. On the ctx so any tab's "Show fix" link can open
+   *  it without threading a prop through every card in between. */
   onShowFix: () => void;
   /** The open tab and, on Settings, the open page (a SETTINGS_ROUTES slug). */
   tab: Tab;

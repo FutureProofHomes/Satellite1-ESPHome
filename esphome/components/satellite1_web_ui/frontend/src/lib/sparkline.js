@@ -1,5 +1,5 @@
 /**
- * The maths behind the Home sensor chips' sparklines (ui.jsx's Spark): raw [ts, value] history in,
+ * The maths behind the Home sensor chips' sparklines (HomeTab.tsx): raw [ts, value] history in,
  * two SVG path strings out. Pure and DOM-free on purpose, so the preview tooling and any future
  * test can run the exact production pipeline under plain node.
  *

@@ -9,12 +9,16 @@ import { SearchDrawer } from './media/SearchDrawer';
 import { useArtColor, useMediaModel, useTiers } from './media/model';
 import { I_SPK_BOX, I_VOL, PlayButton, Svg, Vol } from './media/parts';
 
-/** How often a relay-reported pause, alone holding the bar up, is re-asked while nothing is open. */
+/** How often a relay-reported pause, alone holding the bar up, is re-asked while nothing is open:
+ *  roughly one action call a minute, and only while a paused group is showing - the price of a
+ *  queue cleared elsewhere going dark here within a minute rather than never, the same moment Music
+ *  Assistant's own bar goes dark. */
 const MA_PAUSED_RECHECK_MS = 45000;
 
 /**
  * The media bar, its Now Playing sheet, the players panel and search. Hidden until the first
- * /api/sat1/media answer, which never comes on a device with no media player (404).
+ * /api/sat1/media answer, which never comes on a device with no media player (404). What each tier
+ * adds is in docs/web-ui.md, "The media footer and its three tiers".
  */
 export function MediaBar({
   ctx
@@ -27,7 +31,8 @@ export function MediaBar({
   const tiers = useTiers(ctx.ha, ctx.device?.mac, open || panel);
 
   // Neither tier says "paused" for a Sendspin player - the pause stops the stream and the MA player
-  // goes idle - so both read "not playing, but the queue still holds the resume point".
+  // goes idle - so both read "not playing, but the queue still holds the resume point" (wsPausedOf
+  // in src/lib/media.js has the detail).
   const wsPaused = wsPausedOf(tiers.wsOn, tiers.ws.me, tiers.wsOn ? tiers.ws.queue : null);
   const relayPaused = relayPausedOf(tiers.wsOn, tiers.ma, Date.now());
   const model = useMediaModel(wsPaused || relayPaused);
@@ -43,6 +48,9 @@ export function MediaBar({
     if (was === 2 && ssState != null && ssState !== 2) tiers.maAsk();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ssState]);
+  // While a relay-reported pause alone holds the bar up, re-ask slowly so its trust window keeps
+  // being re-earned for as long as the pause is real. The open drawers run useMaData's own faster
+  // cycle and the socket streams updates unasked, so neither needs this.
   useEffect(() => {
     if (!relayPaused || open || panel) return undefined;
     const t = setInterval(() => tiers.maAsk(), MA_PAUSED_RECHECK_MS);
@@ -72,6 +80,9 @@ export function MediaBar({
   const sub = [model.artist, active || announcing ? model.srcText : ''].filter(Boolean).join(' \u00b7 ');
   const gcount = tiers.members.length;
 
+  // The bar is a div with a click because its controls are buttons, and buttons do not nest. The
+  // volume row stops the click on the row rather than the input, so a miss beside the slider does
+  // not open Now Playing mid-drag.
   return <div className="mroot" style={{
     '--tint': tint
   } as CSSProperties}>

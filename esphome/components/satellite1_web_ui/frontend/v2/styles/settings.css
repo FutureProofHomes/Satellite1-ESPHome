@@ -1,6 +1,7 @@
 /* ===== Settings pages ===== */
 
-/* A fact past v1's warning thresholds (heap, loop time, chip temperature). */
+/* A fact past its warning or danger line: the heap, loop-time and chip-temperature thresholds set in
+   DeviceCard, src/components/DiagnosticsTab.tsx. */
 .dx-fact-v.t-warn { color: #fbbf24; }
 .dx-fact-v.t-err { color: #f87171; }
 [data-theme='light'] .dx-fact-v.t-warn { color: #b45309; }
@@ -19,7 +20,8 @@
 /* The page section is the scroll container, so a revealed card only needs breathing room. */
 .dx-tab .dx-card[id] { scroll-margin-top: 12px; }
 
-/* A tapped toast's destination: an outline that breathes twice and rests transparent. */
+/* A tapped toast's destination: an outline that breathes twice and rests transparent - the owner's
+   "gentle fade in and out, not a sticky highlight". */
 @keyframes dxReveal {
   0%, 100% { outline-color: transparent; }
   20%, 40% { outline-color: var(--accent); }

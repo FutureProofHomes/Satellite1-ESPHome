@@ -30,16 +30,16 @@ const OPTS = { mode: "cors", credentials: "omit", cache: "no-store" };
 // { name, origin, key }
 
 /** The same-area rows worth attempting: online Satellite1 models only, minus the tuning device
- *  itself. Both tests are the switcher's own (shell.jsx) - the roster is one picture and the two
- *  features must read it the same way:
+ *  itself. Both tests are the device switcher's own (Satellite1Now.tsx) - the roster is one
+ *  picture and the two features must read it the same way:
  *  - Model: `dev` also carries every other FutureProofHomes device Home Assistant knows - a
  *    Nexus, its Conversation and AI Task devices - and none of those has microphones to mute;
  *    attempting them put "Couldn't mute Nexus Conversation" on the status line (owner's report,
  *    September 23 2026, first hardware test).
  *  - Availability (d[6], the switcher's isUp): an unplugged device cannot answer the wake word,
  *    so listing it as "may answer while you tune" is a false alarm - three powered-off units did
- *    exactly that (owner's report, same night). Skipped silently, like the switcher folds them
- *    behind its Offline disclosure. The trade, accepted by that decision: a peer whose HA
+ *    exactly that (owner's report, same night). Skipped silently, as the switcher marks them
+ *    Offline and lists them last. The trade, accepted by that decision: a peer whose HA
  *    availability lags a reboot by a few seconds is neither muted nor listed for that moment. */
 function sameAreaPeers(ha, selfMac) {
   const rows = ha?.d?.dev;

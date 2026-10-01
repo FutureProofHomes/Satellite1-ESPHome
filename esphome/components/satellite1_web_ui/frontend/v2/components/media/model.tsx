@@ -16,9 +16,12 @@ type Done = (media: any) => boolean;
 type Pending = Record<string, { done: Done; at: number }>;
 
 /**
- * Commands awaiting their echo in the polled payload. The POST answers nothing, so an entry starts
- * on click and settles on the first payload its `done` passes, or at the deadline - which has to
- * fire between payloads too, since a device that stopped answering sends none.
+ * Commands awaiting their echo in the polled payload. Music Assistant's own player rings the acting
+ * button while the server's in-progress flag is up (PlayBtn.vue's `play_action_in_progress`), but
+ * /api/sat1/media carries no such flag and the command POST answers nothing, so the lifecycle is
+ * rebuilt here: an entry starts on click and settles on the first payload its `done` passes, or at
+ * the deadline - which has to fire between payloads too, since idle polls run 5s apart and a device
+ * that stopped answering sends none.
  */
 function usePendingCmds(media: any): [Pending, (key: string, done: Done) => void] {
   const [pending, setPending] = useState<Pending>({});
@@ -41,11 +44,15 @@ function usePendingCmds(media: any): [Pending, (key: string, done: Done) => void
 /**
  * GET /api/sat1/media and what the bar makes of it. `maPaused` is the upper tiers' word that the
  * group is paused; it joins this browser's own `held` pause rather than replacing it, because
- * `held` works with no tier answering and the tiers work across browsers.
+ * `held` works with no tier answering and the tiers work across browsers. It needs no clearing of
+ * its own: it is derived from the tiers' live view, so the group resuming or the queue being
+ * cleared, wherever that happens, is what makes it false.
  */
 export function useMediaModel(maPaused: boolean) {
   const { media, mediaCmd, mediaPoke } = useMedia(true);
   const [held, setHeld] = useState(false);
+  // One pending map for the bar and Now Playing: their play buttons send the same command, so they
+  // must ring together.
   const [pending, startCmd] = usePendingCmds(media);
   // Starting an entry pulls the next poll forward: an idle poll is 5s away, the ring's whole deadline.
   const startPending = (key: string, done: Done) => {
@@ -103,18 +110,22 @@ export function usePlayhead(media: any, playing: boolean) {
 
 /**
  * The two upper tiers. The Music Assistant socket is this browser's own connection to the MA
- * server, open for the life of the page while a connection is configured (one socket at most -
- * it is the MA server's, not the device's). The Home Assistant relay is `disc` (this device's MA
- * player and its join candidates, riding the big payload) plus /api/sat1/ma's live view, polled
- * only while `wake` - something showing it is open - and only when no socket answers instead.
+ * server, open for the life of the page while a connection is configured, because the bar's badge
+ * wants real-time membership too (one socket at most - it is the MA server's, not the device's).
+ * The Home Assistant relay is `disc` (this device's MA player and its join candidates, riding the
+ * big payload) plus /api/sat1/ma's live view, polled only while `wake` - something showing it is
+ * open, since each poll is an action call on the device - and only when no socket answers instead.
+ * useMaData's single mount-time read covers the badge.
  */
 export function useTiers(ha: any, mac: string | undefined, wake: boolean) {
   const [maCfg, setMaCfg] = useState<{ url: string; token: string }>(maSettings.get);
   const ws = useMaSocket(mac, maCfg.url && maCfg.token ? maCfg : null);
   const wsOn = ws.status === 'on' && !!ws.me;
 
-  // A browser with no stored connection seeds itself from the device's copy, once per mount; a
-  // browser that holds its own keeps it.
+  // A browser with no stored connection seeds itself from the device's copy, once per mount - the
+  // app remounts per device, which is the right cadence, since the copy is per device. That is what
+  // lets one setup serve every phone. A browser that holds its own keeps it, so one deliberately
+  // pointed at a different server is not overwritten.
   useEffect(() => {
     if (maCfg.url && maCfg.token) return undefined;
     let live = true;
@@ -142,7 +153,8 @@ export function useTiers(ha: any, mac: string | undefined, wake: boolean) {
     setOptVol({});
   }, [ma, ws.players]);
 
-  // Group edits in flight: a pending join rings its add row, a pending unjoin hides its member row.
+  // Group edits in flight: a pending join rings its add row, a pending unjoin hides its member row -
+  // the instant optimistic hide the owner kept (September 2026) over a lingering ringed row.
   const [pendingGroup, setPendingGroup] = useState<Record<string, { kind: 'join' | 'unjoin'; at: number }>>({});
   const { raw, members, addables } = groupRows({ wsOn, me: ws.me, players: ws.players, live, cands: disc?.c, pending: pendingGroup });
   useEffect(() => {
@@ -150,6 +162,8 @@ export function useTiers(ha: any, mac: string | undefined, wake: boolean) {
     // The payloads are the events; `raw` is derived from exactly them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ma, ws.players]);
+  // The deadline fires without a payload too: a socket that went quiet sends nothing to settle on,
+  // and neither a ring nor a hidden row may outlive a failed edit.
   useEffect(() => {
     const ats = Object.values(pendingGroup).map(e => e.at);
     if (!ats.length) return undefined;
@@ -194,6 +208,8 @@ export function useTiers(ha: any, mac: string | undefined, wake: boolean) {
     wsOn,
     me,
     maCmd,
+    // The raw relay payload rides beside `live` for its `age` and `at`, which decide whether a
+    // "paused" claim is fresh enough to trust (relayPausedOf).
     ma,
     maAsk,
     live,

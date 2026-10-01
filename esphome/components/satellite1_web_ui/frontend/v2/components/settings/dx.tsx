@@ -225,7 +225,10 @@ export function DxToggle({
     </button>;
 }
 
-/** Options are plain strings, or [value, label] pairs where the two differ. */
+/**
+ * Options are plain strings, or [value, label] pairs where the two differ. Drawn rather than a
+ * native <select>, whose popup Safari renders ignoring option styling entirely.
+ */
 export function DxSelect({
   value,
   options,
@@ -298,13 +301,15 @@ export function copyText(text: string) {
     }
     return true;
   } catch {
+    // The text is on screen, so selecting it by hand still works.
     return false;
   }
 }
 
 /**
  * Saves as an in-page Blob rather than a link to the device: Chromium interposes a "may have been
- * tampered with" interstitial on any download delivered over plain HTTP, and a Blob is local.
+ * tampered with" interstitial on any download delivered over plain HTTP, and a Blob is local
+ * (Crash reports in docs/web-ui.md says why nothing else worked).
  */
 export function saveBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);

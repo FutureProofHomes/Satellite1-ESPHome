@@ -1,7 +1,6 @@
 /**
  * The Settings pages' pure logic: wording the device facts, reading log lines, and minting the
- * hass_ingress YAML. Ported from src/routes/diagnostics.jsx, where each piece lived inline in the
- * card that used it; the reasoning behind each rule is recorded there.
+ * hass_ingress YAML.
  */
 import { TEXT } from "../../src/copy.js";
 
@@ -20,9 +19,14 @@ export function uptime(s) {
 }
 
 /**
- * The FUSB302B's contract string ("3.25A (max) @ 20V") as the USB-C Power Supply fact: voltage
- * first because it decides the amplifier's gain mode, the ~ standing for "(max)", and the wattage
- * under it. A string that does not parse shows raw; nothing (a build without the PD sensor) is null.
+ * The FUSB302B's contract string ("3.25A (max) @ 20V") as the USB-C Power Supply fact, in the
+ * owner's format (September 2026): voltage first because it decides the amplifier's gain mode, the
+ * ~ standing for "(max)" - the charger's ceiling, not a live draw - and the wattage under it,
+ * because watts are how people know their chargers. The entity keeps the raw string, which is what
+ * Home Assistant shows and automations may read. A string that does not parse shows raw, so a
+ * future contract format degrades rather than losing the row. The sensor publishes on every
+ * powered outcome, the plain-5V timeout included, so nothing at all (null here) means a build
+ * without the PD sensor, not a 5 V supply.
  */
 export function usbFact(raw) {
   if (raw == null || raw === "") return null;
@@ -35,9 +39,11 @@ export function usbFact(raw) {
 }
 
 /**
- * GET /api/sat1/amp's power mode, worded. `pending` first (the activation window measures the
- * supply, and the reported mode is stale until it ends), then `active` (line out or an XMOS flash
- * shuts the amplifier down). A mode this firmware never picks shows raw.
+ * GET /api/sat1/amp's power mode, worded. `pending` first: during the ~100 ms activation window the
+ * reported mode is still the bootstrap's, and "measuring" is the truth. Then `active`, because line
+ * out or an XMOS flash shuts the amplifier down and the stale mode would lie. The two modes this
+ * firmware selects get names; any other (PWR_MODE 1 or 3) shows raw, so a future firmware that
+ * picks one reaches the screen without an app release.
  */
 export function ampMode(amp) {
   if (!amp) return null;
@@ -48,7 +54,10 @@ export function ampMode(amp) {
   return { v: `PWR_MODE ${amp.mode}`, d: null };
 }
 
-/** The analog gain index (0-20) as the dBV the amplifier applies: 11-21 dBV in half steps. */
+/**
+ * The analog gain index (0-20) as the dBV the amplifier applies: 11-21 dBV in half steps. The index
+ * is what the number entity stores and the slider writes; dBV is only what the readout says.
+ */
 export const gainDbv = (v) => `${(11 + v / 2).toFixed(1)} dBV`;
 
 /* ------------------------------------------------------------------ */
@@ -92,7 +101,11 @@ export function stamp(at) {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
 }
 
-/** What Export saves: the lines on screen, filters and all, each with its arrival time. */
+/**
+ * What Export saves: the lines on screen, filters and all, because the filtered view is the thing
+ * worth sending to someone else. Each carries its arrival time, so a support request's "when did
+ * it happen" gets the same answer the screen gives.
+ */
 export const logExport = (lines) => lines.map((l) => `[${stamp(l.at)}] ${l.text}`).join("\n");
 
 export const logFileName = (date) => `satellite1-${date.toISOString().slice(0, 19).replace(/[:T]/g, "-")}.log`;
@@ -113,9 +126,10 @@ export function crashWhen(r, boot, uptimeNow, now = Date.now()) {
 }
 
 /**
- * Mirrors the firmware's password_acceptable_ so nothing valid here earns a 400 there: 8-31
- * printable ASCII, no quote or backslash, no leading or trailing space. Returns the TEXT key of
- * the first problem, or null.
+ * Mirrors the firmware's password_acceptable_ exactly, so nothing valid here earns a 400 there:
+ * 8-31 printable ASCII, no leading or trailing space, and no quote or backslash, which would
+ * complicate every place the password is embedded (the Home Assistant payload's literal_eval path
+ * among them). Returns the TEXT key of the first problem, or null.
  */
 export function passwordProblem(next, again) {
   if (next.length < 8 || next.length > 31) return "pw_len";
@@ -142,11 +156,25 @@ const macTail = (mac) =>
     .slice(-6);
 
 /**
- * One paste-ready hass_ingress block for the whole fleet: this device as the one visible "Satellite1
- * Fleet" panel, every peer in the Home Assistant roster (`dev` rows: [model, name, area, mac, sw,
- * url, up, pw, net, radar, present, ip]) hidden behind it as a child. Peer keys are this device's
- * hostname base plus the peer's mac suffix - the convention the device switcher's panel links rely
- * on - so a device renamed away from it gets no peers, and a peer with no routable IP is left out.
+ * One paste-ready hass_ingress block for the whole fleet (owner call, September 2026): this device
+ * as the one visible "Satellite1 Fleet" panel, every peer in the Home Assistant roster (`dev` rows:
+ * [model, name, area, mac, sw, url, up, pw, net, radar, present, ip]) hidden behind it as a
+ * `parent:` child, reachable at /<parent>/<child>, where the device switcher's panel links land.
+ * Peer keys are this device's hostname base plus the peer's mac suffix - the name_add_mac_suffix
+ * convention peerRow in src/components/Satellite1Now.tsx derives the same way, so the two ends
+ * cannot drift apart. A device renamed away from it gets no peers, and with no roster at all (HA
+ * down, a solo device) the block is this device's entry alone.
+ *
+ * Proxy mode (work_mode: ingress) rather than an iframe of the device's own origin, which cannot
+ * work: an https HA page may not embed a plain-http device (mixed content), and a cross-site iframe
+ * never gets the device's SameSite=Lax session cookie, so login loops forever. Proxied, the browser
+ * only talks to HA's origin, on local-http and public-https installs alike; the app's side of that
+ * contract is BASE in src/lib/device.js. The per-entry lines: require_admin (parent only - children
+ * are not sidebar panels) because the panel exposes the devices' sign-in pages to every HA user who
+ * can see it; expire_time because hass_ingress's own token defaults to an hour, after which a
+ * standing tab is signed out of the proxy mid-session; the host header because the proxy forwards
+ * the browser's Host, which the pairing endpoints' DNS-rebinding guard rejects (Authentication in
+ * docs/web-ui.md), and push-button sign-in needs a Host this device answers to.
  */
 export function ingressYaml(d, roster) {
   const ownName = String(d.name || "satellite1").toLowerCase();
@@ -172,6 +200,8 @@ export function ingressYaml(d, roster) {
     : [];
   for (const r of rows) {
     const suffix = macTail(r?.[3]);
+    // The routable address: the roster's live IP, else an IP-literal configuration_url. A row with
+    // neither cannot be proxied, so it is left out rather than emitted broken.
     let ip = String(r?.[11] || "");
     if (!IPV4.test(ip)) {
       try {

@@ -13,8 +13,8 @@
  * single-origin device-switching reason notif.js gives, with the same local-bucket migration
  * dance before the first state poll delivers the MAC.
  *
- * Only real samples are ever stored. The synthetic cold-start backfill the chips draw (ui.jsx)
- * is render-side only and never lands here, so stored data stays honest.
+ * Only real samples are ever stored. The synthetic cold-start backfill the chips draw
+ * (HomeTab.tsx) is render-side only and never lands here, so stored data stays honest.
  */
 
 const PREFIX = "sat1.spark.";

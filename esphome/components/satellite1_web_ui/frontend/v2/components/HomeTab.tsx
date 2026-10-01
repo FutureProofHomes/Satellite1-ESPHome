@@ -37,8 +37,9 @@ type Line = {
 };
 
 /**
- * v1's sensor table (routes/controls.jsx). `step` is the display step: the offset stepper's floor
- * and the sparkline's backfill amplitude. `min`/`max` stand in for a number payload without its range.
+ * The Home sensors, each with the number entity that calibrates it. `step` is the display step: the
+ * offset stepper's floor and the sparkline's backfill amplitude. `min`/`max` stand in for a number
+ * payload without its range.
  */
 const SENSORS: Sensor[] = [{
   id: 'temp',
@@ -79,6 +80,17 @@ type SparkData = {
   amp: number;
   seed: string;
 };
+/**
+ * The area chart in a chip's bottom band: decoration under the reading, never a control; the maths
+ * is in src/lib/sparkline.js. One look for all three chips (owner decision, September 2026). The
+ * fill is the line's own colour faded through stop-opacity to transparent rather than a pale tint,
+ * which sat invisible on the light theme's near-white chip and heavy on the dark theme's - one colour
+ * at one low opacity reads the same against both. Both layers stay well under full opacity (user
+ * request, September 2026: "somewhat faded behind the text"), so the reading stays the loudest thing
+ * in the chip. Gradient ids are document-global, hence one per device and sensor; non-scaling-stroke
+ * because preserveAspectRatio="none" would otherwise smear the line into different widths on the
+ * two axes.
+ */
 function Spark({
   pts,
   amp,
@@ -172,8 +184,10 @@ function SensorDrawer({
 
 /**
  * The calibration offset: a number entity whose value the sensor's filter adds, so the reading the
- * sensor publishes is already corrected. Every press writes; the pressed value holds on screen until
- * the device echoes it, so quick presses step on from each other rather than from a stale value.
+ * sensor publishes is already corrected. It is stepped in the entity's native unit (°C for
+ * temperature) whatever the display shows, so what is stored stays a clean multiple of the entity's
+ * step. Every press writes; the pressed value holds on screen until the device echoes it, so quick
+ * presses step on from each other rather than from a stale value.
  */
 function useOffset(ctx: Ctx, s: Sensor) {
   const off = entity(ctx, s.offsetKey);
@@ -211,6 +225,10 @@ function TempPopup({
     atMin,
     atMax
   } = useOffset(ctx, s);
+  // The unit preference is an internal ESPHome switch rather than browser storage, so a wall tablet
+  // and a phone agree. Display-only: the sensor publishes °C and the offset stores °C whatever it
+  // says, so flipping it can never drift the calibration. Absent on older firmware, where no toggle
+  // renders and everything stays °C.
   const unitF = entity(ctx, 'temp_unit_f');
   const isF = isOn(unitF);
   return <div className="sensor-drawer-body temp-pop" aria-label="Temperature settings"><div><span className="eyebrow">CALIBRATION · Temperature</span><strong>{reading(value, s.digits, s.unit, isF)}</strong></div><p className="muted cal-hint">{s.hint}</p><DrawerSpark {...spark} /><div className="temp-row"><span>Offset</span><div className="stepper"><button aria-label="Decrease offset" disabled={atMin} onClick={() => bump(-1)}>−</button><b>{offsetText(offset, s.digits, '°', isF)}</b><button aria-label="Increase offset" disabled={atMax} onClick={() => bump(1)}>+</button></div></div>{unitF && <div className="temp-row"><span>Fahrenheit <HintBtn text={HINTS.temp_unit} /></span><button role="switch" aria-checked={isF} aria-label="Use Fahrenheit" className={'switch ' + (isF ? 'on' : '')} onClick={() => post(pathFor(ctx, 'temp_unit_f', isF ? 'turn_off' : 'turn_on'))}><i /></button></div>}<div className="cal-actions"><button className="done" onClick={close}>Done</button></div></div>;
@@ -247,6 +265,9 @@ function SensorPills({
   ctx: Ctx;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  // The one paint before /api/sat1/state answers: chip-shaped shimmers hold the row's geometry so
+  // the readings land in place. Gated on the device payload, not on the rows - a device with no
+  // sensors at all should show its truthful nothing, not shimmer forever.
   if (!ctx.device) return <div className="pills">{[0, 1, 2, 3].map(i => <div key={i}><div className="sensor skel" aria-hidden="true" style={{
         height: "87.29px"
       }}><strong style={{
@@ -256,10 +277,15 @@ function SensorPills({
         }}>&nbsp;</small><ChevronDown size={10} className="sensor-caret" /></div></div>)}</div>;
   const isF = isOn(entity(ctx, 'temp_unit_f'));
   const mac = String(ctx.device.mac || 'local').toLowerCase();
-  // Referenced by id: satellite1_radar registers it at runtime from a C++ literal, so it has no
+  // Referenced by id: satellite1_radar registers it at runtime from a C++ literal the LD2450 and
+  // LD2410 handlers share, so its name is owned by code rather than anyone's YAML and it has no
   // config id for the entity map to point at.
   const presence = ctx.states['text_sensor/Radar Target'];
   const module = entity(ctx, 'radar_module');
+  // The presence chip is a real link and only a plain left click is routed in-app, so a long-press
+  // or modifier-click still opens a new tab - someone comparing the plot against what they can see
+  // in the room wants both at once. Its title carries the firmware's full wording; the chip shows
+  // the short form.
   const close = () => setExpanded(null);
   return <div className="pills">{SENSORS.map(s => {
       const sensor = entity(ctx, s.key);
@@ -292,9 +318,11 @@ function SensorPills({
 }
 
 /**
- * The last few exchanges, oldest at the top, with v1's per-wake-word tabs above them once two words
- * have spoken. The newest word's tab opens by itself, and a hand-picked tab holds until a newer word
- * fires. The box follows new lines unless the person has scrolled up to read.
+ * The last few exchanges, oldest at the top, so a misheard command is visible without opening the
+ * log - with one tab per wake word above them once two words have spoken (owner request, September
+ * 2026). The newest word's tab opens by itself, and a hand-picked tab holds until a newer word
+ * fires. The empty state sits inside the same box, so it does not change shape the first time
+ * something is said. The box follows new lines unless the person has scrolled up to read.
  */
 function Transcript({
   lines
@@ -329,9 +357,19 @@ function Transcript({
 }
 
 /**
- * The device's timers, read-only: Home Assistant owns Assist timers and offers no way to cancel one
- * from here, so they are managed by voice. The poll runs every second while one counts; between
- * answers the shown time counts down from the last one so seconds never stall or skip.
+ * The device's timers. They live on the device, not in Home Assistant, so they keep counting and
+ * still ring with the connection gone - which is why they are worth showing on a tab that works
+ * offline. Nothing shows when there are none: timers are created by voice, so an empty state would
+ * invite a press that does nothing.
+ *
+ * Read-only by architecture, not by choice. The owner asked for a cancel button, and there is
+ * nowhere to wire one: Home Assistant owns Assist timers, the native API only pushes their events
+ * device-ward, and Home Assistant offers no action that cancels one (conversation.process carries no
+ * device id, and timer intents are device-scoped). Voice is the interface - "cancel the timer" -
+ * which HINTS.timers says. If the protocol ever grows a cancel message, this is where it lands.
+ *
+ * The poll runs every second while one counts; between answers the shown time counts down from the
+ * last one so seconds never stall or skip.
  */
 function Timers({
   timers
@@ -351,6 +389,10 @@ function Timers({
       return <div key={t.id} className={'timer-pill' + (left === 0 ? ' done' : '') + (t.active ? '' : ' paused')} title={HINTS.timers}><Clock size={15} aria-hidden="true" /><span className="timer-pill-label">{timerLabel(t)}{!t.active && <small> · paused</small>}</span><strong className="timer-pill-time">{clock(left)}</strong></div>;
     })}</div>;
 }
+/**
+ * The things a person glances at and adjusts daily, all of which work with Home Assistant switched
+ * off.
+ */
 export function HomeTab({
   ctx,
   orb,

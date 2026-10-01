@@ -271,9 +271,13 @@ function ParticlesOrb({
   }} aria-hidden="true" />;
 }
 /**
- * A just-written value, held over the stale state that follows it until the device's echo comes
- * within `tol` of it or five seconds pass (a refused write, where the stale value is the truth).
- * v1's useHeld (src/ui.jsx), re-rendering on hold so callers need no state of their own.
+ * A just-written value, held over the stale state that follows it. A control writes and then keeps
+ * rendering from the entity or poll behind it, which does not know about the write for up to a poll
+ * interval - so a slider's thumb snapped back to the old value and jumped forward again when the
+ * echo landed (reported from Safari on the phone, September 2026, but present everywhere). The held
+ * value wins until the echo comes within `tol` of it, which absorbs rounding on values that
+ * round-trip through 0-255, or until five seconds pass - the escape for a write the device refused,
+ * where the stale value is the truth. It re-renders on hold so callers need no state of their own.
  */
 export function useHeld(value: number, tol: number): [number, (v: number) => void] {
   const held = useRef<{ v: number; at: number } | null>(null);
@@ -287,7 +291,8 @@ export function useHeld(value: number, tol: number): [number, (v: number) => voi
 
 /**
  * The picker's LED sliders: they follow the drag on screen and write once, on the native change at
- * release. preact/compat turns onChange into input events, so the commit listens for it directly.
+ * release, because a write per input event would queue a request per pixel of drag (MSlider has the
+ * same rule). preact/compat turns onChange into input events, so the commit listens for it directly.
  */
 function LedRange({
   label,
@@ -413,6 +418,8 @@ export function VoiceOrb({
   const view = orbView(phase, ctx.connected, muted);
   const ring = entity(ctx, 'ring');
   const ringColor = ring?.color || { r: 255, g: 255, b: 255 };
+  // Every colour pick posts turn_on with the colour, so picking on a dark ring lights it in that
+  // colour - one gesture instead of toggle-then-pick (owner, September 2026).
   const ringOn = (params: Record<string, number>) => post(`${pathFor(ctx, 'ring', 'turn_on')}?${new URLSearchParams(params as unknown as Record<string, string>)}`);
   const ringRgb = ([r, g, b]: number[]) => ringOn({ r, g, b });
   const pickCustom = (h: number) => {

@@ -1,14 +1,16 @@
 /**
- * The setup wizard's decisions, out of the component so they can be tested. Each one is
- * src/setup.jsx's, which documents the hardware findings behind them.
+ * The setup wizard's decisions, out of the component so they can be tested. The component
+ * (src/components/SetupWizard.tsx) carries the hardware findings behind the launcher and the
+ * redirect; docs/web-ui-copy.md ("The onboarding wizard") walks the whole flow.
  */
 
 /**
  * Whether the page is inside an OS captive-portal sheet rather than a real browser. The iOS/macOS
- * sheet is WebKit without the `Safari/` token every real browser on Apple platforms carries;
- * Android's is a bare WebView or names its CaptivePortalLogin app. A wrong "true" costs one tap on
- * Continue here instead, a wrong "false" strands someone in a sheet that closes mid-flow, so the
- * Apple test leans toward sheet.
+ * sheet is WebKit without the `Safari/` token every real browser on Apple platforms carries (Chrome
+ * and Firefox on iOS carry it too); Android's is a bare WebView (the `; wv)` marker) or names its
+ * CaptivePortalLogin app. A wrong "true" costs one tap on Continue here instead, a wrong "false"
+ * strands someone in a sheet that closes before the flow's ending, so the Apple test leans toward
+ * sheet.
  */
 export function inCaptiveSheet(ua) {
   if (/AppleWebKit/i.test(ua) && !/Safari\//i.test(ua)) return true;
@@ -16,10 +18,14 @@ export function inCaptiveSheet(ua) {
 }
 
 /**
- * Where a fresh load lands. A connected station means the WiFi half is done however it was done,
- * so Home Assistant is next. Otherwise only the captive sheet gets the launcher: `?setup=prime` is
- * the launcher's own reload (straight to its button), and `?setup=go` is its button's link, which a
- * sheet that kept the tap must not loop back from.
+ * Where a fresh load lands, from the device's own facts, so a reload finds the person where they
+ * are: mid-AP, mid-join, or back on the home network mid-wizard. A connected station means the WiFi
+ * half is done however it was done, so Home Assistant is next. Otherwise only the captive sheet
+ * gets the launcher, and a real browser - including one whose join failed or is retrying - gets the
+ * network list. `?setup=prime` is the launcher's own reload (straight to its button), and
+ * `?setup=go` is its button's link, which a sheet that kept the tap must not loop back from: the
+ * network list works in the sheet, and the joining step's fallback address covers that path's
+ * ending.
  */
 export function entryStep(wifi, search, ua) {
   if (wifi?.connected) return { step: "haconnect", launched: false };
@@ -72,8 +78,8 @@ export function probeOrigins(host, ip) {
 
 /**
  * The redirect's trigger: two consecutive answers from the same origin. The phone's hop off the
- * dying AP passes through cellular before the home WiFi settles, and one answer can thread a gap
- * the navigation a beat later cannot.
+ * dying AP passes through cellular, then the home WiFi, then validation, and one answer can thread
+ * a gap the navigation a beat later cannot.
  */
 export function probeStreak(need = 2) {
   const runs = {};
@@ -90,7 +96,9 @@ export const actionsOk = (actions) => actions === 1 || actions === 3;
 /**
  * Where the Home Assistant connect step goes on a setup/status read: nowhere until the device
  * reports onboarding done (it completes itself when the API attaches), then sign-in, or the
- * actions step first while the checkbox is off or not yet probed.
+ * actions step first while the checkbox is off or not yet probed. The fork is an owner request
+ * (September 26 2026): with the box ticked before sign-in, the VoiceTap window sign-in opens by
+ * itself can speak its 4-digit code instead of falling back to the wake-word challenge.
  */
 export function afterAdd(st) {
   if (st?.setup !== 0) return null;

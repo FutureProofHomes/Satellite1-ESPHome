@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+// The real ESPHome mark (owner-supplied PNG, September 25 2026) dresses the Discovered card, a live
+// recreation of Home Assistant's own that wears this device's real name: the person is told to find
+// exactly this card, and an approximation would defeat that.
 import ESPHOME_LOGO from '../../assets/esphome-logo.png';
 import { TEXT } from '../../src/copy.js';
 import { openHomeAssistant } from '../../src/lib/openha.js';
@@ -7,12 +10,21 @@ import { actionsOk, afterAdd, entryStep, joinProblem, joinRead, mergeScan, onHom
 import { Logo, cogStep, useTheme } from './bits';
 
 /**
- * The onboarding wizard a factory-fresh device serves instead of the sign-in screen. The behavior is
- * src/setup.jsx's, which documents why each step works the way it does: the captive-portal sheet
- * gets only the launcher, whose one job is to get the person into their real browser; the browser
- * picks the WiFi and is redirected to the device's home-network address once both are there; and
- * the Home Assistant steps wait for the device to report the add, then the actions checkbox, before
- * handing over to sign-in.
+ * The onboarding wizard a factory-fresh device serves instead of the sign-in screen, mounted while
+ * GET /api/sat1/setup/status says onboarding is pending; the device's session gate keeps the
+ * endpoints it uses sessionless exactly as long as that is true.
+ *
+ * The flow is browser-first (owner design, September 26 2026). The OS captive-portal sheet that pops
+ * when a phone joins the setup AP gets only the launcher, whose one job is to open the person's real
+ * browser at this same address, because the sheet closes itself the moment the device leaves the
+ * setup network and nothing served into it can outlive that. A browser tab survives the hop: it
+ * picks the WiFi and is redirected to the device's home-network address once both are there. The
+ * Home Assistant steps wait there for the add - the device completes onboarding itself when the API
+ * attaches, with no password step (the generated password is published to Home Assistant, and
+ * VoiceTap needs none) - then for the actions checkbox, before handing over to sign-in. Open Home
+ * Assistant tries the companion app and keeps the web address as a visible link, never an automatic
+ * fallback (src/lib/openha.js has the dialog race behind that). docs/web-ui-copy.md ("The onboarding
+ * wizard") walks the whole flow.
  */
 type WizStep = 'boot' | 'launcher' | 'network' | 'joining' | 'mode' | 'haconnect' | 'haactions';
 const WIZ_ORDER: WizStep[] = ['launcher', 'network', 'joining', 'mode', 'haconnect', 'haactions'];
@@ -49,6 +61,7 @@ const BAR_IDX = [{
   id: 'b3',
   i: 3
 }];
+/** Signal strength as 0-4 bars from dBm, on the usual thresholds; advisory either way. */
 const barsOf = (rssi: number) => rssi >= -55 ? 4 : rssi >= -66 ? 3 : rssi >= -77 ? 2 : rssi >= -88 ? 1 : 0;
 const Bars = ({
   rssi
@@ -71,7 +84,8 @@ const LockIcon = () => <svg className="wifi-lock" viewBox="0 0 12 12" fill="none
     <path d="M4 5V3.6a2 2 0 0 1 4 0V5" />
   </svg>;
 
-/** replaceState rather than a push, so the captive sheet's back gesture is not trapped. */
+/** The Home Assistant steps wear their own addresses (owner request), by replaceState rather than a
+ *  push so the captive sheet's back gesture is not trapped. */
 const wearHash = (hash: string) => {
   try {
     history.replaceState(null, '', location.pathname + location.search + hash);
@@ -88,8 +102,12 @@ const launchAndroid = (e: MouseEvent) => {
   location.href = `intent://${location.host}/?setup=go#Intent;scheme=http;action=android.intent.action.VIEW;end`;
 };
 
-/** Typed into a type="text" field that CSS masks: password managers key on type="password", and
- *  their save-this sheets covered the Join button mid-onboarding. */
+/** Typed into a type="text" field that CSS masks, not type="password": a WiFi key is not an account
+ *  credential, and password managers key on the input type - their save-this and strong-password
+ *  sheets pounced mid-onboarding (owner report, September 26 2026: Bitwarden's covered the Join
+ *  button). The vendor data-* attributes tell the major managers to stand down besides. The
+ *  network-name field wears them too, because a name-plus-secret pair is exactly the shape managers
+ *  read as a login form. */
 const NO_MANAGERS = {
   autoComplete: 'off',
   autoCorrect: 'off',
@@ -140,7 +158,8 @@ export function SetupWizard({
   const [notYet, setNotYet] = useState(false);
   // One navigation, however many probes confirm the way is clear.
   const redirected = useRef(false);
-  // The station IP, caught during the brief AP+STA overlap after the join.
+  // The station IP, caught during the brief AP+STA overlap after the join. Android browsers cannot
+  // resolve .local, so the redirect probes this address too.
   const staIp = useRef<string | null>(null);
   const homeOrigin = host ? `http://${host}.local` : '';
 
@@ -155,9 +174,16 @@ export function SetupWizard({
     })();
   }, []);
 
-  // Entering the launcher fresh opens the pass window, then navigates through ?setup=prime: a real
-  // navigation is what makes the sheet re-check connectivity, and replace() keeps the sheet's back
-  // gesture off a page whose only job was to leave.
+  // The way out of the captive sheet. iOS opens other apps' URL schemes from the sheet but never the
+  // browser's own (x-safari-* included; confirmed on hardware September 26 2026 and in Apple's
+  // developer forums), so the launcher rides what production captive portals do (Cisco Spaces
+  // documents it as their iOS flow), in an order proven on hardware the same day. Entering it fresh
+  // opens the pass window (portalPass: the device answers the OS connectivity probes "online"),
+  // then navigates through ?setup=prime - a real navigation is what makes the sheet re-check, and
+  // background fetches do not count. The sheet flips to its connected state (Cancel becomes Done),
+  // from which a tapped absolute link opens in the real browser, possibly underneath the sheet
+  // until Done is tapped. replace() keeps the sheet's back gesture off a page whose only job was to
+  // leave.
   useEffect(() => {
     if (step !== 'launcher' || launched) return;
     (async () => {
@@ -198,8 +224,15 @@ export function SetupWizard({
     return () => clearInterval(t);
   }, [step]);
 
-  // The joining heartbeat, and the redirect that carries the person across the network gap. Probes
-  // fire unawaited, so a hung .local lookup cannot delay the IP probe that answers on Android.
+  // The joining heartbeat, and the redirect that carries the person across the network gap. Two
+  // rules come from hardware (September 26 2026), where a redirect landed on Safari's "not connected
+  // to the internet" page and stranded the person, because the page had already left itself and
+  // nothing could retry: probing arms only once the join is real (joinRead), and the navigation
+  // waits for two consecutive answers from one origin 1.25s apart (probeStreak), so it rides a path
+  // that has settled. Probes fire unawaited, so a hung .local lookup cannot delay the IP probe that
+  // answers on Android. A page whose network vanishes instead (the captive sheet closes with the AP,
+  // and no script can follow) already has the fallback address on screen, which is why there is no
+  // network-gone warning (owner request, September 26 2026).
   useEffect(() => {
     if (step !== 'joining') return;
     const start = Date.now();
@@ -247,8 +280,11 @@ export function SetupWizard({
     return !!next;
   };
 
-  // The connect step records the mode itself, because the chooser is not a step and the device
-  // needs mode=ha to complete onboarding when the API attaches.
+  // The connect step records the mode itself, because the chooser is not a step (owner decision,
+  // September 26 2026: one live option was ceremony, so the mode shows as a stated fact with a
+  // Change link) and the device needs mode=ha to complete onboarding when the API attaches.
+  // Idempotent: a re-record answers ok, and done (already onboarded) means the poll is about to
+  // hand over anyway.
   useEffect(() => {
     if (step !== 'haconnect' || modeSet) return;
     setupMode('ha').then((r: any) => {
@@ -265,8 +301,13 @@ export function SetupWizard({
     }, 2000);
     return () => clearInterval(t);
   }, [step]);
-  // Ticking the checkbox reloads the config entry, the device's probe re-fires, and the verdict
-  // flips within about a second.
+  // The actions step (owner request, September 26 2026): meeting the checkbox after sign-in read as
+  // one more thing past the finish line, and an unticked box is why a first VoiceTap fell back to
+  // the wake-word challenge. Its steps are the post-login blocked card's own through the shared
+  // cogStep; the wizard knows only the firmware name, so step 2 wears the "unless you renamed it"
+  // hedge, and Skip never traps because that card remains the fallback. Ticking the checkbox
+  // reloads the config entry, the device's probe re-fires, and the verdict flips within about a
+  // second.
   useEffect(() => {
     if (step !== 'haactions') return;
     wearHash('#/home-assistant-actions');
@@ -308,6 +349,8 @@ export function SetupWizard({
       setBusy(false);
     }
   };
+  // The Change chooser's pick, and its way back: Home Assistant is the only live card, so choosing
+  // is confirming.
   const chooseHa = async () => {
     setBusy(true);
     setErr('');

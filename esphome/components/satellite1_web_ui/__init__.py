@@ -562,9 +562,9 @@ async def to_code(config):
 
     # The PWA surface: home-screen icons committed as artifacts (like the photo above, so the CI
     # drift check compares reviewed bytes), and a manifest rendered here because it carries the
-    # device's friendly name, which only codegen knows. Colors are the app's dark theme tokens
-    # from frontend/src/app.css - the icons are drawn on the same background, so the home screen,
-    # the splash and the app agree. iOS reads none of this (it wants the apple-touch-icon and the
+    # device's friendly name, which only codegen knows. Colors are the icons' own backdrop, so the
+    # home screen and Chrome's launch splash agree with the icon; the app's dark background
+    # (--bg in frontend/src/app.css) is a shade darker. iOS reads none of this (it wants the apple-touch-icon and the
     # meta tags in index.html); the manifest is for Chrome's add-to-home-screen path.
     manifest = json.dumps(
         {

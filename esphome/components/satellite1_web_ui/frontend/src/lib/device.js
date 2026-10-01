@@ -746,9 +746,10 @@ export function useVoice(enabled) {
  * resulted - the next poll does. A failed post already surfaces through the toast.
  *
  * `mediaPoke` pulls the next poll forward. It exists for the pending rings on the transport
- * controls (media.jsx's usePendingCmds): a play sent from idle rides the 5s cadence, and a ring
- * that spins out most of its deadline waiting for a poll that would have confirmed at once reads
- * as a slow device. One nudged re-poll shortly after the command is queued closes that gap.
+ * controls (the media bar's model, media/model.tsx): a play sent from idle rides the 5s cadence,
+ * and a ring that spins out most of its deadline waiting for a poll that would have confirmed at
+ * once reads as a slow device. One nudged re-poll shortly after the command is queued closes that
+ * gap.
  */
 /** djb2 in base36: not cryptographic, just enough to tell one artwork URL from the next, so the
  *  relay path below changes exactly when the art does and browser caching handles the rest. */

@@ -7,8 +7,14 @@ import { I_MINUS, I_PLUS, I_VOL, Svg, Vol, dragHandle } from './parts';
 /**
  * The group behind the bar's speaker button: each member with its volume and a remove, then the
  * speakers that could join, from whichever tier answers (useTiers). With no tier at all - Home
- * Assistant delivered no Music Assistant player for this device and no direct connection is set
- * up - it says so once the payload has arrived.
+ * Assistant delivered no Music Assistant player for this device (Home Assistant absent, its actions
+ * off, or no Music Assistant) and no direct connection is set up - it says so once the payload has
+ * arrived, and says nothing while it is still loading.
+ *
+ * The whole-group slider shows only while there is a group (owner's request, September 2026): with
+ * one speaker it duplicated that speaker's own row and the bar's slider both, and "Volume" over a
+ * list of speakers read as nobody's in particular. A tapped add row rings and locks until the join
+ * is confirmed, per row, so two quick adds spin independently.
  */
 export function PlayersPanel({
   model,

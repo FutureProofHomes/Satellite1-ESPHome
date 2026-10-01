@@ -98,7 +98,7 @@ export function listNotifs() {
 
 /** What the bell wears: how many notifications still need handling. Pending ones are not counted
  *  (their toast is still on screen and may yet be tapped) and not listed in the drawer either -
- *  the notch is their surface until they settle. */
+ *  the header pill is their surface until they settle. */
 export function notifCount() {
   const cut = Date.now() - DAY_MS;
   return entries.filter((e) => e.state === "active" && e.ts >= cut).length;

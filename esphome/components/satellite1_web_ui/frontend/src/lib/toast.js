@@ -1,7 +1,6 @@
 /**
- * The toast store: the app's out-of-band vocabulary, shown on the notch surface beside the route
- * tab (NotchToasts in shell.jsx renders it; the run to the tab's right was reserved for exactly
- * this - see .rtab in app.css).
+ * The toast store: the app's out-of-band vocabulary, shown as one pill in the header (ToastPill in
+ * Satellite1Now.tsx renders it).
  *
  * Module-scope pub/sub rather than context, for the reason onWriteError in device.js is: the
  * callers live in files the shell imports (device.js most of all), so an import the other way
@@ -10,7 +9,7 @@
  * Two lifetimes, matching what the old bottom surface learned the hard way:
  *
  * - Timed toasts (ttl > 0) are moments - a failed write, a log warning, news. One shows at a
- *   time (the notch is a single row), later ones queue, and errors jump the queue because "it
+ *   time (the header has room for one pill), later ones queue, and errors jump the queue because "it
  *   broke" outranks "it recovered". A toast re-announcing its `key` while one with that key is
  *   already up coalesces into it - the count badge - rather than stacking: a slider dragged
  *   against a dead device fails a dozen writes a second, and a dozen identical toasts is a

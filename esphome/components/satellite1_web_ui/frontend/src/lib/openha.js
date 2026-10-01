@@ -1,9 +1,9 @@
 /**
- * The Open Home Assistant tap, shared by the fix drawer (splash.jsx) and the onboarding wizard
- * (setup.jsx). On phones it opens the companion app through its homeassistant:// scheme - one hop,
- * no interstitial tab, no internet needed, and notably the one kind of link that escapes the iOS
- * captive-portal sheet. Desktops skip the intercept and let the anchor open its real href (the My
- * Home Assistant web redirect) in a new tab.
+ * The Open Home Assistant tap, shared by the Home Assistant verdict screen (HaGate.tsx) and the
+ * onboarding wizard (SetupWizard.tsx). On phones it opens the companion app through its
+ * homeassistant:// scheme - one hop, no interstitial tab, no internet needed, and notably the one
+ * kind of link that escapes the iOS captive-portal sheet. Desktops skip the intercept and let the
+ * anchor open its real href (the My Home Assistant web redirect) in a new tab.
  *
  * Deliberately NO automatic web fallback anymore (owner report, September 26 2026). The old
  * version armed a timer that judged "no app claimed the tap" off the page still being visible -

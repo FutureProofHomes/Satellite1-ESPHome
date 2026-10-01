@@ -4,10 +4,17 @@ import { TEXT } from '../../src/copy.js';
 import { Icon, Logo, useTheme } from './bits';
 
 /**
- * The sign-in screen: VoiceTap first, the password underneath. The behavior is src/login.jsx's -
- * the pairing window opens, the device chooses how it wants to be answered (the button alone while
- * the mics are muted, a spoken code when Home Assistant can announce one, the wake-word challenge
- * when it cannot), and the poll reports progress until the window resolves.
+ * The sign-in screen: the first thing a browser without a session sees, and for most people the last
+ * time they see it for 90 days.
+ *
+ * Two ways in, in the order we would rather they used. VoiceTap opens the pairing window - the ring
+ * breathes, the device may speak, and a press of the action button or the right spoken answer is the
+ * approval; no secret is ever typed. The password underneath is the universal fallback,
+ * challenge-response so the password never crosses the wire (docs/web-ui.md, "Ways to sign in").
+ *
+ * The instructions follow what the poll reports, because the device picks the mode when the window
+ * opens: the button alone while the mics are muted, a spoken code when Home Assistant can announce
+ * one, the wake-word challenge when it cannot.
  */
 type Pair = {
   s: 'pending' | 'busy' | 'expired' | 'denied' | 'error';
@@ -21,6 +28,10 @@ type Pair = {
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.max(0, s) % 60).padStart(2, '0')}`;
 
+/** hw rides the poll: a button-only window forced by the hardware mute slider gets the copy that says
+ *  how to get voice sign-in back. hab rides it too: a voice window that fell back from the spoken
+ *  code because Home Assistant may not perform actions gets the copy that says why, so the wake-word
+ *  challenge reads as a fallback rather than a malfunction. */
 const modeText = (mode?: string, hw?: boolean, hab?: boolean) =>
   mode === 'code' ? TEXT.login_mode_code
   : mode === 'seq' ? (hab ? TEXT.login_mode_seq_hab : TEXT.login_mode_seq)
@@ -48,18 +59,24 @@ export function LoginScreen({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // Read on submit rather than trusting the state: a password manager's autofill followed by an
-  // immediate Enter can outrun the re-render.
+  // immediate Enter can outrun the re-render, and a submit that silently does nothing is
+  // indistinguishable from a broken page.
   const pwRef = useRef<HTMLInputElement>(null);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const live = useRef(true);
   // Which device this is, so a row of identical sign-in pages can be told apart: the friendly name,
-  // else the mDNS name, else the host the browser is already on.
+  // else the mDNS name, else the host the browser is already on. Seeded with the host so the line is
+  // never empty and never jumps from blank to filled; whoami upgrades it in place.
   const [dev, setDev] = useState(location.hostname);
   useEffect(() => {
     whoami().then((who: any) => {
       if (!who) return;
+      // `fn` is absent only on an older firmware body, which cannot happen inside one image but
+      // costs nothing to survive.
       const label = who.fn || (who.name ? `${who.name}.local` : null);
       if (label) setDev(label);
+      // The friendly name beats the hostname in a row of tabs, and the app proper uses the same
+      // name after sign-in.
       document.title = who.fn || who.name;
     });
     return () => {
@@ -103,7 +120,8 @@ export function LoginScreen({
       }
       if (p && p.s === 'pending') {
         setPair({ s: 'pending', mode: p.mode, left: p.left, hw: p.hw, hab: p.hab === 1, seq: p.seq || null, p: p.p || 0 });
-        // Faster while a challenge listens: the chips dimming is the "it heard me" feedback.
+        // Faster while a challenge listens: the chips dimming is the "it heard me" feedback, and
+        // 1.2s behind the utterance reads as "it missed me". Nothing else on screen moves per word.
         pollTimer.current = setTimeout(tick, p.mode === 'seq' ? 500 : 1200);
         return;
       }
@@ -120,16 +138,23 @@ export function LoginScreen({
   const cancelPair = () => {
     clearTimeout(pollTimer.current);
     setPair(null);
-    // The window is this browser's own, so closing it lets the next attempt start straight away.
+    // Tell the device too: the window is this browser's own (the pair cookie proves it), so cancel
+    // stops the breathing ring now and lets the next attempt start straight away, instead of
+    // leaving an abandoned window that refuses the next click as busy for up to a minute.
     pairCancel();
   };
 
-  // The onboarding wizard hands over to this screen with the pairing window already opening.
+  // The onboarding wizard hands over to this screen with the pairing window already opening (owner
+  // request, September 26 2026): the customer returns from tapping Add in Home Assistant to a
+  // breathing ring. Mount-once on purpose: a cancelled window falls back to the ordinary screen.
   useEffect(() => {
     if (autoPair) startPair();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The submit button is disabled only while a sign-in is in flight, never because the field looks
+  // empty: browsers suppress Enter-to-submit when the default button is disabled, and an autofilled
+  // value can be real before the re-render that would enable it.
   const submit = async (e: Event) => {
     e.preventDefault();
     const value = pwRef.current?.value ?? password;

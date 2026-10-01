@@ -1,6 +1,5 @@
 /**
- * The Wake Word tab's pure logic, ported from src/routes/wakewords.jsx (where the hardware history
- * behind each number is told): the Living Graph's marks, the tuner's placement math, the swap
+ * The Wake Word tab's pure logic: the Living Graph's marks, the tuner's placement math, the swap
  * poll's verdict, the Home Assistant pairing write, the picker's list, and the per-slot Finished
  * Speaking Detection rule.
  *
@@ -30,8 +29,10 @@ export const fade = (age) => 0.32 + 0.68 * (1 - Math.min(Math.max(age ?? 0, 0), 
 
 /**
  * A track's 24h `dh` ring ([msAgo, score, kind, id], kind 0 a firing and 1 a close call) as graph
- * marks. The jitter keys on the entry's stable id, never its position, so a dot landing never
- * moves the others; only a firing under 4.5s old ripples.
+ * marks. The ring is persisted on the device, so the record survives reboots. The jitter keys on
+ * the entry's stable id, never its position, so a dot landing never moves the others (owner's
+ * report: index-keyed jitter reshuffled the graph on every firing). Only the newest firing
+ * ripples, and only while under 4.5s old.
  */
 export function rowMarks(track, yBase = 14, ySpan = 28) {
   const out = [];
@@ -50,7 +51,9 @@ export function rowMarks(track, yBase = 14, ySpan = 28) {
   return out;
 }
 
-/** The room's hourly high-water buckets (`day`, newest first) as the tuner's amber smatter. */
+/** The room's hourly high-water buckets (`day`, newest first) as the tuner's amber smatter, age
+ *  driving the fade. No aggregate tick and no label: the room's reach is wherever the smatter
+ *  ends. */
 export function roomMarks(day, yBase, ySpan) {
   const out = [];
   (day || []).forEach((v, k) => {
@@ -71,7 +74,8 @@ export function sessionRoomMarks(seen, yBase, ySpan) {
   }));
 }
 
-/** The session's attempts in fixed lanes: two at the same score must not overlap into one blot. */
+/** The session's attempts in fixed lanes rather than jitter: two attempts at the same score
+ *  overlapped into one unreadable blot (owner's screenshot). */
 export function attemptMarks(attempts, yBase, laneH) {
   return attempts.map((a, k) => ({
     id: `a${k}`,
@@ -85,8 +89,11 @@ const ROUNDS = ["near", "near", "far", "other"];
 
 /**
  * A tune session's event ring ([peak, avg, vad, msAgo, mm]) as scored attempts plus the count the
- * voice gate refused. The score is the peak: the engine resets its window the instant a detection
- * fires, so during a floored session the windowed mean is truncated at the floor.
+ * voice gate refused. The score is the peak single-frame probability, a hardware finding (Dev12,
+ * September 22 2026): the engine resets its probability window the instant a detection fires, so
+ * during a floored session the max windowed mean is truncated at the floor. The peak is the one
+ * number the reset cannot touch; placement()'s margin covers its overestimate of the steady-state
+ * mean.
  */
 export function attemptsOf(ev) {
   const attempts = ev.filter((e) => !e[2]).map((e, k) => ({ score: e[0], round: ROUNDS[k] || "other" }));
@@ -95,7 +102,9 @@ export function attemptsOf(ev) {
 
 /**
  * Into placement: the knob seeds inside the gap between the room and the quietest attempt, so
- * Apply without dragging is a correct answer. No usable gap is diagnosed by side instead.
+ * Apply without dragging is a correct answer. The seed is clamped 8 (quantized) under the quietest
+ * attempt, the margin for the peak score's overestimate of the steady-state mean. No usable gap is
+ * diagnosed by side rather than shrugged at.
  */
 export function placement(attempts, day, roomReg) {
   const floorV = Math.min(...attempts.map((a) => a.score));
@@ -108,7 +117,8 @@ export function placement(attempts, day, roomReg) {
 }
 
 /** The placement readout's verdict at knob `cutC`: crowding the quietest try, at or under the
- *  room's reach, or safe. `c` and `floorC` are the percentages the copy names. */
+ *  room's reach, or safe. `c` and `floorC` are the percentages the copy names. In quick edit
+ *  `floorV` is the persisted voice stat, read as data only: it is never drawn as a band. */
 export function readout(cutC, floorV, day, roomReg) {
   const floorC = floorV ? pctN(floorV) : 0;
   let roomC = roomReg ? pctN(roomReg) : 0;
@@ -119,7 +129,9 @@ export function readout(cutC, floorV, day, roomReg) {
   return { tone: "dim", c, floorC };
 }
 
-/** The cutoff write: the knob quantized into 100-250, with the session's stats when known. */
+/** The cutoff write: the knob quantized into 100-250, with the session's stats when known. The
+ *  engine only ever reads the threshold; `n`, `f` and `h` are advisory, persisted for the graph and
+ *  read back as the track's `tn` [noise, floor, hi] that quick edit reopens placement over. */
 export function cutoffPath(i, cutC, noise, floor, hi) {
   const v = Math.max(100, Math.min(250, Math.round(cutC * 2.55)));
   return `/api/sat1/wakewords/cutoff?i=${i}&v=${v}${noise ? `&n=${noise}` : ""}${floor ? `&f=${floor}` : ""}${hi ? `&h=${hi}` : ""}`;

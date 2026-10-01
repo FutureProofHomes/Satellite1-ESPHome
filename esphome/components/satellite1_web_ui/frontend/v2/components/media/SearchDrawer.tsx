@@ -1,8 +1,15 @@
 /**
- * Search, over this browser's Music Assistant socket only: the Home Assistant relay speaks the
- * firmware's fixed verbs and cannot carry a search. Without a configured connection the drawer
- * offers the same MaPanel as Now Playing. A pick plays on the device's active queue, which Music
- * Assistant redirects to the group leader's whenever this speaker is grouped.
+ * Search, over this browser's Music Assistant socket only, by design: the Home Assistant relay
+ * speaks the fixed verbs the firmware bakes in, and teaching it search would cost firmware bytes
+ * plus a device round trip per keystroke, against the socket tier's whole point of costing the
+ * firmware nothing. Without a configured connection the drawer offers the same MaPanel as Now
+ * Playing. A pick plays on the device's active queue, which Music Assistant redirects to the group
+ * leader's whenever this speaker is grouped, so playing on the group costs nothing extra.
+ *
+ * Picks go out as player_queues/play_media { queue_id, media: uri, option }, with option replace,
+ * next or add (verified against the MA frontend @ 367878c, September 2026). "Play now" sends
+ * replace rather than play on purpose: its sub-label promises "replaces queue", and that is the
+ * common intent of picking an album by name - predictable beats clever.
  */
 import type { ReactNode } from 'react';
 import { Fragment, useEffect, useRef, useState } from 'react';
@@ -15,9 +22,16 @@ import { MaPanel } from './MaPanel';
 import type { Tiers } from './model';
 import { I_NEXT, I_PLAY, I_PLUS, dragHandle, mi } from './parts';
 
+/** The pause between the last keystroke and the search, the same order of magnitude as MA's own
+ *  modal; Enter skips it. */
 const DEBOUNCE_MS = 400;
+/** How long a row's confirmation check stands before the row returns to normal. */
 const DONE_MS = 2500;
+/** The ceiling on a play command's spinner: a socket that silently swallows the answer must not
+ *  spin the button forever. */
 const ACT_TIMEOUT_MS = 10000;
+/** Recent searches stay in this browser's localStorage only, guarded like every localStorage touch
+ *  in the app: losing the memory is survivable. */
 const KEY_RECENT = 'sat1.ma.recent';
 const RECENT_MAX = 8;
 
@@ -79,6 +93,7 @@ function useMaSearch(cmd: (c: string, a: object) => Promise<any>, ready: boolean
     if (timer.current) clearTimeout(timer.current);
     const query = q.trim();
     if (!ready || query.length < 2) {
+      // Invalidate anything in flight, so its late answer cannot paint over the recents view.
       seq.current++;
       setRes(null);
       setBusy(false);
@@ -144,6 +159,7 @@ export function SearchDrawer({
       setSel(null);
       setDone({ uri: item.uri, label: option === 'replace' ? TEXT.search_playing : TEXT.search_queued });
       setTimeout(() => setDone(d => d && d.uri === item.uri ? null : d), DONE_MS);
+      // A search someone played from is a search worth remembering.
       saveRecents(addRecent(recents, q, RECENT_MAX));
     }).catch(() => {
       clearTimeout(ceiling);
@@ -180,8 +196,12 @@ export function SearchDrawer({
   const status = (text: string) => <div className="search-status"><span className="search-spin" /><div className="dim sm">{text}</div></div>;
   let body: ReactNode = null;
   if (!configured) {
+    // The drawer says what it needs and offers the setup where it stands; the panel unfolds on the
+    // button rather than greeting everyone with a token field.
     body = <div className="search-empty">{I_SEARCH_SM}<div className="search-empty-t">{TEXT.search_need_ma_t}</div><p className="dim sm">Search rides a direct connection to your Music Assistant server. Set it up once and every browser signed into this device shares it.</p>{setupOpen ? setup : <button className="btn solid primary" onClick={() => setSetupOpen(true)}>{TEXT.search_setup_btn}</button>}</div>;
   } else if (!wsOn) {
+    // A refused token gets the panel's own error line and the panel itself, so the fix is where the
+    // failure is.
     body = ws.status === 'error' ? <div className="search-empty"><p className="dim sm">{TEXT.ma_error}</p>{setup}</div> : status(TEXT.search_connecting);
   } else if (q.trim().length < 2) {
     body = <>

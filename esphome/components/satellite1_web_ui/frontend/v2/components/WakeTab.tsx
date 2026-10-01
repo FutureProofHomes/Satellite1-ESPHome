@@ -136,7 +136,8 @@ const TICKS = [{
   p: 100
 }];
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-/** The stop model reports its phrase lowercase; it reads capitalized everywhere. */
+/** The stop model reports its phrase lowercase; it reads capitalized everywhere (owner call,
+ *  September 2026). Every other word arrives already display-cased by the loader. */
 const showWord = (w: string) => w === 'stop' ? 'Stop' : w;
 const kb = (n: number) => Math.round(n / 1024);
 const SpeakIcon = () => <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 5v3h2l3 3V2L4 5H2z" fill="currentColor" /><path d="M9 4.5a3 3 0 010 4M10.5 3a5 5 0 010 7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" /></svg>;
@@ -201,9 +202,12 @@ const KEY_STEP: Record<string, number> = {
   PageUp: 5
 };
 /**
- * The Living Graph. With `onCut` the knob drags and the graph is a slider; with only `onTune` the
- * knob is a tap target and the graph a button. A press moves the knob only once it has travelled
- * past a 4px slop, so a tap never nudges the line.
+ * The Living Graph. Its marks are drawn twice and split at the knob into two color worlds: left of
+ * it frosted on the amber veil (what the word ignores, literally out of focus), right of it
+ * crisp on the accent tint. The two colors are the whole explanation; the split has no legend.
+ * With `onCut` the knob drags and the graph is a slider; with only `onTune` the knob is a tap
+ * target and the graph a button. A press moves the knob only once it has travelled past a 4px
+ * slop, so a tap never nudges the line.
  */
 function TouchGraph({
   gid,
@@ -369,8 +373,12 @@ const toPlace = (s: TunerState, attempts: Attempt[], vadTries: number): TunerSta
 };
 /**
  * The tuner: Start opens a device session (the model floored, peers muted), the voice rounds land
- * as blue dots, then placement seeds the knob inside the gap for Apply. `quick` is the knob-tap
- * path: placement straight over the stored stats, no session.
+ * as blue dots (near, near, far, then other people, the last skippable), then placement seeds the
+ * knob inside the gap for Apply. There is no room-listening phase: the engine only ever reads the
+ * threshold, and the room's last 24 hours is already on the graph as the amber smatter. Nor is
+ * there a confirmation phase: the first real firing confirms itself by landing on the row's graph
+ * with its ripple. `quick` is the knob-tap path: placement straight over the stored stats, no
+ * session, with Re-Tune as the full re-measure.
  */
 function Tuner({
   ctx,
@@ -412,6 +420,8 @@ function Tuner({
     hiV: quick ? seed.hi : 0,
     cutC: quick ? clampCut(pctN(seed.cut || 130)) : 55
   }));
+  // The same-area peers this session holds muted (src/lib/peermute.js), so they do not answer the
+  // word being said over and over. Peers self-heal on a 60s TTL, so every release is best effort.
   const heldRef = useRef<any[]>([]);
   const [pm, setPm] = useState<{
     muted: string[];
@@ -423,7 +433,10 @@ function Tuner({
     heldRef.current = [];
   };
   const panel = useDrawer(onClose);
-  // Peers self-heal on a 60s TTL, so every release here is best effort.
+  // The session is opened by Start (the ready gate is the whole point), kept alive every 20s while
+  // open, and closed on unmount whatever phase the panel died in. Quick edit never opens one:
+  // placement against stored data needs no floored model. The peer holds ride the same lifecycle,
+  // asked for at Start, reminded on the same cadence, released wherever the session ends.
   const openRef = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
@@ -458,6 +471,9 @@ function Tuner({
       /* firmware without `cap`: assume able */
     }
     openRef.current = true;
+    // The peer holds run in parallel with the rounds; nothing here blocks the measurement. Re-Tune
+    // re-enters start() with the holds already placed, and asking again would only re-run the
+    // sign-ins, so the ask happens once and the keepalive carries it from there.
     if (!heldRef.current.length) {
       holdPeerMutes(ctx.ha, ctx.device?.mac).then((res: any) => {
         if (!mounted.current) {
@@ -480,9 +496,13 @@ function Tuner({
       skipped: false
     }));
   };
+  // A session that died device-side, or a build that cannot score, has no live holds to justify:
+  // the peers go back to their own mute states while the panel shows its message.
   useEffect(() => {
     if (st.phase === 'gone' || st.phase === 'nocap') releasePeers();
   }, [st.phase]);
+  // The session's event ring drives the voice phase; the payload's day buckets keep the smatter
+  // fresh in every phase.
   useEffect(() => {
     let live = true;
     const tick = async () => {
@@ -499,7 +519,9 @@ function Tuner({
           ...next,
           day
         };
-        // A higher register reading lands as a new dot; earlier ones never move.
+        // A higher register reading lands as a new dot; earlier ones never move. The running max
+        // still feeds the placement math, but one live dot sliding to each new max made the whole
+        // graph appear to jump mid-session (owner's report, September 22 2026).
         if (reg > next.roomReg && (next.phase === 'voice' || next.phase === 'place')) next = {
           ...next,
           roomReg: reg,
@@ -533,6 +555,8 @@ function Tuner({
     skipped: true
   });
   const apply = async () => {
+    // The room's reach: the loudest of the day's buckets, the session register, and whatever a
+    // previous tune persisted.
     const noise = Math.max(0, ...st.day, st.roomReg, st.noise);
     const r = await post(cutoffPath(i, st.cutC, noise, st.floorV, st.hiV)).catch(() => null);
     if (!r?.ok) return;
@@ -556,6 +580,9 @@ function Tuner({
   const prompt = n < 2 ? TEXT.tn2_near.replace('%s', word) : n < 3 ? TEXT.tn2_far : TEXT.tn2_other;
   const verdict = readout(st.cutC, st.floorV, st.day, st.roomReg);
   const readText = verdict.tone === 'warn' ? TEXT.tn2_high.replace('%s', `${verdict.floorC}%`) : verdict.tone === 'err' ? TEXT.tn2_low : `${TEXT.tn2_ok.replace('%s', `${verdict.c}%`)}${verdict.floorC ? TEXT.tn2_under.replace('%s', String(verdict.floorC - verdict.c)) : ''}.`;
+  // The peer-muting status, explicit by owner decision (September 23 2026): who is muted for this
+  // session, who could not be, or that nobody could even be looked for. Silent only when the roster
+  // answered and named no same-area peer - there is nothing to say about an empty room.
   const pmNote = pm && <>
     {pm.muted.length > 0 && <p className="ww-note">{`${pm.muted.length === 1 ? TEXT.tn_pm_one : TEXT.tn_pm_many.replace('%s', String(pm.muted.length))} (${pm.muted.join(', ')})`}</p>}
     {pm.failed.length > 0 && <p className="ww-note warn">{TEXT.tn_pm_failed.replace('%s', pm.failed.join(', '))}</p>}
@@ -568,6 +595,8 @@ function Tuner({
         alignItems: 'center',
         gap: 8
       }}><span>{title}</span><HintBtn text={HINTS.living_graph} /></h2><button className="secondary" onClick={onClose}>Close</button></div>
+    {/* One graph at one height through every phase: the canvas resizing between ready and the
+        rounds read as a layout bug (owner's screenshots, September 22 2026). */}
     <TouchGraph gid={`tn${i}`} h={150} marks={marks} cut={place ? st.cutC : undefined} onCut={place ? c => setSt(s => ({
       ...s,
       cutC: c
@@ -575,6 +604,8 @@ function Tuner({
     {st.phase === 'ready' && <div><p className="ww-read dim">{(isStop ? TEXT.tn2_ready_stop : TEXT.tn2_ready).replace('%s', word)}</p><div className="ww-btns"><button className="primary" onClick={start}>{TEXT.tn2_start}</button><button className="secondary" onClick={onClose}>{TEXT.cancel}</button></div></div>}
     {st.phase === 'voice' && <div><p className="ww-read"><strong>{prompt}</strong><span> ({Math.min(n, 4)} / 4)</span></p>{st.vadTries > 0 && <p className="ww-note warn">{TEXT.tn_vad}</p>}{pmNote}{n >= 3 && <div className="ww-btns"><button className="secondary" onClick={skip}>{TEXT.tn2_skip}</button></div>}</div>}
     {place && <div><p className={`ww-read ${verdict.tone}`}>{readText}</p>{pmNote}<div className="ww-acts">
+      {/* Four verbs in this order (owner call): back into the rounds, wipe the 24h record, out,
+          commit. */}
       <button className="secondary" onClick={start}>{TEXT.tn2_retune}</button>
       <button className="secondary" onClick={clearHistory}>{TEXT.tn2_clear}</button>
       <button className="secondary" onClick={onClose}>{TEXT.cancel}</button>
@@ -668,6 +699,7 @@ function WordDrawer({
         {shown.map((e: Entry) => {
           const isSelected = e.spec === current;
           const isTaken = !!other && e.word.toLowerCase() === other;
+          // A disabled row names why ("on the other slot"); a grey row alone does not say.
           const note = [e.source, e.ver, e.unverified && TEXT.ww_unverified, isTaken && TEXT.ww_on_other].filter(Boolean).join(' · ');
           return <button key={e.key} type="button" role="radio" aria-checked={isSelected} className={isSelected ? 'ww-opt on' : 'ww-opt'} disabled={busy || isTaken} onClick={() => onPick(e)}>
             <span className="ww-opt-label"><span className="ww-opt-word">{e.word}</span><span className="ww-opt-source">{note}</span></span>
@@ -740,6 +772,13 @@ function Sources({
   </article>;
 }
 const isOn = (e: any) => e.value === true || e.state === 'ON';
+/**
+ * The Wake Word tab. The device is the validator and the source of truth: the browser only
+ * enumerates sources (src/lib/wakesources.js) and polls the swap it asked for, and a failed
+ * download leaves the previous word listening, which the card says. A word's graph appears only
+ * once it is tuned - its presence is the tuned state, with no badge - and an untuned word carries
+ * the Tune it! button instead (owner call, September 2026).
+ */
 export function WakeTab({
   ctx
 }: {
@@ -752,6 +791,7 @@ export function WakeTab({
   const [tuning, setTuning] = useState<Tuning | null>(null);
   const [swaps, setSwaps] = useState<Record<number, Swap | null>>({});
   const anyBusy = Object.values(swaps).some(s => s?.phase === 'busy');
+  // The standing 2.5s poll is there because the graphs' dots and live landings are living facts.
   // Swaps and tune sessions run their own faster chained loops; the standing poll stands down
   // meanwhile so only one loop reads at a time.
   const {
@@ -810,9 +850,12 @@ export function WakeTab({
   useEffect(() => {
     haSyncOnce(haRefresh);
   }, []);
-  // One word per mount: a word listening on the device but holding no Home Assistant select (a
-  // browser closed mid-pairing) gets one. Keyed on the word list too, since HA and the slot read
-  // land in either order.
+  // The one-shot mount repair: a word listening on the device but holding no Home Assistant select
+  // (a browser closed mid-pairing, or a swap that predates the device-side reload) gets one. One
+  // word per mount, because a second unslotted word would race the first for the same free select
+  // on a stale view; the next visit catches it. syncSlot's own guards skip slotted words and stop
+  // when no select is free. Keyed on the word list too, since HA and the slot read land in either
+  // order.
   const repaired = useRef(false);
   useEffect(() => {
     if (repaired.current || !assist.ready) return;
@@ -822,9 +865,11 @@ export function WakeTab({
     assist.syncSlot(orphan, true).catch(() => {});
   }, [assist.ready, activeWords.length]);
 
-  // Home Assistant's wake word selects follow the device's slots. An empty `asst` is expected
-  // while HA reloads this device's config entry after a download, so it is waited out, not
-  // taken as a verdict.
+  // Home Assistant's wake word selects follow the device's slots. After a download the device asks
+  // HA to reload this device's config entry, which tears down and rebuilds every entity, so the
+  // deadline is 60s and the write only lands once the selects are back with the new option. An
+  // empty `asst` is expected meanwhile and is waited out, not taken as a verdict: stopping on one
+  // bad poll is how a download could strand the HA select on "No Wake Word" for good.
   const syncAssist = async (i: number, prevWord: string, nextWord: string) => {
     const deadline = Date.now() + 60000;
     for (;;) {
@@ -837,6 +882,8 @@ export function WakeTab({
         await haRefresh();
       }
       if (!alive.current || Date.now() > deadline) return;
+      // A breather between rounds: HA needs seconds to reconnect and re-read after the reload, and
+      // re-posting flat out burns the device's socket table while it does.
       await sleep(500);
     }
   };
@@ -917,7 +964,8 @@ export function WakeTab({
   };
 
   // Finished Speaking Detection: the device keeps one select per slot and copies the firing slot's
-  // value into Home Assistant's own before each request; `unset` follows HA.
+  // value into Home Assistant's own before each request; `unset` follows HA. See docs/web-ui.md,
+  // "Finished speaking detection, per wake word".
   const fsdRaw = ha?.d?.fsd;
   const haFsd: string | null = !haBlocked(ha) && !haTooOld(ha) && Array.isArray(fsdRaw) && fsdRaw.length === 2 ? fsdRaw[1] : null;
   const fsdOwn = FSD_KEYS.map((k: string) => entity(ctx, k)?.value);
@@ -943,8 +991,10 @@ export function WakeTab({
   };
   const stopSwitch = entity(ctx, 'stop_word');
   const stopOn = stopSwitch ? isOn(stopSwitch) : false;
-  // The switch is the preference; `stop_active` is whether the stop model runs right now. Firmware
-  // without the sensor falls back to the switch, never a false "Paused".
+  // The switch is the preference; `stop_active` is whether the stop model runs right now, published
+  // by the firmware's stop_word_arm/disarm scripts (voice_assistant.yaml) in the same instant they
+  // flip the model and pushed over /events. Firmware without the sensor falls back to the switch,
+  // never a false "Paused".
   const stopActive = entity(ctx, 'stop_active');
   const stopRunning: boolean | null = stopActive ? isOn(stopActive) : null;
   const wakeSound = entity(ctx, 'wake_sound');
@@ -958,6 +1008,8 @@ export function WakeTab({
   const pipeOptions: [string, string][] = [[PIPELINE_PREFERRED, TEXT.pipeline_preferred], ...assist.pipelines.map((p: string) => [p, p] as [string, string])];
   const pipeValue = (w: string): string => assist.pipelineFor(w) ?? assist.fallbackPipeline() ?? PIPELINE_PREFERRED;
   const pipeLabel = (v: string) => v === PIPELINE_PREFERRED ? TEXT.pipeline_preferred : v;
+  // Everything the graph already knows about a track, so quick edit reopens placement with no
+  // re-recording.
   const tuneSeed = (i: number) => {
     const t = i === STOP_SLOT ? stopw : slotAt(i);
     return {
@@ -1037,6 +1089,10 @@ export function WakeTab({
   const stopCard = () => {
     if (!stopw || !stopSwitch) return null;
     const tuned = stopOn && stopw.cut > 0;
+    // Three states (owner's report, September 2026: the model is disabled in steady state, so a
+    // standing "Live" was a lie). Green "Listening" whenever the model genuinely runs, which
+    // wins even with the switch off because a ringing timer arms it regardless; yellow "Paused"
+    // while armed but idle, tuned or not.
     const live = stopRunning === null ? tuned : stopRunning;
     const paused = stopRunning === false && stopOn;
     const tuneBtn = stopOn && !tuned;

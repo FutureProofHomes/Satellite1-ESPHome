@@ -1,9 +1,10 @@
 /**
  * The hash routes, and their translation to the design's tab and settings-page names.
  *
- * Routing stays on the hash for the reason src/shell.jsx gives: ESPHome's httpd has no client-side
- * routes, so a path router would 404 on every reload but "/", and a hash never reaches the server,
- * so a bookmark survives a firmware update. That last part is why the old names keep resolving.
+ * Routing is on the hash because ESPHome's httpd has a single wildcard handler per method and no
+ * notion of client-side routes, so a path router would 404 on every reload but "/". The hash never
+ * reaches the server, so a bookmark survives a firmware update - which is why the old names keep
+ * resolving (docs/web-ui.md, "What it is").
  *
  * The URL names are not the design's ids on purpose: the design calls Home "NOW" and the
  * amplifier page "audio", and #/settings/audio beside #/audio would read as the same page.
@@ -30,7 +31,9 @@ const SUBS = [
   ["community", "community"],
 ];
 
-/** Hashes from before the redesign. */
+/** Hashes the previous UI used: #/controls and #/config from before the September 2026 rename, and
+ *  #/diagnostics, whose cards became the Settings pages. Bookmarks outlive firmware updates by
+ *  design, so they must keep landing somewhere better than the default. */
 const LEGACY = { controls: "home", config: "audio", diagnostics: "settings/device" };
 
 /**

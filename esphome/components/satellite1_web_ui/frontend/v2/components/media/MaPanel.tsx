@@ -7,10 +7,14 @@ type Scan = null | { done: number; total: number; list?: undefined; err?: undefi
 
 /**
  * The direct Music Assistant connection, folded shut at the bottom of Now Playing and opened in
- * place by search's "Set up connection". The token lands in this browser's storage and, behind the
- * sign-in, on the device, so the next browser seeds itself from it (lib/ma.js). "Find my server"
- * sweeps the device's own /24 on MA's port; `ip` is the device's address, which is on that subnet
- * by definition.
+ * place by search's "Set up connection" (`defaultOpen`, because there the person has already asked
+ * for it). The one place the app asks for a credential, and deliberately buried: the bar is
+ * complete without it. The token is a long-lived one from MA's profile settings; it lands in this
+ * browser's storage and, behind the sign-in, on the device (owner's request, September 2026), so
+ * the next browser seeds itself from it - src/lib/ma.js has the trust reasoning. The dot on the fold
+ * is the connection, so the panel can stay shut once it works. "Find my server" sweeps the device's
+ * own /24 on MA's port and verifies each listener over the WebSocket hello (scanForMa); `ip` is the
+ * device's address, which is on that subnet by definition.
  */
 export function MaPanel({
   tiers,
@@ -28,6 +32,7 @@ export function MaPanel({
   const configured = !!(maCfg.url && maCfg.token);
   const status = configured ? ws.status : 'off';
 
+  // A panel closed mid-sweep drops the answer rather than setting dead state.
   const [scan, setScan] = useState<Scan>(null);
   const scanLive = useRef(false);
   useEffect(() => () => {

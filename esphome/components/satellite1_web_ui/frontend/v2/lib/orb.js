@@ -1,10 +1,15 @@
 /**
  * The Home tab's pure logic: the orb's state from the assistant's phase, and the conversions around
  * it - sensor readings and their calibration offsets, the transcript's per-word tabs, timers, and
- * the LED ring's colours. Ported from v1's routes/controls.jsx.
+ * the LED ring's colours.
  */
 
-/** PHASE in src/lib/device.js (the voice_assist_*_phase_id substitutions) -> the orb's states. */
+/**
+ * PHASE in src/lib/device.js (the voice_assist_*_phase_id substitutions) -> the orb's states. It is
+ * the same phase the LED ring animates from, so the orb and the ring cannot disagree. 10, "Not
+ * ready", is the honest reading with Home Assistant gone: the microphones work, but there is nothing
+ * on the other end to answer.
+ */
 const PHASE_ORB = {
   1: "idle",
   2: "listening",
@@ -141,7 +146,11 @@ export function hexToRgb(hex) {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-/** Hue in degrees and saturation 0-1 at full value to RGB, as v1's colour wheel wrote the ring. */
+/**
+ * Hue in degrees and saturation 0-1 at full value to RGB, the colour the LED ring is written with.
+ * Value stays at full on purpose: brightness is a separate control on the light, and folding it into
+ * the colour makes both harder to set.
+ */
 export function hsvToRgb(h, s) {
   const f = (n) => {
     const k = (n + h / 60) % 6;
