@@ -15,6 +15,6 @@
       "react-dom": ["./node_modules/preact/compat"]
     }
   },
-  "include": ["v2/**/*", "src/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["design-ref"]
 }

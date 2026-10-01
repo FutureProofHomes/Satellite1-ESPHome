@@ -21,7 +21,7 @@ import {
   readout,
   rowMarks,
   swapStep,
-} from "../v2/lib/wake.js";
+} from "../src/lib/wake.js";
 
 test("a track's graph keeps the last day, keyed on stable ids", () => {
   const track = {

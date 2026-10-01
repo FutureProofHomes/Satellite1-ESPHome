@@ -1,11 +1,11 @@
 /**
- * The v2 hash routes. Bookmarks outlive firmware (the hash never reaches the server), so the names
+ * The hash routes. Bookmarks outlive firmware (the hash never reaches the server), so the names
  * from before the redesign have to keep landing on the page they meant.
  */
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseRoute, routeHash } from "../v2/lib/routes.js";
+import { parseRoute, routeHash } from "../src/lib/routes.js";
 
 test("each tab parses from its own hash", () => {
   assert.deepEqual(parseRoute("#/home"), { tab: "NOW", sub: null });

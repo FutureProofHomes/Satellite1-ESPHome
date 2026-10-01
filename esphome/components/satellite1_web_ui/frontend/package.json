@@ -6,7 +6,6 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "build:v2": "node build.mjs v2",
     "dev": "node dev.mjs",
     "test": "node --test test/*.test.mjs"
   },

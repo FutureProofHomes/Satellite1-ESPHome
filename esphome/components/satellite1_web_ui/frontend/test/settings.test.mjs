@@ -22,7 +22,7 @@ import {
   stamp,
   uptime,
   usbFact,
-} from "../v2/lib/settings.js";
+} from "../src/lib/settings.js";
 
 test("sizes and durations read the way the design writes them", () => {
   assert.equal(kb(120832), "118 kB");

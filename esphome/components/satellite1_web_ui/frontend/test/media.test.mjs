@@ -26,7 +26,7 @@ import {
   tintOf,
   toHsl,
   wsPausedOf,
-} from "../v2/lib/media.js";
+} from "../src/lib/media.js";
 
 const track = { title: "Amber Skies", artist: "Fieldlight", album: "Harvest", art: "http://ma/a.jpg" };
 

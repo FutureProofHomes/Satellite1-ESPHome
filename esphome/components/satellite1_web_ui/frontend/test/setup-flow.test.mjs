@@ -16,7 +16,7 @@ import {
   onHomeOrigin,
   probeOrigins,
   probeStreak,
-} from "../v2/lib/setup-flow.js";
+} from "../src/lib/setup-flow.js";
 
 const UA = {
   iosSheet: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",

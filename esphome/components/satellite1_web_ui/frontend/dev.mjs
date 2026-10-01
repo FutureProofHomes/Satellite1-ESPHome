@@ -1,6 +1,6 @@
 /**
- * Local preview for the v2 UI: rebuilds dist-v2/index.html whenever a source file changes, serves it,
- * and forwards everything else to a real device.
+ * Local preview: rebuilds dist/index.html whenever a source file changes, serves it, and forwards
+ * everything else to a real device.
  *
  *   DEVICE=http://satellite1-a4c2f8.local npm run dev     # then open http://localhost:5173/
  *
@@ -20,7 +20,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const page = join(here, "..", "dist-v2", "index.html");
+const page = join(here, "..", "dist", "index.html");
 const port = Number(process.env.PORT || 5173);
 const device = process.env.DEVICE ? new URL(process.env.DEVICE) : null;
 
@@ -41,7 +41,7 @@ function build() {
     return building;
   }
   building = new Promise((resolve) => {
-    const child = spawn(process.execPath, ["build.mjs", "v2"], { cwd: here, stdio: "inherit" });
+    const child = spawn(process.execPath, ["build.mjs"], { cwd: here, stdio: "inherit" });
     child.on("exit", () => {
       building = null;
       if (again) {
@@ -55,7 +55,7 @@ function build() {
 }
 
 let debounce;
-for (const dir of ["v2", "src", "assets"]) {
+for (const dir of ["src", "assets"]) {
   watch(join(here, dir), { recursive: true }, () => {
     clearTimeout(debounce);
     debounce = setTimeout(build, 120);
@@ -107,5 +107,5 @@ createServer(async (req, res) => {
   }
   forward(req, res);
 }).listen(port, () => {
-  console.log(`v2 preview on http://localhost:${port}/` + (device ? ` -> ${device.origin}` : " (no DEVICE: API calls answer 502)"));
+  console.log(`Preview on http://localhost:${port}/` + (device ? ` -> ${device.origin}` : " (no DEVICE: API calls answer 502)"));
 });

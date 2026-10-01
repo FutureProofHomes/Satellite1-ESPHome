@@ -20,7 +20,7 @@ import {
   realTargets,
   shapeBody,
   stepTrails,
-} from "../v2/lib/presence.js";
+} from "../src/lib/presence.js";
 
 const SQUARE = [
   { x: -100, y: 100 },

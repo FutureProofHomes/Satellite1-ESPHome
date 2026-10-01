@@ -25,7 +25,7 @@ import {
   toggleLoose,
   togglePlayer,
   treePayload,
-} from "../v2/lib/audio.js";
+} from "../src/lib/audio.js";
 
 const sel = (areas = [], extra = [], excluded = []) => ({
   areas: new Set(areas),

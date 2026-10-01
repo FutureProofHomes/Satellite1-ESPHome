@@ -22,7 +22,7 @@ import {
   timerLabel,
   timerLeft,
   transcriptTabs,
-} from "../v2/lib/orb.js";
+} from "../src/lib/orb.js";
 
 test("each voice assistant phase maps to its orb state", () => {
   assert.equal(orbState(1, true), "idle");
