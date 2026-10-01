@@ -68,8 +68,8 @@ Pass criteria:
 - The log contains `Audio shutdown complete; XMOS is ready for direct flashing`.
 - Wake word, voice assistant, media player, microphone RX, speaker TX, line-out,
   and TAS2780 all stop before direct flashing begins.
-- The boot-partition summary reports that factory-image sectors were erased and
-  already-erased tail sectors were skipped.
+- The boot-partition summary reports that the factory-image sectors and the
+  immediately following upgrade-header sector were erased.
 - Flashing reaches 100 percent without an I2S ownership or DAC activation error.
 - XMOS reconnects and the internal speaker route becomes usable again.
 - ESP provisioning is unchanged.
@@ -86,8 +86,8 @@ Pass criteria:
 - The shutdown-complete log appears before flashing begins.
 - PCM5122 is muted during direct flashing without changing the saved user mute
   preference.
-- The log contains `XMOS boot partition prepared` and accounts for every sector
-  in the 1 MiB boot partition as an image, dirty-tail, or clean-tail sector.
+- The log contains `XMOS boot partition prepared` and identifies the erased
+  upgrade-header sector immediately after the factory image.
 - Flashing succeeds, XMOS reconnects, and line-out is restored.
 - No pop, sustained noise, or stale playback is observed.
 

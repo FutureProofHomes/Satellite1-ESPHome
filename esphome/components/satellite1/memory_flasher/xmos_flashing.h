@@ -70,7 +70,6 @@ class XMOSFlasher : public MemoryFlasher, public Satellite1SPIService {
   bool wait_while_flash_busy_(uint32_t timeout_ms);
   bool read_page_(uint32_t byte_addr, uint8_t *buffer);
   bool write_page_(uint32_t byte_addr, uint8_t *buffer);
-  bool sector_is_erased_(size_t sector, bool *is_erased);
   bool prepare_flash_transaction_(uint32_t erased_length, XmosFlashState recovery_state);
   void start_record_verification_();
   bool verify_record_step_();
@@ -104,8 +103,6 @@ class XMOSFlasher : public MemoryFlasher, public Satellite1SPIService {
   uint32_t last_published_{0};
   size_t total_sectors_to_erase_{0};
   size_t factory_image_sectors_{0};
-  size_t dirty_tail_sectors_erased_{0};
-  size_t clean_tail_sectors_skipped_{0};
   int current_sector_{-1};
   size_t total_number_of_bytes_{0};
   size_t bytes_remaining_;

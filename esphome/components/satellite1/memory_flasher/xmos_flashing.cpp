@@ -127,10 +127,14 @@ void XMOSFlasher::loop() {
         this->state = FLASHER_SUCCESS_STATE;
       } else if (remaining == 0) {
         if (this->requested_action == ACTION_FLASH_EMBEDDED_IMAGE) {
-          ESP_LOGI(TAG,
-                   "XMOS boot partition prepared: %zu image sectors erased, %zu dirty tail sectors erased, %zu "
-                   "clean tail sectors skipped",
-                   this->factory_image_sectors_, this->dirty_tail_sectors_erased_, this->clean_tail_sectors_skipped_);
+          if (this->total_sectors_to_erase_ > this->factory_image_sectors_) {
+            ESP_LOGI(TAG,
+                     "XMOS boot partition prepared: %zu factory image sectors erased, upgrade header sector %zu erased",
+                     this->factory_image_sectors_, this->factory_image_sectors_);
+          } else {
+            ESP_LOGI(TAG, "XMOS boot partition prepared: %zu factory image sectors erased; no upgrade header sector",
+                     this->factory_image_sectors_);
+          }
         }
         ESP_LOGI(TAG, "XMOS erase complete; writing embedded image");
         this->state = FLASHER_FLASHING;
@@ -506,22 +510,6 @@ bool XMOSFlasher::read_page_(uint32_t byte_addr, uint8_t *buffer) {
   return true;
 }
 
-bool XMOSFlasher::sector_is_erased_(size_t sector, bool *is_erased) {
-  *is_erased = true;
-  const uint32_t sector_address = sector * FLASH_SECTOR_SIZE;
-  for (size_t offset = 0; offset < FLASH_SECTOR_SIZE; offset += FLASH_PAGE_SIZE) {
-    if (!this->read_page_(sector_address + offset, this->compare_buffer_))
-      return false;
-    for (size_t pos = 0; pos < FLASH_PAGE_SIZE; pos++) {
-      if (this->compare_buffer_[pos] != 0xFF) {
-        *is_erased = false;
-        return true;
-      }
-    }
-  }
-  return true;
-}
-
 void XMOSFlasher::set_record_unknown_() {
   memset(&this->record_, 0, sizeof(this->record_));
   this->record_.magic = FLASH_RECORD_MAGIC;
@@ -731,20 +719,23 @@ bool XMOSFlasher::init_flashing_() {
   this->bytes_remaining_ = size_in_bytes;
   this->page_pos_ = 0;
   this->factory_image_sectors_ = size_in_sectors;
-  this->dirty_tail_sectors_erased_ = 0;
-  this->clean_tail_sectors_skipped_ = 0;
 
+  const size_t boot_partition_sectors = FLASH_BOOT_PARTITION_SIZE / FLASH_SECTOR_SIZE;
+  const size_t embedded_erase_sectors =
+      size_in_sectors < boot_partition_sectors ? size_in_sectors + 1 : boot_partition_sectors;
   const uint32_t erase_length = this->requested_action == ACTION_FLASH_EMBEDDED_FULL_ERASE
                                     ? FLASH_TOTAL_NUMBER_OF_SECTORS * FLASH_SECTOR_SIZE
                                 : this->requested_action == ACTION_FLASH_EMBEDDED_IMAGE
-                                    ? FLASH_BOOT_PARTITION_SIZE
+                                    ? static_cast<uint32_t>(embedded_erase_sectors * FLASH_SECTOR_SIZE)
                                     : static_cast<uint32_t>(size_in_sectors * FLASH_SECTOR_SIZE);
   const XmosFlashState recovery_state = this->requested_action == ACTION_FLASH_EMBEDDED_FULL_ERASE
                                             ? this->factory_reset_pending_
                                                   ? XmosFlashState::FACTORY_RESET_RECOVERY_REQUIRED
                                                   : XmosFlashState::FULL_ERASE_RECOVERY_REQUIRED
                                             : XmosFlashState::RECOVERY_REQUIRED;
-  if (!this->prepare_flash_transaction_(FLASH_BOOT_PARTITION_SIZE, recovery_state)) {
+  const uint32_t recovery_verification_length =
+      this->requested_action == ACTION_FLASH_EMBEDDED_IMAGE ? erase_length : FLASH_BOOT_PARTITION_SIZE;
+  if (!this->prepare_flash_transaction_(recovery_verification_length, recovery_state)) {
     ESP_LOGE(TAG, "Couldn't persist XMOS flash transaction before erase");
     this->error_code = INIT_FLASH_ERROR;
     return false;
@@ -786,22 +777,7 @@ int XMOSFlasher::erasing_step_() {
 
   this->current_sector_++;
   if (this->current_sector_ < this->total_sectors_to_erase_) {
-    bool erase_sector = true;
-    if (this->requested_action == ACTION_FLASH_EMBEDDED_IMAGE &&
-        static_cast<size_t>(this->current_sector_) >= this->factory_image_sectors_) {
-      bool already_erased = false;
-      if (!this->sector_is_erased_(this->current_sector_, &already_erased)) {
-        this->error_code = WRITE_TO_FLASH_ERROR;
-        return -1;
-      }
-      if (already_erased) {
-        erase_sector = false;
-        this->clean_tail_sectors_skipped_++;
-      } else {
-        this->dirty_tail_sectors_erased_++;
-      }
-    }
-    if (erase_sector && !this->erase_sector_(this->current_sector_)) {
+    if (!this->erase_sector_(this->current_sector_)) {
       this->error_code = WRITE_TO_FLASH_ERROR;
       return -1;
     }
@@ -827,7 +803,7 @@ int XMOSFlasher::flashing_step_() {
       return -1;
     }
     // it's the last page to flash
-    // The remaining boot partition must stay erased after the factory artifact.
+    // Pad unused bytes in the final factory-image page with the erased value.
     memset(this->reader_buffer_ + bytes_read, 0xFF, FLASH_PAGE_SIZE - bytes_read);
   }
 
