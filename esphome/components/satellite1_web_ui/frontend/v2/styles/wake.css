@@ -1,0 +1,36 @@
+/* The Wake Word tab's states the design's mock never had to draw. WakeTab's own stylesheet lands
+   after this one (it rides in the page), so every override here outranks its rule on specificity. */
+
+p.ww-note.warn { color: #ffb35e; }
+p.ww-note.err { color: #ff7185; }
+[data-theme='light'] p.ww-note.warn { color: #b45309; }
+[data-theme='light'] p.ww-note.err { color: #be123c; }
+.ww-flow + .ww-note { margin-top: 10px; }
+.ww-src + .ww-note, .ww-add + .ww-note { margin: 8px 0 0; }
+.ww-card > .ww-note:last-child { margin-bottom: 0; }
+.ww-note + .ww-btns { margin-top: 0; }
+
+.ww-flow-btn:disabled { opacity: .6; cursor: default; }
+.ww-add button:disabled { opacity: .5; cursor: default; }
+
+/* The stop word armed but its model idle right now: neither the green truth nor an error. */
+.ww-live.paused { color: rgba(255, 196, 94, .95); }
+.ww-live.paused i { background: #ffc45e; animation: none; }
+
+/* Only the tuner's graph owns the gesture; a row graph lets a swipe across it scroll the page. */
+svg.ww-graph:not(.drag) { touch-action: auto; }
+.lg-hit { fill: transparent; cursor: ew-resize; }
+.ww-graph:not(.drag) .lg-hit { cursor: pointer; }
+.ww-graph:focus { outline: none; }
+.ww-graph:focus-visible, .ww-speak:focus-visible { outline: 2px solid var(--accent2); outline-offset: 3px; border-radius: 8px; }
+
+/* The picker scrolls its own list under the sticky filter; every other drawer scrolls whole. */
+div.ww-panel { overflow-y: auto; }
+div.ww-panel:has(> .ww-picker-list) { overflow-y: hidden; }
+div.ww-panel:focus { outline: none; }
+
+.ww-sec .ww-hint-wrap { margin-left: 8px; vertical-align: -4px; }
+.ww-sec .ww-hint-btn { letter-spacing: 0; text-transform: none; }
+
+.ww-foot a { color: var(--accent2); }
+.ww-link { background: none; padding: 0; min-height: 0; font: inherit; color: var(--accent2); text-decoration: underline; }

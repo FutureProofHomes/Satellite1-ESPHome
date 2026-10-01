@@ -3,258 +3,85 @@ import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import { ArrowRight, ChevronDown, Check } from '../icons';
 import type { Ctx } from '../ctx';
+import { HINTS, TEXT, WW_ERR } from '../../src/copy.js';
+import { PIPELINE_PREFERRED, STOP_SLOT, entity, haBlocked, haSyncOnce, haTooOld, pathFor, post, requestJson, useAssist, useWakeSlots } from '../../src/lib/device.js';
+import { holdPeerMutes, keepPeerMutes, releasePeerMutes } from '../../src/lib/peermute.js';
+import { DEFAULT_SOURCES, REQUEST_WORD_URL, TRAIN_URL, canSpeak, enumerateSource, readSources, speak, writeSources } from '../../src/lib/wakesources.js';
+import { CUT_MAX, CUT_MIN, FSD_KEYS, FSD_OPTIONS, attemptMarks, attemptsOf, clampCut, cutoffPath, fade, filterEntries, fsdShown, fsdWrites, isUrl, langLabel, langsOf, pairingWrite, parseSource, pctN, pickerEntries, placement, readout, roomMarks, rowMarks, sessionRoomMarks, swapStep } from '../lib/wake.js';
 type MarkKind = 'fire' | 'near' | 'room' | 'you';
 interface Mark {
   id: string;
   c: number;
   y: number;
   kind: MarkKind;
+  age?: number;
+  ripple?: boolean;
 }
-interface Slot {
-  id: string;
-  word: string;
-  tuned: boolean;
+/** One track of GET /api/sat1/wakewords: a slot, or the stop word's `stopw` block. */
+interface Track {
+  i?: number;
+  m?: string;
+  w?: string;
+  st?: number;
+  err?: number;
   cut: number;
-  pipe: string;
-  eos: string;
+  ld?: number;
+  tn?: number[];
+  day?: number[];
+  dh?: number[][];
+  dl?: number;
+  tot?: number;
 }
-interface LibEntry {
-  id: string;
+interface Swap {
+  phase: 'busy' | 'error';
   word: string;
-  lang: string;
-  kb: number;
-  unverified?: boolean;
-}
-interface LibGroup {
-  key: string;
-  label: string;
-  entries: LibEntry[];
+  spec: string;
+  err?: number;
+  dl?: number;
+  tot?: number;
 }
 interface Source {
-  id: string;
   url: string;
-  count: number;
+  label: string;
+}
+interface CatEntry {
+  loading?: boolean;
+  error?: boolean;
+  entries?: unknown[];
+}
+interface Entry {
+  key: string;
+  word: string;
+  spec: string;
+  langs: string[];
+  source: string;
+  ver?: string;
+  unverified?: boolean;
 }
 interface Attempt {
   score: number;
-  round: 'near' | 'far' | 'them';
+  round: string;
 }
-const CUT_MIN = 40;
-const CUT_MAX = 95;
-const ROOM_SCORE = 35;
-const HINTS = {
-  wake_words: 'Up to two wake words listen at once, each pointed at its own Voice Pipeline. The graph under each word is its last 24 hours.',
-  living_graph: 'Solid dots are firings, hollow ones close calls, amber smatter is the room. Drag the knob to move the trigger threshold.',
-  wake_sound: 'The chime the device plays when it hears a wake word.',
-  stop_word: 'Say Stop to interrupt the assistant mid-response. When disabled, timers and alarms will keep ringing until the assistant is asked to stop them.',
-  voice_pipeline: 'Which Home Assistant Assist pipeline answers this word. Untuned words fire on the model default — a two-minute tune fits the word to this room.',
-  wake_sources: 'Where the word list comes from. Add a GitHub repo or a manifest URL to offer more words. Words already installed keep working even if a source is removed.'
-};
-const PIPES = [{
-  id: 'preferred',
-  label: 'Preferred'
-}, {
-  id: 'Home Assistant Cloud',
-  label: 'Home Assistant Cloud'
-}, {
-  id: 'Local Whisper',
-  label: 'Local Whisper'
-}];
-const EOS_OPTS = [{
-  id: 'default',
-  label: 'Default'
-}, {
-  id: 'aggressive',
-  label: 'Aggressive'
-}, {
-  id: 'relaxed',
-  label: 'Relaxed'
-}, {
-  id: 'manual',
-  label: 'Manual'
-}];
-const LANGS = [{
-  id: 'all',
-  label: 'All languages'
-}, {
-  id: 'en',
-  label: 'English'
-}, {
-  id: 'es',
-  label: 'Spanish'
-}, {
-  id: 'fr',
-  label: 'French'
-}, {
-  id: 'de',
-  label: 'German'
-}];
-const LIBRARY: LibGroup[] = [{
-  key: 'esphome',
-  label: 'esphome/micro-wake-word-models',
-  entries: [{
-    id: 'on',
-    word: 'Okay Nabu',
-    lang: 'en',
-    kb: 276
-  }, {
-    id: 'hj',
-    word: 'Hey Jarvis',
-    lang: 'en',
-    kb: 267
-  }, {
-    id: 'hm',
-    word: 'Hey Mycroft',
-    lang: 'en',
-    kb: 262
-  }, {
-    id: 'al',
-    word: 'Alexa',
-    lang: 'en',
-    kb: 294
-  }, {
-    id: 'co',
-    word: 'Computer',
-    lang: 'en',
-    kb: 259
-  }, {
-    id: 'oc',
-    word: 'Okay Casita',
-    lang: 'es',
-    kb: 264
-  }]
-}, {
-  key: 'fph',
-  label: 'FutureProofHomes/wakewords',
-  entries: [{
-    id: 'hs',
-    word: 'Hey Satellite',
-    lang: 'en',
-    kb: 270
-  }, {
-    id: 'bm',
-    word: 'Bonjour Maison',
-    lang: 'fr',
-    kb: 265,
-    unverified: true
-  }, {
-    id: 'hh',
-    word: 'Hallo Haus',
-    lang: 'de',
-    kb: 263,
-    unverified: true
-  }]
-}];
-const WORD_MARKS: Mark[] = [{
-  id: 'f1',
-  c: 88,
-  y: 22,
-  kind: 'fire'
-}, {
-  id: 'f2',
-  c: 81,
-  y: 35,
-  kind: 'fire'
-}, {
-  id: 'n1',
-  c: 64,
-  y: 28,
-  kind: 'near'
-}, {
-  id: 'n2',
-  c: 55,
-  y: 43,
-  kind: 'near'
-}, {
-  id: 'r1',
-  c: 24,
-  y: 31,
-  kind: 'room'
-}, {
-  id: 'r2',
-  c: 31,
-  y: 46,
-  kind: 'room'
-}];
-const STOP_MARKS: Mark[] = [{
-  id: 's1',
-  c: 86,
-  y: 25,
-  kind: 'fire'
-}, {
-  id: 's2',
-  c: 20,
-  y: 32,
-  kind: 'room'
-}];
-const ROOM_SMATTER: Mark[] = [{
-  id: 'rs1',
-  c: 22,
-  y: 48,
-  kind: 'room'
-}, {
-  id: 'rs2',
-  c: 31,
-  y: 84,
-  kind: 'room'
-}, {
-  id: 'rs3',
-  c: 18,
-  y: 104,
-  kind: 'room'
-}, {
-  id: 'rs4',
-  c: 27,
-  y: 64,
-  kind: 'room'
-}, {
-  id: 'rs5',
-  c: 35,
-  y: 96,
-  kind: 'room'
-}];
-const ATTEMPT_PLAN: Attempt[] = [{
-  score: 87,
-  round: 'near'
-}, {
-  score: 84,
-  round: 'near'
-}, {
-  score: 76,
-  round: 'far'
-}, {
-  score: 79,
-  round: 'them'
-}];
-const ROUND_TEXT: Record<string, string> = {
-  near: 'Stand near the satellite and say it normally',
-  far: 'Walk across the room and say it again',
-  them: 'Have someone else in the house say it'
-};
-const INITIAL_SLOTS: Slot[] = [{
-  id: 'a',
-  word: 'Okay Nabu',
-  tuned: true,
-  cut: 72,
-  pipe: 'preferred',
-  eos: 'default'
-}, {
-  id: 'b',
-  word: 'Hey Jarvis',
-  tuned: false,
-  cut: 68,
-  pipe: 'Local Whisper',
-  eos: 'default'
-}];
-const INITIAL_SOURCES: Source[] = [{
-  id: 'src1',
-  url: 'https://github.com/esphome/micro-wake-word-models',
-  count: 6
-}, {
-  id: 'src2',
-  url: 'https://github.com/FutureProofHomes/wakewords',
-  count: 3
-}];
+interface Tuning {
+  i: number;
+  word: string;
+  isStop: boolean;
+  quick: boolean;
+}
+interface TunerState {
+  phase: 'ready' | 'voice' | 'place' | 'nogap' | 'nocap' | 'gone';
+  attempts: Attempt[];
+  vadTries: number;
+  skipped: boolean;
+  roomReg: number;
+  roomSeen: number[];
+  day: number[];
+  noise: number;
+  floorV: number;
+  hiV: number;
+  cutC: number;
+  nogap?: string;
+}
 const GRID_V = [{
   id: 'g10',
   p: 10
@@ -516,27 +343,10 @@ const CSS = `
 [data-theme='light'] .ww-opt-source{color:#6b6b78}
 .ww-opt .ww-speak{flex-shrink:0;cursor:pointer}
 `;
-interface FlatEntry {
-  id: string;
-  word: string;
-  lang: string;
-  source: string;
-}
-const FLAT: FlatEntry[] = LIBRARY.flatMap(g => g.entries.map(e => ({
-  id: e.id,
-  word: e.word,
-  lang: e.lang,
-  source: g.label
-})));
-const filterFlat = (q: string, lang: string, sel: string[]) => FLAT.filter(e => e.word.toLowerCase().includes(q.toLowerCase()) && (lang === 'all' || e.lang === lang)).sort((a, b) => Number(sel.includes(b.word)) - Number(sel.includes(a.word)));
-const speakWord = (w: string, l: string) => {
-  if ('speechSynthesis' in window) {
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(w);
-    u.lang = l === 'fr' ? 'fr-FR' : l === 'de' ? 'de-DE' : l === 'es' ? 'es-ES' : 'en-US';
-    window.speechSynthesis.speak(u);
-  }
-};
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+/** The stop model reports its phrase lowercase; it reads capitalized everywhere. */
+const showWord = (w: string) => w === 'stop' ? 'Stop' : w;
+const kb = (n: number) => Math.round(n / 1024);
 const SpeakIcon = () => <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 5v3h2l3 3V2L4 5H2z" fill="currentColor" /><path d="M9 4.5a3 3 0 010 4M10.5 3a5 5 0 010 7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" /></svg>;
 interface DdOption {
   id: string;
@@ -561,7 +371,10 @@ function Dropdown({
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     const k = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setOpen(false);
+      }
     };
     document.addEventListener('pointerdown', h);
     document.addEventListener('keydown', k);
@@ -582,12 +395,26 @@ function Dropdown({
 function renderMark(m: Mark, x: (c: number) => number, plotH: number) {
   const mx = x(m.c);
   const my = Math.max(8, Math.min(m.y, plotH - 8));
-  if (m.kind === 'fire') return <g key={m.id}><circle className="lg-halo-a" cx={mx} cy={my} r="9" /><circle className="lg-rip" cx={mx} cy={my} r="8.5" /><circle className="lg-fire" cx={mx} cy={my} r="5" /></g>;
-  if (m.kind === 'near') return <circle key={m.id} className="lg-near" cx={mx} cy={my} r="3.5" />;
-  if (m.kind === 'room') return <g key={m.id}><circle className="lg-halo-w" cx={mx} cy={my} r="7" /><circle className="lg-rip-room" cx={mx} cy={my} r="8.5" /><circle className="lg-room" cx={mx} cy={my} r="3.5" /></g>;
+  if (m.kind === 'fire') return <g key={m.id} opacity={fade(m.age)}><circle className="lg-halo-a" cx={mx} cy={my} r="9" />{m.ripple && <circle className="lg-rip" cx={mx} cy={my} r="8.5" />}<circle className="lg-fire" cx={mx} cy={my} r="5" /></g>;
+  if (m.kind === 'near') return <circle key={m.id} className="lg-near" cx={mx} cy={my} r="3.5" opacity={fade(m.age)} />;
+  if (m.kind === 'room') return <g key={m.id} opacity={fade(m.age) * 0.85}><circle className="lg-halo-w" cx={mx} cy={my} r="7" />{m.ripple && <circle className="lg-rip-room" cx={mx} cy={my} r="8.5" />}<circle className="lg-room" cx={mx} cy={my} r="3.5" /></g>;
   return <g key={m.id}><circle className="lg-rip-you" cx={mx} cy={my} r="8.5" /><circle className="lg-you" cx={mx} cy={my} r="5" /></g>;
 }
+const KEY_STEP: Record<string, number> = {
+  ArrowLeft: -1,
+  ArrowDown: -1,
+  ArrowRight: 1,
+  ArrowUp: 1,
+  PageDown: -5,
+  PageUp: 5
+};
+/**
+ * The Living Graph. With `onCut` the knob drags and the graph is a slider; with only `onTune` the
+ * knob is a tap target and the graph a button. A press moves the knob only once it has travelled
+ * past a 4px slop, so a tap never nudges the line.
+ */
 function TouchGraph({
+  gid,
   marks,
   cut,
   onCut,
@@ -595,6 +422,7 @@ function TouchGraph({
   h = 120,
   aria
 }: {
+  gid: string;
   marks: Mark[];
   cut?: number;
   onCut?: (v: number) => void;
@@ -605,11 +433,11 @@ function TouchGraph({
   const W = 320;
   const ref = useRef<SVGSVGElement>(null);
   const [held, setHeld] = useState(false);
-  const dragDelta = useRef(0);
-  const pointerStart = useRef({
-    x: 0,
-    y: 0
-  });
+  const press = useRef<{
+    x: number;
+    y: number;
+    moved: boolean;
+  } | null>(null);
   const x = (c: number) => c / 100 * W;
   const plotH = h - 16;
   const rows = [1, 2, 3].map(i => ({
@@ -619,54 +447,80 @@ function TouchGraph({
   const setFrom = (clientX: number) => {
     const r = ref.current?.getBoundingClientRect();
     if (!r || !onCut) return;
-    const v = Math.round((clientX - r.left) / r.width * 100);
-    onCut(Math.max(CUT_MIN, Math.min(CUT_MAX, v)));
+    onCut(clampCut(Math.round((clientX - r.left) / r.width * 100)));
+  };
+  const release = () => {
+    press.current = null;
+    setHeld(false);
+  };
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (onCut && cut !== undefined) {
+      const next = e.key === 'Home' ? CUT_MIN : e.key === 'End' ? CUT_MAX : KEY_STEP[e.key] ? cut + KEY_STEP[e.key] : null;
+      if (next === null) return;
+      e.preventDefault();
+      onCut(clampCut(next));
+    } else if (onTune && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      onTune();
+    }
   };
   const cx = cut !== undefined ? x(cut) : 0;
-  const uid = aria.replace(/\s+/g, '');
-  return <svg ref={ref} className="ww-graph" viewBox={`0 0 ${W} ${h}`} role="img" aria-label={aria} onPointerMove={e => {
-    if (held) {
-      const dx = Math.abs(e.clientX - pointerStart.current.x);
-      const dy = Math.abs(e.clientY - pointerStart.current.y);
-      dragDelta.current = Math.max(dragDelta.current, dx + dy);
-      setFrom(e.clientX);
-    }
+  const a11y = onCut && cut !== undefined ? {
+    role: 'slider',
+    tabIndex: 0,
+    'aria-valuemin': CUT_MIN,
+    'aria-valuemax': CUT_MAX,
+    'aria-valuenow': cut,
+    'aria-valuetext': `${cut}%`,
+    onKeyDown
+  } : onTune ? {
+    role: 'button',
+    tabIndex: 0,
+    onKeyDown
+  } : {
+    role: 'img'
+  };
+  return <svg ref={ref} className={onCut ? 'ww-graph drag' : 'ww-graph'} viewBox={`0 0 ${W} ${h}`} aria-label={aria} {...a11y} onPointerMove={e => {
+    const p = press.current;
+    if (!p) return;
+    if (!p.moved && Math.abs(e.clientX - p.x) + Math.abs(e.clientY - p.y) < 4) return;
+    p.moved = true;
+    setFrom(e.clientX);
   }} onPointerUp={() => {
-    if (held && dragDelta.current < 4 && onTune) onTune();
-    setHeld(false);
-    dragDelta.current = 0;
-  }} onPointerCancel={() => setHeld(false)}>
+    if (press.current && !press.current.moved) onTune?.();
+    release();
+  }} onPointerCancel={release}>
     <defs>
-      <filter id="lg-frost" x="-30%" y="-30%" width="160%" height="160%" colorInterpolationFilters="sRGB">
+      <filter id={`${gid}-frost`} x="-30%" y="-30%" width="160%" height="160%" colorInterpolationFilters="sRGB">
         <feGaussianBlur in="SourceGraphic" stdDeviation="6" />
       </filter>
-      <clipPath id={`lg-veil-clip-${uid}`}><rect x="0" y="0" width={cx} height={plotH} /></clipPath>
-      <clipPath id={`lg-clear-clip-${uid}`}><rect x={cx} y="0" width={W - cx} height={plotH} /></clipPath>
+      <clipPath id={`${gid}-veil`}><rect x="0" y="0" width={cx} height={plotH} /></clipPath>
+      <clipPath id={`${gid}-clear`}><rect x={cx} y="0" width={W - cx} height={plotH} /></clipPath>
     </defs>
     <rect className="lg-track" x="0" y="0" width={W} height={plotH} rx="7" />
     {GRID_V.map(g => <line key={g.id} className={g.mj ? 'lg-paper mj' : 'lg-paper'} x1={x(g.p)} x2={x(g.p)} y1="0" y2={plotH} />)}
     {rows.map(r => <line key={r.id} className="lg-paper" x1="0" x2={W} y1={r.y} y2={r.y} />)}
     {cut !== undefined && <rect className="lg-veil" x="0" y="0" width={cx} height={plotH} rx="7" />}
     {cut !== undefined && <rect className="lg-tint" x={cx} y="0" width={W - cx} height={plotH} />}
-    {cut !== undefined && <g clipPath={`url(#lg-veil-clip-${uid})`} filter="url(#lg-frost)">{marks.map(m => renderMark(m, x, plotH))}</g>}
-    <g clipPath={cut !== undefined ? `url(#lg-clear-clip-${uid})` : undefined}>{marks.map(m => renderMark(m, x, plotH))}</g>
+    {cut !== undefined && <g clipPath={`url(#${gid}-veil)`} filter={`url(#${gid}-frost)`}>{marks.map(m => renderMark(m, x, plotH))}</g>}
+    <g clipPath={cut !== undefined ? `url(#${gid}-clear)` : undefined}>{marks.map(m => renderMark(m, x, plotH))}</g>
     <line className="lg-axis" x1="0" x2={W} y1={plotH} y2={plotH} />
     {TICKS.map(t => <g key={t.id}><line className="lg-axis" x1={x(t.p)} x2={x(t.p)} y1={plotH} y2={plotH + 4} /><text className="lg-al" x={x(t.p)} y={h - 1} textAnchor={t.p === 0 ? 'start' : t.p === 100 ? 'end' : 'middle'}>{t.p}%</text></g>)}
     {cut !== undefined && <g>
       <line className="lg-stem" x1={cx} x2={cx} y1="0" y2={plotH} />
       {held && <circle className="lg-heldring" cx={cx} cy={plotH / 2} r="18" />}
-      <rect className={held ? 'lg-knob held' : 'lg-knob'} x={cx - 7} y={plotH / 2 - 14} width="14" height="28" rx="4.5" onPointerDown={e => {
-        if (!onCut) return;
-        (e.currentTarget.ownerSVGElement as SVGSVGElement).setPointerCapture(e.pointerId);
-        setHeld(true);
-        dragDelta.current = 0;
-        pointerStart.current = {
-          x: e.clientX,
-          y: e.clientY
-        };
-      }} />
+      <rect className={held ? 'lg-knob held' : 'lg-knob'} x={cx - 7} y={plotH / 2 - 14} width="14" height="28" rx="4.5" />
       <line className="lg-grip" x1={cx - 2} x2={cx - 2} y1={plotH / 2 - 6} y2={plotH / 2 + 6} />
       <line className="lg-grip" x1={cx + 2} x2={cx + 2} y1={plotH / 2 - 6} y2={plotH / 2 + 6} />
+      {(onCut || onTune) && <rect className="lg-hit" x={cx - 18} y="0" width="36" height={plotH} onPointerDown={e => {
+        (e.currentTarget.ownerSVGElement as SVGSVGElement).setPointerCapture(e.pointerId);
+        press.current = {
+          x: e.clientX,
+          y: e.clientY,
+          moved: false
+        };
+        setHeld(true);
+      }} />}
     </g>}
     {cut !== undefined && <text className="lg-al lg-confidence" x="8" y={plotH - 8} textAnchor="start" style={{
       fontSize: '10px',
@@ -696,7 +550,10 @@ function HintBtn({
       if (!btn.current?.contains(e.target as Node) && !bubble.current?.contains(e.target as Node)) setOpen(false);
     };
     const esc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setOpen(false);
+      }
     };
     document.addEventListener('pointerdown', dismiss, true);
     document.addEventListener('keydown', esc);
@@ -741,318 +598,790 @@ function HintBtn({
     }}>{text}</div>, document.body)}
   </span>;
 }
-const Chev = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m6 9 6 6 6-6" /></svg>;
-function useDrawerBlur() {
+/** A drawer's page duties: the page behind blurs, focus moves into the panel and back out after,
+ *  and Escape closes it. Popups inside stop their own Escape before it reaches the window. */
+function useDrawer(onClose: () => void) {
+  const panel = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
+    const back = document.activeElement as HTMLElement | null;
     document.body.classList.add('has-drawer');
-    return () => document.body.classList.remove('has-drawer');
+    panel.current?.focus({
+      preventScroll: true
+    });
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close.current();
+    };
+    window.addEventListener('keydown', esc);
+    return () => {
+      document.body.classList.remove('has-drawer');
+      window.removeEventListener('keydown', esc);
+      back?.focus?.({
+        preventScroll: true
+      });
+    };
   }, []);
+  return panel;
 }
-function Picker({
-  current,
-  other,
-  onPick,
-  onClose
-}: {
-  current: string;
-  other: string;
-  onPick: (w: string) => void;
-  onClose: () => void;
-}) {
-  const [q, setQ] = useState('');
-  const [lang, setLang] = useState('all');
-  const list = filterFlat(q, lang, [current]);
-  useDrawerBlur();
-  return createPortal([<div key="scrim" className="ww-scrim" onClick={onClose} />, <div key="panel" className="ww-panel" role="dialog" aria-label="Wake Word Picker" onClick={e => e.stopPropagation()}>
-    <div className="ww-ptop"><h2>Wake Word Picker</h2><button className="secondary" onClick={onClose}>Close</button></div>
-    <div className="ww-filter"><input className="ww-search" placeholder="Search words" value={q} onChange={e => setQ(e.target.value)} /><Dropdown value={lang} options={LANGS} onChange={setLang} label="Language" /></div>
-    <div className="ww-picker-list">
-      <div className="ww-opts" role="radiogroup" aria-label="Wake Word">{list.map(e => {
-          const isSelected = e.word === current;
-          const isTaken = e.word === other;
-          return <button key={e.id} type="button" role="radio" aria-checked={isSelected} className={isSelected ? 'ww-opt on' : 'ww-opt'} disabled={isTaken} onClick={() => !isTaken && onPick(e.word)}>
-            <span className="ww-opt-label"><span className="ww-opt-word">{e.word}</span><span className="ww-opt-source">{e.source}</span></span>
-            <span className="ww-speak" role="button" tabIndex={0} aria-label={`Preview ${e.word}`} onClick={ev => {
-              ev.stopPropagation();
-              speakWord(e.word, e.lang);
-            }}><SpeakIcon /></span>
-            <span className="ww-mark">{isSelected && <Check size={13} strokeWidth={3} />}</span>
-          </button>;
-        })}</div>
-      <p className="ww-foot">More words come from the sources in the card below.</p>
-    </div>
-  </div>], document.body);
-}
+const toPlace = (s: TunerState, attempts: Attempt[], vadTries: number): TunerState => {
+  const p = placement(attempts, s.day, s.roomReg);
+  if (p.nogap) return {
+    ...s,
+    attempts,
+    vadTries,
+    phase: 'nogap',
+    nogap: p.nogap
+  };
+  return {
+    ...s,
+    attempts,
+    vadTries,
+    phase: 'place',
+    noise: p.noise,
+    floorV: p.floorV,
+    hiV: p.hiV,
+    cutC: p.cutC
+  };
+};
+/**
+ * The tuner: Start opens a device session (the model floored, peers muted), the voice rounds land
+ * as blue dots, then placement seeds the knob inside the gap for Apply. `quick` is the knob-tap
+ * path: placement straight over the stored stats, no session.
+ */
 function Tuner({
+  ctx,
+  i,
   word,
-  onApply,
+  isStop,
+  quick,
+  seed,
+  track,
+  wakeRead,
   onClose
 }: {
+  ctx: Ctx;
+  i: number;
   word: string;
-  onApply: (cut: number) => void;
+  isStop: boolean;
+  quick: boolean;
+  seed: {
+    cut: number;
+    noise: number;
+    floor: number;
+    hi: number;
+    day: number[];
+  };
+  track: Track | null;
+  wakeRead: () => Promise<any>;
   onClose: () => void;
 }) {
-  const [phase, setPhase] = useState<'ready' | 'voice' | 'place'>('ready');
-  const [n, setN] = useState(0);
-  const [cut, setCut] = useState(60);
-  const [room, setRoom] = useState<Mark[]>(ROOM_SMATTER);
-  useDrawerBlur();
+  const [st, setSt] = useState<TunerState>(() => ({
+    phase: quick ? 'place' : 'ready',
+    attempts: [],
+    vadTries: 0,
+    skipped: false,
+    roomReg: 0,
+    roomSeen: [],
+    day: seed.day,
+    noise: seed.noise,
+    floorV: quick ? seed.floor : 0,
+    hiV: quick ? seed.hi : 0,
+    cutC: quick ? clampCut(pctN(seed.cut || 130)) : 55
+  }));
+  const heldRef = useRef<any[]>([]);
+  const [pm, setPm] = useState<{
+    muted: string[];
+    failed: string[];
+    unknown: boolean;
+  } | null>(null);
+  const releasePeers = () => {
+    if (heldRef.current.length) releasePeerMutes(heldRef.current);
+    heldRef.current = [];
+  };
+  const panel = useDrawer(onClose);
+  // Peers self-heal on a 60s TTL, so every release here is best effort.
+  const openRef = useRef(false);
+  const mounted = useRef(true);
   useEffect(() => {
-    if (phase !== 'voice') return;
-    if (n >= ATTEMPT_PLAN.length) {
-      const floor = Math.min(...ATTEMPT_PLAN.map(a => a.score));
-      setCut(Math.round(ROOM_SCORE + 0.6 * (floor - ROOM_SCORE)));
-      setPhase('place');
+    const ka = setInterval(() => {
+      if (openRef.current) {
+        post(`/api/sat1/wakewords/tune?i=${i}&on=1`).catch(() => {});
+        keepPeerMutes(heldRef.current);
+      }
+    }, 20000);
+    return () => {
+      mounted.current = false;
+      clearInterval(ka);
+      if (openRef.current) post(`/api/sat1/wakewords/tune?i=${i}&on=0`).catch(() => {});
+      openRef.current = false;
+      releasePeers();
+    };
+  }, [i]);
+  const start = async () => {
+    const r = await post(`/api/sat1/wakewords/tune?i=${i}&on=1`).catch(() => null);
+    if (!mounted.current) return;
+    if (!r || !r.ok) {
+      setSt(s => ({
+        ...s,
+        phase: 'gone'
+      }));
       return;
     }
-    const t = setTimeout(() => setN(v => v + 1), 2800);
-    return () => clearTimeout(t);
-  }, [phase, n]);
-  const you: Mark[] = ATTEMPT_PLAN.slice(0, n).map((a, i) => ({
-    id: `y${a.score}${a.round}`,
-    c: a.score,
-    y: 30 + i * 22,
-    kind: 'you' as MarkKind
-  }));
-  const floor = Math.min(...ATTEMPT_PLAN.map(a => a.score));
-  const cur = ATTEMPT_PLAN[Math.min(n, ATTEMPT_PLAN.length - 1)];
-  let read = {
-    cls: 'dim',
-    t: `Fires above ${cut}% · every room dot in the frost · ${floor - cut} pts under your quietest try.`
+    let cap = 1;
+    try {
+      cap = JSON.parse(r.text).cap ?? 1;
+    } catch {
+      /* firmware without `cap`: assume able */
+    }
+    openRef.current = true;
+    if (!heldRef.current.length) {
+      holdPeerMutes(ctx.ha, ctx.device?.mac).then((res: any) => {
+        if (!mounted.current) {
+          if (res.held.length) releasePeerMutes(res.held);
+          return;
+        }
+        heldRef.current = res.held;
+        if (res.held.length || res.failed.length || res.unknown) setPm({
+          muted: res.held.map((p: any) => p.name),
+          failed: res.failed,
+          unknown: res.unknown
+        });
+      });
+    }
+    setSt(s => ({
+      ...s,
+      phase: cap === 0 ? 'nocap' : 'voice',
+      attempts: [],
+      vadTries: 0,
+      skipped: false
+    }));
   };
-  if (cut >= floor - 2) read = {
-    cls: 'warn',
-    t: `Above your quietest try (${floor}%) - real calls from across the room will be missed.`
-  };else if (cut <= ROOM_SCORE) read = {
-    cls: 'err',
-    t: 'Amber dots sit past your line - the room has scored this high in the last day. Expect false firings.'
+  useEffect(() => {
+    if (st.phase === 'gone' || st.phase === 'nocap') releasePeers();
+  }, [st.phase]);
+  useEffect(() => {
+    let live = true;
+    const tick = async () => {
+      if (!live) return;
+      const d = await wakeRead();
+      if (!live) return;
+      const day = (i === STOP_SLOT ? d?.stopw?.day : d?.slots?.find((x: Track) => x.i === i)?.day) || null;
+      const tune = d?.tune && d.tune.i === i ? d.tune : null;
+      const ev = tune ? tune.ev || [] : null;
+      const reg = tune ? tune.room || 0 : 0;
+      setSt(s => {
+        let next = s;
+        if (day) next = {
+          ...next,
+          day
+        };
+        // A higher register reading lands as a new dot; earlier ones never move.
+        if (reg > next.roomReg && (next.phase === 'voice' || next.phase === 'place')) next = {
+          ...next,
+          roomReg: reg,
+          roomSeen: [...next.roomSeen, reg]
+        };
+        if (next.phase !== 'voice') return next;
+        if (ev === null) return {
+          ...next,
+          phase: 'gone'
+        };
+        const {
+          attempts,
+          vadTries
+        } = attemptsOf(ev);
+        const enough = attempts.length >= 4 || attempts.length >= 3 && next.skipped;
+        return enough ? toPlace(next, attempts, vadTries) : {
+          ...next,
+          attempts,
+          vadTries
+        };
+      });
+      setTimeout(tick, 700);
+    };
+    tick();
+    return () => {
+      live = false;
+    };
+  }, [i]);
+  const skip = () => setSt(s => s.attempts.length >= 3 ? toPlace(s, s.attempts, s.vadTries) : {
+    ...s,
+    skipped: true
+  });
+  const apply = async () => {
+    const noise = Math.max(0, ...st.day, st.roomReg, st.noise);
+    const r = await post(cutoffPath(i, st.cutC, noise, st.floorV, st.hiV)).catch(() => null);
+    if (!r?.ok) return;
+    if (openRef.current) {
+      openRef.current = false;
+      await post(`/api/sat1/wakewords/tune?i=${i}&on=0`).catch(() => {});
+    }
+    releasePeers();
+    await wakeRead();
+    onClose();
   };
-  return createPortal([<div key="scrim" className="ww-scrim" />, <div key="panel" className="ww-panel" role="dialog" aria-label={`Tune ${word}`}>
+  const clearHistory = async () => {
+    await post(`/api/sat1/wakewords/clearhist?i=${i}`).catch(() => null);
+    await wakeRead();
+  };
+  const smatter: Mark[] = [...roomMarks(st.day, 38, 80), ...sessionRoomMarks(st.roomSeen, 38, 80)];
+  const tries: Mark[] = attemptMarks(st.attempts, 42, 26);
+  const place = st.phase === 'place';
+  const marks = st.phase === 'nocap' || st.phase === 'gone' ? [] : st.phase === 'ready' ? smatter : place && quick ? [...smatter, ...rowMarks(track, 42, 84)] : [...smatter, ...tries];
+  const n = st.attempts.length;
+  const prompt = n < 2 ? TEXT.tn2_near.replace('%s', word) : n < 3 ? TEXT.tn2_far : TEXT.tn2_other;
+  const verdict = readout(st.cutC, st.floorV, st.day, st.roomReg);
+  const readText = verdict.tone === 'warn' ? TEXT.tn2_high.replace('%s', `${verdict.floorC}%`) : verdict.tone === 'err' ? TEXT.tn2_low : `${TEXT.tn2_ok.replace('%s', `${verdict.c}%`)}${verdict.floorC ? TEXT.tn2_under.replace('%s', String(verdict.floorC - verdict.c)) : ''}.`;
+  const pmNote = pm && <>
+    {pm.muted.length > 0 && <p className="ww-note">{`${pm.muted.length === 1 ? TEXT.tn_pm_one : TEXT.tn_pm_many.replace('%s', String(pm.muted.length))} (${pm.muted.join(', ')})`}</p>}
+    {pm.failed.length > 0 && <p className="ww-note warn">{TEXT.tn_pm_failed.replace('%s', pm.failed.join(', '))}</p>}
+    {pm.unknown && <p className="ww-note warn">{TEXT.tn_pm_unknown}</p>}
+  </>;
+  const title = TEXT.tn_title.replace('%s', word);
+  return createPortal([<div key="scrim" className="ww-scrim" />, <div key="panel" ref={panel} tabIndex={-1} className="ww-panel" role="dialog" aria-modal="true" aria-label={title}>
     <div className="ww-ptop"><h2 style={{
         display: 'flex',
         alignItems: 'center',
         gap: 8
-      }}><span>Tune “{word}”</span><HintBtn text={HINTS.living_graph} /></h2><button className="secondary" onClick={onClose}>Close</button></div>
-    <TouchGraph h={150} marks={[...room, ...you]} cut={phase === 'place' ? cut : undefined} onCut={phase === 'place' ? setCut : undefined} aria={`Tuning graph for ${word}`} />
-    {phase === 'ready' && <div><p className="ww-read dim">Follow the prompts and walk the room saying “{word}”. Blue dots are live detections; amber dots are the past 24 hours. You'll use them to place the firing line - and you can move it any time.</p><div className="ww-btns"><button className="primary" onClick={() => {
-          setN(0);
-          setPhase('voice');
-        }}>Start</button><button className="secondary" onClick={onClose}>Cancel</button></div></div>}
-    {phase === 'voice' && <div><p className="ww-read"><strong>{ROUND_TEXT[cur.round]}</strong><span> ({Math.min(n + 1, 4)} / 4)</span></p><p className="ww-note">Muted 1 nearby satellite for this session (Kitchen Satellite)</p></div>}
-    {phase === 'place' && <div><p className={`ww-read ${read.cls}`}>{read.t}</p><div className="ww-acts">
-      <button className="secondary" onClick={() => {
-          setN(0);
-          setPhase('voice');
-        }}>Re-Tune</button>
-      <button className="secondary" onClick={() => setRoom([])}>Clear history</button>
-      <button className="secondary" onClick={onClose}>Cancel</button>
-      <button className="primary" onClick={() => onApply(cut)}>Apply</button>
+      }}><span>{title}</span><HintBtn text={HINTS.living_graph} /></h2><button className="secondary" onClick={onClose}>Close</button></div>
+    <TouchGraph gid={`tn${i}`} h={150} marks={marks} cut={place ? st.cutC : undefined} onCut={place ? c => setSt(s => ({
+      ...s,
+      cutC: c
+    })) : undefined} aria={place ? `Trigger threshold for “${word}”` : `Tuning graph for “${word}”`} />
+    {st.phase === 'ready' && <div><p className="ww-read dim">{(isStop ? TEXT.tn2_ready_stop : TEXT.tn2_ready).replace('%s', word)}</p><div className="ww-btns"><button className="primary" onClick={start}>{TEXT.tn2_start}</button><button className="secondary" onClick={onClose}>{TEXT.cancel}</button></div></div>}
+    {st.phase === 'voice' && <div><p className="ww-read"><strong>{prompt}</strong><span> ({Math.min(n, 4)} / 4)</span></p>{st.vadTries > 0 && <p className="ww-note warn">{TEXT.tn_vad}</p>}{pmNote}{n >= 3 && <div className="ww-btns"><button className="secondary" onClick={skip}>{TEXT.tn2_skip}</button></div>}</div>}
+    {place && <div><p className={`ww-read ${verdict.tone}`}>{readText}</p>{pmNote}<div className="ww-acts">
+      <button className="secondary" onClick={start}>{TEXT.tn2_retune}</button>
+      <button className="secondary" onClick={clearHistory}>{TEXT.tn2_clear}</button>
+      <button className="secondary" onClick={onClose}>{TEXT.cancel}</button>
+      <button className="primary" onClick={apply}>{TEXT.tn_apply}</button>
     </div></div>}
+    {st.phase === 'nogap' && <div><p className="ww-read err">{st.nogap === 'room' ? TEXT.tn_nogap_room : TEXT.tn_nogap_voice}</p><div className="ww-btns"><button className="secondary" onClick={onClose}>{TEXT.cancel}</button></div></div>}
+    {(st.phase === 'nocap' || st.phase === 'gone') && <div><p className={st.phase === 'gone' ? 'ww-read warn' : 'ww-read dim'}>{st.phase === 'gone' ? TEXT.tn_gone : TEXT.tn_nocap}</p><div className="ww-btns"><button className="secondary" onClick={onClose}>{TEXT.cancel}</button></div></div>}
   </div>], document.body);
 }
 function PipeDrawer({
-  slot,
-  onChange,
+  slotName,
+  pipe,
+  fsd,
   onClose
 }: {
-  slot: Slot;
-  onChange: (p: Partial<Slot>) => void;
+  slotName: string;
+  pipe: {
+    value: string;
+    options: [string, string][];
+    busy: boolean;
+    onPick: (v: string) => void;
+  } | null;
+  fsd: {
+    value: string;
+    onPick: (v: string) => void;
+  } | null;
   onClose: () => void;
 }) {
-  useDrawerBlur();
-  return createPortal([<div key="scrim" className="ww-scrim" onClick={onClose} />, <div key="panel" className="ww-panel" role="dialog" aria-label="Voice Pipeline" onClick={e => e.stopPropagation()}>
+  const panel = useDrawer(onClose);
+  return createPortal([<div key="scrim" className="ww-scrim" onClick={onClose} />, <div key="panel" ref={panel} tabIndex={-1} className="ww-panel" role="dialog" aria-modal="true" aria-label={`Voice Pipeline, ${slotName}`} onClick={e => e.stopPropagation()}>
     <div className="ww-ptop"><h2>Voice Pipeline</h2><button className="secondary" onClick={onClose}>Close</button></div>
-    <h3 className="ww-sec">Voice Pipeline</h3>
-    <div className="ww-opts" role="radiogroup" aria-label="Voice Pipeline">{PIPES.map(p => <button key={p.id} type="button" role="radio" aria-checked={slot.pipe === p.id} className={slot.pipe === p.id ? 'ww-opt on' : 'ww-opt'} onClick={() => onChange({
-        pipe: p.id
-      })}><span>{p.label}</span><span className="ww-mark">{slot.pipe === p.id && <Check size={13} strokeWidth={3} />}</span></button>)}</div>
-    <h3 className="ww-sec ww-sec-gap">Finished Speaking Detection</h3>
-    <div className="ww-opts" role="radiogroup" aria-label="Finished Speaking Detection">{EOS_OPTS.map(o => <button key={o.id} type="button" role="radio" aria-checked={slot.eos === o.id} className={slot.eos === o.id ? 'ww-opt on' : 'ww-opt'} onClick={() => onChange({
-        eos: o.id
-      })}><span>{o.label}</span><span className="ww-mark">{slot.eos === o.id && <Check size={13} strokeWidth={3} />}</span></button>)}</div>
-    <p className="ww-foot">Controls how quickly the satellite detects end of speech.</p>
+    {pipe && <>
+      <h3 className="ww-sec">Voice Pipeline<HintBtn text={<>{HINTS.voice_pipeline} <a href={TEXT.vp_docs_url} target="_blank" rel="noopener">{TEXT.vp_docs}</a></>} /></h3>
+      <div className="ww-opts" role="radiogroup" aria-label="Voice Pipeline">{pipe.options.map(([id, label]) => <button key={id} type="button" role="radio" aria-checked={pipe.value === id} className={pipe.value === id ? 'ww-opt on' : 'ww-opt'} disabled={pipe.busy} onClick={() => pipe.value !== id && pipe.onPick(id)}><span>{label}</span><span className="ww-mark">{pipe.value === id && <Check size={13} strokeWidth={3} />}</span></button>)}</div>
+    </>}
+    {fsd && <>
+      <h3 className={pipe ? 'ww-sec ww-sec-gap' : 'ww-sec'}>Finished Speaking Detection<HintBtn text={HINTS.finished_speaking} /></h3>
+      <div className="ww-opts" role="radiogroup" aria-label="Finished Speaking Detection">{FSD_OPTIONS.map(([id, label]: [string, string]) => <button key={id} type="button" role="radio" aria-checked={fsd.value === id} className={fsd.value === id ? 'ww-opt on' : 'ww-opt'} onClick={() => fsd.value !== id && fsd.onPick(id)}><span>{label}</span><span className="ww-mark">{fsd.value === id && <Check size={13} strokeWidth={3} />}</span></button>)}</div>
+      <p className="ww-foot">Controls how quickly the satellite detects end of speech.</p>
+    </>}
   </div>], document.body);
 }
 function WordDrawer({
-  selected,
-  slotId,
-  onToggle,
+  slotName,
+  entries,
+  pending,
+  current,
+  taken,
+  busy,
+  onPick,
   onClose
 }: {
-  selected: string[];
-  slotId: string;
-  onToggle: (w: string) => void;
+  slotName: string;
+  entries: Entry[];
+  pending: {
+    url: string;
+    label: string;
+    error: boolean;
+  }[];
+  current: string;
+  taken: string;
+  busy: boolean;
+  onPick: (e: Entry | null) => void;
   onClose: () => void;
 }) {
   const [q, setQ] = useState('');
   const [lang, setLang] = useState('all');
-  const current = selected[0] ?? '';
-  const list = filterFlat(q, lang, selected);
-  useDrawerBlur();
-  return createPortal([<div key="scrim" className="ww-scrim" onClick={onClose} />, <div key="panel" className="ww-panel" role="dialog" aria-label={`Wake Word for slot ${slotId}`} onClick={e => e.stopPropagation()}>
+  const panel = useDrawer(onClose);
+  const langs: string[] = langsOf(entries);
+  const {
+    shown,
+    hidden
+  } = filterEntries(entries, q, lang === 'all' ? '' : lang, current);
+  const other = taken.toLowerCase();
+  const speakable = canSpeak();
+  return createPortal([<div key="scrim" className="ww-scrim" onClick={onClose} />, <div key="panel" ref={panel} tabIndex={-1} className="ww-panel" role="dialog" aria-modal="true" aria-label={`Wake Word Picker, ${slotName}`} onClick={e => e.stopPropagation()}>
     <div className="ww-ptop"><h2>Wake Word Picker</h2><button className="secondary" onClick={onClose}>Close</button></div>
-    <div className="ww-filter"><input className="ww-search" placeholder="Search words" value={q} onChange={e => setQ(e.target.value)} /><Dropdown value={lang} options={LANGS} onChange={setLang} label="Language" /></div>
+    <div className="ww-filter"><input className="ww-search" type="search" placeholder="Search words" aria-label="Search words" value={q} onChange={e => setQ(e.currentTarget.value)} />{langs.length > 1 && <Dropdown value={lang} options={[{
+        id: 'all',
+        label: TEXT.ww_all_langs
+      }, ...langs.map(l => ({
+        id: l,
+        label: langLabel(l)
+      }))]} onChange={setLang} label="Language" />}</div>
     <div className="ww-picker-list">
-      <div className="ww-opts" role="radiogroup" aria-label="Wake Word">{list.map(e => {
-          const isSelected = e.word === current;
-          const isTaken = selected.includes(e.word) && e.word !== current;
-          return <button key={e.id} type="button" role="radio" aria-checked={isSelected} className={isSelected ? 'ww-opt on' : 'ww-opt'} disabled={isTaken} onClick={() => !isTaken && onToggle(e.word)}>
-            <span className="ww-opt-label"><span className="ww-opt-word">{e.word}</span><span className="ww-opt-source">{e.source}</span></span>
-            <span className="ww-speak" role="button" tabIndex={0} aria-label={`Preview ${e.word}`} onClick={ev => {
+      <div className="ww-opts" role="radiogroup" aria-label="Wake Word">
+        {!q.trim() && lang === 'all' && <button type="button" role="radio" aria-checked={!current} className={current ? 'ww-opt' : 'ww-opt on'} disabled={busy} onClick={() => onPick(null)}>
+          <span className="ww-opt-label"><span className="ww-opt-word">No wake word</span></span>
+          <span className="ww-mark">{!current && <Check size={13} strokeWidth={3} />}</span>
+        </button>}
+        {shown.map((e: Entry) => {
+          const isSelected = e.spec === current;
+          const isTaken = !!other && e.word.toLowerCase() === other;
+          const note = [e.source, e.ver, e.unverified && TEXT.ww_unverified, isTaken && TEXT.ww_on_other].filter(Boolean).join(' · ');
+          return <button key={e.key} type="button" role="radio" aria-checked={isSelected} className={isSelected ? 'ww-opt on' : 'ww-opt'} disabled={busy || isTaken} onClick={() => onPick(e)}>
+            <span className="ww-opt-label"><span className="ww-opt-word">{e.word}</span><span className="ww-opt-source">{note}</span></span>
+            {speakable && <span className="ww-speak" role="button" tabIndex={0} aria-label={`Preview ${e.word}`} onClick={ev => {
               ev.stopPropagation();
-              speakWord(e.word, e.lang);
-            }}><SpeakIcon /></span>
+              speak(e.word);
+            }} onKeyDown={ev => {
+              if (ev.key !== 'Enter' && ev.key !== ' ') return;
+              ev.preventDefault();
+              ev.stopPropagation();
+              speak(e.word);
+            }}><SpeakIcon /></span>}
             <span className="ww-mark">{isSelected && <Check size={13} strokeWidth={3} />}</span>
           </button>;
-        })}</div>
+        })}
+      </div>
+      {hidden > 0 && <p className="ww-foot">{hidden} {TEXT.ww_more}</p>}
+      {pending.map(p => <p key={p.url} className="ww-foot">{p.label}: {p.error ? TEXT.ww_source_failed : TEXT.ww_source_loading}</p>)}
       <p className="ww-foot">More words come from the sources in the card below.</p>
     </div>
   </div>], document.body);
 }
+function Sources({
+  sources,
+  setSources,
+  cat
+}: {
+  sources: Source[];
+  setSources: (list: Source[]) => void;
+  cat: Record<string, CatEntry>;
+}) {
+  const [url, setUrl] = useState('');
+  const [bad, setBad] = useState(false);
+  const [confirm, setConfirm] = useState<string | null>(null);
+  const missing = DEFAULT_SOURCES.filter((d: Source) => !sources.some(s => s.url === d.url));
+  const add = () => {
+    const src = parseSource(url);
+    if (!src) {
+      setBad(true);
+      return;
+    }
+    setBad(false);
+    if (sources.some(s => s.url === src.url)) return;
+    setSources([...sources, src]);
+    setUrl('');
+  };
+  return <article className="ww-card">
+    <div className="ww-head"><h2 className="ww-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16" /></svg><span>Wake Word Sources</span><HintBtn text={HINTS.wake_sources} /></h2></div>
+    {sources.map(s => {
+      const c = cat[s.url];
+      return <div key={s.url}><div className="ww-src"><a href={s.url} target="_blank" rel="noreferrer">{s.label}</a>{!c?.error && <small>{c?.entries ? `${c.entries.length} ${TEXT.ws_words}` : TEXT.ww_source_loading}</small>}<button className="ww-x" aria-label={`Remove ${s.label}`} onClick={() => setConfirm(s.url)}>Remove</button></div>
+        {c?.error && <p className="ww-note warn">{TEXT.ww_source_failed}</p>}
+        {confirm === s.url && <div className="ww-confirm"><span>Remove this source? Its words disappear from the picker. Words already installed keep working.</span><div><button className="secondary" onClick={() => setConfirm(null)}>Keep</button><button className="primary" onClick={() => {
+              setSources(sources.filter(x => x.url !== s.url));
+              setConfirm(null);
+            }}>Remove</button></div></div>}</div>;
+    })}
+    {missing.length > 0 && <p className="ww-foot"><button type="button" className="ww-link" onClick={() => setSources([...missing, ...sources])}>{TEXT.ws_restore}</button></p>}
+    <form className="ww-add" noValidate onSubmit={e => {
+      e.preventDefault();
+      add();
+    }}>
+      <input type="url" placeholder="https://github.com/owner/repo" value={url} onChange={e => {
+        setUrl(e.currentTarget.value);
+        setBad(false);
+      }} aria-label="Source URL" /><button className="primary" type="submit" disabled={!url.trim()}>Add</button>
+    </form>
+    {bad && <p className="ww-note err">{TEXT.ws_bad_url}</p>}
+    <p className="ww-foot">{TEXT.ws_footer_q}<a href={REQUEST_WORD_URL} target="_blank" rel="noopener">{TEXT.ws_request}</a>{TEXT.ws_or}<a href={TRAIN_URL} target="_blank" rel="noopener">{TEXT.ws_train}</a>.</p>
+  </article>;
+}
+const isOn = (e: any) => e.value === true || e.state === 'ON';
 export function WakeTab({
   ctx
 }: {
   ctx: Ctx;
 }) {
-  const [slots, setSlots] = useState<Slot[]>(INITIAL_SLOTS);
-  const [stopOn, setStopOn] = useState(true);
-  const [stopCut, setStopCut] = useState(75);
-  const [chime, setChime] = useState(true);
-  const [picking, setPicking] = useState<string | null>(null);
-  const [tuning, setTuning] = useState<string | null>(null);
-  const [sources, setSources] = useState<Source[]>(INITIAL_SOURCES);
-  const [url, setUrl] = useState('');
-  const [confirm, setConfirm] = useState<string | null>(null);
-  const [piping, setPiping] = useState<string | null>(null);
-  const [wordsOpen, setWordsOpen] = useState<string | null>(null);
-  const upd = (id: string, p: Partial<Slot>) => setSlots(s => s.map(x => x.id === id ? {
-    ...x,
-    ...p
-  } : x));
-  const toggleWord = (w: string) => setSlots(s => {
-    if (s.some(x => x.word === w)) return s.length > 1 ? s.filter(x => x.word !== w) : s;
-    if (s.length >= 2) return s;
-    const base = s[0];
-    return [...s, {
-      id: `s${Date.now()}`,
-      word: w,
-      tuned: false,
-      cut: 68,
-      pipe: base?.pipe ?? 'preferred',
-      eos: base?.eos ?? 'default'
-    }];
-  });
-  const pickSlot = slots.find(s => s.id === picking);
-  const tuneSlot = slots.find(s => s.id === tuning);
-  const pipeSlot = slots.find(s => s.id === piping);
-  const wordSlot = slots.find(s => s.id === wordsOpen);
-  return <section className="control wake-section">
+  const {
+    ha,
+    haRefresh
+  } = ctx;
+  const [tuning, setTuning] = useState<Tuning | null>(null);
+  const [swaps, setSwaps] = useState<Record<number, Swap | null>>({});
+  const anyBusy = Object.values(swaps).some(s => s?.phase === 'busy');
+  // Swaps and tune sessions run their own faster chained loops; the standing poll stands down
+  // meanwhile so only one loop reads at a time.
+  const {
+    wake,
+    wakeRead,
+    setSlot
+  } = useWakeSlots(tuning || anyBusy ? 0 : 2500);
+  // The hook's null is both "not answered yet" and "no loader on this build" (a 404): one read of
+  // our own tells them apart, so the not-available note never flashes while the first loads.
+  const [settled, setSettled] = useState(false);
+  const alive = useRef(true);
+  useEffect(() => {
+    wakeRead().then(() => alive.current && setSettled(true));
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  const [sources, setSourcesState] = useState<Source[]>(readSources);
+  const [cat, setCat] = useState<Record<string, CatEntry>>({});
+  const setSources = (list: Source[]) => {
+    setSourcesState(list);
+    writeSources(list);
+  };
+  useEffect(() => {
+    let live = true;
+    for (const s of sources) {
+      if (cat[s.url] && !cat[s.url].loading) continue;
+      setCat(c => ({
+        ...c,
+        [s.url]: {
+          loading: true
+        }
+      }));
+      enumerateSource(s).then((entries: unknown[]) => live && setCat(c => ({
+        ...c,
+        [s.url]: {
+          entries
+        }
+      }))).catch(() => live && setCat(c => ({
+        ...c,
+        [s.url]: {
+          error: true
+        }
+      })));
+    }
+    return () => {
+      live = false;
+    };
+  }, [sources]);
+  const [picking, setPicking] = useState<number | null>(null);
+  const [piping, setPiping] = useState<number | null>(null);
+  const slots: Track[] = wake?.slots || [];
+  const slotAt = (i: number) => slots.find(s => s.i === i);
+  const activeWords = slots.filter(s => s.m && s.w).map(s => s.w as string);
+  const assist = useAssist(ha, haRefresh, activeWords);
+  useEffect(() => {
+    haSyncOnce(haRefresh);
+  }, []);
+  // One word per mount: a word listening on the device but holding no Home Assistant select (a
+  // browser closed mid-pairing) gets one. Keyed on the word list too, since HA and the slot read
+  // land in either order.
+  const repaired = useRef(false);
+  useEffect(() => {
+    if (repaired.current || !assist.ready) return;
+    const orphan = activeWords.find(w => assist.pipelineFor(w) === null);
+    if (!orphan) return;
+    repaired.current = true;
+    assist.syncSlot(orphan, true).catch(() => {});
+  }, [assist.ready, activeWords.length]);
+
+  // Home Assistant's wake word selects follow the device's slots. An empty `asst` is expected
+  // while HA reloads this device's config entry after a download, so it is waited out, not
+  // taken as a verdict.
+  const syncAssist = async (i: number, prevWord: string, nextWord: string) => {
+    const deadline = Date.now() + 60000;
+    for (;;) {
+      const fresh = await requestJson('/api/sat1/ha').catch(() => null);
+      const sel = fresh?.d?.asst?.s;
+      if (Array.isArray(sel) && sel.length) {
+        const write = pairingWrite(sel, i, prevWord, nextWord);
+        if (!write) return;
+        await post(`/api/sat1/ha/select?e=${encodeURIComponent(write[0])}&o=${encodeURIComponent(write[1])}`).catch(() => {});
+        await haRefresh();
+      }
+      if (!alive.current || Date.now() > deadline) return;
+      await sleep(500);
+    }
+  };
+  const choose = async (i: number, spec: string, word: string) => {
+    const prevWord = slotAt(i)?.w || '';
+    if (tuning && tuning.i === i) setTuning(null);
+    setSwaps(s => ({
+      ...s,
+      [i]: {
+        phase: 'busy',
+        word,
+        spec
+      }
+    }));
+    const r = await setSlot(i, spec).catch(() => ({
+      ok: false
+    }));
+    if (!r.ok) {
+      if (alive.current) setSwaps(s => ({
+        ...s,
+        [i]: {
+          phase: 'error',
+          word,
+          spec,
+          err: 0
+        }
+      }));
+      return;
+    }
+    const deadline = Date.now() + (isUrl(spec) ? 90000 : 10000);
+    for (;;) {
+      await sleep(isUrl(spec) ? 900 : 400);
+      if (!alive.current) return;
+      const d = await wakeRead();
+      const s = d?.slots?.find((x: Track) => x.i === i);
+      const step = swapStep(s, spec);
+      if (step?.done) {
+        setSwaps(prev => ({
+          ...prev,
+          [i]: null
+        }));
+        await syncAssist(i, prevWord, spec === 'none' ? '' : s.w || word);
+        return;
+      }
+      if (step && 'err' in step) {
+        setSwaps(prev => ({
+          ...prev,
+          [i]: {
+            phase: 'error',
+            word,
+            spec,
+            err: step.err
+          }
+        }));
+        return;
+      }
+      if (step) setSwaps(prev => ({
+        ...prev,
+        [i]: {
+          ...(prev[i] as Swap),
+          dl: step.dl,
+          tot: step.tot
+        }
+      }));
+      if (Date.now() > deadline) {
+        setSwaps(prev => ({
+          ...prev,
+          [i]: {
+            phase: 'error',
+            word,
+            spec,
+            err: 7
+          }
+        }));
+        return;
+      }
+    }
+  };
+
+  // Finished Speaking Detection: the device keeps one select per slot and copies the firing slot's
+  // value into Home Assistant's own before each request; `unset` follows HA.
+  const fsdRaw = ha?.d?.fsd;
+  const haFsd: string | null = !haBlocked(ha) && !haTooOld(ha) && Array.isArray(fsdRaw) && fsdRaw.length === 2 ? fsdRaw[1] : null;
+  const fsdOwn = FSD_KEYS.map((k: string) => entity(ctx, k)?.value);
+  const fsdNow: string[] | null = fsdShown(fsdOwn, haFsd);
+  const [fsdHold, setFsdHold] = useState<Record<number, string>>({});
+  const pickFsd = async (i: number, option: string) => {
+    const writes: [number, string][] = fsdWrites(fsdOwn, haFsd, i, option);
+    setFsdHold(h => ({
+      ...h,
+      ...Object.fromEntries(writes)
+    }));
+    const done = await Promise.all(writes.map(([k, v]) => post(`${pathFor(ctx, FSD_KEYS[k], 'set')}?option=${encodeURIComponent(v)}`).catch(() => null)));
+    // Held until the stream has had time to report the device's own value; a refused write
+    // snaps back at once.
+    const drop = () => alive.current && setFsdHold(h => {
+      const next = {
+        ...h
+      };
+      for (const [k, v] of writes) if (next[k] === v) delete next[k];
+      return next;
+    });
+    if (done.some(r => !r?.ok)) drop();else setTimeout(drop, 2000);
+  };
+  const stopSwitch = entity(ctx, 'stop_word');
+  const stopOn = stopSwitch ? isOn(stopSwitch) : false;
+  // The switch is the preference; `stop_active` is whether the stop model runs right now. Firmware
+  // without the sensor falls back to the switch, never a false "Paused".
+  const stopActive = entity(ctx, 'stop_active');
+  const stopRunning: boolean | null = stopActive ? isOn(stopActive) : null;
+  const wakeSound = entity(ctx, 'wake_sound');
+  const chime: boolean | null = wakeSound ? isOn(wakeSound) : null;
+  const heading = <><span className="eyebrow">WAKE · WAKE WORDS</span><h1>Say the <em>word.</em></h1></>;
+  if (!ctx.device || !wake) return <section className="control wake-section">
     <style>{CSS}</style>
-    <span className="eyebrow">WAKE · WAKE WORDS</span>
-    <h1>Say the <em>word.</em></h1>
-    <article className="ww-card">
-      <div className="ww-head"><h2 className="ww-title"><span>Wake Word 1</span><HintBtn text={HINTS.wake_words} /></h2>
-        <span className="ww-title"><button className={chime ? 'ww-bell' : 'ww-bell off'} aria-pressed={chime} aria-label="Wake chime" onClick={() => setChime(!chime)}>
+    {heading}
+    {ctx.device && settled && <article className="ww-card"><p className="ww-note">Wake word control is not available on this firmware build.</p></article>}
+  </section>;
+  const stopw: Track | null = wake.stopw || null;
+  const pipeOptions: [string, string][] = [[PIPELINE_PREFERRED, TEXT.pipeline_preferred], ...assist.pipelines.map((p: string) => [p, p] as [string, string])];
+  const pipeValue = (w: string): string => assist.pipelineFor(w) ?? assist.fallbackPipeline() ?? PIPELINE_PREFERRED;
+  const pipeLabel = (v: string) => v === PIPELINE_PREFERRED ? TEXT.pipeline_preferred : v;
+  const tuneSeed = (i: number) => {
+    const t = i === STOP_SLOT ? stopw : slotAt(i);
+    return {
+      cut: t?.cut || 0,
+      noise: t?.tn?.[0] || 0,
+      floor: t?.tn?.[1] || 0,
+      hi: t?.tn?.[2] || 0,
+      day: t?.day || []
+    };
+  };
+  const assistNote = !assist.ready && activeWords.length > 0 && <p className="ww-note">
+    {haBlocked(ha) ? TEXT.assistant_blocked : haTooOld(ha) ? TEXT.ha_too_old : TEXT.assistant_needs_ha}
+    {haBlocked(ha) && <> <button type="button" className="ww-link" onClick={ctx.onShowFix}>{TEXT.show_fix}</button></>}
+  </p>;
+  const wordCard = (i: number) => {
+    const slot = slotAt(i);
+    const swap = swaps[i];
+    const swapping = swap?.phase === 'busy';
+    const failed = swap?.phase === 'error';
+    const word = swapping ? swap.word : slot?.w || '';
+    const waiting = !swap && !!slot && (slot.st === 3 || slot.st === 2 && !slot.ld && isUrl(slot.m));
+    const tuned = !swapping && !!slot && slot.cut > 0;
+    const live = tuned && !!slot.ld;
+    const tuneBtn = !tuned && !swapping && !failed && !!slot?.ld;
+    const pipe = !swapping && word && assist.ready ? pipeValue(word) : null;
+    let note: [string, string] | null = null;
+    if (swapping) {
+      const progress = (swap.tot || 0) > 0 ? `${kb(swap.dl || 0)} / ${kb(swap.tot as number)} KB` : isUrl(swap.spec) ? TEXT.ww_downloading : TEXT.ww_loading;
+      note = ['', slot?.w && slot.w !== swap.word ? `${progress} ${TEXT.mb_swap_note.replace('%1', showWord(slot.w)).replace('%2', showWord(swap.word))}` : progress];
+    } else if (failed) note = ['err', `${TEXT.ww_failed} ${WW_ERR[swap.err || 0] || ''}`.trim()];else if (waiting) note = ['warn', slot.st === 3 ? TEXT.ww_waiting : `${WW_ERR[slot.err || 0] || ''} ${TEXT.ww_retrying}`.trim()];
+    return <article className="ww-card" key={`w${i}`}>
+      <div className="ww-head"><h2 className="ww-title"><span>Wake Word {i + 1}</span><HintBtn text={HINTS.wake_words} /></h2>
+        {i === 0 && chime !== null && <span className="ww-title"><button className={chime ? 'ww-bell' : 'ww-bell off'} aria-pressed={chime} aria-label={TEXT.ww_chime} onClick={() => post(pathFor(ctx, 'wake_sound', chime ? 'turn_off' : 'turn_on'))}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0" />{!chime && <path d="m3 3 18 18" />}</svg>
-        </button><HintBtn text={HINTS.wake_sound} /></span></div>
+        </button><HintBtn text={HINTS.wake_sound} /></span>}</div>
       <div className="ww-flow">
         <div className="ww-flow-cell">
           <span className="ww-flow-cap">Wake Word</span>
-          <button className={wordsOpen === slots[0].id ? 'ww-flow-btn open' : 'ww-flow-btn'} onClick={() => setWordsOpen(slots[0].id)}>
-            <span>{slots[0].word}</span>
+          <button className={picking === i ? 'ww-flow-btn open' : 'ww-flow-btn'} aria-haspopup="dialog" disabled={swapping} onClick={() => setPicking(i)}>
+            <span>{word ? showWord(word) : 'None'}</span>
             <ChevronDown size={16} />
           </button>
         </div>
-        <span className="ww-flow-arrow" aria-hidden="true"><ArrowRight size={18} /></span>
-        <div className="ww-flow-cell">
-          <span className="ww-flow-cap">Voice Pipeline</span>
-          <button className={piping === slots[0].id ? 'ww-flow-btn open' : 'ww-flow-btn'} onClick={() => setPiping(slots[0].id)}>
-            <span>{PIPES.find(p => p.id === slots[0].pipe)?.label ?? 'Select...'}</span>
-            <ChevronDown size={16} />
-          </button>
-        </div>
+        {pipe !== null && <>
+          <span className="ww-flow-arrow" aria-hidden="true"><ArrowRight size={18} /></span>
+          <div className="ww-flow-cell">
+            <span className="ww-flow-cap">Voice Pipeline</span>
+            <button className={piping === i ? 'ww-flow-btn open' : 'ww-flow-btn'} aria-haspopup="dialog" onClick={() => setPiping(i)}>
+              <span>{pipeLabel(pipe)}</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </>}
       </div>
-      <div className="ww-top">
-        {slots[0].tuned && <HintBtn text={HINTS.living_graph} />}
-        {!slots[0].tuned && <button className="ww-tune" onClick={() => setTuning(slots[0].id)}>Tune it!</button>}
-      </div>
-      {slots[0].tuned ? <TouchGraph h={72} marks={WORD_MARKS} cut={slots[0].cut} onCut={v => upd(slots[0].id, {
-        cut: v
-      })} onTune={() => setTuning(slots[0].id)} aria={`Scores for ${slots[0].word}`} /> : null}
-    </article>
-    <article className="ww-card">
-      <div className="ww-head"><h2 className="ww-title"><span>Wake Word 2</span><HintBtn text={HINTS.wake_words} /></h2></div>
-      <div className="ww-flow">
-        <div className="ww-flow-cell">
-          <span className="ww-flow-cap">Wake Word</span>
-          <button className={wordsOpen === slots[1].id ? 'ww-flow-btn open' : 'ww-flow-btn'} onClick={() => setWordsOpen(slots[1].id)}>
-            <span>{slots[1].word}</span>
-            <ChevronDown size={16} />
-          </button>
-        </div>
-        <span className="ww-flow-arrow" aria-hidden="true"><ArrowRight size={18} /></span>
-        <div className="ww-flow-cell">
-          <span className="ww-flow-cap">Voice Pipeline</span>
-          <button className={piping === slots[1].id ? 'ww-flow-btn open' : 'ww-flow-btn'} onClick={() => setPiping(slots[1].id)}>
-            <span>{PIPES.find(p => p.id === slots[1].pipe)?.label ?? 'Select...'}</span>
-            <ChevronDown size={16} />
-          </button>
-        </div>
-      </div>
-      <div className="ww-top">
-        {slots[1].tuned && <HintBtn text={HINTS.living_graph} />}
-        {!slots[1].tuned && <button className="ww-tune" onClick={() => setTuning(slots[1].id)}>Tune it!</button>}
-      </div>
-      {slots[1].tuned ? <TouchGraph h={72} marks={WORD_MARKS} cut={slots[1].cut} onCut={v => upd(slots[1].id, {
-        cut: v
-      })} onTune={() => setTuning(slots[1].id)} aria={`Scores for ${slots[1].word}`} /> : null}
-    </article>
-    <article className="ww-card">
+      {note && <p className={note[0] ? `ww-note ${note[0]}` : 'ww-note'}>{note[1]}</p>}
+      {failed && <div className="ww-btns"><button className="primary" onClick={() => choose(i, swap.spec, swap.word)}>{TEXT.ww_retry}</button></div>}
+      {i === 0 && activeWords.length === 0 && !anyBusy && <p className="ww-note">{TEXT.ww_route_none}</p>}
+      {i === 0 && assistNote}
+      {(tuned || tuneBtn) && <div className="ww-top">
+        {live && <span className="ww-live"><i />{TEXT.lg_listening}</span>}
+        {tuned && <HintBtn text={HINTS.living_graph} />}
+        {tuneBtn && <button className="ww-tune" onClick={() => setTuning({
+          i,
+          word,
+          isStop: false,
+          quick: false
+        })}>{TEXT.ww_tune_btn}</button>}
+      </div>}
+      {tuned && <TouchGraph gid={`g${i}`} h={72} marks={rowMarks(slot)} cut={pctN(slot.cut)} onTune={() => setTuning({
+        i,
+        word,
+        isStop: false,
+        quick: true
+      })} aria={TEXT.tn_title.replace('%s', showWord(word))} />}
+    </article>;
+  };
+  const stopCard = () => {
+    if (!stopw || !stopSwitch) return null;
+    const tuned = stopOn && stopw.cut > 0;
+    const live = stopRunning === null ? tuned : stopRunning;
+    const paused = stopRunning === false && stopOn;
+    const tuneBtn = stopOn && !tuned;
+    return <article className="ww-card">
       <div className="ww-head"><h2 className="ww-title"><span>Stop Word</span><HintBtn text={HINTS.stop_word} /></h2></div>
       <button className={`wsw${stopOn ? ' on' : ''}`} style={{
         marginTop: 14,
         marginBottom: 16
-      }} role="switch" aria-checked={stopOn} onClick={() => setStopOn(s => !s)}>
+      }} role="switch" aria-checked={stopOn} onClick={() => post(pathFor(ctx, 'stop_word', stopOn ? 'turn_off' : 'turn_on'))}>
         {!stopOn && <span className="wsw-knob" />}
         <span>Stop</span>
         {stopOn && <span className="wsw-knob" />}
       </button>
-      {stopOn ? <TouchGraph h={72} marks={STOP_MARKS} cut={stopCut} onCut={setStopCut} onTune={() => {}} aria="Scores for Stop" /> : null}
-    </article>
-    <article className="ww-card">
-      <div className="ww-head"><h2 className="ww-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16" /></svg><span>Wake Word Sources</span><HintBtn text={HINTS.wake_sources} /></h2></div>
-      {sources.map(s => <div key={s.id}><div className="ww-src"><a href={s.url} target="_blank" rel="noreferrer">{s.url.replace('https://github.com/', '')}</a><small>{s.count} words</small><button className="ww-x" onClick={() => setConfirm(s.id)}>Remove</button></div>
-        {confirm === s.id && <div className="ww-confirm"><span>Remove this source? Its words disappear from the picker. Words already installed keep working.</span><div><button className="secondary" onClick={() => setConfirm(null)}>Keep</button><button className="primary" onClick={() => {
-              setSources(sources.filter(x => x.id !== s.id));
-              setConfirm(null);
-            }}>Remove</button></div></div>}</div>)}
-      <form className="ww-add" onSubmit={e => {
-        e.preventDefault();
-        if (!url.trim()) return;
-        setSources([...sources, {
-          id: `src${Date.now()}`,
-          url: url.trim(),
-          count: 0
-        }]);
-        setUrl('');
-      }}>
-        <input type="url" placeholder="https://github.com/owner/repo" value={url} onChange={e => setUrl(e.target.value)} aria-label="Source URL" /><button className="primary" type="submit">Add</button>
-      </form>
-    </article>
-    {pipeSlot && <PipeDrawer slot={pipeSlot} onChange={p => upd(pipeSlot.id, p)} onClose={() => setPiping(null)} />}
-    {wordSlot && <WordDrawer selected={[wordSlot.word, ...slots.filter(s => s.id !== wordSlot.id).map(s => s.word)]} slotId={wordSlot.id} onToggle={w => {
-      if (w !== wordSlot.word) upd(wordSlot.id, {
-        word: w,
-        tuned: false
-      });
-      setWordsOpen(null);
-    }} onClose={() => setWordsOpen(null)} />}
-    {tuneSlot && <Tuner word={tuneSlot.word} onClose={() => setTuning(null)} onApply={c => {
-      upd(tuneSlot.id, {
-        tuned: true,
-        cut: c
-      });
-      setTuning(null);
-    }} />}
+      {(live || paused || tuneBtn) && <div className="ww-top">
+        {live ? <span className="ww-live"><i />{TEXT.lg_listening}</span> : paused ? <span className="ww-live paused"><i />{TEXT.lg_paused}</span> : null}
+        {tuneBtn && <button className="ww-tune" onClick={() => setTuning({
+          i: STOP_SLOT,
+          word: 'stop',
+          isStop: true,
+          quick: false
+        })}>{TEXT.ww_tune_btn}</button>}
+      </div>}
+      {tuned && <TouchGraph gid="gs" h={72} marks={rowMarks(stopw)} cut={pctN(stopw.cut)} onTune={() => setTuning({
+        i: STOP_SLOT,
+        word: 'stop',
+        isStop: true,
+        quick: true
+      })} aria={TEXT.tn_title.replace('%s', 'Stop')} />}
+    </article>;
+  };
+  const pickerFor = (i: number) => {
+    const entries: Entry[] = pickerEntries(wake.builtin, TEXT.ww_included, sources, cat);
+    const pending = sources.filter(s => cat[s.url]?.loading || cat[s.url]?.error).map(s => ({
+      url: s.url,
+      label: s.label,
+      error: !!cat[s.url]?.error
+    }));
+    const current = swaps[i]?.phase === 'busy' ? (swaps[i] as Swap).spec : slotAt(i)?.m || '';
+    return <WordDrawer slotName={`Wake Word ${i + 1}`} entries={entries} pending={pending} current={current} taken={slotAt(1 - i)?.w || swaps[1 - i]?.word || ''} busy={anyBusy} onPick={e => {
+      setPicking(null);
+      if (!e) {
+        if (current) choose(i, 'none', '');
+      } else if (e.spec !== current) choose(i, e.spec, e.word);
+    }} onClose={() => setPicking(null)} />;
+  };
+  const pipeFor = (i: number) => {
+    const w = slotAt(i)?.w || '';
+    if (!w) return null;
+    return <PipeDrawer slotName={`Wake Word ${i + 1}`} pipe={assist.ready ? {
+      value: pipeValue(w),
+      options: pipeOptions,
+      busy: assist.busy,
+      onPick: v => assist.setPipeline(w, v)
+    } : null} fsd={fsdNow ? {
+      value: fsdHold[i] ?? fsdNow[i],
+      onPick: v => pickFsd(i, v)
+    } : null} onClose={() => setPiping(null)} />;
+  };
+  return <section className="control wake-section">
+    <style>{CSS}</style>
+    {heading}
+    {wordCard(0)}
+    {wordCard(1)}
+    {stopCard()}
+    <Sources sources={sources} setSources={setSources} cat={cat} />
+    {picking !== null && pickerFor(picking)}
+    {piping !== null && pipeFor(piping)}
+    {tuning && <Tuner key={`${tuning.i}-${tuning.quick}`} ctx={ctx} i={tuning.i} word={showWord(tuning.word)} isStop={tuning.isStop} quick={tuning.quick} seed={tuneSeed(tuning.i)} track={tuning.i === STOP_SLOT ? stopw : slotAt(tuning.i) || null} wakeRead={wakeRead} onClose={() => setTuning(null)} />}
   </section>;
 }
