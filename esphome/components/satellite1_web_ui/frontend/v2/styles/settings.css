@@ -1,0 +1,65 @@
+/* ===== Settings pages ===== */
+
+/* A fact past v1's warning thresholds (heap, loop time, chip temperature). */
+.dx-fact-v.t-warn { color: #fbbf24; }
+.dx-fact-v.t-err { color: #f87171; }
+[data-theme='light'] .dx-fact-v.t-warn { color: #b45309; }
+[data-theme='light'] .dx-fact-v.t-err { color: #dc2626; }
+
+/* The card title's disclosure button reads as the title; the whole head stays the touch target. */
+.dx-card-toggle { min-height: 0; padding: 0; margin: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.dx-card-toggle:focus-visible { outline: 2px solid var(--accent2); outline-offset: 4px; border-radius: 4px; }
+
+/* A link-styled button inside a fact; the global 44px touch floor would stretch the fact. */
+.dx-inline { min-height: 0; padding: 0; border: 0; background: none; color: var(--accent2); font: inherit; text-align: left; cursor: pointer; align-self: flex-start; }
+.dx-inline:hover { text-decoration: underline; }
+[data-theme='light'] .dx-inline { color: var(--accent); }
+.dx-fact-sub > a { min-height: 0; align-self: flex-start; }
+
+/* The page section is the scroll container, so a revealed card only needs breathing room. */
+.dx-tab .dx-card[id] { scroll-margin-top: 12px; }
+
+/* A tapped toast's destination: an outline that breathes twice and rests transparent. */
+@keyframes dxReveal {
+  0%, 100% { outline-color: transparent; }
+  20%, 40% { outline-color: var(--accent); }
+  55% { outline-color: transparent; }
+  75% { outline-color: var(--accent); }
+}
+.dx-reveal { outline: 2px solid transparent; outline-offset: 2px; animation: dxReveal 2.5s ease-in-out; }
+.dx-upd-row.dx-reveal { outline-offset: -2px; border-radius: 12px; }
+
+/* The log line a toast pointed at. The panel is the offset origin the reveal centres it by. */
+.dx-log { position: relative; }
+.dx-log .dx-muted { padding: 0; }
+.dx-log-line.hl { background: color-mix(in srgb, var(--accent) 22%, transparent); border-radius: 4px; outline: 2px solid transparent; animation: dxReveal 2.5s ease-in-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dx-reveal, .dx-log-line.hl { animation: none; outline: 2px solid var(--accent); }
+}
+
+/* Phones scan black on white; a themed or tinted code fails on half of them. */
+.dx-qr, [data-theme='light'] .dx-qr { width: 148px; height: 148px; padding: 0; background: #fff; fill: #000; border-radius: 10px; }
+.dx-launch-side .dx-flush { padding: 0; }
+
+/* Crash Reports */
+.dx-crash { padding: 12px 16px; border-top: 1px solid rgba(255,255,255,.05); display: flex; flex-direction: column; gap: 4px; }
+.dx-card-body > .dx-crash:first-child { border-top: none; }
+[data-theme='light'] .dx-crash { border-top-color: rgba(0,0,0,.06); }
+.dx-crash-head { display: flex; align-items: baseline; gap: 8px; }
+.dx-crash-t { flex: 1; font-size: 13px; font-weight: 700; color: #f87171; }
+[data-theme='light'] .dx-crash-t { color: #dc2626; }
+.dx-crash-ran { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.dx-crash-when { font-size: 12px; color: var(--muted); margin: 0; }
+.dx-crash-at { font-family: 'SF Mono','Fira Code',monospace; font-size: 11px; color: var(--muted); margin: 0; overflow-wrap: anywhere; }
+.dx-crash-bt { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; }
+.dx-crash-log { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 16px 10px; border-radius: 10px; background: rgba(0,0,0,.25); }
+[data-theme='light'] .dx-crash-log { background: rgba(0,0,0,.04); }
+
+/* The physical buttons' live state. */
+.dx-bstates { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px 4px; }
+.dx-bstate { padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--muted); background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); transition: background .12s, color .12s, border-color .12s; }
+[data-theme='light'] .dx-bstate { background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.1); }
+.dx-bstate.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.dx-bstate.warn.on { background: #ef4444; border-color: #ef4444; }
+.dx-card-last { font-size: 11px; color: var(--muted); white-space: nowrap; }
