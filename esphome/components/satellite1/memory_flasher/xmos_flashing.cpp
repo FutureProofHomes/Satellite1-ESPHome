@@ -126,7 +126,8 @@ void XMOSFlasher::loop() {
         this->deinit_flashing_();
         this->state = FLASHER_SUCCESS_STATE;
       } else if (remaining == 0) {
-        if (this->requested_action == ACTION_FLASH_EMBEDDED_IMAGE) {
+        if (this->requested_action == ACTION_FLASH_EMBEDDED_IMAGE ||
+            this->requested_action == ACTION_FLASH_REMOTE_IMAGE) {
           if (this->total_sectors_to_erase_ > this->factory_image_sectors_) {
             ESP_LOGI(TAG,
                      "XMOS boot partition prepared: %zu factory image sectors erased, upgrade header sector %zu erased",
@@ -183,7 +184,7 @@ void XMOSFlasher::publish_progress_() {
         this->current_sector_ < 0 ? 0 : static_cast<uint64_t>(this->current_sector_ + 1) * FLASH_SECTOR_SIZE);
     const uint64_t written_bytes = this->total_number_of_bytes_ - this->bytes_remaining_;
     const uint64_t total_work_bytes = erase_bytes + this->total_number_of_bytes_;
-    if (this->requested_action == ACTION_FLASH_EMBEDDED_IMAGE) {
+    if (this->requested_action == ACTION_FLASH_EMBEDDED_IMAGE || this->requested_action == ACTION_FLASH_REMOTE_IMAGE) {
       // Sector erases are much slower than page programs, so progress follows operation time rather than bytes.
       constexpr uint8_t ERASE_PROGRESS_PERCENT = 75;
       if (this->state == FLASHER_ERASING) {
@@ -304,6 +305,7 @@ void XMOSFlasher::flash_remote_image() {
     return;
   }
 
+  this->error_code = FLASHER_OK;
   this->flash_attempted_this_boot_ = true;
 
   if (this->md5_expected_.empty() && !this->http_get_md5_()) {
@@ -721,20 +723,20 @@ bool XMOSFlasher::init_flashing_() {
   this->factory_image_sectors_ = size_in_sectors;
 
   const size_t boot_partition_sectors = FLASH_BOOT_PARTITION_SIZE / FLASH_SECTOR_SIZE;
-  const size_t embedded_erase_sectors =
+  const size_t factory_image_erase_sectors =
       size_in_sectors < boot_partition_sectors ? size_in_sectors + 1 : boot_partition_sectors;
-  const uint32_t erase_length = this->requested_action == ACTION_FLASH_EMBEDDED_FULL_ERASE
-                                    ? FLASH_TOTAL_NUMBER_OF_SECTORS * FLASH_SECTOR_SIZE
-                                : this->requested_action == ACTION_FLASH_EMBEDDED_IMAGE
-                                    ? static_cast<uint32_t>(embedded_erase_sectors * FLASH_SECTOR_SIZE)
-                                    : static_cast<uint32_t>(size_in_sectors * FLASH_SECTOR_SIZE);
+  const bool factory_image_action =
+      this->requested_action == ACTION_FLASH_EMBEDDED_IMAGE || this->requested_action == ACTION_FLASH_REMOTE_IMAGE;
+  const uint32_t erase_length =
+      this->requested_action == ACTION_FLASH_EMBEDDED_FULL_ERASE ? FLASH_TOTAL_NUMBER_OF_SECTORS * FLASH_SECTOR_SIZE
+      : factory_image_action ? static_cast<uint32_t>(factory_image_erase_sectors * FLASH_SECTOR_SIZE)
+                             : static_cast<uint32_t>(size_in_sectors * FLASH_SECTOR_SIZE);
   const XmosFlashState recovery_state = this->requested_action == ACTION_FLASH_EMBEDDED_FULL_ERASE
                                             ? this->factory_reset_pending_
                                                   ? XmosFlashState::FACTORY_RESET_RECOVERY_REQUIRED
                                                   : XmosFlashState::FULL_ERASE_RECOVERY_REQUIRED
                                             : XmosFlashState::RECOVERY_REQUIRED;
-  const uint32_t recovery_verification_length =
-      this->requested_action == ACTION_FLASH_EMBEDDED_IMAGE ? erase_length : FLASH_BOOT_PARTITION_SIZE;
+  const uint32_t recovery_verification_length = factory_image_action ? erase_length : FLASH_BOOT_PARTITION_SIZE;
   if (!this->prepare_flash_transaction_(recovery_verification_length, recovery_state)) {
     ESP_LOGE(TAG, "Couldn't persist XMOS flash transaction before erase");
     this->error_code = INIT_FLASH_ERROR;

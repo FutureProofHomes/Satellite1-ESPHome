@@ -75,13 +75,29 @@ script:
           else:
             - logger.log: "XMOS direct-flash preparation timed out; audio remains disabled"
 
-button:
-  - platform: template
-    id: flash_xmos_same_boot
-    name: "Flash XMOS Firmware (Same Boot)"
-    entity_category: diagnostic
-    disabled_by_default: true
-    on_press:
+  - id: restore_audio_after_remote_metadata_failure
+    mode: restart
+    then:
+      - delay: 250ms
+      - if:
+          condition:
+            lambda: |-
+              return !id(xflash).in_progress() && id(satellite1_id).is_xmos_connected() &&
+                     (id(xflash).error_code == memory_flasher::MD5_INVALID ||
+                      id(xflash).error_code == memory_flasher::BAD_URL);
+          then:
+            - lambda: id(xmos_audio_ready) = true;
+            - script.execute: refresh_audio_output
+            - script.execute: start_micro_wake_word
+            - logger.log: "Restored audio after XMOS remote flash metadata failure"
+
+http_request:
+  buffer_size_rx: 4096
+  buffer_size_tx: 2048
+
+api:
+  actions:
+    - action: flash_xmos_same_boot
       then:
         - if:
             condition:
@@ -98,3 +114,51 @@ button:
                     - logger.log: "XMOS direct flash cancelled because audio shutdown did not complete"
             else:
               - logger.log: "XMOS direct flash unavailable because the flasher is busy or no embedded image exists"
+
+    - action: flash_xmos_remote_same_boot
+      variables:
+        image_url: string
+        expected_md5: string
+        md5_url: string
+      then:
+        - if:
+            condition:
+              lambda: |-
+                const bool image_url_valid = image_url.rfind("https://", 0) == 0 || image_url.rfind("http://", 0) == 0;
+                const bool md5_url_present = !md5_url.empty();
+                const bool md5_present = !expected_md5.empty();
+                bool md5_valid = expected_md5.size() == 32;
+                for (const char value : expected_md5) {
+                  md5_valid = md5_valid && ((value >= '0' && value <= '9') ||
+                                            (value >= 'a' && value <= 'f') ||
+                                            (value >= 'A' && value <= 'F'));
+                }
+                const bool md5_url_valid = !md5_url_present || md5_url.rfind("https://", 0) == 0 ||
+                                           md5_url.rfind("http://", 0) == 0;
+                return !id(xflash).in_progress() && image_url_valid && md5_url_valid &&
+                       (md5_present != md5_url_present) && (!md5_present || md5_valid);
+            then:
+              - script.execute: prepare_xmos_direct_flash
+              - script.wait: prepare_xmos_direct_flash
+              - if:
+                  condition:
+                    lambda: return id(xmos_audio_shutdown_complete) && !id(xflash).in_progress();
+                  then:
+                    - if:
+                        condition:
+                          lambda: return !expected_md5.empty();
+                        then:
+                          - memory_flasher.write_image:
+                              image_version: ${xmos_fw_version}
+                              image_file: !lambda return image_url;
+                              md5: !lambda return expected_md5;
+                        else:
+                          - memory_flasher.write_image:
+                              image_version: ${xmos_fw_version}
+                              image_file: !lambda return image_url;
+                              md5_url: !lambda return md5_url;
+                    - script.execute: restore_audio_after_remote_metadata_failure
+                  else:
+                    - logger.log: "XMOS remote direct flash cancelled because audio shutdown did not complete"
+            else:
+              - logger.log: "XMOS remote direct flash rejected because the flasher is busy or its arguments are invalid"
