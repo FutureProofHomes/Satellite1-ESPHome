@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ReactNode } from 'react';
 import { ArrowRight, ChevronDown, Check } from '../icons';
 import type { Ctx } from '../ctx';
+import { HintBtn } from './bits';
 import { HINTS, TEXT, WW_ERR } from '../../src/copy.js';
 import { PIPELINE_PREFERRED, STOP_SLOT, entity, haBlocked, haSyncOnce, haTooOld, pathFor, post, requestJson, useAssist, useWakeSlots } from '../../src/lib/device.js';
 import { holdPeerMutes, keepPeerMutes, releasePeerMutes } from '../../src/lib/peermute.js';
@@ -320,75 +320,6 @@ function TouchGraph({
       fontStyle: 'italic'
     }}>Confidence</text>}
   </svg>;
-}
-let _openHintSetter: ((v: boolean) => void) | null = null;
-function HintBtn({
-  text
-}: {
-  text: ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const btn = useRef<HTMLButtonElement>(null);
-  const bubble = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{
-    left: number;
-    top: number;
-  } | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    if (_openHintSetter && _openHintSetter !== setOpen) _openHintSetter(false);
-    _openHintSetter = setOpen;
-    const dismiss = (e: PointerEvent) => {
-      if (!btn.current?.contains(e.target as Node) && !bubble.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const esc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        setOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', dismiss, true);
-    document.addEventListener('keydown', esc);
-    return () => {
-      document.removeEventListener('pointerdown', dismiss, true);
-      document.removeEventListener('keydown', esc);
-      if (_openHintSetter === setOpen) _openHintSetter = null;
-    };
-  }, [open]);
-  useLayoutEffect(() => {
-    if (!open) {
-      setPos(null);
-      return;
-    }
-    const id = requestAnimationFrame(() => {
-      if (!btn.current || !bubble.current) return;
-      const t = btn.current.getBoundingClientRect();
-      const b = bubble.current.getBoundingClientRect();
-      const GAP = 6;
-      const MARGIN = 8;
-      let left = t.left + t.width / 2 - b.width / 2;
-      left = Math.max(MARGIN, Math.min(left, window.innerWidth - b.width - MARGIN));
-      const below = t.bottom + GAP;
-      const top = below + b.height + MARGIN > window.innerHeight ? Math.max(MARGIN, t.top - b.height - GAP) : below;
-      setPos({
-        left,
-        top
-      });
-    });
-    return () => cancelAnimationFrame(id);
-  }, [open]);
-  return <span className="ww-hint-wrap">
-    <button ref={btn} type="button" className="ww-hint-btn" aria-label="More information" aria-expanded={open} onClick={() => setOpen(v => !v)}>i</button>
-    {open && createPortal(<div ref={bubble} className="ww-hint-bubble" role="tooltip" style={pos ? {
-      left: pos.left,
-      top: pos.top,
-      opacity: 1
-    } : {
-      left: -9999,
-      top: -9999,
-      opacity: 0
-    }}>{text}</div>, document.body)}
-  </span>;
 }
 /** A drawer's page duties: the page behind blurs, focus moves into the panel and back out after,
  *  and Escape closes it. Popups inside stop their own Escape before it reaches the window. */

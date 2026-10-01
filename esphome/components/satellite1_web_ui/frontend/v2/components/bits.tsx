@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 /**
  * Light or dark, remembered per browser under the key v1 used. index.html applies it before the
@@ -39,6 +41,83 @@ export function Icon({
     mic: 'M8 2a2 2 0 0 1 2 2v4a2 2 0 0 1-4 0V4a2 2 0 0 1 2-2Zm-4 6a4 4 0 0 0 8 0m-4 4v3m-2 0h4'
   };
   return <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name] || paths.plus} /></svg>;
+}
+let closeOpenHint: (() => void) | null = null;
+/**
+ * The ⓘ beside a label. One is open at a time. Its bubble is fixed to the viewport, so a scroll
+ * closes it rather than leave it floating off its button. Escape stops at the hint, so it does not
+ * also close the drawer the hint sits in, and the press does not toggle a clickable card head.
+ */
+export function HintBtn({
+  text
+}: {
+  text: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const bubble = useRef<HTMLDivElement>(null);
+  const close = useRef(() => setOpen(false)).current;
+  useEffect(() => {
+    if (!open) return undefined;
+    if (closeOpenHint && closeOpenHint !== close) closeOpenHint();
+    closeOpenHint = close;
+    const outside = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!btn.current?.contains(t) && !bubble.current?.contains(t)) close();
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      close();
+    };
+    document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('keydown', esc);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('pointerdown', outside, true);
+      document.removeEventListener('keydown', esc);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+      if (closeOpenHint === close) closeOpenHint = null;
+    };
+  }, [open]);
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return undefined;
+    }
+    const id = requestAnimationFrame(() => {
+      if (!btn.current || !bubble.current) return;
+      const t = btn.current.getBoundingClientRect();
+      const b = bubble.current.getBoundingClientRect();
+      const left = Math.max(8, Math.min(t.left + t.width / 2 - b.width / 2, window.innerWidth - b.width - 8));
+      const below = t.bottom + 6;
+      setPos({
+        left,
+        top: below + b.height + 8 > window.innerHeight ? Math.max(8, t.top - b.height - 6) : below
+      });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [open]);
+  return <span className="hint-wrap">
+    <button ref={btn} type="button" className="hint-btn" aria-label="More information" aria-expanded={open} onClick={e => {
+      e.stopPropagation();
+      setOpen(v => !v);
+    }}>i</button>
+    {open && createPortal(<div ref={bubble} className="hint-bubble" role="tooltip" style={pos ? {
+      left: pos.left,
+      top: pos.top
+    } : {
+      left: -9999,
+      top: -9999,
+      visibility: 'hidden'
+    }}>{text}</div>, document.body)}
+  </span>;
 }
 /** Home Assistant's cog, drawn inline in the walk-through's step 2 where the person has to find it. */
 const Cog = () => <svg className="fix-cog" viewBox="0 0 24 24" aria-hidden="true"><path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z" /></svg>;

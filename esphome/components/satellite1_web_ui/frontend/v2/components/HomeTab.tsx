@@ -7,6 +7,7 @@ import { sparkPaths } from '../../src/lib/sparkline.js';
 import type { Ctx, Orb } from '../ctx';
 import { ChevronDown, Clock } from '../icons';
 import { clock, isOn, offsetSpec, offsetText, reading, stepOffset, timerLabel, timerLeft, transcriptTabs } from '../lib/orb.js';
+import { HintBtn } from './bits';
 import { useHeld, VoiceOrb } from './VoiceOrb';
 type Sensor = {
   id: string;
@@ -212,7 +213,7 @@ function TempPopup({
   } = useOffset(ctx, s);
   const unitF = entity(ctx, 'temp_unit_f');
   const isF = isOn(unitF);
-  return <div className="sensor-drawer-body temp-pop" aria-label="Temperature settings"><div><span className="eyebrow">CALIBRATION · Temperature</span><strong>{reading(value, s.digits, s.unit, isF)}</strong></div><p className="muted cal-hint">{s.hint}</p><DrawerSpark {...spark} /><div className="temp-row"><span>Offset</span><div className="stepper"><button aria-label="Decrease offset" disabled={atMin} onClick={() => bump(-1)}>−</button><b>{offsetText(offset, s.digits, '°', isF)}</b><button aria-label="Increase offset" disabled={atMax} onClick={() => bump(1)}>+</button></div></div>{unitF && <div className="temp-row"><span>Fahrenheit</span><button role="switch" aria-checked={isF} aria-label="Use Fahrenheit" title={HINTS.temp_unit} className={'switch ' + (isF ? 'on' : '')} onClick={() => post(pathFor(ctx, 'temp_unit_f', isF ? 'turn_off' : 'turn_on'))}><i /></button></div>}<div className="cal-actions"><button className="done" onClick={close}>Done</button></div></div>;
+  return <div className="sensor-drawer-body temp-pop" aria-label="Temperature settings"><div><span className="eyebrow">CALIBRATION · Temperature</span><strong>{reading(value, s.digits, s.unit, isF)}</strong></div><p className="muted cal-hint">{s.hint}</p><DrawerSpark {...spark} /><div className="temp-row"><span>Offset</span><div className="stepper"><button aria-label="Decrease offset" disabled={atMin} onClick={() => bump(-1)}>−</button><b>{offsetText(offset, s.digits, '°', isF)}</b><button aria-label="Increase offset" disabled={atMax} onClick={() => bump(1)}>+</button></div></div>{unitF && <div className="temp-row"><span>Fahrenheit <HintBtn text={HINTS.temp_unit} /></span><button role="switch" aria-checked={isF} aria-label="Use Fahrenheit" className={'switch ' + (isF ? 'on' : '')} onClick={() => post(pathFor(ctx, 'temp_unit_f', isF ? 'turn_off' : 'turn_on'))}><i /></button></div>}<div className="cal-actions"><button className="done" onClick={close}>Done</button></div></div>;
 }
 function Calibration({
   ctx,

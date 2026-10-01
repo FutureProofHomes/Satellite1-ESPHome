@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import ReactDOM from 'react-dom';
+import React, { useState, useEffect, useRef } from 'react';
 import { HINTS, TEXT } from '../../src/copy.js';
 import { entity, haSyncOnce, pathFor, post } from '../../src/lib/device.js';
 import { NEED_MEDIA, NEED_VOLUME, areaCount, areaLocked, areaState, eligible, haProblem, hasTargets, isLive, looseCount, looseLocked, looseState, nudge, rowOn, rowWhy, toggleArea, toggleLoose, togglePlayer, treePayload } from '../lib/audio.js';
+import { HintBtn } from './bits';
 import { MSlider } from './MSlider';
 import type { Ctx } from '../ctx';
 
@@ -60,80 +60,6 @@ function useHeld(value: number, tol: number): [number, (v: number) => void] {
   return [held && !arrived ? held.v : value, (v: number) => setHeld({ v, at: Date.now() })];
 }
 
-let closeActiveHint: (() => void) | null = null;
-function HintBtn({
-  text
-}: {
-  text: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{
-    top: number;
-    left: number;
-  } | null>(null);
-  const btn = useRef<HTMLButtonElement>(null);
-  const bubble = useRef<HTMLDivElement>(null);
-  const close = useRef(() => setOpen(false));
-  useLayoutEffect(() => {
-    if (!open) {
-      setPos(null);
-      return;
-    }
-    const id = requestAnimationFrame(() => {
-      const b = btn.current?.getBoundingClientRect();
-      const w = bubble.current?.offsetWidth ?? 260;
-      const h = bubble.current?.offsetHeight ?? 60;
-      if (!b) return;
-      let left = b.left + b.width / 2 - w / 2;
-      left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
-      let top = b.bottom + 8;
-      if (top + h > window.innerHeight - 8) top = b.top - h - 8;
-      setPos({
-        top,
-        left
-      });
-    });
-    return () => cancelAnimationFrame(id);
-  }, [open]);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (btn.current?.contains(t) || bubble.current?.contains(t)) return;
-      setOpen(false);
-    };
-    const onScroll = () => setOpen(false);
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', onScroll);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-      window.removeEventListener('scroll', onScroll, true);
-      window.removeEventListener('resize', onScroll);
-      if (closeActiveHint === close.current) closeActiveHint = null;
-    };
-  }, [open]);
-  const toggle = () => {
-    if (!open) {
-      if (closeActiveHint && closeActiveHint !== close.current) closeActiveHint();
-      closeActiveHint = close.current;
-    }
-    setOpen(v => !v);
-  };
-  return <span style={{
-    display: 'inline-flex'
-  }}>
-      <button ref={btn} type="button" className="au-hint-btn" aria-label="More info" aria-expanded={open} onClick={toggle}>i</button>
-      {open && ReactDOM.createPortal(<div ref={bubble} role="tooltip" className="au-hint-bubble" style={{
-      top: pos?.top ?? -9999,
-      left: pos?.left ?? -9999,
-      visibility: pos ? 'visible' : 'hidden'
-    }}>{text}</div>, document.body)}
-    </span>;
-}
 function AuToggle({
   checked,
   disabled,
