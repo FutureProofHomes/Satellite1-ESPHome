@@ -6,6 +6,8 @@
 #include "esphome/core/defines.h"
 #include "esphome/core/hal.h"
 
+#include <functional>
+
 namespace esphome {
 namespace tas2780 {
 
@@ -21,7 +23,11 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   void reset();
   void activate();
   void deactivate();
+  void set_activation_guard(std::function<bool()> activation_guard) {
+    this->activation_guard_ = std::move(activation_guard);
+  }
   bool is_active() const { return this->active_; }
+  bool is_activation_pending() const { return this->activation_pending_; }
   void update_register();
   void log_error_states();
 
@@ -61,6 +67,7 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   float vol_range_min_{.3};
   float vol_range_max_{1.};
   ChannelSelect selected_channel_{MONO_DWN_MIX};
+  std::function<bool()> activation_guard_{};
 };
 
 }  // namespace tas2780

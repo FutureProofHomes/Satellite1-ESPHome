@@ -59,3 +59,4 @@ i2s_audio:
     i2s_mclk_pin: GPIO16
     access_mode: duplex
     i2s_mode: secondary
+    access_guard: !lambda return id(xmos_audio_ready);

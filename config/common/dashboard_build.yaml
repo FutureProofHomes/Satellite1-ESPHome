@@ -8,4 +8,4 @@ button:
     entity_category: diagnostic
     on_press:
       then:
-        - memory_flasher.write_embedded_image:
+        - memory_flasher.request_embedded_flash_reboot:

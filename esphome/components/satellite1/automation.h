@@ -22,7 +22,6 @@ template<Satellite1State State> class Satellite1StateTrigger : public Trigger<> 
 };
 
 using XMOSConnectedStateTrigger = Satellite1StateTrigger<SAT_XMOS_CONNECTED_STATE>;
-using FlashConnectedStateTrigger = Satellite1StateTrigger<SAT_FLASH_CONNECTED_STATE>;
 
 class XMOSNoResponseStateTrigger : public Trigger<> {
  public:

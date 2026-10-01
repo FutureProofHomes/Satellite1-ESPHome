@@ -7,6 +7,8 @@
 #include "esphome/core/defines.h"
 #include <driver/i2s_std.h>
 
+#include <functional>
+
 namespace esphome {
 namespace i2s_audio {
 
@@ -129,6 +131,8 @@ class I2SPortComponent : public Component {
   void set_audio_out(I2SAudioOut *comp_out) { this->audio_out_ = comp_out; }
 
   void set_access_mode(I2SAccessMode access_mode) { this->access_mode_ = access_mode; }
+  void set_access_guard(std::function<bool()> access_guard) { this->access_guard_ = std::move(access_guard); }
+  bool access_permitted() const { return !this->access_guard_ || this->access_guard_(); }
   bool is_exclusive() { return this->access_mode_ == I2SAccessMode::EXCLUSIVE; }
 
   void set_i2s_role(i2s_role_t role) { this->i2s_role_ = role; }
@@ -141,6 +145,7 @@ class I2SPortComponent : public Component {
 
   Mutex lock_;
   I2SAccessMode access_mode_{I2SAccessMode::DUPLEX};
+  std::function<bool()> access_guard_{};
   uint8_t access_state_{I2SAccess::FREE};
 
   bool claim_access_(uint8_t access);

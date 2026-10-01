@@ -338,6 +338,10 @@ void TAS2780::init() {
 }
 
 void TAS2780::activate() {
+  if (this->activation_guard_ && !this->activation_guard_()) {
+    ESP_LOGD(TAG, "TAS2780 activation deferred until audio hardware is ready");
+    return;
+  }
   constexpr uint8_t bootstrap_power_mode = 0;
   ESP_LOGD(TAG, "Activating TAS2780 in bootstrap PWR_MODE:%d", bootstrap_power_mode);
   // clear interrupt latches
@@ -357,6 +361,11 @@ void TAS2780::activate() {
 }
 
 void TAS2780::finish_activation_() {
+  if (this->activation_guard_ && !this->activation_guard_()) {
+    this->deactivate();
+    return;
+  }
+
   constexpr uint8_t bootstrap_power_mode = 0;
   constexpr uint8_t fallback_power_mode = 2;
   SupplyVoltages voltages;
