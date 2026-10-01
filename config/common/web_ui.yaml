@@ -209,6 +209,11 @@ satellite1_web_ui:
   # exist; the loader owns the downloads and the enabled-iff-slotted invariant.
   wake_loader_id: mww_loader
 
+  # Finished speaking detection per wake word slot, Primary first (common/voice_assistant.yaml). The
+  # wake word handler there asks this component to copy the firing slot's value onto Home Assistant's
+  # own select - the HA payload's `fsd` - through the on_ha_select queue, before the assistant starts.
+  fsd_selects: [fsd_primary, fsd_secondary]
+
   # The crash flight recorder (common/core_board.yaml), behind the Diagnostics route's Crash
   # Reports card: GET /api/sat1/crash (the record ring), /api/sat1/crash/log (the pre-crash log
   # tail), /api/sat1/crash/dump.bin (the raw core dump image) and POST /api/sat1/crash/erase. All
@@ -491,6 +496,11 @@ satellite1_web_ui:
       # the loader's slot endpoints, and the two Home Assistant selects read the same loader state.
       # The mic-guard length, on the Audio routing card under the toggles it belongs with.
       remote_sync_guard: remote_sync_guard
+      # Finished speaking detection for the Primary and Secondary wake word slots - the app's
+      # per-wake-word setting. Written like any other device select; `unset` leaves Home Assistant's
+      # value alone.
+      fsd_1: fsd_primary
+      fsd_2: fsd_secondary
 
     buttons:
       restart: restart_button

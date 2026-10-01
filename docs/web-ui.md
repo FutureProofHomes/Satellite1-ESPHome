@@ -541,6 +541,46 @@ restored value at boot and the turn action writes a stale state into the store.
 This replaced a comma-separated text entity, and it is a breaking change with renamed and deleted
 entities. [TTS-Routing.md](TTS-Routing.md) has the upgrade notes.
 
+## Finished speaking detection, per wake word
+
+Home Assistant keeps one "Finished speaking detection" select per satellite — how much trailing
+silence its pipeline VAD waits for before it decides you are done — and reads it at the start of
+every pipeline run (`_resolve_vad_sensitivity()` in `assist_satellite/entity.py`). There is no
+per-wake-word value on its side, so the device keeps one per slot and copies the right one across
+just before each conversation starts.
+
+**Storage.** Two template selects in `common/voice_assistant.yaml`, `fsd_primary` and
+`fsd_secondary`, with options `unset`, `aggressive`, `default` and `relaxed`, restored from flash.
+They are `fsd_1` and `fsd_2` in the app's entity map and are written like any other device select.
+Home Assistant sees them but has them disabled by default; `web_server` filters only on `internal`,
+so they still ride `/events` and the REST set.
+
+**Applying it.** In the branch of `on_wake_word_detected` that starts the assistant — after the
+sign-in gate, the test window, mute and a ringing timer have had their say, so none of those firings
+ever touches Home Assistant — `queue_fsd_for(wake_word)` on `satellite1_web_ui` matches the phrase
+against the loader's slots (the same match `notify_detection` makes), reads that slot's select, and
+queues `select.select_option` on the select the HA payload names in `fsd[0]`. It uses the same
+queue and `on_ha_select` trigger as `POST /api/sat1/ha/select`. A centre-button start applies the
+Primary slot through `queue_fsd_for_slot(0)`. Conversations Home Assistant starts itself keep
+whatever value is current.
+
+**When it writes nothing.** The slot is `unset`, the payload has no `fsd`, or Home Assistant is
+believed to hold the value already. "Believed" is one value: the payload's `fsd[1]` each time a sync
+commits, replaced by each value the device queues. The payload alone would not do, because the
+device's own writes trigger no resync: after slot 2's write it would still show slot 1's value, and
+slot 1's next firing would look like a no-op.
+
+**Timing.** The write leaves from the component's loop within one iteration, on the same API
+connection as the pipeline start that follows it. With the wake sound on, the chime's existing
+300ms covers it; with it off, a queued write gets 150ms before `voice_assistant.start`; when nothing
+was queued there is no delay at all. The centre button always chimes, so its 300ms covers it.
+
+What a customer sees is Home Assistant's select changing on its device page as different wake words
+fire, and a change made there lasting only until a wake word sets it again. Both slots ship
+`unset`, so a device nobody has configured writes nothing and behaves exactly as before; the app
+fills both in on the first change, giving the other slot Home Assistant's current value. Until the
+first sync after Home Assistant connects (about five seconds) there is no `fsd` to write to.
+
 ## Crash reports
 
 Built September 2026 (plan file `crash_capture_on_diagnostics_d392c408`), after units in the field

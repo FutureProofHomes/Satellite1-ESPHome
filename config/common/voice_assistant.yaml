@@ -171,15 +171,29 @@ micro_wake_word:
                                         # this: muted microphones, a ringing timer, a running assistant and an
                                         # announcement already playing are all branches that never reach here.
                                         - script.execute: remote_wake_chime_send
+                                        # This wake word's finished speaking detection, copied onto Home
+                                        # Assistant's select before the start that reads it (see the
+                                        # select: block below). The write leaves from the web UI's loop
+                                        # within an iteration; the chime's 300ms covers its trip, and
+                                        # without a chime a queued write gets 150ms of its own. Nothing
+                                        # queued - unset, or already Home Assistant's value - waits for
+                                        # nothing.
                                         - if:
                                             condition:
                                               switch.is_on: wake_sound
                                             then:
+                                              - lambda: id(web_ui_app)->queue_fsd_for(wake_word);
                                               - script.execute:
                                                   id: play_sound
                                                   priority: true
                                                   sound_file: "wake_word_triggered_sound"
                                               - delay: 300ms
+                                            else:
+                                              - if:
+                                                  condition:
+                                                    lambda: return id(web_ui_app)->queue_fsd_for(wake_word);
+                                                  then:
+                                                    - delay: 150ms
                                         - voice_assistant.start:
                                             wake_word: !lambda return wake_word;
 
@@ -648,3 +662,45 @@ binary_sensor:
 # a threshold - and a five-option select cannot express a measured value; a control that can only
 # misrepresent the real one is worse than none. The tuner writes through mww_runtime_loader, which
 # persists per slot and re-applies at boot.
+
+select:
+  # Finished speaking detection per wake word slot, the web app's per-word setting. Home Assistant
+  # keeps one "Finished speaking detection" select per satellite and reads it when each pipeline
+  # starts, so on_wake_word_detected above copies the firing slot's value onto it just before
+  # voice_assistant.start (queue_fsd_for in satellite1_web_ui). `unset` writes nothing, which is
+  # how both ship - a device nobody has configured keeps Home Assistant's single value for every
+  # wake word, exactly as before. The other three are Home Assistant's own option values, forwarded
+  # verbatim, so they must not be renamed.
+  #
+  # Visible to Home Assistant but disabled there by default: the app is where these are set, and two
+  # extra selects beside Home Assistant's own would read as a duplicate of it. disabled_by_default
+  # does not hide them from web_server - it only filters on internal - so /events and the REST set
+  # still reach them.
+  - platform: template
+    id: fsd_primary
+    name: "Primary Wake Word Finished Speaking"
+    icon: "mdi:account-voice"
+    entity_category: config
+    disabled_by_default: true
+    optimistic: true
+    restore_value: true
+    initial_option: "unset"
+    options:
+      - "unset"
+      - "aggressive"
+      - "default"
+      - "relaxed"
+  - platform: template
+    id: fsd_secondary
+    name: "Secondary Wake Word Finished Speaking"
+    icon: "mdi:account-voice"
+    entity_category: config
+    disabled_by_default: true
+    optimistic: true
+    restore_value: true
+    initial_option: "unset"
+    options:
+      - "unset"
+      - "aggressive"
+      - "default"
+      - "relaxed"

@@ -173,11 +173,12 @@ export const HINTS = {
   voice_override:
     "How loud this device speaks when the assistant replies, separate from media volume. Zero follows the media volume instead. Speakers you route answers to have their own level - Remote TTS volume, on the Audio page.",
 
-  /* The Assistant card's VAD-sensitivity select, under the slider above. Two things need saying:
-     what the three options trade against each other, and that the setting is Home Assistant's -
-     which is also why the row vanishes when Home Assistant is away. */
+  /* Finished speaking detection, set per wake word. Three things need saying: what the options
+     trade against each other, that each wake word has its own, and why Home Assistant's single
+     control of the same name keeps changing - the device copies the firing word's value onto it
+     before each conversation, so a change made there does not stick. */
   finished_speaking:
-    "How long the assistant waits after you stop talking before it answers. Aggressive answers fastest; Relaxed tolerates longer mid-sentence pauses. This is a Home Assistant setting - the same control as on its device page - so it only appears while Home Assistant is connected.",
+    "How long the assistant waits after you stop talking before it answers. Aggressive answers fastest; Relaxed tolerates longer mid-sentence pauses. Each wake word has its own setting. Home Assistant keeps only one, so just before the assistant listens, the device copies the wake word's choice onto it - which is why Finished speaking detection on Home Assistant's device page changes as different wake words are used. A change made there only lasts until a wake word sets it again. The action button uses the Primary wake word's setting.",
 
   speaker_channel:
     "Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want.",

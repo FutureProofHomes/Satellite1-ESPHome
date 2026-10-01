@@ -104,6 +104,7 @@ CONF_ON_MA_VOLUME = "on_ma_volume"
 CONF_ON_MA_SEEK = "on_ma_seek"
 CONF_ON_SELECTION_CHANGE = "on_selection_change"
 CONF_SOUNDS = "sounds"
+CONF_FSD_SELECTS = "fsd_selects"
 
 satellite1_web_ui_ns = cg.esphome_ns.namespace("satellite1_web_ui")
 Satellite1WebUI = satellite1_web_ui_ns.class_("Satellite1WebUI", cg.Component)
@@ -253,6 +254,15 @@ CONFIG_SCHEMA = cv.All(
             # other control in the app there is no local state to write - only an action to call, and
             # calling it belongs in YAML beside the ladder.
             cv.Optional(CONF_ON_HA_SELECT): automation.validate_automation(single=True),
+            # The per-wake-word Finished Speaking Detection selects, Primary slot first. Home
+            # Assistant keeps one such select per satellite (the payload's `fsd`) and reads it when a
+            # pipeline starts, so queue_fsd_for copies the firing slot's value onto it through the
+            # on_ha_select queue above. Each needs the options unset/aggressive/default/relaxed:
+            # anything but `unset` is forwarded verbatim as Home Assistant's own option value.
+            # Optional - without it every wake word shares Home Assistant's one value.
+            cv.Optional(CONF_FSD_SELECTS): cv.All(
+                cv.ensure_list(cv.use_id(select.Select)), cv.Length(min=1, max=2)
+            ),
             # The Music Assistant relay: fired from loop() for POST /api/sat1/ma/refresh and
             # /api/sat1/ma/<cmd>, each implemented in common/web_ui_media.yaml as one
             # homeassistant.action call - the same split as the two above, for the same reason. All
@@ -477,6 +487,9 @@ async def to_code(config):
             [(cg.std_string, "entity"), (cg.std_string, "option")],
             config[CONF_ON_HA_SELECT],
         )
+
+    for slot, sel_id in enumerate(config.get(CONF_FSD_SELECTS, [])):
+        cg.add(var.set_fsd_select(slot, await cg.get_variable(sel_id)))
 
     if CONF_ON_MA_REFRESH in config:
         await automation.build_automation(

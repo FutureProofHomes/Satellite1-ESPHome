@@ -1968,37 +1968,41 @@ void WebUIHandler::handle_ha_select_(AsyncWebServerRequest *request) {
     }
   }
 
-  {
-    LockGuard guard{this->select_lock_};
-
-    bool queued = false;
-    for (auto &pending : this->select_queue_) {
-      if (pending.entity == entity) {
-        // Last choice wins. Picking twice from an open dropdown should leave Home Assistant with the
-        // second answer and cost one action call, not two whose order decides the outcome.
-        pending.option = option;
-        queued = true;
-        break;
-      }
-    }
-
-    if (!queued) {
-      if (this->select_queue_.size() >= WU_SELECT_QUEUE) {
-        // 409 rather than a silent drop, and 409 rather than 429 because init_response_ has no 429 and
-        // would answer 500. The app retries; the alternative is a control that looks like it worked.
-        request->send(409, "application/json", "{\"ok\":0}");
-        return;
-      }
-      this->select_queue_.push_back({entity, option});
-    }
-
-    this->select_pending_.store(true, std::memory_order_release);
+  if (!this->queue_select_write(entity, option)) {
+    // 409 rather than a silent drop, and 409 rather than 429 because init_response_ has no 429 and
+    // would answer 500. The app retries; the alternative is a control that looks like it worked.
+    request->send(409, "application/json", "{\"ok\":0}");
+    return;
   }
 
   // Queued, like the refresh above. The app learns what actually happened by resyncing and reading the
   // states back out of the next payload, which is the only honest confirmation available: this call
   // captures no response, so the device never finds out whether Home Assistant accepted the option.
   request->send(200, "application/json", "{\"queued\":1}");
+}
+
+bool WebUIHandler::queue_select_write(const std::string &entity, const std::string &option) {
+  LockGuard guard{this->select_lock_};
+
+  bool queued = false;
+  for (auto &pending : this->select_queue_) {
+    if (pending.entity == entity) {
+      // Last choice wins. Picking twice from an open dropdown should leave Home Assistant with the
+      // second answer and cost one action call, not two whose order decides the outcome.
+      pending.option = option;
+      queued = true;
+      break;
+    }
+  }
+
+  if (!queued) {
+    if (this->select_queue_.size() >= WU_SELECT_QUEUE)
+      return false;
+    this->select_queue_.push_back({entity, option});
+  }
+
+  this->select_pending_.store(true, std::memory_order_release);
+  return true;
 }
 
 bool WebUIHandler::take_select_write(SelectWrite &out) {

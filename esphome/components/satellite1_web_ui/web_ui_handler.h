@@ -383,6 +383,11 @@ class WebUIHandler : public AsyncWebHandler {
   /// load per main-loop iteration and nothing else.
   bool take_select_write(SelectWrite &out);
 
+  /// Adds one write to that queue, coalesced by entity. False when the queue is full. The endpoint
+  /// validates first; the component's finished-speaking helper calls this directly from the main loop
+  /// with the entity the payload named, so both writers share one queue and one trigger.
+  bool queue_select_write(const std::string &entity, const std::string &option);
+
   /// Set from the component's setup(), before this handler is registered.
   void set_selection(Selection *selection) { this->selection_ = selection; }
 

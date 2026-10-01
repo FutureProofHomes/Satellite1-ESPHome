@@ -12,12 +12,19 @@
 #include "esphome/components/switch/switch.h"
 #endif
 
+#ifdef USE_SELECT
+#include "esphome/components/select/select.h"
+#endif
+
 #ifdef USE_SAT1_WEB_UI_SENDSPIN
 #include "esphome/components/sendspin/sendspin_hub.h"
 #endif
 
 namespace esphome {
 namespace satellite1_web_ui {
+
+/// The Primary and Secondary wake word slots, each with its own Finished Speaking Detection select.
+static constexpr uint8_t WU_FSD_SLOTS = 2;
 
 /// Appends `src` to `out` with the whitespace a readable YAML source carries stripped out: Jinja
 /// `{# ... #}` comments are dropped and every run of whitespace collapses to one space.
@@ -193,8 +200,33 @@ class Satellite1WebUI : public Component {
 #endif
 
 #ifdef USE_SAT1_MWW_LOADER
-  void set_wake_loader(mww_runtime_loader::MwwRuntimeLoader *loader) { this->handler_.set_wake_loader(loader); }
+  void set_wake_loader(mww_runtime_loader::MwwRuntimeLoader *loader) {
+    this->wake_loader_ = loader;
+    this->handler_.set_wake_loader(loader);
+  }
 #endif
+
+#ifdef USE_SELECT
+  /// The per-wake-word Finished Speaking Detection selects, Primary slot first - fsd_selects: in
+  /// common/web_ui.yaml. From generated code.
+  void set_fsd_select(uint8_t slot, select::Select *sel) {
+    if (slot < WU_FSD_SLOTS)
+      this->fsd_selects_[slot] = sel;
+  }
+#endif
+
+  /// Home Assistant has one "Finished speaking detection" select per satellite and reads it when each
+  /// pipeline starts, so a per-wake-word value means copying the firing slot's value onto it first.
+  /// Called from on_wake_word_detected in common/voice_assistant.yaml, ahead of the chime and the
+  /// assistant start. Queues the write on the /api/sat1/ha/select queue and returns true, or returns
+  /// false and does nothing when the slot is `unset`, Home Assistant is believed to hold the value
+  /// already, or the payload names no such select. True is the YAML's cue to give the write time to
+  /// land when no chime is covering it.
+  bool queue_fsd_for(const std::string &wake_word);
+
+  /// The same for a start that names a slot rather than a wake word: the centre button, which
+  /// applies the Primary slot's value (common/buttons.yaml).
+  bool queue_fsd_for_slot(uint8_t slot);
 
 #ifdef USE_SAT1_CRASH_REPORT
   /// The crash flight recorder, for the /api/sat1/crash* endpoints. From generated code, so it is
@@ -257,8 +289,9 @@ class Satellite1WebUI : public Component {
   Trigger<> *get_ha_refresh_trigger() { return &this->ha_refresh_trigger_; }
 
   /// Fired from loop() with an entity id and an option, for the Home Assistant selects that decide
-  /// which assistant answers which wake word. The action call itself is in YAML for the same reason the
-  /// refresh ladder is: homeassistant.action belongs next to the rest of the data layer.
+  /// which assistant answers which wake word and how long it waits for you to finish (queue_fsd_for
+  /// below). The action call itself is in YAML for the same reason the refresh ladder is:
+  /// homeassistant.action belongs next to the rest of the data layer.
   ///
   /// At most one per iteration, so the automation behind this is never re-entered while running. A
   /// `delay:` in it would still be a mistake - it would stall the queue rather than corrupt it.
@@ -300,6 +333,11 @@ class Satellite1WebUI : public Component {
   /// case and does nothing.
   void adopt_ha_area_(const char *json);
 
+  /// Takes the `fsd` pair - Home Assistant's Finished speaking detection select and its state - out
+  /// of a freshly committed payload, the same way. Null does nothing; a payload without the pair
+  /// clears it, so the helper stops writing to a select Home Assistant no longer reports.
+  void adopt_ha_fsd_(const char *json);
+
   WebUIHandler handler_;
   SessionGate gate_;
   Selection selection_;
@@ -309,6 +347,21 @@ class Satellite1WebUI : public Component {
 #ifdef USE_SAT1_WEB_UI_SENDSPIN
   sendspin_::SendspinHub *sendspin_hub_{nullptr};
 #endif
+#ifdef USE_SAT1_MWW_LOADER
+  mww_runtime_loader::MwwRuntimeLoader *wake_loader_{nullptr};
+#endif
+#ifdef USE_SELECT
+  select::Select *fsd_selects_[WU_FSD_SLOTS]{};
+#endif
+  /// Home Assistant's select, from the payload's `fsd[0]`, and the value it is believed to hold.
+  ///
+  /// One "believed" value rather than the payload's state and the last write kept side by side,
+  /// because the payload is only re-read on a sync and the device's own writes do not trigger one:
+  /// after writing slot 2's value, a payload still showing slot 1's would make slot 1's next firing
+  /// look like a no-op. So the newer of the two wins - a commit replaces it with what Home Assistant
+  /// rendered, a queued write replaces it with what was sent. Main loop only, like both writers.
+  std::string fsd_entity_;
+  std::string fsd_known_;
   Trigger<> ha_refresh_trigger_;
   Trigger<std::string, std::string> ha_select_trigger_;
   Trigger<> ma_refresh_trigger_;

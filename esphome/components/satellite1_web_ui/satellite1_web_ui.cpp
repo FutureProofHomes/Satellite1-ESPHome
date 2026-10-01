@@ -274,10 +274,16 @@ void Satellite1WebUI::loop() {
 char *Satellite1WebUI::stage_ha_payload(size_t capacity) { return this->handler_.stage_ha_payload(capacity); }
 
 void Satellite1WebUI::commit_ha_payload(size_t len, int rung) {
-  this->adopt_ha_area_(this->handler_.commit_ha_payload(len, rung));
+  const char *json = this->handler_.commit_ha_payload(len, rung);
+  this->adopt_ha_area_(json);
+  this->adopt_ha_fsd_(json);
 }
 
-void Satellite1WebUI::commit_ha_pages(int rung) { this->adopt_ha_area_(this->handler_.commit_ha_pages(rung)); }
+void Satellite1WebUI::commit_ha_pages(int rung) {
+  const char *json = this->handler_.commit_ha_pages(rung);
+  this->adopt_ha_area_(json);
+  this->adopt_ha_fsd_(json);
+}
 
 void Satellite1WebUI::adopt_ha_area_(const char *json) {
   if (json == nullptr)
@@ -298,6 +304,95 @@ void Satellite1WebUI::adopt_ha_area_(const char *json) {
   if (end == nullptr || end == start)
     return;
   this->selection_.set_own_area(std::string(start, static_cast<size_t>(end - start)));
+}
+
+/// Skips spaces at `p` and steps over `c` if it is next.
+static bool consume_json_char(const char *&p, char c) {
+  while (*p == ' ')
+    p++;
+  if (*p != c)
+    return false;
+  p++;
+  return true;
+}
+
+/// Reads one JSON string at `p` and leaves `p` past its closing quote. Refuses an escape rather than
+/// decoding it: entity ids and the three option values never carry one.
+static bool read_flat_json_string(const char *&p, std::string &out) {
+  if (!consume_json_char(p, '"'))
+    return false;
+  const char *start = p;
+  while (*p != '"' && *p != '\\' && *p != '\0')
+    p++;
+  if (*p != '"')
+    return false;
+  out.assign(start, static_cast<size_t>(p - start));
+  p++;
+  return true;
+}
+
+void Satellite1WebUI::adopt_ha_fsd_(const char *json) {
+  if (json == nullptr)
+    return;
+
+  // A find for adopt_ha_area_'s reasons. `"fsd":` cannot match inside an earlier string value (an
+  // area or pipeline name), because a quote inside a JSON string is escaped.
+  static const char *const KEY = "\"fsd\":";
+  const char *at = strstr(json, KEY);
+  const char *p = at == nullptr ? nullptr : at + strlen(KEY);
+  std::string entity, state;
+  const bool ok = p != nullptr && consume_json_char(p, '[') && read_flat_json_string(p, entity) &&
+                  consume_json_char(p, ',') && read_flat_json_string(p, state) && entity.rfind("select.", 0) == 0;
+  if (!ok) {
+    this->fsd_entity_.clear();
+    this->fsd_known_.clear();
+    return;
+  }
+  this->fsd_entity_ = std::move(entity);
+  this->fsd_known_ = std::move(state);
+}
+
+bool Satellite1WebUI::queue_fsd_for(const std::string &wake_word) {
+#ifdef USE_SAT1_MWW_LOADER
+  if (this->wake_loader_ == nullptr || wake_word.empty())
+    return false;
+  // The loader's own view of which phrase each slot holds - the same match notify_detection makes.
+  mww_runtime_loader::SlotView views[mww_runtime_loader::WL_SLOTS];
+  uint32_t dl = 0, total = 0;
+  int dl_slot = -1;
+  this->wake_loader_->snapshot(views, dl, total, dl_slot);
+  for (uint8_t i = 0; i < mww_runtime_loader::WL_SLOTS && i < WU_FSD_SLOTS; i++) {
+    if (views[i].word == wake_word)
+      return this->queue_fsd_for_slot(i);
+  }
+#endif
+  return false;
+}
+
+bool Satellite1WebUI::queue_fsd_for_slot(uint8_t slot) {
+#ifdef USE_SELECT
+  if (slot >= WU_FSD_SLOTS || this->fsd_selects_[slot] == nullptr || this->fsd_entity_.empty())
+    return false;
+  select::Select *sel = this->fsd_selects_[slot];
+  if (!sel->has_state())
+    return false;
+  const StringRef value = sel->current_option();
+  if (value.empty() || value == "unset" || value == this->fsd_known_)
+    return false;
+
+  std::string option(value.c_str(), value.size());
+  if (!this->handler_.queue_select_write(this->fsd_entity_, option)) {
+    ESP_LOGW(TAG, "Select queue full; slot %u's finished speaking detection not applied",
+             static_cast<unsigned>(slot) + 1);
+    return false;
+  }
+  ESP_LOGD(TAG, "Finished speaking detection -> %s (slot %u, was %s)", option.c_str(),
+           static_cast<unsigned>(slot) + 1, this->fsd_known_.c_str());
+  this->fsd_known_ = std::move(option);
+  return true;
+#else
+  return false;
+#endif
 }
 
 void Satellite1WebUI::set_ha_payload(const std::string &json, int rung) {
