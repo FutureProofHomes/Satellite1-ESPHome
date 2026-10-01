@@ -1,0 +1,13 @@
+/* The Audio tab's states the design's mock never had to draw. */
+
+/* Why a tree is empty: v1's quiet caption under the tree title rather than a banner, since the empty
+   tree is already the signal. */
+.au-ha-state { margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.au-ha-state p { margin: 0; }
+.au-ha-state p + p { margin-top: 6px; }
+.au-fix { display: inline; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--accent2); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.au-missing { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+
+/* Each card's backdrop-filter makes it a stacking context, so the mic guard's list would open
+   underneath the Area Ducking card below it. */
+.au-card:has(.au-sel-pop) { position: relative; z-index: 10; }
