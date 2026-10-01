@@ -1,6 +1,18 @@
 /* The shell's states the design's mock never had to draw. */
 
-/* The header dot is Home Assistant's connection; app.css paints it green with !important. */
+/* The notch insets, through variables so a Home Assistant ingress panel (index.html sets
+   data-embed pre-paint) can zero them: the embedding chrome already clears the status bar and home
+   indicator, and iOS propagates the insets into the iframe anyway, so honouring them there pays the
+   notch twice - a blank band the height of the status bar above the header (owner's companion-app
+   screenshots, September 2026). Served directly, the page runs full-bleed and the insets hold. */
+:root { --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); }
+html[data-embed] { --sat: 0px; --sab: 0px; }
+
+/* The boot splash from index.html, over everything until the app's first real screen removes it. */
+#splash { position: fixed; inset: 0; z-index: 1000; }
+
+/* The header dot is Home Assistant's connection; app.css paints it green with !important. Neutral
+   when disconnected rather than hidden, so the colour is the signal rather than its presence. */
 .app > header .device-chip .dot.off { background: var(--muted) !important; box-shadow: none !important; }
 .peer-list .offline .dot { background: var(--muted); box-shadow: none; }
 .peer-list a.nolink { cursor: default; }

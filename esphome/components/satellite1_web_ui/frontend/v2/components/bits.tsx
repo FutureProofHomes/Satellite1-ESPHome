@@ -3,9 +3,10 @@ import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 /**
- * Light or dark, remembered per browser under the key v1 used. index.html applies it before the
- * first paint, so this reads the attribute rather than storage - the two cannot disagree if the
- * write ever fails (localStorage throws with site data blocked).
+ * Light or dark, remembered per browser under the same key as the previous UI, so a choice made
+ * there survives the update. index.html applies it before the first paint, so this reads the
+ * attribute rather than storage - the two cannot disagree if the write ever fails (localStorage
+ * throws with site data blocked).
  */
 export function useTheme(): ['dark' | 'light', () => void] {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
@@ -44,9 +45,14 @@ export function Icon({
 }
 let closeOpenHint: (() => void) | null = null;
 /**
- * The ⓘ beside a label. One is open at a time. Its bubble is fixed to the viewport, so a scroll
- * closes it rather than leave it floating off its button. Escape stops at the hint, so it does not
- * also close the drawer the hint sits in, and the press does not toggle a clickable card head.
+ * The ⓘ beside a label. Its bubble is placed in viewport coordinates measured from the button rather
+ * than inside the card, because a card can scroll or sit close enough to an edge that an anchored
+ * bubble would be clipped; it is clamped into the viewport, and goes above the button when there is
+ * no room below, which on a phone is most of the page. Being fixed, a scroll closes it rather than
+ * leave it floating off its button. One is open at a time: on a phone two open bubbles cover the
+ * content they explain. Escape stops at the hint, so it does not also close the drawer the hint sits
+ * in - caught in the capture phase, because the drawers listen on document as well as window - and
+ * the press does not toggle a clickable card head.
  */
 export function HintBtn({
   text
@@ -75,12 +81,12 @@ export function HintBtn({
       close();
     };
     document.addEventListener('pointerdown', outside, true);
-    document.addEventListener('keydown', esc);
+    document.addEventListener('keydown', esc, true);
     window.addEventListener('scroll', close, true);
     window.addEventListener('resize', close);
     return () => {
       document.removeEventListener('pointerdown', outside, true);
-      document.removeEventListener('keydown', esc);
+      document.removeEventListener('keydown', esc, true);
       window.removeEventListener('scroll', close, true);
       window.removeEventListener('resize', close);
       if (closeOpenHint === close) closeOpenHint = null;
@@ -119,18 +125,27 @@ export function HintBtn({
     }}>{text}</div>, document.body)}
   </span>;
 }
-/** Home Assistant's cog, drawn inline in the walk-through's step 2 where the person has to find it. */
+/**
+ * Home Assistant's cog (mdi:cog, the glyph it draws on a device's row), drawn inline in the
+ * walk-through's step 2 so the person finds it by sight rather than by the word "cog".
+ */
 const Cog = () => <svg className="fix-cog" viewBox="0 0 24 24" aria-hidden="true"><path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z" /></svg>;
 
 /**
- * Step 2 of the actions walk-through: the copy.js template's %c becomes the cog and %s the device's
- * name. The gate and the setup wizard both render it, so the two always speak the same steps.
+ * Step 2 of the actions walk-through: the template's %c becomes the cog and %s the device's name,
+ * markers that keep the sentence reviewable as one piece of text in src/copy.js. The gate and the
+ * setup wizard both render it, so the two always speak the same steps.
  */
 export const cogStep = (tpl: string, name: string) => {
   const [before, after] = tpl.split('%c');
   return <>{before}<Cog />{after.replace('%s', name)}</>;
 };
 
+/**
+ * The FutureProofHomes mark, inlined from the vector master (Documentation repo) and stroked in
+ * currentColor so one copy serves both themes - about 700 bytes gzipped, against two PNGs that would
+ * not gzip at all. `cls` sizes it per surface; the login size is the default.
+ */
 export const Logo = ({
   cls = 'login-logo'
 }: {

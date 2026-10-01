@@ -48,6 +48,10 @@ function Seek({
   </>;
 }
 
+/**
+ * The expanded view. It carries no volume slider (owner's request, September 2026): the bar and the
+ * players panel both have one, and a third copy here was clutter, not control.
+ */
 export function NowPlaying({
   model,
   tiers,
@@ -68,6 +72,8 @@ export function NowPlaying({
   const drag = useRef<number | null>(null);
   const { pos, dur } = usePlayhead(media, playing);
 
+  // With the socket up the queue's own clock, ticked by every queue_time_updated, drives the
+  // scrubber, so the position is real rather than extrapolated from a poll.
   const clock = wsOn ? queueClock(ws.queue, Date.now()) : null;
   const sDur = clock ? clock.dur : dur;
   const sPos = clock ? clock.pos : pos;
@@ -77,15 +83,19 @@ export function NowPlaying({
     else maCmd('seek', { e: me, t });
   };
 
-  // Shown at once rather than a poll later; the next reported value, whatever it is, replaces it.
+  // Shown at once, because a toggle that sits unmoved until the next poll reads as refused; the
+  // pending ring says "working" alongside it. The override lasts as long as the ring: it settles on
+  // the echo, or gives up at the deadline, and a refused toggle falls back to what the player says.
   const [optShuffle, setOptShuffle] = useState<boolean | null>(null);
   const [optRepeat, setOptRepeat] = useState<number | null>(null);
+  const shufflePending = !!pending.shuffle;
+  const repeatPending = !!pending.repeat;
   useEffect(() => {
-    setOptShuffle(null);
-  }, [media?.shuffle]);
+    if (!shufflePending) setOptShuffle(null);
+  }, [media?.shuffle, shufflePending]);
   useEffect(() => {
-    setOptRepeat(null);
-  }, [media?.repeat]);
+    if (!repeatPending) setOptRepeat(null);
+  }, [media?.repeat, repeatPending]);
   const ctrl = media?.shuffle != null;
   const shuffle = optShuffle ?? media?.shuffle === 1;
   const repeat = optRepeat ?? media?.repeat ?? 0;
@@ -103,13 +113,16 @@ export function NowPlaying({
     mediaCmd('repeat', { m: REPEAT_MODE[next], src: 'sendspin' });
   };
   // No queue index to watch: a skip is done when the title moves or the position falls back (prev
-  // mid-track restarts the same song).
+  // mid-track restarts the same song). Two identical consecutive tracks ride to the deadline - a
+  // slightly long spin, never a wrong state.
   const skip = (key: 'prev' | 'next') => {
     const t0 = media?.title;
     const p0 = media?.pos ?? 0;
     startPending(key, m => m?.title !== t0 || (m?.pos ?? 0) < p0);
     mediaCmd(key, { src: srcParam });
   };
+  // Each control disables while its own command is pending, as Music Assistant's do; that is also
+  // the guard against a double-send the device would replay.
   const btn = (key: string, on?: boolean) => 'mbtn' + (on ? ' on' : '') + (pending[key] ? ' busy' : '');
 
   return createPortal([<div key="scrim" className="mscrim" onClick={onClose} />, <section key="msheet" className="msheet" role="dialog" aria-label="Now playing" onClick={e => e.stopPropagation()}>

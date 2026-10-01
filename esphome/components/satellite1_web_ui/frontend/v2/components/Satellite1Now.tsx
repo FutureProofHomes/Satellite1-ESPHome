@@ -19,7 +19,7 @@ import { PresenceTab } from './PresenceTab';
 import { WakeTab } from './WakeTab';
 type Sheet = 'media' | 'device' | 'notice' | null;
 type ToastKind = 'info' | 'warn' | 'error' | 'timer';
-/** lib/toast.js's visible toast, and lib/notif.js's history row: the same anatomy. */
+/** src/lib/toast.js's visible toast, and src/lib/notif.js's history row: the same anatomy. */
 type Toast = {
   id: number;
   kind: string;
@@ -42,8 +42,8 @@ const TOAST_ICONS = {
 const pillKind = (k: string): ToastKind => k === 'err' ? 'error' : k === 'warn' || k === 'timer' ? k : 'info';
 
 /**
- * The header's toast: a view of whatever lib/toast.js says is visible. The store owns the timing,
- * the queue and the ×N coalescing; the pill only draws, swipes and reports taps.
+ * The header's toast: a view of whatever src/lib/toast.js says is visible. The store owns the
+ * timing, the queue and the ×N coalescing; the pill only draws, swipes and reports taps.
  */
 function ToastPill({
   toast,
@@ -102,7 +102,8 @@ function ToastPill({
     </div>;
 }
 
-/** The pages v1's #/diagnostics cards became, for history rows recorded before the switch. */
+/** Where the previous UI's #/diagnostics cards live now. Notification rows that UI wrote stay in
+ *  localStorage for 24 hours carrying go "#/diagnostics" and a card intent, and still act here. */
 const CARD_PAGE: Record<string, string> = {
   log: '#/settings/logs',
   crash: '#/settings/logs',
@@ -112,8 +113,9 @@ const CARD_PAGE: Record<string, string> = {
 /**
  * What a tapped toast or history row does - one path for both, so the two can never act
  * differently on the same entry. "fix" opens the walk-through; anything else navigates with its
- * intent riding lib/toast.js's handoff. Standing on the destination already fires no hashchange,
- * so that page hears a window event instead.
+ * intent riding src/lib/toast.js's handoff. Standing on the destination already, an identical hash
+ * fires no hashchange and remounts nothing, so that page hears a window event instead (the Settings
+ * pages listen while mounted).
  */
 function runAct(t: Toast, onFix: () => void) {
   if (t.act === 'fix') {
@@ -131,7 +133,9 @@ function runAct(t: Toast, onFix: () => void) {
 /**
  * Every event that raises a toast, watched here because the shell lives exactly as long as one
  * device's session (it remounts per remote-control target, which resets the once-per-session
- * guards for a genuinely different device).
+ * guards for a genuinely different device). Toasts are the app's whole out-of-band vocabulary
+ * since the amber banners were retired (owner decision, September 2026). A failed request toasts
+ * only when it was a write - see onWriteError in src/lib/device.js for why reads stay out of it.
  */
 function useToastSources({
   connected,
@@ -157,16 +161,21 @@ function useToastSources({
     const err = lvl !== 'W';
     toast({
       kind: err ? 'err' : 'warn',
-      // Per level and component, so ten wifi warnings are one toast wearing ×10.
+      // Per level and component, so ten wifi warnings are one toast wearing ×10 while an unrelated
+      // error still gets its own. The source already stays quiet while a log view has a reader.
       key: `log-${err ? 'E' : 'W'}-${tag}`,
       ttl: 6000,
       title: (err ? TEXT.log_toast_err : TEXT.log_toast_warn).replace('%s', tag || TEXT.log_toast_dev),
       sub: TEXT.write_failed_go,
       go: '#/settings/logs',
+      // The line rides by the same {at, text} identity the log ring holds (src/lib/device.js stamps
+      // both from one clock), so the reveal lands on the exact line - and a coalescing burst adopts
+      // the newest line as it counts up.
       intent: { card: 'log', level: err ? 'E' : 'W', line: { at, text } }
     });
   }), []);
-  // The nudge, on the rising edge only: once on entering a blocked app, again only if it re-enters.
+  // The nudge, on the rising edge only: once on entering a blocked app (arriving through the gate's
+  // Continue included), again only if the state genuinely re-enters - never per re-render.
   useEffect(() => {
     if (blocked) toast({
       kind: 'warn',
@@ -218,6 +227,8 @@ function useToastSources({
     });
     crashSeen.current = crash;
   }, [crash]);
+  // Update news, once per session. The guard resets with the shell's remount, so a device switch can
+  // report the other device's update - which is correct: it is different news.
   const updTold = useRef(false);
   const upd = device?.e?.firmware ? states[device.e.firmware] : undefined;
   const updState = upd?.state;
@@ -255,10 +266,17 @@ function Sheet({
 }) {
   const panelRef = useRef<HTMLElement>(null);
   const dragStartY = useRef<number | null>(null);
+  const closeRef = useRef(close);
+  closeRef.current = close;
   useEffect(() => {
     if (!kind) return;
     document.body.classList.add('has-drawer');
-    return () => document.body.classList.remove('has-drawer');
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current();
+    window.addEventListener('keydown', esc);
+    return () => {
+      document.body.classList.remove('has-drawer');
+      window.removeEventListener('keydown', esc);
+    };
   }, [kind]);
   if (!kind) return null;
   const dismiss = close;
@@ -349,8 +367,9 @@ export function Satellite1Now({
   const [theme, toggleTheme] = useTheme();
   const [route, setRoute] = useState(() => parseRoute(location.hash));
   useEffect(() => {
-    // A v1 bookmark or an unknown hash is rewritten in place to the page it resolved to, so the
-    // address bar never disagrees with what is on screen.
+    // A bookmark from the previous UI (#/controls, #/config, #/diagnostics) or an unknown hash is
+    // rewritten in place to the page it resolved to, so the address bar never disagrees with what
+    // is on screen.
     const on = () => {
       const r = parseRoute(location.hash);
       const canon = routeHash(r.tab, r.sub ?? undefined);
@@ -371,29 +390,38 @@ export function Satellite1Now({
   }, []);
   const navLayer = tab === 'SETTINGS' ? 1 : 0;
   const [sheet, setSheet] = useState<Sheet>(null);
-  // The gate is up from the first signed-in render and gone for good once it fades; the fix is the
-  // same screen reopened on demand.
+  // The gate is up from the first signed-in render - the first authenticated moment, whether the
+  // session came from the sign-in screen a second ago or from a 90-day cookie - and gone for good
+  // once it fades. State rather than anything remembered, so every page load gets the same honest
+  // check. The fix is the same screen reopened on demand.
   const [gateDone, setGateDone] = useState(false);
   const [fixOpen, setFixOpen] = useState(false);
 
   // Settings wants fresh heap and loop figures; everywhere else the only thing that goes stale is
-  // the Home Assistant dot, worth one request every ten seconds.
+  // the Home Assistant dot, worth one request every ten seconds so it starts telling the truth again
+  // on its own after the connection comes back.
   const { device, deviceError } = useDeviceState(tab === 'SETTINGS' ? 2000 : 10000);
   const events = useEvents();
   const ha = useHaData();
   const selection = useSelection();
 
-  // Dual-origin cookie priming, once the state payload names the other entrance. Never while
-  // remote: `device` is the peer's there.
+  // Dual-origin cookie priming: one CORS sign-in against the device's other entrance (.local when
+  // on the IP, the IP when on .local), once the state payload names it. The key is dropped the
+  // moment it is used - it lives nowhere but the cookie after this. Never while remote: `device` is
+  // the peer's there, and priming the peer's other origin with the local key can only fail.
   useEffect(() => {
     if (remote || !primeKey.current || !device) return;
     primeOtherOrigin(primeKey.current, device.name, device.ip);
     primeKey.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [device, primeKey]);
+  // A session dying under a running app - the password changed, or Sign out everywhere pressed
+  // somewhere else. The state poll is the heartbeat that notices.
   useEffect(() => {
     if (deviceError === 'HTTP 401') onAuthLost();
   }, [deviceError, onAuthLost]);
+  // The notification and sparkline histories are bucketed per MAC; point both at this device the
+  // moment it is known, which also covers a remote-control retarget (the shell remounts per device).
   const mac = device?.mac;
   useEffect(() => {
     if (mac) {
@@ -413,8 +441,10 @@ export function Satellite1Now({
     go
   };
 
-  // The sensor sparklines accrue on every tab, not only while Home is open: the change effects
-  // catch a moved value, and the 60s beat keeps flat periods accruing points.
+  // The sensor sparklines accrue on every tab, not only while Home is open. Values are the
+  // entities' native units (°C - the °F flip is display-only). The change effects catch a moved
+  // value, and the 60s beat keeps flat periods accruing points: the stream's merge reducer swallows
+  // no-change publishes, so a timer is the only way to see them.
   const sparkTemp = Number(entity(ctx, 'temp')?.value);
   const sparkHum = Number(entity(ctx, 'humidity')?.value);
   const sparkLux = Number(entity(ctx, 'lux')?.value);
@@ -430,12 +460,16 @@ export function Satellite1Now({
     }, 60000);
     return () => clearInterval(t);
   }, []);
+  // Resolved once here, so the header, the side nav and the switcher cannot disagree about what this
+  // device is called. The tab title follows it; the sign-in screen already set the hostname as the
+  // fallback for the time before.
   const { name: label, area } = deviceIdentity(device, ha.ha);
   useEffect(() => {
     if (label) document.title = label;
   }, [label]);
 
-  // The store's visible toast, and a ghost of the one leaving so its exit can animate.
+  // The store's visible toast, and a ghost of the one leaving so its exit can animate - an element
+  // unmounted the moment it is dismissed is gone before any transition can run.
   const [cur, setCur] = useState<Toast | null>(null);
   const [ghost, setGhost] = useState<Toast | null>(null);
   const prevToast = useRef<Toast | null>(null);
@@ -450,7 +484,8 @@ export function Satellite1Now({
     }
     return undefined;
   }, [cur]);
-  // `blocked` waits for the gate to leave: while it stands, the verdict is its story to tell.
+  // `blocked` waits for the gate to leave: while it stands, the verdict is its story to tell, and the
+  // toast's job is to keep the fix reachable afterwards.
   useToastSources({
     connected: events.connected,
     blocked: gateDone && haBlocked(ha.ha),
@@ -477,11 +512,17 @@ export function Satellite1Now({
     '--orb-a35': hexToRgba(orb.a, 0.35),
     '--orb-a55': hexToRgba(orb.a, 0.55)
   } as React.CSSProperties;
+  // This browser only - Sign out everywhere lives on Settings > Security, where its blast radius can
+  // be explained. The reload lands on the boot probe, which finds no session and shows sign-in.
   const signOut = async () => {
     setSheet(null);
     await logout();
     location.reload();
   };
+  // The header dot is Home Assistant's connection, not the device's reachability: this is the
+  // device serving the page, so that would be a light that could never go out. While a peer is
+  // remote-controlled the chip says so in one word, because every device's name has the same shape
+  // and the single-origin switch changes nothing else about the page.
   const haText = device?.ha ? TEXT.ha_connected : TEXT.ha_disconnected;
   const openFix = () => setFixOpen(true);
   const activeToast = cur;
@@ -539,6 +580,8 @@ export function Satellite1Now({
 }
 const hostOf = (u: unknown) => String(u || '').replace(/^https?:\/\//, '').replace(/[/:].*$/, '');
 const isUp = (d: any[]) => d[6] === 1 || d[6] === '1';
+/* The variant fields are the payload's own encoding - 'e'/'w', 2450/2410, 1/0 - so a row from older
+   firmware, which sends none of the three, shows nothing rather than something wrong. */
 const radarModel = (r: unknown) => r === 2450 || r === 2410 ? `LD${r}` : '';
 const netName = (n: unknown) => n === 'e' ? 'Ethernet' : n === 'w' ? 'Wi\u2011Fi' : '';
 /** "LD2450 · present", or nothing for a device whose firmware sends no radar fields. */
@@ -548,11 +591,25 @@ const radarText = (r: unknown, present: unknown) => {
 };
 
 /**
- * The device switcher (src/shell.jsx's SwitcherSheet in the design's sheet): this device on top,
- * then every other Satellite1 the Home Assistant payload lists, online first. The roster is the
- * `dev` block on /api/sat1/ha - row fields [model, name, area, mac, sw, url, up, pw, net, radar,
- * present] - so nothing here discovers anything; a jump signs in to the peer first and, when the
- * peer's firmware allows it, retargets this app instead of navigating.
+ * The device switcher: this device on top, then every other Satellite1 the Home Assistant payload
+ * lists, online first. The roster is the `dev` block on /api/sat1/ha - row fields [model, name,
+ * area, mac, sw, url, up, pw, net, radar, present] - so nothing here discovers anything; a jump
+ * signs in to the peer first and, when the peer's firmware allows it, retargets this app instead of
+ * navigating.
+ *
+ * No discovery because a browser can do none: mDNS browsing is not available to a page, and probing
+ * peers directly fails too - Digest credentials are scoped per origin and a cross-origin probe dies
+ * on the preflight. So each row's link is the peer's `configuration_url` (the address behind Home
+ * Assistant's "Visit device") and its dot is Home Assistant's availability view, which is better
+ * data anyway: it knows a device is off the moment it disconnects, where a probe would wait out a
+ * timeout. The caveat is that the payload is the device's cache, so the sheet re-syncs it (below).
+ *
+ * Satellite1 models only: a Nexus is in `dev` too, and a row that jumps to a device with no page to
+ * serve is a trap. This device is dropped by MAC rather than by name, because the name is exactly
+ * the field owners change. A row with no URL renders unlinked rather than hidden - a device that
+ * exists but cannot be jumped to is still worth seeing. There is no add-by-address field (removed
+ * at the owner's request); a peer Home Assistant cannot list is reachable by typing its address.
+ * The variant fields are described in docs/web-ui.md, "Why the browser never calls Home Assistant".
  */
 function DeviceSheet({
   ctx,
@@ -576,8 +633,16 @@ function DeviceSheet({
   const { device, ha, haRefresh, states } = ctx;
   const hash = routeHash(ctx.tab, ctx.sub ?? undefined);
   const mac = (device?.mac || '').toLowerCase();
-  // Re-sync the roster on open, then on a 5s beat while the last answer came on rung 1 (the fast
-  // statistics path; rung 2 costs ~3s a call and would sit on the queue the jump needs).
+  // Re-sync the roster the moment the sheet opens: otherwise the cache is rebuilt only when the Audio
+  // or Wake tab asks (haSyncOnce, once per page load), and a peer powered off in between kept a
+  // green dot for days.
+  // Then, while the sheet stays open, the same sync on a 5s beat - what makes a peer's presence tag
+  // follow the room. Gated three ways: never while a sync is running (haRefresh sleeps ~3s inside,
+  // so an ungated interval would stack them), never while the tab is hidden (a background poll
+  // spends Home Assistant action calls on a sheet nobody sees), and only while the last answer came
+  // on rung 1, the recorder.get_statistics fast path. The rung 2 fallback costs ~3s a call through
+  // conversation.process and would sit on the request queue the jump itself needs; those
+  // installations keep the once-per-open sync.
   const haNow = useRef(ha);
   haNow.current = ha;
   useEffect(() => {
@@ -597,14 +662,20 @@ function DeviceSheet({
       sync();
     }, 5000);
     return () => clearInterval(t);
+    // haRefresh is stable for the life of the app; this is per-open by design.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Sorted by area then name, so a house full of these groups by room, matching the tree on Audio.
   const roster: any[][] = ha?.d?.dev || [];
   const peers = roster.filter(d => /satellite1/i.test(d?.[0] || '') && (d?.[3] || '').toLowerCase() !== mac).sort((x, y) => `${x[2]}\u0000${x[1]}`.localeCompare(`${y[2]}\u0000${y[1]}`));
   const ordered = [...peers.filter(isUp), ...peers.filter(d => !isUp(d))];
 
   // This device's own tags read the live stream rather than the cached roster, so its presence
-  // lights the moment the radar does. While remote these are the controlled peer's own.
+  // lights the moment the radar does; the roster row (kept out of `peers` by the mac filter) is the
+  // fallback. While remote these are the controlled peer's own. "Room Presence" is the auto-detect
+  // build's runtime registration and "Presence" the pinned builds' YAML: names the firmware owns,
+  // not ones an owner renames (what the entity table exists to protect against), so they are
+  // referenced by id.
   const mineRow = roster.find(d => (d?.[3] || '').toLowerCase() === mac);
   const netLive = String(states?.[device?.e?.network]?.value || '');
   const myNet = netLive.startsWith('Eth') ? 'e' : netLive.startsWith('WiFi') ? 'w' : mineRow?.[8];
@@ -613,11 +684,17 @@ function DeviceSheet({
   const presLive = states?.['binary_sensor/Room Presence'] || states?.['binary_sensor/Presence'];
   const myPres = presLive ? presLive.value === true || presLive.state === 'ON' : mineRow?.[10];
   const myLit = !!radarModel(myRadar) && (myPres === 1 || myPres === true);
+  // The open page rides along, so moving to another device keeps it. The hash never reaches either
+  // server, so this works against old firmware too - it just falls off to whatever that serves at /.
   const peerHref = (base: string) => `${String(base).replace(/\/+$/, '')}/${hash}`;
 
-  // The seamless jump: sign in to the peer before leaving so its page opens as the app, and try the
-  // single-origin switch first. Anything that declines falls back to plain navigation; the href
-  // stays real underneath for middle-click and open-in-new-tab.
+  // The seamless jump: sign in to the peer before leaving so its page opens as the app rather than
+  // as its sign-in screen. The peer's password rides the roster (the Web UI Password sensor every
+  // device already publishes to Home Assistant, via web_ui_ha.yaml) and the sign-in is the same
+  // challenge-response the password form uses. Anything that declines - older peer firmware, a
+  // missing password, mDNS trouble - falls back to plain navigation and the peer's own sign-in. The
+  // href stays real underneath, so middle-click and open-in-new-tab keep working (they skip the
+  // sign-in and land on the fallback).
   const jump = async (e: React.MouseEvent, url: string, pw: string | undefined) => {
     if (!pw || e.button !== 0 || e.metaKey || e.ctrlKey) return;
     e.preventDefault();
@@ -627,16 +704,38 @@ function DeviceSheet({
       location.href = peerHref(url);
       return;
     }
+    // The single-origin switch, tried first: one gated read with the fresh key says whether the
+    // peer accepts remote control and speaks this app's API contract (see probePeer). A yes means
+    // the app retargets and remounts with no navigation, so the iOS home-screen app never meets
+    // Safari's in-app sheet. The base is the roster's IP origin rather than the .local upgrade below:
+    // this target lives in memory for the session, so DHCP stability buys nothing, and skipping mDNS
+    // removes the one way the switch could land on a browser error page. The mac rides along only on
+    // the way out of the local device, so the sheet can offer the way back (isHome).
     if (await probePeer(origin, peer.key)) {
       onRemote({ base: origin, key: peer.key }, remote ? null : mac);
       return;
     }
+    // Older peer firmware: plain navigation, landing through ?key= so the peer sets its cookie
+    // first-party, where third-party cookie blocking cannot eat it. When the login body carries the
+    // peer's hostname and this page is itself on .local - proof this browser resolves mDNS - it goes
+    // straight to the peer's .local origin, skipping the IP-then-redirect double load; peers run the
+    // same firmware, so this page's port is the peer's. The name is regex-checked before it becomes
+    // a URL because it arrives in a CORS-readable body. Known accepted risk: this proves our mDNS
+    // works, not the peer's - a peer with mdns: disabled lands on a browser error page. The fleet
+    // ships mDNS on, and the failure is recoverable: back, or middle-click the real href.
     const base = location.hostname.endsWith('.local') && peer.name && /^[a-z0-9-]+$/i.test(peer.name) ? `http://${peer.name}.local${location.port ? `:${location.port}` : ''}` : origin;
     location.href = `${base}/?key=${peer.key}${hash}`;
   };
+  // While remote, the device serving this page is just another roster row (the mac filter excludes
+  // the controlled device, not the serving one). Going home is a state reset on a session this
+  // browser already holds - no cross-sign-in, no probe, nothing that can fail.
   const isHome = (d: any[]) => !!remote && !!localMac && (d?.[3] || '').toLowerCase() === localMac;
+  // Room first: it is what a person scans for, and the address is the fallback when two devices
+  // share a room (owner's call).
   const meta = (d: any[], url: string) => isHome(d) ? TEXT.switcher_home : !isUp(d) ? 'Offline' : [d[2], hostOf(url), netName(d[8]), radarText(d[9], d[10])].filter(Boolean).join(' · ');
   const peerRow = (d: any[]) => {
+    // peerOrigin, not d[5] raw: a .local configuration_url is swapped for the row's live IP when the
+    // roster carries one, so the jump works where mDNS does not (see src/lib/device.js).
     const url = peerOrigin(d);
     const up = isUp(d);
     const cls = up ? '' : 'offline';
@@ -646,8 +745,16 @@ function DeviceSheet({
       e.preventDefault();
       onLocal();
     }}>{body}</a>;
-    // Behind the ingress proxy a peer's plain-http origin is out of reach, but its own ingress
-    // panel is not: same origin as this page, at "/" plus the slug of its mDNS hostname.
+    // Behind the ingress proxy a peer's plain-http origin is out of reach: navigating this (possibly
+    // https) HA panel there in place is blocked as mixed content, and so are the cross-origin
+    // sign-in fetches the jump rides. But the peer's own ingress panel shares this page's origin, so
+    // target="_top" navigates there natively inside HA, companion app included (a first build's
+    // target="_blank" IP link tossed iOS users out to Safari - owner's report, September 2026). The
+    // entry path is "/" plus the panel's YAML key, which is the peer's mDNS hostname under the same
+    // slug rule the HA Side Panel card's generated YAML uses (panelSlug in src/lib/auth.js). The
+    // hostname comes from the raw configuration_url, not peerOrigin(), which swaps in the IP. A row
+    // with no usable hostname falls back to a new-tab link: a top-level http navigation is allowed
+    // where an embedded one is not, and a possibly-dead panel link would be strictly worse.
     if (url && proxied) {
       let peerSlug = '';
       try {
@@ -657,16 +764,25 @@ function DeviceSheet({
         /* no configuration_url on this row; the mac derivation below */
       }
       if (!peerSlug) {
-        // HA usually records the IP, which names no panel - but the fleet's hostnames are
-        // <base>-<last six hex of mac>, so the peer's is this device's base plus its suffix.
+        // The rung that fires on most installs: HA's ESPHome integration writes configuration_url
+        // with the IP it connects on, and an IP names no panel. But the fleet's hostnames are
+        // <base>-<last six hex of mac> (name_add_mac_suffix), so the peer's is this device's base
+        // plus the peer's suffix. The endsWith check is the honesty test: a device renamed away
+        // from the convention proves the base unknowable, and the new-tab fallback beats a guessed
+        // link to a panel that does not exist.
         const ownName = String(device?.name || '').toLowerCase();
         const ownSuffix = mac.replace(/[^a-z0-9]/g, '').slice(-6);
         const peerSuffix = String(d?.[3] || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(-6);
         if (ownSuffix.length === 6 && peerSuffix.length === 6 && ownName.endsWith(ownSuffix)) peerSlug = (ownName.slice(0, -6) + peerSuffix).replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
       }
       if (peerSlug) {
-        // Flat panels live at /<slug>, nested ones at /<parent>/<slug>; HA 404s an unregistered
-        // route, so one HEAD probe of the flat path decides.
+        // Two panel layouts exist and the link must serve both. Flat: every device is its own
+        // sidebar entry at /<slug>. Nested: one visible entry and the rest hidden behind
+        // hass_ingress's parent: option at /<parent>/<slug> - the layout that keeps the sidebar to
+        // a single "Satellite1 Fleet" item. HA answers a hard 404 for unregistered routes and the
+        // panel page is same-origin, so one HEAD probe of the flat path decides: 404 means nested,
+        // and the parent is wherever the top window stands (on a child page the first segment is
+        // still the parent). The href stays the flat form for middle-click.
         const goPanel = async (e: React.MouseEvent) => {
           if (e.button !== 0 || e.metaKey || e.ctrlKey) return;
           e.preventDefault();
@@ -680,6 +796,10 @@ function DeviceSheet({
           } catch {
             /* an unanswerable probe changes nothing: the flat link is the best guess standing */
           }
+          // The proxied twin of the seamless sign-in: the peer cannot be signed in from here, so its
+          // password is left in shared HA-origin localStorage under its slug for the peer's own app
+          // to claim on boot (see putPanelHandoff, and the boot in src/App.tsx). No handoff, no
+          // harm: the peer's own sign-in screen takes over.
           const pw = d?.[7];
           if (pw) putPanelHandoff(peerSlug, pw);
           try {
@@ -697,6 +817,9 @@ function DeviceSheet({
   const ownMeta = [area, device?.ip].filter(Boolean).join(' · ');
   const ownRadar = radarModel(myRadar);
   const ownNet = netName(myNet);
+  // An empty roster has two honest readings: nothing else in the house, or a roster the device is
+  // not allowed to fetch. While actions are blocked the empty line says so, instead of promising
+  // rows that cannot arrive.
   return <div className="device-sheet"><span className="eyebrow">DEVICE SWITCHER</span><h2>{label || 'This device'}</h2><p className="muted">{ownMeta}{ownRadar && <>{ownMeta ? ' · ' : ''}<span className={myLit ? 'green' : 'dim'} title={myLit ? TEXT.presence_on : TEXT.presence_off}>●</span> {ownRadar}</>}{ownNet && ` · ${ownNet}`}</p><div className="peer-list">{ordered.map(peerRow)}</div>{peers.length === 0 && <div className="empty">{haBlocked(ha) ? TEXT.no_devices_blocked : TEXT.no_devices}</div>}<button type="button" onClick={onSignOut} style={{
       marginTop: 10,
       alignSelf: 'flex-start',
@@ -724,15 +847,17 @@ const FILTERS: [string, string][] = [['all', TEXT.notif_all], ['info', TEXT.noti
 const KIND_LABEL: Record<string, string> = { err: 'ERROR', warn: 'WARN', info: 'INFO', ok: 'INFO' };
 
 /**
- * The bell's sheet: lib/notif.js's past 24 hours. Pending entries are left out - their toast is
+ * The bell's sheet: src/lib/notif.js's past 24 hours. Pending entries are left out - their toast is
  * still on screen and may yet be tapped. A tap archives the row and acts as the toast would have.
+ * Archived rows stay listed under their own filter, dimmed but tappable: archive means handled,
+ * not deleted.
  */
 function Notice({ onAct }: { onAct: (t: Toast) => void }) {
   const [filter, setFilter] = useState('all');
   const [, bump] = useState(0);
   useEffect(() => subscribeNotifs(() => bump(n => n + 1)), []);
   const rows = (listNotifs() as (Toast & { ts: number; state: string })[]).filter(e => e.state !== 'pending' && (filter === 'arch' ? e.state === 'archived' : e.state !== 'archived' && (filter === 'all' || filter === (e.kind === 'ok' ? 'info' : e.kind))));
-  return <div className="notice-sheet"><div className="sheet-top"><span className="eyebrow">{TEXT.notif_title.toUpperCase()}</span><button onClick={() => archiveAllNotifs()}>{TEXT.notif_clear}</button></div><div className="filters">{FILTERS.map(([id, text]) => <button className={filter === id ? 'active' : ''} key={id} onClick={() => setFilter(id)}>{text}</button>)}</div>{rows.length ? rows.map(e => <article key={e.id} className={`notice ${e.kind === 'ok' ? 'info' : e.kind}${e.state === 'archived' ? ' archived' : ''}`} role="button" tabIndex={0} onClick={() => {
+  return <div className="notice-sheet"><div className="sheet-top"><span className="eyebrow">{TEXT.notif_title.toUpperCase()}</span>{notifCount() > 0 && <button onClick={() => archiveAllNotifs()}>{TEXT.notif_clear}</button>}</div><div className="filters">{FILTERS.map(([id, text]) => <button className={filter === id ? 'active' : ''} key={id} onClick={() => setFilter(id)}>{text}</button>)}</div>{rows.length ? rows.map(e => <article key={e.id} className={`notice ${e.kind === 'ok' ? 'info' : e.kind}${e.state === 'archived' ? ' archived' : ''}`} role="button" tabIndex={0} onClick={() => {
       if (e.state !== 'archived') archiveNotif(e.id);
       onAct(e);
     }} onKeyDown={k => {

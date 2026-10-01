@@ -12,6 +12,7 @@ import {
   feetOn,
   gateArray,
   gateLabel,
+  grabCorner,
   inPolygon,
   nearest,
   presenceLabel,
@@ -117,6 +118,14 @@ test("deleting lands nothing where the shape came from", () => {
   assert.deepEqual(shapeBody(config, 1, 1, []).zones, [SQUARE, [], SQUARE]);
   assert.deepEqual(shapeBody(config, "x", "x", []).exclusion, []);
   assert.deepEqual(shapeBody({}, 0, 0, []), { zones: [[], [], []], exclusion: [] });
+});
+
+test("a press grabs the nearest corner in reach, not the first", () => {
+  const cramped = [{ x: 0, y: 100 }, { x: 30, y: 100 }, { x: 30, y: 130 }];
+  assert.equal(grabCorner(cramped, { x: 25, y: 102 }, 40), 1);
+  assert.equal(grabCorner(cramped, { x: 28, y: 125 }, 40), 2);
+  assert.equal(grabCorner(cramped, { x: 200, y: 300 }, 40), -1);
+  assert.equal(grabCorner([], { x: 0, y: 0 }, 40), -1);
 });
 
 test("point-in-polygon and whole-shape drags", () => {

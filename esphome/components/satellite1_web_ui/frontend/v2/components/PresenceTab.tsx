@@ -3,26 +3,54 @@ import type { Dispatch, PointerEvent as RPointerEvent, ReactNode, SetStateAction
 import { HINTS, PRESENCE, TEXT } from '../../src/copy.js';
 import { BASE, entity, pathFor, post, RADAR_LIVE_MS, useRadar } from '../../src/lib/device.js';
 import { RadarIcon } from '../icons';
-import { clampShift, direction, distLabel, feetOn, gateArray, gateLabel, inPolygon, labelPoint, nearest, presenceLabel, rangeLabel, realTargets, shapeBody, stepTrails } from '../lib/presence.js';
+import { clampShift, direction, distLabel, feetOn, gateArray, gateLabel, grabCorner, inPolygon, labelPoint, nearest, presenceLabel, rangeLabel, realTargets, shapeBody, stepTrails } from '../lib/presence.js';
 import { HintBtn } from './bits';
 import { MSlider } from './MSlider';
 import type { Ctx } from '../ctx';
 
 /**
- * Presence, on satellite1_radar's own JSON API rather than entities: the radar's settings live in
- * the module's config behind /api/v1/<module>/config, as v1's route reads them. useRadar owns the
- * probe, the chained live poll (only while this tab is mounted), the optimistic writes, the
- * LD2410's /apply and the debounced flash save.
+ * Presence, on satellite1_radar's own JSON API rather than entities. That is not a shortcut: the
+ * radar's settings are not ESPHome entities at all, they live in the module's own config and are
+ * read and written over /api/v1/<module>/config, the API the standalone /radar_tuner pages used
+ * until the owner approved their retirement in September 2026. useRadar (src/lib/device.js) owns
+ * the probe, the chained live poll (only while this tab is mounted), the optimistic writes, the
+ * LD2410's /apply and the debounced flash save. Because the handler arms the LD2410's engineering
+ * mode from the live poll itself, mounting this tab is the whole protocol for gate energies.
+ *
+ * There is no save button, at the owner's call: every change is live at once and reaches flash ten
+ * seconds after the last edit, and a save button beside controls that visibly already worked read
+ * as either redundant or ominous.
  */
 
+/**
+ * Half-width of the plotted area, in cm. The LD2450's field of view is about ±60°, so at its 600cm
+ * ceiling the lateral extent it can report is wider than the range itself. 400 keeps a person at
+ * the edge of a normal room on screen without shrinking the middle, where everyone actually is.
+ */
 const PLOT_HALF_W = 400;
 const PLOT_DEPTH = 640;
+/**
+ * The wedge's corners: the LD2450 fans ±60° from straight ahead, so its edges pass through
+ * (±depth·sin60°, depth·cos60°). Wider than the viewBox on purpose - the SVG clips the wings, and
+ * narrowing the angle to fit would draw a field the module does not have. The wedge is also why a
+ * corner of the plot never shows anyone.
+ */
 const FOV_X = Math.sin(60 * Math.PI / 180) * PLOT_DEPTH;
 const FOV_Y = Math.cos(60 * Math.PI / 180) * PLOT_DEPTH;
-/** The handler stores at most this many corners per polygon and refuses the whole POST past it. */
+/**
+ * The handler stores at most this many corners per polygon (MAX_ZONE_POINTS in ld2450_handler.h)
+ * and refuses the whole POST past it, so the editor stops appending at the same number.
+ */
 const MAX_POINTS = 8;
 const TRAIL_LEN = 6;
+/**
+ * Targets are drawn at the origin and placed by a CSS transform, because transforms transition and
+ * geometry attributes do not everywhere: the dot glides between live polls instead of teleporting,
+ * so a walking person reads as walking. Trail echoes are keyed by age, so when the history shifts
+ * each echo glides to the next position and the tail follows the person like a comet's.
+ */
 const GLIDE = `transform ${RADAR_LIVE_MS}ms linear`;
+/** Distance rings every 2m, which is how people describe a room. */
 const RINGS = [{
   id: 'r200',
   r: 200
@@ -81,6 +109,10 @@ function Switch({
  * Slider writes, sent only when the value changed. MSlider commits on every pointer-up and key-up,
  * Tab landing on it included, and each commit here is a config POST (and an /apply on the LD2410).
  * A previewed field has already been patched locally, so it is compared with its pre-drag value.
+ *
+ * Neither Settings card disables its controls while a write is in flight. Writes are optimistic and
+ * the queue serialises them, so there is nothing to protect, and greying every control out for each
+ * round trip made the whole card flash on every slider release.
  */
 function useSettings(config: any, write: (patch: any) => unknown, preview: (patch: any) => void) {
   const before = useRef<Record<string, unknown>>({});
@@ -100,6 +132,27 @@ function useSettings(config: any, write: (patch: any) => unknown, preview: (patc
     }
   };
 }
+
+/**
+ * The LD2450 plot, in radar coordinates rather than pixels: the viewBox is centimetres, so every
+ * zone polygon and target is drawn with the numbers the device sent, and no canvas or library is
+ * needed. The sensor sits at the top centre with the field fanning downward - the /radar_tuner
+ * pages' orientation, kept at the owner's request - which is SVG's native direction: radar y grows
+ * away from the device and screen y grows down, so no flip transform is needed.
+ *
+ * Editing rides the same coordinates in reverse: a pointer position maps back to centimetres
+ * through the plot's bounding box with two divisions and no calibration, so a dragged corner is
+ * stored as the number the device will be told. One pointer handler covers every gesture - down
+ * near a corner grabs it, down inside the shape grabs the whole shape, down anywhere else appends a
+ * corner and grabs that - because on a phone these are all the same finger and should not fight
+ * over it. A press on a corner that never travels is a tap, and a tap selects the corner, which is
+ * what arms Remove corner.
+ *
+ * Every edit is a functional update: a release can record history and then select in the same
+ * handler, and a spread of the stale `edit` closure in the second call would silently revert the
+ * first. That shipped once as "cannot draw shapes at all", every tap adding a corner and un-adding
+ * it in the same frame.
+ */
 function Plot({
   zones,
   exclusion,
@@ -146,6 +199,8 @@ function Plot({
   };
   const down = (e: RPointerEvent) => {
     const p = toPoint(e);
+    // Not editing: a tap on a committed shape opens its editor. Zones are tested first, so a zone
+    // drawn inside the exclusion area still opens as itself.
     if (!edit) {
       for (let i = 0; i < 3; i++) {
         if ((zones[i] || []).length > 2 && inPolygon(p, zones[i])) {
@@ -157,6 +212,8 @@ function Plot({
       return;
     }
     e.preventDefault();
+    // Snapshotted before anything mutates, and pushed on release only if the gesture changed
+    // something: one gesture is one undo step, whether it added, dragged or moved the whole shape.
     preRef.current = edit.points.map(q => ({
       ...q
     }));
@@ -165,7 +222,9 @@ function Plot({
     movedRef.current = false;
     addedRef.current = false;
     changedRef.current = false;
-    const near = edit.points.findIndex(q => Math.hypot(q.x - p.x, q.y - p.y) < 40);
+    // The grab radius is in plot centimetres and sized for a finger on a phone-width plot, not a
+    // cursor.
+    const near = grabCorner(edit.points, p, 40);
     if (near >= 0) {
       dragRef.current = near;
     } else if (edit.points.length > 2 && inPolygon(p, edit.points)) {
@@ -203,6 +262,9 @@ function Plot({
         }))
       });
     } else {
+      // A finger is never perfectly still, so a corner does not move until the pointer travels
+      // past 12cm: otherwise a tap would nudge the corner it meant to select, and the silent drift
+      // would be a mutation the undo history never saw.
       if (!movedRef.current && Math.hypot(p.x - startRef.current.x, p.y - startRef.current.y) <= 12) return;
       movedRef.current = true;
       changedRef.current = true;
@@ -232,6 +294,9 @@ function Plot({
       });
     }
   };
+  // The shape being edited is drawn from the draft, and the config's copies of both the slot it
+  // came from and the slot it will save into are skipped, so a stale shape never sits under the
+  // draft. `from` and `which` differ while the Exclusion toggle converts a shape between kinds.
   const hideZone = (i: number) => edit && (edit.from === i || edit.which === i);
   const hideExcl = edit && (edit.from === 'x' || edit.which === 'x');
   const zoneList = zones.map((z, i) => ({
@@ -250,6 +315,10 @@ function Plot({
       touchAction: 'none'
     } : undefined} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} role="img" aria-label="Radar plot of the room">
       <defs>
+        {/* userSpaceOnUse so the gradient is centimetres from the sensor, not a fraction of the
+            wedge's own box: the glow must sit at the device however the wedge is clipped. The glow
+            filter's box is grown because blur samples outside the circle's own bounds, and the
+            default region clips the halo into a square. */}
         <radialGradient id="pr-fovg" gradientUnits="userSpaceOnUse" cx="0" cy="0" r={PLOT_DEPTH}>
           <stop offset="0" stopColor="rgba(147,180,253,0.10)" />
           <stop offset="1" stopColor="rgba(147,180,253,0.01)" />
@@ -282,6 +351,8 @@ function Plot({
         <text className="pr-plot-name pr-excl-name" x={labelPoint(exclusion).x} y={labelPoint(exclusion).y}>Exclusion</text>
       </g>}
       {edit && edit.points.length > 0 && <g>
+        {/* A polyline until there are three corners, because a two-point polygon renders as
+            nothing and the second tap would look like it did not land. */}
         {edit.points.length > 2 ? <polygon points={polygonPoints(edit.points)} fill={edit.which === 'x' ? 'rgba(251,191,36,0.15)' : 'rgba(147,180,253,0.18)'} stroke={edit.which === 'x' ? 'rgba(251,191,36,0.7)' : 'rgba(147,180,253,0.8)'} strokeWidth="1.5" strokeDasharray={edit.which === 'x' ? '5 3' : undefined} /> : <polyline points={polygonPoints(edit.points)} fill="none" stroke="rgba(147,180,253,0.6)" strokeWidth="1.5" />}
         {edit.points.length > 2 && <text className={`pr-plot-name${edit.which === 'x' ? ' pr-excl-name' : ''}`} x={labelPoint(edit.points).x} y={labelPoint(edit.points).y}>
           {edit.which === 'x' ? 'Exclusion' : `Zone ${(edit.which as number) + 1}`}
@@ -292,6 +363,8 @@ function Plot({
           p
         }) => <circle key={id} cx={p.x} cy={p.y} r="16" fill={edit.sel === i ? 'rgba(147,180,253,0.5)' : 'rgba(147,180,253,0.15)'} stroke={edit.sel === i ? '#93b4fd' : 'rgba(147,180,253,0.6)'} strokeWidth="2" />)}
       </g>}
+      {/* The configured cut-off, drawn so a target beyond it visibly sits outside. Zero is no
+          cut-off - the module's full reach - so nothing is drawn for it. */}
       {range > 0 && <g>
         <g filter="url(#pr-fog)" mask="url(#pr-out-mask)" opacity="0.4">
           <path fill="url(#pr-fovg)" d={`M0 0 L${-FOV_X} ${FOV_Y} A${PLOT_DEPTH} ${PLOT_DEPTH} 0 0 0 ${FOV_X} ${FOV_Y} Z`} />
@@ -332,6 +405,12 @@ function Plot({
           <circle cx="-3" cy="-3" r="3.5" fill="rgba(255,255,255,0.7)" />
         </g>
       </g>)}
+      {/* Labelled on the rings, not along an edge: the device sits at the top centre, so a row of
+          ticks across the full width puts "0" at 400cm to the left, which made the scale actively
+          misleading. A ring of radius r crosses the centreline at y = r and the label sits just
+          below it, clamped so the outermost ring's label cannot fall off the bottom of the viewBox.
+          The geometry stays in centimetres whatever the unit switch says; only the labels
+          convert. */}
       {RINGS.map(r => <text key={r.id} className="pr-tick" x="14" y={Math.min(r.r + 26, PLOT_DEPTH - 10)}>
         {isFt ? `${Math.round(r.r / 30.48 * 10) / 10} ft` : `${r.r / 100}m`}
       </text>)}
@@ -339,7 +418,15 @@ function Plot({
   </div>;
 }
 
-/** The status row. The Distance pill opens the unit switch, and only when the firmware has one. */
+/**
+ * The status row. Presence and zone occupancy come from the firmware's own debounced entities over
+ * the event stream - the states Home Assistant automates on, so this row can never disagree with
+ * the lights. People, distance and direction come from the live target poll instead, because the
+ * entities carry no coordinates; raw readings are right for a row whose job is "what does it see
+ * this instant". Direction is where the nearest person stands as the plot draws them, so the pill
+ * and the moving dot always agree. The Distance pill opens the unit switch, and only when the
+ * firmware has one.
+ */
 function StatusPills({
   pills,
   isFt,
@@ -369,6 +456,13 @@ function StatusPills({
     </div>}
   </div>;
 }
+/**
+ * The live badge renders only while this tab is mounted, which is exactly when the live poll runs,
+ * so it is a true statement about the device rather than decoration. HINTS.presence sits here
+ * rather than on the home sensor chip that links to this tab: the chip has no room for an ⓘ that is
+ * not also a mis-tap risk, and this card is where someone who followed it lands. The answer is
+ * worth having in a product with microphones in it - people assume presence is heard, not sensed.
+ */
 function CardHead({
   title
 }: {
@@ -384,7 +478,11 @@ function CardHead({
   </div>;
 }
 
-/** `/api/v1/reboot` restarts the whole device, so this shows only when the module says it needs one. */
+/**
+ * `/api/v1/reboot` calls `App.safe_reboot()` and restarts the whole device, not just the radar, so
+ * this is not a permanent button labelled as a radar action: it shows only when the module's config
+ * reports `reboot_required`, and says what it will actually do.
+ */
 function RestartRow({
   busy,
   onRestart
@@ -413,11 +511,19 @@ function Heading({
   </>;
 }
 function Looking() {
+  // Braced, not bare JSX text: a \u escape in a text child is literal characters, not an escape.
   return <section className="control pr-tab">
     <Heading>The room, <em>mapped.</em></Heading>
     <div className="pr-card"><p className="pr-wait" role="status">{'Looking for a radar module\u2026'}</p></div>
   </section>;
 }
+/**
+ * No module fitted: a doorway, not a dead end - the owner's wording and the owner's product photo.
+ * The tab stays when no module is detected, the owner's decision, reversing an earlier plan to hide
+ * it. The image is served from the device's own flash at /ui/no-sensor.webp (self-contained
+ * firmware, no CDN), so the card renders whole on a network with no internet; only the two links
+ * need the outside world, which is honest, because so does buying a sensor.
+ */
 function NoRadar({
   onGoDevice
 }: {
@@ -461,6 +567,8 @@ function LD2450View({
   } = radar;
   const [edit, setEdit] = useState<Edit>(null);
   const settings = useSettings(config, write, radarPreview);
+  // The comet tails live in a ref, not state: they are derived from the poll that already
+  // re-rendered this view, so recording them must not schedule another render.
   const trailsRef = useRef<Record<number, Pt[]>>({});
   const targets: Target[] = realTargets(radarLive);
   trailsRef.current = stepTrails(trailsRef.current, targets, TRAIL_LEN);
@@ -471,7 +579,11 @@ function LD2450View({
   const hasExcl = exclusion.length > 2;
   const firstFree = [0, 1, 2].find(i => (zones[i] || []).length < 3);
   const isExcl = !!edit && edit.which === 'x';
+  // The slot an exclusion would become if the toggle were switched off; without one it stays on.
   const zoneSlot = edit && typeof edit.from === 'number' ? edit.from : firstFree;
+  // One or two corners cannot be saved: the handler would store the shape, but the firmware treats
+  // anything under three corners as not defined, and a silently dead zone is the worst possible
+  // outcome of a save button. Zero corners is a legitimate save; it is how a shape is deleted.
   const savable = edit && (edit.points.length === 0 || edit.points.length >= 3);
   const zoneBtns = defined.map(i => ({
     id: `zb${i}`,
@@ -495,11 +607,18 @@ function LD2450View({
     await write(shapeBody(config, edit.from, edit.which, edit.points));
     setEdit(null);
   };
+  // Delete writes the empty polygon and closes the editor in one step, at the owner's call, since
+  // clearing the draft and then saving the emptiness was two steps for one intention. It is offered
+  // only for shapes that exist on the device; a never-saved draft has nothing to delete, and Cancel
+  // already discards it.
   const del = async () => {
     if (!edit || edit.from == null) return;
     await write(shapeBody(config, edit.from, edit.from, []));
     setEdit(null);
   };
+  // Plot, instruction line and zone controls share one card, one surface for the whole task, and
+  // this is the only instruction line, above the buttons or the editor, per the owner: it walks the
+  // person through drawing while the editor stays pure controls.
   const instruction = edit ? edit.points.length === 0 ? TEXT.zi_first : edit.points.length < 3 ? TEXT.zi_more : edit.sel != null ? TEXT.zi_selected : TEXT.zi_adjust : defined.length || hasExcl ? TEXT.zones_set : TEXT.zones_none;
   const pills: Pill[] = [{
     l: 'Presence',
@@ -544,6 +663,9 @@ function LD2450View({
           })} />
         </div>
         <div className="pr-actions">
+          {/* Undo replays the plot's history, one step per gesture, so a moved corner goes back
+              where it was rather than vanishing. The selection drops because the restored snapshot
+              may not contain the selected index. */}
           <button type="button" className="pr-btn" disabled={edit.hist.length === 0} onClick={() => setEdit(e => !e || e.hist.length === 0 ? e : {
             ...e,
             points: e.hist[e.hist.length - 1],
@@ -576,6 +698,11 @@ function LD2450View({
 
     <div className="pr-card">
       <div className="pr-card-head"><span className="pr-card-title">Settings</span></div>
+      {/* The slider ranges are the handler's own validation bounds, so no value can draw a 400:
+          detection_range 0-600 and stability 0-10. Timeout is a uint16 but is offered up to 300s,
+          because a presence timeout beyond five minutes is not a setting anyone wants. The range
+          preview lets the plot's ring track the thumb; the device hears one write, on release, and
+          in feet mode the slider still steps and writes 10cm, only the readout converts. */}
       <div className="pr-row">
         <div className="pr-row-label"><span>Detection range</span><HintBtn text={HINTS.radar_range} /></div>
         <MSlider value={num(config.detection_range)} min={0} max={600} step={10} ariaLabel="Detection range" format={v => rangeLabel(v, isFt)} onPreview={v => settings.preview('detection_range', v)} onCommit={v => settings.commit('detection_range', v)} />
@@ -621,8 +748,20 @@ const GATE_KEYS: Record<string, number> = {
 
 /**
  * One gate group: each row's bar is the live energy at that distance and its notch the trigger
- * threshold. A drag or key run edits a local draft; release commits all nine values, the only
- * shape the endpoint takes. Rows past the furthest gate still show energy but take no input.
+ * threshold. They share a bar because the live energy is exactly the reference a person needs to
+ * place a threshold. A drag or key run edits a local draft; release commits all nine values, the
+ * only shape the endpoint takes, and useRadar follows the write with the /apply the module needs.
+ * There is no number beside the bar: the owner found the flickering energy readout distracting,
+ * and the bar itself is the reading.
+ *
+ * Rows past the furthest gate dim rather than disappear, because the module still measures there
+ * but ignores the result: the faint energy is the evidence for extending the range, and removing
+ * rows would make the furthest-gate slider look like it deletes data. Their notch goes entirely,
+ * since a threshold on an ignored gate is a dead control.
+ *
+ * Written from the handler's payload rather than from hardware: the `{"gates":{"move":[...],
+ * "still":[...]}}` shape is what `handle_ld2410_live_` emits, and the layout is unverified against
+ * a real LD2410.
  */
 function GateGroup({
   kind,
@@ -733,6 +872,9 @@ function LD2410View({
   const reading = states['sensor/Radar Detection Distance'] || states['sensor/Radar Moving Distance'];
   const cm = reading ? Number(reading.value) : NaN;
   const gates = radarLive && radarLive.gates || {};
+  // The LD2410 has no zones, so its Presence pill keeps the firmware's Moving/Still/Clear, the only
+  // detail the module offers; and it reports one distance rather than coordinates, so that is the
+  // whole story the row can tell.
   const pills: Pill[] = [{
     l: 'Presence',
     v: target && target.value ? PRESENCE[target.value] || target.value : '\u2014'
@@ -762,6 +904,8 @@ function LD2410View({
         <div className="pr-row-label"><span>Timeout</span><HintBtn text={HINTS.radar_timeout} /></div>
         <MSlider value={num(config.timeout)} min={0} max={300} step={5} ariaLabel="Timeout" format={v => `${v} s`} onCommit={v => settings.commit('timeout', v)} />
       </div>
+      {/* The furthest-gate previews dim the gate rows above in real time as they are dragged; the
+          device still hears one write, on release. */}
       <div className="pr-row">
         <div className="pr-row-label"><span>Furthest movement gate</span><HintBtn text={HINTS.gate_max_move} /></div>
         <MSlider value={num(config.max_move_gate)} min={0} max={8} step={1} ariaLabel="Furthest movement gate" format={v => `${v}`} onPreview={v => settings.preview('max_move_gate', v)} onCommit={v => settings.commit('max_move_gate', v)} />
@@ -770,6 +914,10 @@ function LD2410View({
         <div className="pr-row-label"><span>Furthest stillness gate</span><HintBtn text={HINTS.gate_max_still} /></div>
         <MSlider value={num(config.max_still_gate)} min={0} max={8} step={1} ariaLabel="Furthest stillness gate" format={v => `${v}`} onPreview={v => settings.preview('max_still_gate', v)} onCommit={v => settings.commit('max_still_gate', v)} />
       </div>
+      {/* A two-stop slider rather than a dropdown, at the owner's call: it sits among sliders, and
+          a slider whose ends are the two choices reads as "less reach, finer" against "more reach,
+          coarser" where a dropdown read as a form field. The handler takes the two strings
+          verbatim; the feet labels are display only. */}
       <div className="pr-row">
         <div className="pr-row-label"><span>Distance resolution</span><HintBtn text={HINTS.radar_resolution} /></div>
         <MSlider value={fine ? 0 : 1} min={0} max={1} step={1} ariaLabel="Distance resolution" format={v => v === 0 ? isFt ? '0.7 ft' : '0.2 m' : isFt ? '2.5 ft' : '0.75 m'} onPreview={v => settings.preview('distance_resolution', v === 0 ? '0.2m' : '0.75m')} onCommit={v => settings.commit('distance_resolution', v === 0 ? '0.2m' : '0.75m')} />
@@ -792,6 +940,9 @@ export function PresenceTab({
   onGoDevice?: () => void;
 }) {
   const radar = useRadar(true);
+  // The distance unit is an internal ESPHome switch, so a wall tablet and a phone agree and a
+  // reboot keeps the choice. One read for the whole tab: the plot's ring labels, the gate rows,
+  // both settings cards and the Distance pill follow it.
   const unit = entity(ctx, 'distance_unit_ft');
   const isFt = feetOn(unit);
   const setFt = unit ? (v: boolean) => {

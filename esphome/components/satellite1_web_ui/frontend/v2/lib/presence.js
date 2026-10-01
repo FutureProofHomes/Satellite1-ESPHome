@@ -46,8 +46,11 @@ export function direction(t) {
 
 /**
  * The LD2450 Presence pill: the occupied zones by number, else Yes/No from the debounced target
- * state. A zone only counts while the config defines it, because a deleted zone's sensor lives on
- * until reboot reporting "Undefined".
+ * state. One pill for presence and zone, at the owner's call: "Zone 2" beats "Yes" because where
+ * someone is says more than that they are, and Yes/No beats Approaching/Still because that was the
+ * radar's vocabulary, not the room's. A zone only counts while the config defines it, because a
+ * deleted zone's sensor lives on until reboot reporting "Undefined". The `Radar Zone N` and
+ * `Radar Target` names are runtime names owned by C++ literals in the radar component.
  */
 export function presenceLabel(config, states) {
   const zones = (config && config.zones) || [];
@@ -60,7 +63,11 @@ export function presenceLabel(config, states) {
   return target && target.value && target.value !== "Clear" ? "Yes" : "No";
 }
 
-/** An LD2410 gate's band of distance, "0.75–1.5m": what the row watches rather than its index. */
+/**
+ * An LD2410 gate's band of distance, "0.75–1.5m": what the row watches rather than its index. It
+ * follows the configured resolution, so flipping 0.75m/0.2m relabels every row to match what the
+ * module is now measuring.
+ */
 export function gateLabel(i, fine, isFt) {
   const step = fine ? 0.2 : 0.75;
   const fmt = (m) => String(parseFloat(isFt ? ((m * 100) / CM_PER_FT).toFixed(1) : m.toFixed(2)));
@@ -98,6 +105,21 @@ export function inPolygon(p, poly) {
     if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
   }
   return inside;
+}
+
+/** The corner a press grabs: the nearest one within `radius`, or -1. The nearest and not the first,
+ *  because a cramped shape puts several corners in reach of one finger. */
+export function grabCorner(points, p, radius) {
+  let idx = -1;
+  let best = radius;
+  points.forEach((q, i) => {
+    const d = Math.hypot(q.x - p.x, q.y - p.y);
+    if (d < best) {
+      best = d;
+      idx = i;
+    }
+  });
+  return idx;
 }
 
 /** Where a shape's name goes: the mean of its corners, close enough for room-shaped polygons. */

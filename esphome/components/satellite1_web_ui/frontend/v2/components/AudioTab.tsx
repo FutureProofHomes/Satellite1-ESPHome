@@ -9,7 +9,15 @@ import type { Ctx } from '../ctx';
 /**
  * Where this device's sound goes. The trees edit the selection the device owns at /api/sat1/sel;
  * the rows under them are plain entities. Each card degrades on its own - a missing Home Assistant
- * empties the trees and says why, while the entity rows keep working, because they are device state.
+ * empties the trees and says why, while the entity rows keep working, because they are device state
+ * that applies the moment Home Assistant comes back.
+ *
+ * The two switches Home Assistant shows for this, "Route TTS To All Area Players" and "Duck All Area
+ * Players", are projections of the selection rather than separate settings: ticking this device's
+ * own area in a tree turns the matching switch on, and unticking any single player in it turns the
+ * switch off (docs/web-ui.md, "The routing and ducking selection"). The speaker amplifier's own
+ * settings live on Diagnostics rather than here (owner call, September 2026), with the USB-C power
+ * reading that decides the amp's gain mode.
  */
 
 /** [entity id, name, caps, available] - the /api/sat1/ha row. */
@@ -25,16 +33,11 @@ type Selection = { local: boolean; area: string; routing: Sel; duck: Sel };
 type Problem = { text: string; fix?: boolean; soft?: boolean } | null;
 type CheckState = 'on' | 'off' | 'mixed';
 
-/** v1's hints for these two name the page each used to sit on; here they share a card. */
-const HINT = {
-  voice_override: 'How loud this device speaks when the assistant replies, separate from media volume. Zero follows the media volume instead. Speakers you route answers to have their own level - Remote Speaker Volume, below.',
-  remote_tts_volume: "How loud answers are on the remote speakers. This device's own level is the one on the Local Speaker row. Sonos reads the level from the announcement itself; anything else has its volume set for the answer and put back afterwards."
-};
-
 const has = (ctx: Ctx, key: string) => !!ctx.device?.e?.[key];
 const switchOn = (e: any) => !!e && (e.value === true || e.state === 'ON' || e.state === 'on');
 const numberOf = (e: any) => e ? Number(e.value ?? e.state) : 0;
-/** A failed write is already toasted by device.js; the catch only keeps a dropped socket quiet. */
+/** A failed write is already toasted by src/lib/device.js; the catch only keeps a dropped socket
+ *  quiet. */
 const send = (ctx: Ctx, key: string, action: string, query?: Record<string, string | number>) => {
   const p = pathFor(ctx, key, action, query);
   if (p) post(p).catch(() => {});
@@ -42,8 +45,10 @@ const send = (ctx: Ctx, key: string, action: string, query?: Record<string, stri
 
 /**
  * A just-written number, shown over the stale reads that follow it until the device's echo reaches
- * it or five seconds pass (a refused write, where the stale value is the truth) - v1's useHeld, as
- * state rather than a ref, because MSlider renders its `value` prop the moment it drops its draft.
+ * it (within `tol`) or five seconds pass (a refused write, where the stale value is the truth).
+ * Without it the control snaps back to the old value on release and jumps forward when the echo
+ * lands. State rather than a ref, because MSlider renders its `value` prop the moment it drops its
+ * draft.
  */
 function useHeld(value: number, tol: number): [number, (v: number) => void] {
   const [held, setHeld] = useState<{ v: number; at: number } | null>(null);
@@ -124,6 +129,13 @@ function AuSelect({
         </div>}
     </div>;
 }
+/**
+ * The tri-state box, a button rather than an input: an indeterminate checkbox needs a ref to set
+ * the property, and there is no attribute for it. Its marks are drawn - an SVG tick, a CSS dash -
+ * rather than typed, because the device serves no webfont and U+25EA, the half-filled square a typed
+ * third state would use, is missing from most system fonts and arrives as an empty rectangle. A
+ * tri-state control whose third state renders as a blank box is worse than none.
+ */
 function AuCheck({
   state,
   disabled,
@@ -160,6 +172,9 @@ function AuCheck({
       </span>
     </button>;
 }
+/** A row of players under a heading with its own bulk box, for a real area and for "No Area
+ *  Assigned": the two behave differently enough to be worth one shared shell and two callers rather
+ *  than one component with a mode flag. */
 function Group({
   label,
   count,
@@ -207,9 +222,18 @@ function Group({
 }
 
 /**
- * The area -> player tree over one of the selection's two halves. `need` is the capability the
- * tree's call asks of a player (lib/audio.js); rows without it, and this device's own player, stay
- * listed but greyed with the reason, because a hole reads as a bug.
+ * The area -> player tree over one of the selection's two halves. One component for both cards
+ * because the two lists must never disagree about what is in an area: both draw from the same
+ * `areas` payload, which Home Assistant built from the same walk ducking itself uses. `need` is the
+ * capability the tree's call asks of a player (src/lib/audio.js); rows without it, and this device's
+ * own player, stay listed but greyed with the reason, because a hole reads as a bug.
+ *
+ * Local Speaker, when offered, comes first and in the same list as every other place the answer
+ * could go: one choice about which speakers speak, not a routing list plus a separate switch that
+ * silences this one. "No Area Assigned" is not an edge case - on the test installation 40 of the
+ * 104 media players are in no area at all, against 37 that are in one (Cast and AirPlay shadow
+ * entities, group helpers like all_sonos, laptops) - and it is why there is no free-text entity id
+ * field, which would ask someone to know an id the page can simply show them.
  */
 function TargetTree({
   payload,
@@ -267,8 +291,12 @@ function TargetTree({
     </div>;
 }
 
-/** Only the problems: quiet text under the tree title, with "Show fix" on the one a person can fix
- *  from here. */
+/**
+ * Only the problems: quiet text under the tree title, with "Show fix" on the one a person can fix
+ * from here. No age line or Refresh button - the sync runs once per page load, so there is nothing
+ * to operate, and a timestamp on a list of speakers answers a question nobody was asking. Renders
+ * nothing rather than an empty box, which would leave its margins behind above every tree.
+ */
 function HaState({
   problem,
   payload,
@@ -313,7 +341,7 @@ function LocalLevel({
     alignItems: 'center',
     gap: 6
   }}>
-      <HintBtn text={HINT.voice_override} />
+      <HintBtn text={HINTS.voice_override} />
       <button type="button" className="au-sel-btn" aria-label="Decrease local speaker volume" style={{
       width: 36,
       minHeight: 36,
@@ -360,8 +388,20 @@ function NumberSlider({
 }
 
 /**
- * Anything chosen means a response goes somewhere besides this speaker - the device's own test - so
- * the rows that only apply to remote players stand disabled while nothing is.
+ * Anything chosen means a response goes somewhere besides this speaker - the device's own test,
+ * ${tts_routing_active} in tts_routing.yaml - so the rows that only apply to remote players stand
+ * disabled while nothing is. There is no master switch, so nothing can be on with an empty list.
+ *
+ * One volume slider has three mechanisms behind it: Sonos reads the level off the announcement,
+ * another Satellite1 has its Voice Override set and put back, and everything else has its media
+ * volume set and restored. Deliberately not a per-target table: which one applies depends on Sonos
+ * membership and on the target's own override value, neither of which is in the payload, so a table
+ * would be a confident guess per row. Zero is hands-off - tts_routing.yaml treats it as "leave every
+ * target's volume alone" - and reads as such. The mic guard comes last because it is about what
+ * happens after playback rather than what plays.
+ *
+ * The entities keep their legacy TTS names whatever the labels say, because renaming an ESPHome
+ * entity orphans it; docs/TTS-Routing.md carries the compatibility note.
  */
 function RemoteRouting({
   ctx,
@@ -388,7 +428,7 @@ function RemoteRouting({
       local: v
     })} localLevel={has(ctx, 'voice_override') && <LocalLevel ctx={ctx} />} need={NEED_MEDIA} />
       {has(ctx, 'remote_tts_volume') && <div className="au-row">
-          <div className="au-row-label"><span>Remote Speaker Volume</span><HintBtn text={HINT.remote_tts_volume} /></div>
+          <div className="au-row-label"><span>Remote Speaker Volume</span><HintBtn text={HINTS.remote_tts_volume} /></div>
           <NumberSlider ctx={ctx} k="remote_tts_volume" label="Remote speaker volume" disabled={!active} format={v => v === 0 ? 'Use Remote Volume' : `${Math.round(v)}%`} />
         </div>}
       {has(ctx, 'remote_wake_chime') && <div className="au-row">
@@ -409,8 +449,14 @@ function RemoteRouting({
 }
 
 /**
- * Every area in the house is offered, not only this device's own, and there is no Local Speaker
- * row: this device's level while it talks is Voice Override's, and its own player is greyed anyway.
+ * Every area in the house is offered, not only this device's own - ducking a room this device is
+ * not in is a deliberate capability, not a side effect - and there is no Local Speaker row: this
+ * device's level while it talks is Voice Override's, and its own player is greyed anyway.
+ *
+ * The duck starts at the wake word and holds until the answer ends, so players are quiet while the
+ * device listens too. Zero on Duck volume is literal, unlike Remote Speaker Volume and Voice
+ * Override: area_ducking.yaml sets ducked players to 0%, silencing them for the length of the
+ * interaction, so the readout says "mute" rather than implying hands-off.
  */
 function AreaDucking({
   ctx,
@@ -443,14 +489,18 @@ export function AudioTab({
 }: {
   ctx: Ctx;
 }) {
-  // Once per page load, shared with every other tab that reads the speaker list.
+  // Once per page load, shared with every other tab that reads the speaker list. GET /api/sat1/ha is
+  // the device's cached copy; this is what asks Home Assistant for a fresh one.
   useEffect(() => {
     haSyncOnce(ctx.haRefresh);
+    // haSyncOnce guards itself, so the effect runs once by design.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const problem: Problem = haProblem(ctx.ha, ctx.device?.ha);
   const payload: Payload = treePayload(ctx.ha, problem);
   const sel: Selection | null = ctx.sel;
+  // The selection gates both cards. A missing one is reported apart from a missing device: the shell
+  // is up, so it is the selection specifically.
   return <section className="control au-tab au-route">
       <span className="eyebrow">AUDIO · ROUTING</span>
       <h1><span>Sound, </span><em>directed.</em></h1>

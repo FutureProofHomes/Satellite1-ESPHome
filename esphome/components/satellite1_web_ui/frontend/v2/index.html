@@ -5,8 +5,15 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <title>Satellite1</title>
-<!-- Relative hrefs, not root-absolute, so they resolve under a Home Assistant ingress prefix
-     (/api/ingress/<name>/) as well as at "/". The tab favicon reuses the 180px touch icon. -->
+<!-- The home-screen surface. The manifest covers Chrome's add-to-home-screen (over plain HTTP it
+     makes a shortcut, not an installed PWA - install wants a secure context - but the shortcut
+     carries the same icon and name); the apple-* tags are iOS's own vocabulary for the same thing.
+     iOS fetches the touch icon with no cookies at all, which is why the session gate exempts it.
+     status-bar black-translucent lets the app paint under the notch, which viewport-fit=cover above
+     already opted into.
+     Relative hrefs, not root-absolute, so they resolve under a Home Assistant ingress prefix
+     (/api/ingress/<name>/) as well as at "/" - the one place in this document that must work at
+     both mounts. The tab favicon reuses the 180px touch icon: one more link, zero more bytes. -->
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" href="apple-touch-icon.png">
@@ -15,17 +22,52 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Satellite1">
 <meta name="theme-color" content="#0d0d0f">
-<!-- Pre-paint, inline and tiny, for the same reasons as src/index.html: data-embed marks a page served
-     under a proxy prefix so app.css can drop the safe-area insets the embedding chrome already
-     clears; the remembered theme is applied before the stylesheet paints (dark is this design's
-     default); and iOS gets maximum-scale=1 so focusing a sub-16px field does not leave the page
-     zoomed - iOS still honours pinch zoom, and Android, which would not, is left alone. -->
+<!-- Pre-paint, in <head> rather than in main.tsx: the app script sits at the end of <body>, late
+     enough that a phone remembering a theme would first flash the other one. Inline and tiny because
+     a separate request is a second round trip on a seven-socket server.
+     data-embed marks a page served under a proxy prefix (Home Assistant ingress) - any pathname
+     longer than the bare "/". The embedding chrome already clears the notch there, and iOS
+     propagates the insets into the iframe anyway, so honouring env(safe-area-inset-*) again pays the
+     notch twice: a blank band the height of the status bar above the header (owner's companion-app
+     screenshots, September 2026). The same page served directly still runs full-bleed, where the
+     insets are load-bearing.
+     The remembered theme: dark is this design's default. localStorage throws rather than no-ops with
+     site data blocked, so it is guarded, and the cost of failure is the default theme.
+     iOS Safari auto-zooms onto any focused text control under 16px and leaves the page zoomed after -
+     the sign-in field made every first visit end up magnified. maximum-scale=1 turns that off, and
+     iOS has ignored it for real pinch gestures since iOS 10, so zoom still works. iOS only (the
+     platform test catches iPadOS masquerading as a Mac): Android Chrome would honour it by blocking
+     pinch zoom, an accessibility cost for a bug it never had. -->
 <script>if(location.pathname.length>1)document.documentElement.dataset.embed="1";
 try{var t=localStorage.getItem("sat1.theme");document.documentElement.dataset.theme=t==="light"?"light":"dark"}catch(e){document.documentElement.dataset.theme="dark"}
 if(/iPhone|iPod|iPad/.test(navigator.userAgent)||(navigator.maxTouchPoints>1&&/Mac/.test(navigator.platform)))document.querySelector("meta[name=viewport]").content+=",maximum-scale=1";</script>
 <style>/*%CSS%*/</style>
 </head>
 <body>
+<!-- The boot splash: painted with the document, before the app script at the end of <body> is even
+     parsed, and removed by App.tsx the moment boot resolves into a real screen - otherwise the page
+     is blank for as long as boot takes, up to 2.5s while the .local probe runs. A sibling of #root so
+     Preact's first render never reconciles against it. It is the sign-in screen's brand block, on
+     that screen's background, with a pulse where the card goes; the logo is Logo (bits.tsx) and the
+     headline LoginScreen.tsx's, copied because neither module has been parsed yet - change them
+     together. -->
+<main id="splash" class="auth auth-screen" aria-hidden="true">
+<div class="auth-brand">
+<svg class="login-logo" viewBox="0 0 79.375 79.375" fill="none" stroke="currentColor" stroke-linecap="square">
+<g transform="matrix(1.6754,0,0,1.6754,84.9754,-16.4554)" stroke-width="1.31">
+<path d="m -45.44,31.52 11,-10.96 11,10.96 v 16.25 l -5.82,.01"/>
+<path d="m -27.49,20.19 10.94,9.29 v 18.3 l 8.35,.03 V 29.29 l -10.94,-9.66 -1.92,1.73"/>
+<path stroke-width="1.36" d="m -32.25,47.75 c 0,-7.27 -5.89,-13.42 -13.16,-13.42 h 0 c -.05,0 -.1,0 -.15,.01"/>
+<path stroke-width="1.36" d="m -36.31,47.73 c .01,-.12 .01,-.12 .01,-.24 0,-5.03 -4.08,-9.11 -9.11,-9.11 l 0,0 c -.05,0 -.1,0 -.15,.01"/>
+<path stroke-width="1.36" d="m -40.36,47.8 c .01,-.12 .01,-.18 .01,-.31 0,-2.8 -2.27,-5.06 -5.06,-5.06 l 0,0 c -.05,0 -.1,0 -.15,.01"/>
+<path stroke-width="1.36" d="m -45.41,46.48 a 1.01,1.01 0 0 0 -.15,.01 v 1.38 h 1.09 a 1.01,1.01 0 0 0 .07,-.37 1.01,1.01 0 0 0 -1.01,-1.01 z"/>
+</g>
+</svg>
+<span class="auth-eyebrow">SATELLITE1</span>
+<h1 class="auth-headline"><span class="auth-line white">Your home.</span><span class="auth-line violet">Your voice.</span><span class="auth-line white">Your AI.</span></h1>
+</div>
+<div class="wiz-pulse lg"></div>
+</main>
 <div id="root"></div>
 <script>/*%JS%*/</script>
 </body>

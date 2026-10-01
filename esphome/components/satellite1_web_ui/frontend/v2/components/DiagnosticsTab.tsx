@@ -28,7 +28,10 @@ function Pending({
 
 /**
  * The live facts from GET /api/sat1/state (the shell polls it every two seconds), plus the
- * entities that ride /events. The thresholds behind the warning colours are v1's.
+ * entities that ride /events. The state facts deliberately have no entities: each would cost RAM,
+ * a polling component and a place in the /events stream every open tab receives. Only internal RAM
+ * gets the warning colours, because it is what runs out first; PSRAM is plentiful enough that
+ * colouring it would only train people to ignore the colour.
  */
 function DeviceCard({
   ctx,
@@ -42,6 +45,9 @@ function DeviceCard({
   const upd = entity(ctx, 'firmware');
   const available = upd?.state === 'UPDATE AVAILABLE';
   const installing = upd?.state === 'INSTALLING';
+  // ESP32 Temp and USB-C Power Supply are the entity-backed facts, so a build without the sensor
+  // omits the row rather than showing a dash for a reading that will never come. Temperature
+  // follows temp_unit_f so the app never shows mixed units; its tone stays on the published °C.
   const temp = entity(ctx, 'esp_temp');
   const tempC = Number(temp?.value);
   const isF = isOn(entity(ctx, 'temp_unit_f'));
@@ -94,6 +100,10 @@ function ButtonsCard({
 /**
  * The firmware update entity and the beta channel switch, both optional (satellite1.yaml adds
  * them). Install is a POST to the update entity; the device restarts itself when it finishes.
+ * ESPHome's update entity reports UNKNOWN, NO UPDATE, UPDATE AVAILABLE or INSTALLING, and
+ * INSTALLING keeps the update row standing: treated as nothing to offer, it would vanish the
+ * instant Install is pressed, which reads as a failed press at the one moment the device is too
+ * busy to answer for a while.
  */
 function FirmwareCard({
   ctx,
@@ -164,8 +174,10 @@ function HomeAssistantCard({
 }
 
 /**
- * GET /api/sat1/amp every two seconds while on screen, each read chained to the last. A build
- * without the amp answers 404, which ends the poll for good.
+ * GET /api/sat1/amp every two seconds while on screen, each read chained to the last. An audio_dac
+ * is not an entity, so these readings cannot ride /events, and a poll of their own keeps them off
+ * the state payload every tab receives. A build without the amp answers 404, which ends the poll
+ * for good; any other miss leaves the last reading standing for the next read to correct.
  */
 function useAmp() {
   const [amp, setAmp] = useState<any>(null);
@@ -193,8 +205,11 @@ function useAmp() {
 
 /**
  * The TAS2780's live state and its two user settings. The power gain mode follows the USB-C supply,
- * so it is a reading here, not a picker. The analog gain is the person's to set; its notch is the
- * factory default (index 8, 15 dBV).
+ * so it is a reading here, not a picker. Digital volume is read-only on purpose: it is the level the
+ * firmware computed from the volume sliders, shown so someone chasing "why is it quiet" can see
+ * what the amplifier is actually fed. The analog gain is a real number entity, the person's to set;
+ * its notch is the factory default (index 8, 15 dBV), and the drag snaps to it (owner call,
+ * September 2026).
  */
 function SpeakerAmpCard({
   ctx
@@ -207,7 +222,10 @@ function SpeakerAmpCard({
   const gain = entity(ctx, 'amp_gain');
   const gainV = Number(gain?.value ?? gain?.state);
   const mode = ampMode(amp);
-  if (!amp && !chan && !lineOut && !gain) {
+  // Existence from the key table, which arrives with the device; the values ride /events a beat
+  // later, and judging by them would say "not available" on every load.
+  const has = (key: string) => !!ctx.device?.e?.[key];
+  if (!amp && !has('speaker_channel') && !has('line_out') && !has('amp_gain')) {
     if (!ctx.device) return <Pending ctx={ctx} title="TAS2780 Amplifier Control" />;
     return <DxCard title="TAS2780 Amplifier Control" collapsible defaultOpen={true} hint={HINTS.speaker_amp}>
         <p className="dx-muted">The speaker amplifier is not available on this firmware build.</p>
@@ -230,8 +248,14 @@ function SpeakerAmpCard({
 
 /**
  * Only the buttons the firmware maps (web_ui.yaml's entity table) are drawn; erase_xmos_flash is
- * deliberately unmapped. The radar card uses satellite1_radar's generic buttons, which exist on
- * whichever module was detected, rather than the per-model ones.
+ * deliberately unmapped, for the reason recorded beside it in config/common/web_ui.yaml. The radar
+ * card uses satellite1_radar's generic buttons, which exist on whichever module was detected,
+ * rather than the per-model ones. It is gated on radar_module, which satellite1_radar sets only
+ * once detection succeeds - the moment it registers "Radar Restart" and "Radar Factory Reset" - so
+ * the gate and the endpoints agree by construction. Those buttons and "Radar Firmware" are runtime
+ * entities named by C++ literals, with no YAML id for the entity map, so they are addressed by
+ * name. The stock-component ld2410/ld2450 variant builds remove radar_detected_text (the
+ * radar_module key), and the card never renders there.
  */
 function RecoveryCards({
   ctx
@@ -245,6 +269,8 @@ function RecoveryCards({
   const factory = pathFor(ctx, 'factory_reset', 'press');
   const xmosReset = pathFor(ctx, 'xmos_reset', 'press');
   const xmosFlash = pathFor(ctx, 'xmos_flash', 'press');
+  // Satellite1::status_string(): "v1.2.3" while the chip is talking, else "XMOS not responding",
+  // "Flashing Mode" or "" - so the XMOS Firmware fact is a state as often as a version.
   const xmos = entity(ctx, 'xmos_firmware');
   const mod = entity(ctx, 'radar_module')?.value;
   const radar = mod === 'LD2410' || mod === 'LD2450' ? mod : null;
@@ -291,6 +317,11 @@ function RecoveryCards({
         </DxCard>}
     </div>;
 }
+/**
+ * The organisation's four front doors: organisation links, not device links, so they read the same
+ * while a peer is being controlled. Line glyphs stroked in currentColor rather than the brand
+ * assets, whose own colours would clash with both themes.
+ */
 const COMMUNITY: {
   label: string;
   url: string;
@@ -395,10 +426,13 @@ const INTENT_PAGE: Record<string, string> = {
 };
 
 /**
- * Brings a toast's card into view once its page is on screen. Cards above it are still filling in
- * (the crash card waits on its own fetch), so the scroll is re-pinned as the page grows, for a
- * moment, until the person scrolls themselves. The pulse marks the card; the log card flashes its
- * line instead.
+ * Brings a toast's card into view once its page is on screen. One scroll is not enough - an owner's
+ * screenshot (September 2026) caught a toast landing on the wrong card - because cards above the
+ * target keep filling in after mount (the crash card waits on its own fetch). So the scroll is
+ * re-pinned as the page grows, for a moment, and a card that does not exist yet is found when it
+ * appears. The person outranks the pin: one wheel tick or touch-drag stands it down for good. The
+ * pulse marks the card; the log card flashes its line instead, since two highlights on one card is
+ * a page shouting.
  */
 function useReveal(intent: any, page: string, root: React.RefObject<HTMLElement>) {
   useEffect(() => {
@@ -471,8 +505,9 @@ export function DiagnosticsTab({
   }, [subRoute, displayedRoute]);
 
   // A toast's action sets its intent and then the hash, so a new page takes it on arrival; a toast
-  // pointing at the page already open dispatches toast-intent instead. Taking it on every page
-  // change also drops one that went stale.
+  // pointing at the page already open dispatches toast-intent instead, because an identical hash
+  // fires no hashchange and nothing remounts. Taking it on every page change also drops one that
+  // went stale.
   const [intent, setIntent] = useState<any>(null);
   useEffect(() => {
     const i = takeIntent();

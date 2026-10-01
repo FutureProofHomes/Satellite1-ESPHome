@@ -156,7 +156,7 @@ button,a,select,input[type=range]{min-height:44px}.switch{min-height:24px}
 
 /* ===== Media bar ===== */
 .mroot{--tint:rgba(183,117,44,.22)}
-.mbar{position:fixed;left:0;right:0;bottom:0;z-index:6;cursor:pointer;background:linear-gradient(90deg,var(--tint),transparent 70%),var(--surface);border-top:1px solid var(--line);padding:8px 16px calc(8px + env(safe-area-inset-bottom))}
+.mbar{position:fixed;left:0;right:0;bottom:0;z-index:6;cursor:pointer;background:linear-gradient(90deg,var(--tint),transparent 70%),var(--surface);border-top:1px solid var(--line);padding:8px 16px calc(8px + var(--sab))}
 .mbar-row{display:flex;align-items:center;gap:10px}
 .mbar-art img{width:40px;height:40px;border-radius:8px;object-fit:cover;display:block}
 .mbar-meta{flex:1;min-width:0;background:transparent;text-align:left;padding:0}
@@ -169,7 +169,7 @@ button,a,select,input[type=range]{min-height:44px}.switch{min-height:24px}
 .mbar-vol{display:flex;align-items:center;gap:8px;color:var(--muted);margin-top:2px}
 .mbar-vol input,.mseek,.mvol-row input{flex:1;accent-color:var(--accent);padding:0;border:0;background:transparent;min-height:28px;width:100%}
 .mscrim{position:fixed;inset:0;background:#0009;z-index:30;display:flex;align-items:flex-end;justify-content:center}.mscrim.top{z-index:40}
-.msheet,.mpanel{width:100%;max-width:480px;max-height:94dvh;overflow-y:auto;background:linear-gradient(180deg,var(--tint),transparent 45%),var(--surface);border-radius:24px 24px 0 0;padding:14px 22px calc(24px + env(safe-area-inset-bottom));animation:mup .28s ease}
+.msheet,.mpanel{width:100%;max-width:480px;max-height:94dvh;overflow-y:auto;background:linear-gradient(180deg,var(--tint),transparent 45%),var(--surface);border-radius:24px 24px 0 0;padding:14px 22px calc(24px + var(--sab));animation:mup .28s ease}
 @keyframes mup{from{transform:translateY(24px);opacity:0}}
 .mart img{width:min(78vw,320px);aspect-ratio:1;object-fit:cover;display:block;margin:4px auto 22px;border-radius:16px;box-shadow:0 20px 50px #0007}
 .mmeta{text-align:center;margin-bottom:18px}.mmeta h2{font-size:26px;letter-spacing:-.03em;margin:0 0 4px}.mmeta p{margin:0;color:var(--muted);font-size:14px}.mmeta small{display:inline-flex;align-items:center;gap:6px;margin-top:10px;color:var(--muted);font-size:11px}
@@ -234,7 +234,7 @@ button,a,select,input[type=range]{min-height:44px}.switch{min-height:24px}
 .search-empty .mi{width:40px;height:40px;opacity:.3}
 .search-empty-t{font-size:16px;font-weight:600}
 .search-drawer .dim{color:var(--muted,#888893)}
-.search-foot{display:flex;align-items:center;gap:8px;padding:10px 16px calc(10px + env(safe-area-inset-bottom));font-size:12px;border-top:1px solid var(--div,rgba(255,255,255,.08));flex-shrink:0}
+.search-foot{display:flex;align-items:center;gap:8px;padding:10px 16px calc(10px + var(--sab));font-size:12px;border-top:1px solid var(--div,rgba(255,255,255,.08));flex-shrink:0}
 .search-foot .dot{width:7px;height:7px;border-radius:50%;background:var(--muted,#888893);flex-shrink:0}
 .search-foot .dot.ok{background:#22c55e}
 .mpanel-handle{display:block;width:40px;height:4px;min-height:4px;border-radius:2px;background:var(--div,rgba(255,255,255,.2));background-clip:content-box;padding:20px 0;margin:0 auto;border:none;cursor:grab;flex-shrink:0;touch-action:none;-webkit-tap-highlight-color:transparent}
@@ -323,7 +323,7 @@ html, body, #root {
   border-radius: 0 !important;
 }
 .mbar { bottom: 0 !important; z-index: 6 !important; }
-.tabs { bottom: calc(83px + env(safe-area-inset-bottom)) !important; z-index: 5 !important; justify-content: center !important; align-items: center !important; }
+.tabs { bottom: calc(83px + var(--sab)) !important; z-index: 5 !important; justify-content: center !important; align-items: center !important; }
 
 .app > .now {
   flex: 1 !important;
@@ -415,7 +415,7 @@ html, body, #root {
 .app > .control {
   flex: none !important;
   min-height: 0 !important;
-  height: calc(100dvh - var(--header-h, 65px) - var(--tabs-h, 52px) - var(--mbar-h, 83px) - env(safe-area-inset-bottom)) !important;
+  height: calc(100dvh - var(--header-h, 65px) - var(--tabs-h, 52px) - var(--mbar-h, 83px) - var(--sab)) !important;
   overflow-y: auto !important;
   -webkit-overflow-scrolling: touch !important;
   padding: 20px 16px 24px 16px !important;
@@ -430,7 +430,7 @@ html, body, #root {
   .app {
     padding-left: 0 !important;
     padding-right: 0 !important;
-    padding-top: calc(12px + env(safe-area-inset-top)) !important;
+    padding-top: calc(12px + var(--sat)) !important;
   }
   .app > header { padding: 0 24px !important; }
   .now.now-compact {
@@ -466,7 +466,7 @@ html, body, #root {
     gap: 16px !important;
     align-content: start !important;
     padding: 24px 24px 24px 24px !important;
-    height: calc(100dvh - var(--header-h, 65px) - var(--tabs-h, 52px) - var(--mbar-h, 83px) - env(safe-area-inset-bottom)) !important;
+    height: calc(100dvh - var(--header-h, 65px) - var(--tabs-h, 52px) - var(--mbar-h, 83px) - var(--sab)) !important;
   }
   .control > .eyebrow, .control > h1, .control > .lead, .control > .steps, .control > .radar { grid-column: 1 / -1; }
   .tabs { height: 60px !important; align-items: center !important; justify-content: center !important; }
@@ -510,7 +510,7 @@ html, body, #root {
     padding-top: 0 !important;
     padding-left: 32px !important;
     padding-right: 32px !important;
-    padding-bottom: calc(83px + env(safe-area-inset-bottom)) !important;
+    padding-bottom: calc(83px + var(--sab)) !important;
   }
   .now.now-compact {
     display: flex !important;
@@ -544,7 +544,7 @@ html, body, #root {
     gap: 20px !important;
     align-content: start !important;
     padding: 32px 32px 24px 32px !important;
-    height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - env(safe-area-inset-bottom)) !important;
+    height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - var(--sab)) !important;
   }
   .tabs { display: none !important; }
   .sheet, .sheet.right {
@@ -563,20 +563,20 @@ html, body, #root {
 
 /* ===== BAR CLEARANCE — high specificity ===== */
 main.app > section.now:not(.now-compact) {
-  padding-bottom: calc(var(--tabs-h, 52px) + var(--mbar-h, 83px) + env(safe-area-inset-bottom)) !important;
+  padding-bottom: calc(var(--tabs-h, 52px) + var(--mbar-h, 83px) + var(--sab)) !important;
 }
 
 @media (min-width: 1024px) {
   main.app > section.now:not(.now-compact) {
-    padding-bottom: calc(var(--mbar-h, 83px) + env(safe-area-inset-bottom)) !important;
+    padding-bottom: calc(var(--mbar-h, 83px) + var(--sab)) !important;
   }
 }
 
 /* ===== PRECISE HEIGHT CONSTRAINT — overrides all flex confusion ===== */
 section.now.now-compact {
   flex: none !important;
-  height: calc(100dvh - var(--header-h, 65px) - var(--tabs-h, 52px) - var(--mbar-h, 83px) - env(safe-area-inset-bottom)) !important;
-  max-height: calc(100dvh - var(--header-h, 65px) - var(--tabs-h, 52px) - var(--mbar-h, 83px) - env(safe-area-inset-bottom)) !important;
+  height: calc(100dvh - var(--header-h, 65px) - var(--tabs-h, 52px) - var(--mbar-h, 83px) - var(--sab)) !important;
+  max-height: calc(100dvh - var(--header-h, 65px) - var(--tabs-h, 52px) - var(--mbar-h, 83px) - var(--sab)) !important;
   min-height: 0 !important;
   overflow: hidden !important;
   display: flex !important;
@@ -593,8 +593,8 @@ section.now.now-compact {
 }
 @media (min-width: 1024px) {
   section.now.now-compact {
-    height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - env(safe-area-inset-bottom)) !important;
-    max-height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - env(safe-area-inset-bottom)) !important;
+    height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - var(--sab)) !important;
+    max-height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - var(--sab)) !important;
     display: flex !important;
     flex-direction: column !important;
     align-items: center !important;
@@ -753,9 +753,9 @@ section.now.now-compact .timer {
   display: flex !important;
   align-items: center !important;
   justify-content: space-between !important;
-  padding: calc(12px + env(safe-area-inset-top)) 16px 12px !important;
+  padding: calc(12px + var(--sat)) 16px 12px !important;
   height: auto !important;
-  min-height: calc(56px + env(safe-area-inset-top)) !important;
+  min-height: calc(56px + var(--sat)) !important;
   flex-shrink: 0 !important;
   background: var(--surface) !important;
   border-bottom: 1px solid var(--line) !important;
@@ -857,7 +857,7 @@ section.now.now-compact .timer {
 }
 @media (min-width: 640px) {
   .app > header {
-    padding: calc(12px + env(safe-area-inset-top)) 24px 12px !important;
+    padding: calc(12px + var(--sat)) 24px 12px !important;
   }
   .app > header .device-chip {
     font-size: 14px !important;
@@ -873,7 +873,7 @@ section.now.now-compact .timer {
 @media (min-width: 1024px) {
   .app > header {
     grid-column: 1 / -1 !important;
-    padding: calc(12px + env(safe-area-inset-top)) 32px 12px !important;
+    padding: calc(12px + var(--sat)) 32px 12px !important;
   }
   .app > header .device-chip {
     max-width: 380px !important;
@@ -893,20 +893,20 @@ section.now.now-compact .timer {
 /* 2. Header absorbs the safe-area and provides its own internal padding.
       This makes it flush to the viewport top on all devices. */
 .app > header {
-  padding: calc(8px + env(safe-area-inset-top)) 16px 8px !important;
-  min-height: calc(48px + env(safe-area-inset-top)) !important;
+  padding: calc(8px + var(--sat)) 16px 8px !important;
+  min-height: calc(48px + var(--sat)) !important;
   height: auto !important;
 }
 
 @media (min-width: 640px) {
   .app > header {
-    padding: calc(8px + env(safe-area-inset-top)) 24px 8px !important;
+    padding: calc(8px + var(--sat)) 24px 8px !important;
   }
 }
 
 @media (min-width: 1024px) {
   .app > header {
-    padding: calc(8px + env(safe-area-inset-top)) 32px 8px !important;
+    padding: calc(8px + var(--sat)) 32px 8px !important;
   }
 }
 
@@ -1226,7 +1226,7 @@ section.now.now-compact .timer {
   .au-tree-self { flex-wrap:wrap; gap:8px; }
 }
 @media (min-width: 1024px) {
-  .app > .control.au-route { grid-column:2 !important; grid-row:2 !important; display:flex !important; flex-direction:column !important; gap:0 !important; padding:32px 32px 24px !important; max-width:900px; height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - env(safe-area-inset-bottom)) !important; }
+  .app > .control.au-route { grid-column:2 !important; grid-row:2 !important; display:flex !important; flex-direction:column !important; gap:0 !important; padding:32px 32px 24px !important; max-width:900px; height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - var(--sab)) !important; }
   .au-route-cards { gap:24px; }
   .au-route-cards .au-card { padding:20px; }
   .au-tree-p { font-size:13px; }
@@ -1709,7 +1709,7 @@ body:not(.has-drawer) .app {
 @keyframes wwFade{from{opacity:0}}
 @keyframes sup{from{transform:translate(-50%,24px);opacity:0}}
 .sensor-scrim { position:fixed; inset:0; z-index:200; background:rgba(0,0,0,.55); animation:wwFade .25s ease; }
-.sensor-sheet { position:fixed; bottom:0; left:50%; right:auto; top:auto; transform:translateX(-50%); width:min(480px,100%); z-index:201; background:var(--surface); border-radius:20px 20px 0 0; padding:0 20px calc(32px + env(safe-area-inset-bottom)); animation:sup .3s ease; }
+.sensor-sheet { position:fixed; bottom:0; left:50%; right:auto; top:auto; transform:translateX(-50%); width:min(480px,100%); z-index:201; background:var(--surface); border-radius:20px 20px 0 0; padding:0 20px calc(32px + var(--sab)); animation:sup .3s ease; }
 .sensor-sheet .eyebrow { margin-top:4px; }
 .sensor-drawer-body strong { display:block; font-size:28px; margin-top:6px; }
 .sensor-drawer-body .spark { height:48px; margin:12px 0; }
@@ -1819,8 +1819,8 @@ input:not([type=range]):not([type=checkbox]):not([type=radio]),textarea,select{f
 .app > .tab-content-enter > .control { animation: tab-enter 250ms cubic-bezier(0.4, 0, 0.2, 1) both !important; }
 .app > .tab-content-enter > section.now.now-compact { flex: none !important; }
 .app > .tab-content-enter > .now { min-height: 0 !important; overflow: hidden !important; position: relative !important; }
-main.app > .tab-content-enter > section.now { padding-bottom: calc(45px + env(safe-area-inset-bottom)) !important; }
-.app > .tab-content-enter > .control { flex: none !important; min-height: 0 !important; overflow-y: auto !important; -webkit-overflow-scrolling: touch !important; position: relative !important; padding: 16px 16px 24px !important; height: calc(100dvh - var(--header-h, 65px) - var(--tabs-h, 52px) - var(--mbar-h, 83px) - env(safe-area-inset-bottom)) !important; box-sizing: border-box !important; }
+main.app > .tab-content-enter > section.now { padding-bottom: calc(45px + var(--sab)) !important; }
+.app > .tab-content-enter > .control { flex: none !important; min-height: 0 !important; overflow-y: auto !important; -webkit-overflow-scrolling: touch !important; position: relative !important; padding: 16px 16px 24px !important; height: calc(100dvh - var(--header-h, 65px) - var(--tabs-h, 52px) - var(--mbar-h, 83px) - var(--sab)) !important; box-sizing: border-box !important; }
 .app > .tab-content-enter > .control.pr-tab { display: flex !important; flex-direction: column !important; gap: 0 !important; }
 .app > .tab-content-enter > .control.dx-tab { display: block !important; }
 @media (min-width: 640px) {
@@ -1830,9 +1830,9 @@ main.app > .tab-content-enter > section.now { padding-bottom: calc(45px + env(sa
 @media (min-width: 1024px) {
   .app > .tab-content-enter > .now,
   .app > .tab-content-enter > .control { grid-column: 2 !important; grid-row: 2 !important; }
-  main.app > .tab-content-enter > section.now { padding-bottom: calc(10px + env(safe-area-inset-bottom)) !important; }
-  .app > .tab-content-enter > .control:not(.pr-tab):not(.dx-tab):not(.au-route) { grid-template-columns: repeat(3, 1fr) !important; gap: 20px !important; padding: 32px 32px 24px !important; height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - env(safe-area-inset-bottom)) !important; }
-  .app > .tab-content-enter > .control.au-route { max-width: 900px; padding: 32px 32px 24px !important; height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - env(safe-area-inset-bottom)) !important; }
+  main.app > .tab-content-enter > section.now { padding-bottom: calc(10px + var(--sab)) !important; }
+  .app > .tab-content-enter > .control:not(.pr-tab):not(.dx-tab):not(.au-route) { grid-template-columns: repeat(3, 1fr) !important; gap: 20px !important; padding: 32px 32px 24px !important; height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - var(--sab)) !important; }
+  .app > .tab-content-enter > .control.au-route { max-width: 900px; padding: 32px 32px 24px !important; height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - var(--sab)) !important; }
 }
 
 /* ===== MSlider — unified settings slider ===== */

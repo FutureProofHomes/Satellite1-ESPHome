@@ -3,7 +3,7 @@
 
 /* No bar on this device (no media player), so nothing to make room for. */
 .app:not(:has(> .mroot)) { --mbar-h: 0px; }
-.app:not(:has(> .mroot)) .tabs { bottom: env(safe-area-inset-bottom) !important; }
+.app:not(:has(> .mroot)) .tabs { bottom: var(--sab) !important; }
 
 .mart-ph { display: grid; place-items: center; background: var(--surface2); color: var(--muted); }
 .mbar-art .mart-ph { width: 40px; height: 40px; border-radius: 8px; }

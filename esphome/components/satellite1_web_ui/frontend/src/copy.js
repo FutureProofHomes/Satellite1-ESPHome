@@ -48,12 +48,12 @@ export const HINTS = {
   remote_routing:
     "Plays this device's audio on other speakers as well as this one: the assistant's spoken answers, sign-in prompts, ringing timers, and the wake chime if you turn that on below. Tick a room to include every player in it, or open the room and pick players. Local Speaker is this device's own speaker - untick it and answers play only where you have chosen.",
 
-  /* The last sentence used to be three sentences of its own paragraph under the slider. It is here
-     because it explains the control rather than the page, and a permanent paragraph for something you
-     need to read once is what a tooltip is for. Kept because one slider with three behaviours behind it
-     is the kind of thing that gets reported as a bug. */
+  /* The last sentence names the three behaviours behind the one slider - Sonos reading the level off
+     the announcement, another Satellite1 having its voice volume set, anything else its media volume -
+     because one slider that acts three ways gets reported as a bug unless something says so. It is
+     here rather than a paragraph under the slider because you need to read it once. */
   remote_tts_volume:
-    "How loud answers are on the remote speakers. This device's own level is Voice Volume Override, on the home page. Sonos reads the level from the announcement itself; anything else has its volume set for the answer and put back afterwards.",
+    "How loud answers are on the remote speakers. This device's own level is the one on the Local Speaker row. Sonos reads the level from the announcement itself; another Satellite1 has its voice volume set for the answer, and anything else its media volume, both put back afterwards.",
 
   remote_wake_chime:
     "Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to. On Sonos and similar speakers the chime can land up to a second late - their clip playback has a fixed startup cost the device cannot remove.",
@@ -167,11 +167,11 @@ export const HINTS = {
   // exists for Home Assistant; the two write the same cutoffs, last writer wins, and the per-word
   // override is re-asserted at boot.
 
-  // Names the speaker it moves, and names the other slider by its on-screen label and page, because
-  // the pair live on different routes again (this one in the home page's Assistant card, the other in
-  // Remote routing on Audio) and the hints are the only thing keeping them apart.
+  // Names the speaker it moves, and names the other slider by its on-screen label, because the pair
+  // share the Audio page's routing card (this one on the Local Speaker row, the other below it) and
+  // the hints are the only thing keeping them apart.
   voice_override:
-    "How loud this device speaks when the assistant replies, separate from media volume. Zero follows the media volume instead. Speakers you route answers to have their own level - Remote TTS volume, on the Audio page.",
+    "How loud this device speaks when the assistant replies, separate from media volume. Zero follows the media volume instead. Speakers you route answers to have their own level - Remote Speaker Volume, below.",
 
   /* Finished speaking detection, set per wake word. Three things need saying: what the options
      trade against each other, that each wake word has its own, and why Home Assistant's single
@@ -354,19 +354,19 @@ export const TEXT = {
   // The side nav's sign-out: this browser only, unlike Diagnostics' sign-out-everywhere.
   logout: "Sign out",
 
-  /* The onboarding wizard (setup.jsx): what a factory-fresh device shows the phone that joined its
-     setup WiFi. Written for someone unboxing their first smart-home device: short sentences, one
-     instruction each, no jargon the box didn't use, no browser ever named (owner rule, September 26
-     2026 - "your browser", whatever the phone's default is), and no emojis. The captive-portal
-     sheet gets exactly one page - the launcher - because the sheet closes itself the moment the
-     device leaves the setup network; everything real runs in the customer's own browser, which
-     survives that hop and gets redirected across it. */
+  /* The onboarding wizard (SetupWizard.tsx): what a factory-fresh device shows the phone that
+     joined its setup WiFi. Written for someone unboxing their first smart-home device: short
+     sentences, one instruction each, no jargon the box didn't use, no browser ever named (owner
+     rule, September 26 2026 - "your browser", whatever the phone's default is), and no emojis.
+     The captive-portal sheet gets exactly one page - the launcher - because the sheet closes
+     itself the moment the device leaves the setup network; everything real runs in the customer's
+     own browser, which survives that hop and gets redirected across it. */
   setup_title: "Set up your Satellite1",
-  // The launcher: the captive sheet's one page, one tap (setup.jsx documents the mechanism - the
-  // page primes its own way out on load, holds a "getting ready" beat while the sheet catches up,
-  // then offers the one button whose link the now-satisfied sheet hands to the real browser). The
-  // fallback line, with the address rendered live beside it, is the guarantee for whatever refuses
-  // to cooperate.
+  // The launcher: the captive sheet's one page, one tap (SetupWizard.tsx documents the mechanism -
+  // the page primes its own way out on load, holds a "getting ready" beat while the sheet catches
+  // up, then offers the one button whose link the now-satisfied sheet hands to the real browser).
+  // The fallback line, with the address rendered live beside it, is the guarantee for whatever
+  // refuses to cooperate.
   setup_launch_copy: "Your Satellite1 is ready to meet your home.",
   setup_launch_prep: "Getting your setup ready\u2026",
   setup_launch_btn: "Setup Satellite1",
@@ -535,7 +535,7 @@ export const TEXT = {
 
   // Update news, once per session, the version in the title because it is the fact worth reading.
   update_toast_t: "Update %s is available.",
-  update_toast_s: "Tap to install from Diagnostics.",
+  update_toast_s: "Tap to install from Settings \u203A Updates.",
 
   // The ✕ on every toast: dismiss without acting, against the card's tap which acts.
   dismiss: "Dismiss",
@@ -1005,8 +1005,8 @@ export const TEXT = {
   /* sel_failed is gone with the amber banners (owner decision, September 2026): a refused selection
      write now flows through the write-failed toast like every other write - one failure, one surface. */
 
-  /* The splash: the verdict overlay that holds the app's first paint while the boot calls land
-     (splash.jsx). One status line per waiting phase, then either a graceful fade or one of the
+  /* The splash: the Home Assistant verdict that covers the app's first paint while the boot calls
+     land (HaGate.tsx). One status line per waiting phase, then either a graceful fade or one of the
      failure cards below. */
   splash_connecting: "Connecting to your Satellite1\u2026",
   splash_asking: "Asking Home Assistant which speakers you have\u2026",

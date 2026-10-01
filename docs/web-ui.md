@@ -50,21 +50,25 @@ breaking changes in the current release, see [TTS-Routing.md](TTS-Routing.md).
 
 A Preact single-page app, built with esbuild into one self-contained HTML document — markup, styles and
 JavaScript in one file — which is gzipped at compile time and embedded in the firmware as a
-`progmem_array`. There is no filesystem, no SPIFFS image and no second artifact to keep in step.
+`progmem_array`. There is no filesystem, no SPIFFS image and no second artifact to keep in step. The
+screens are the MagicPath "Satellite1 Voice Orb UI" design (snapshot in `frontend/design-ref/`), written
+against React's API and run on `preact/compat`.
 
-Five routes, all on the hash, in this nav order:
+Five tabs, all on the hash, in this nav order:
 
 | Route | What it does |
 |---|---|
-| `#/home` | Sensor readings with tap-to-calibrate, media, the Assistant card (phase, transcript, mute, voice volume override), timers, LED ring |
-| `#/wake-word` | Which wake words the device answers to, sensitivity, wake chime, and the stop word |
-| `#/audio` | TTS routing and area ducking as a tree over your Home Assistant areas |
-| `#/presence` | Live radar plot or gate energies, and the radar's own settings |
-| `#/diagnostics` | Memory, the USB-C power contract, the Speaker amplifier card (power gain mode and digital volume read-only, the analog gain slider, channel and line-out), firmware, live logs, and maintenance actions |
+| `#/home` | The voice orb (assistant phase, mute, voice volume, LED ring colours), sensor readings with sparklines and calibration, timers, and the transcript per wake word |
+| `#/wake-word` | Which wake words the device answers to, each with its sensitivity tuner, voice pipeline and Finished Speaking Detection; the wake chime and the stop word |
+| `#/presence` | Live radar plot with zones, or gate energies, and the radar's own settings |
+| `#/audio` | The local speaker and voice volume; TTS routing and area ducking as trees over your Home Assistant areas, with the remote speakers' volume, mic guard, timer ring and wake chime |
+| `#/settings/<page>` | `device` (facts and buttons), `updates`, `security` (auth token, password), `logs` (live logs, crash reports), `integrations` (Home Assistant side panel), `recovery` (ESP32, XMOS and radar maintenance), `amp` (the TAS2780 amplifier), `community` |
 
-`#/home` and `#/audio` were `#/controls` and `#/config` until the September 2026 rename pass, which
-also gave the wake words card its own `#/wake-word` route; the old hashes still resolve to the new
-routes so bookmarks keep working.
+When the device has a media player, the media bar rides along the bottom of every tab.
+
+`#/home` and `#/audio` were `#/controls` and `#/config` until the September 2026 rename pass, and the
+Settings pages were the cards of `#/diagnostics`; those hashes still resolve (to Home, Audio and
+`#/settings/device`) so bookmarks keep working. An unknown hash lands on Home.
 
 Routing is on the hash rather than on the path because ESPHome's HTTP server has a single wildcard
 handler per method and no notion of client-side routes. A path-based router would 404 on reload for
