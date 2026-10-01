@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>Satellite1</title>
+<!-- Relative hrefs, not root-absolute, so they resolve under a Home Assistant ingress prefix
+     (/api/ingress/<name>/) as well as at "/". The tab favicon reuses the 180px touch icon. -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Satellite1">
+<meta name="theme-color" content="#0d0d0f">
+<!-- Pre-paint, inline and tiny, for the same reasons as src/index.html: data-embed marks a page served
+     under a proxy prefix so app.css can drop the safe-area insets the embedding chrome already
+     clears; the remembered theme is applied before the stylesheet paints (dark is this design's
+     default); and iOS gets maximum-scale=1 so focusing a sub-16px field does not leave the page
+     zoomed - iOS still honours pinch zoom, and Android, which would not, is left alone. -->
+<script>if(location.pathname.length>1)document.documentElement.dataset.embed="1";
+try{var t=localStorage.getItem("sat1.theme");document.documentElement.dataset.theme=t==="light"?"light":"dark"}catch(e){document.documentElement.dataset.theme="dark"}
+if(/iPhone|iPod|iPad/.test(navigator.userAgent)||(navigator.maxTouchPoints>1&&/Mac/.test(navigator.platform)))document.querySelector("meta[name=viewport]").content+=",maximum-scale=1";</script>
+<style>/*%CSS%*/</style>
+</head>
+<body>
+<div id="root"></div>
+<script>/*%JS%*/</script>
+</body>
+</html>
