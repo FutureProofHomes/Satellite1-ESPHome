@@ -1,0 +1,73 @@
+{
+  "mode": "edit",
+  "componentId": "454802455327313920",
+  "projectId": "454801646963294208",
+  "selectedRevisionId": "456041346453622784",
+  "baseRevisionId": "456041346453622784",
+  "jobId": "454312423491534848-external-agent-456043034837147648",
+  "generatedName": "fine-minute-7536",
+  "name": "Satellite1 Web UI",
+  "selectedImages": [],
+  "editableFiles": [
+    {
+      "path": "assets/no-sensor.webp",
+      "sha256": "3b4ecdd186c54d106115f7f08750226ac59843352518beaeeb46ddf3bd7ba53a"
+    },
+    {
+      "path": "src/App.tsx",
+      "sha256": "01b6b278c3f8eee5a7d514d2f6350818b2b40e4ec0bee39b74084b0ad06b477f"
+    },
+    {
+      "path": "src/components/generated/AudioRoute.tsx",
+      "sha256": "c9f96591b078ba2b39a0cd62c64a0a6e377d9b044702e73f71c3bddc1146cf7e"
+    },
+    {
+      "path": "src/components/generated/DiagnosticsRoute.tsx",
+      "sha256": "19b1e43014b4c5a1f354a8846e279e042003ce143cab20ef12382ca270f8b3f8"
+    },
+    {
+      "path": "src/components/generated/HomeRoute.tsx",
+      "sha256": "1a72d6f810b63a622ff0c089d6081b5766398a0e58be015591101ccb099f3ef3"
+    },
+    {
+      "path": "src/components/generated/LoginScreen.tsx",
+      "sha256": "a4bcd4ffc6e66c38d99acf714bf8ab1e929094c4d4381192dd4fff6559ee515d"
+    },
+    {
+      "path": "src/components/generated/MediaFooter.tsx",
+      "sha256": "79b3321d2548e0c06e010f67a826eeb2359e76bc0554380c2be00e20d4c4c3da"
+    },
+    {
+      "path": "src/components/generated/PresenceRoute.tsx",
+      "sha256": "509adfb048db805a581f9baa5579c6133298782e4de0c21666b349c1331d0b84"
+    },
+    {
+      "path": "src/components/generated/Satellite1WebUI.tsx",
+      "sha256": "b7dcfb300737701176132f496fedfe5ab8b8bd0a42cefc359d50c92b4d48911b"
+    },
+    {
+      "path": "src/components/generated/SetupWizard.tsx",
+      "sha256": "88ace0723eb40b3fe18cf8af2a1ec07ea2a0e1382f84207c132400e1bf57538a"
+    },
+    {
+      "path": "src/components/generated/WakeWordsRoute.tsx",
+      "sha256": "029d7d0fe473a1c7bc46484a4138d2a21185e2ed1d69da14ddb34d1ed6e0f10f"
+    },
+    {
+      "path": "src/components/generated/mock.ts",
+      "sha256": "e093e0168c00e4a52822b786a1478c20264de13e4e72be9f7ee85ad4258264a7"
+    },
+    {
+      "path": "src/components/generated/ui.tsx",
+      "sha256": "ff8ae43cbd4715e3bc9bbb8eceb6d3fd7f9b8f26b8a9c464939e357a82c50422"
+    },
+    {
+      "path": "src/index.css",
+      "sha256": "d36713402637324e4a9387e71bb2b010e22678a60923dcc2b96d0ce86eaef8f8"
+    }
+  ],
+  "dimensions": {
+    "width": 400,
+    "height": 880
+  }
+}
