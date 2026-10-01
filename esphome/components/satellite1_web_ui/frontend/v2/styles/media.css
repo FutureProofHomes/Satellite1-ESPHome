@@ -1,0 +1,59 @@
+/* The media bar's additions to the design: states the design never drew - no artwork, a command
+   in flight, a scrubber nothing can drive, the Music Assistant scan - and the page without a bar. */
+
+/* No bar on this device (no media player), so nothing to make room for. */
+.app:not(:has(> .mroot)) { --mbar-h: 0px; }
+.app:not(:has(> .mroot)) .tabs { bottom: env(safe-area-inset-bottom) !important; }
+
+.mart-ph { display: grid; place-items: center; background: var(--surface2); color: var(--muted); }
+.mbar-art .mart-ph { width: 40px; height: 40px; border-radius: 8px; }
+.mart .mart-ph { width: min(78vw, 320px); aspect-ratio: 1; margin: 4px auto 22px; border-radius: 16px; }
+
+.mmeta .dot.off { background: var(--muted); box-shadow: none; }
+.mrow > :only-child { margin: 0 auto; }
+
+/* Read-only until a tier can seek: a progress line rather than a control that refuses the drag. */
+.mseek:disabled { cursor: default; }
+.mseek:disabled::-webkit-slider-thumb { opacity: 0; }
+.mseek:disabled::-moz-range-thumb { opacity: 0; }
+
+/* The pending ring: an arc circling the button while its command awaits the poll's echo. The
+   buttons stay labelled; disabled carries the state. */
+@keyframes mspin { to { transform: rotate(360deg); } }
+.mplay { position: relative; }
+.mbtn.busy::after,
+.mplay.busy::after,
+.madd .busy .madd-glyph::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: mspin .9s linear infinite;
+  pointer-events: none;
+}
+.mplay.busy::after { border-top-color: var(--orb-a, var(--accent2)); }
+.madd-glyph { position: relative; display: inline-flex; }
+.madd button:disabled { cursor: default; }
+
+.mnote { margin: 0 0 10px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+
+.mapanel-hint { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.mascan-btn { align-self: flex-start; padding: 0 14px; }
+.mascan-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 8px 12px; background: transparent; border: 1px solid var(--line); border-radius: 12px; text-align: left; font-size: 13px; }
+.mascan-row.on { border-color: var(--orb-a, var(--accent)); box-shadow: inset 0 0 0 .5px var(--orb-a, var(--accent)); }
+
+.search-spin { display: block; flex: none; width: 14px; height: 14px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; animation: mspin .9s linear infinite; }
+.search-status:has(.search-spin) { text-align: center; }
+.search-status .search-spin { width: 22px; height: 22px; border-width: 2.5px; border-color: var(--line); border-top-color: var(--orb-a, var(--accent)); margin: 8px auto 10px; }
+.search-empty .mapanel { width: 100%; text-align: left; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Still "working" without the spin: a full dim circle. */
+  .mbtn.busy::after,
+  .mplay.busy::after,
+  .madd .busy .madd-glyph::after,
+  .search-spin { animation: none; border-color: currentColor; opacity: .4; }
+  .mplay.busy::after { border-color: var(--orb-a, var(--accent2)); }
+}
