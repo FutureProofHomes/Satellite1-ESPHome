@@ -561,7 +561,7 @@ export function Satellite1Now({
           fontSize: 12,
           fontWeight: 600,
           color: 'var(--muted)'
-        }}><LogOut size={14} aria-hidden="true" /><span>Sign out</span></button></div></nav>
+        }}><LogOut size={14} aria-hidden="true" /><span>{TEXT.logout}</span></button></div></nav>
     <nav className="tabs" data-tab={tab} style={{
       translate: "0px -8px"
     }}><div className="tabs-track" style={{
@@ -834,7 +834,7 @@ function DeviceSheet({
       fontSize: 12,
       fontWeight: 600,
       color: 'var(--muted)'
-    }}><LogOut size={14} aria-hidden="true" /><span>Sign out</span></button></div>;
+    }}><LogOut size={14} aria-hidden="true" /><span>{TEXT.logout}</span></button></div>;
 }
 
 /** "just now", "12m ago", "3h ago" - the history covers 24 hours, so hours are the ceiling. */

@@ -322,7 +322,7 @@ function TouchGraph({
       fontSize: '10px',
       fill: 'rgba(255,255,255,0.4)',
       fontStyle: 'italic'
-    }}>Confidence</text>}
+    }}>{TEXT.tn_axis}</text>}
   </svg>;
 }
 /** A drawer's page duties: the page behind blurs, focus moves into the panel and back out after,
@@ -635,11 +635,11 @@ function PipeDrawer({
   onClose: () => void;
 }) {
   const panel = useDrawer(onClose);
-  return createPortal([<div key="scrim" className="ww-scrim" onClick={onClose} />, <div key="panel" ref={panel} tabIndex={-1} className="ww-panel" role="dialog" aria-modal="true" aria-label={`Voice Pipeline, ${slotName}`} onClick={e => e.stopPropagation()}>
-    <div className="ww-ptop"><h2>Voice Pipeline</h2><button className="secondary" onClick={onClose}>Close</button></div>
+  return createPortal([<div key="scrim" className="ww-scrim" onClick={onClose} />, <div key="panel" ref={panel} tabIndex={-1} className="ww-panel" role="dialog" aria-modal="true" aria-label={`${TEXT.vp_label}, ${slotName}`} onClick={e => e.stopPropagation()}>
+    <div className="ww-ptop"><h2>{TEXT.vp_label}</h2><button className="secondary" onClick={onClose}>Close</button></div>
     {pipe && <>
-      <h3 className="ww-sec">Voice Pipeline<HintBtn text={<>{HINTS.voice_pipeline} <a href={TEXT.vp_docs_url} target="_blank" rel="noopener">{TEXT.vp_docs}</a></>} /></h3>
-      <div className="ww-opts" role="radiogroup" aria-label="Voice Pipeline">{pipe.options.map(([id, label]) => <button key={id} type="button" role="radio" aria-checked={pipe.value === id} className={pipe.value === id ? 'ww-opt on' : 'ww-opt'} disabled={pipe.busy} onClick={() => pipe.value !== id && pipe.onPick(id)}><span>{label}</span><span className="ww-mark">{pipe.value === id && <Check size={13} strokeWidth={3} />}</span></button>)}</div>
+      <h3 className="ww-sec">{TEXT.vp_label}<HintBtn text={<>{HINTS.voice_pipeline} <a href={TEXT.vp_docs_url} target="_blank" rel="noopener">{TEXT.vp_docs}</a></>} /></h3>
+      <div className="ww-opts" role="radiogroup" aria-label={TEXT.vp_label}>{pipe.options.map(([id, label]) => <button key={id} type="button" role="radio" aria-checked={pipe.value === id} className={pipe.value === id ? 'ww-opt on' : 'ww-opt'} disabled={pipe.busy} onClick={() => pipe.value !== id && pipe.onPick(id)}><span>{label}</span><span className="ww-mark">{pipe.value === id && <Check size={13} strokeWidth={3} />}</span></button>)}</div>
     </>}
     {fsd && <>
       <h3 className={pipe ? 'ww-sec ww-sec-gap' : 'ww-sec'}>Finished Speaking Detection<HintBtn text={HINTS.finished_speaking} /></h3>
@@ -683,7 +683,7 @@ function WordDrawer({
   const speakable = canSpeak();
   return createPortal([<div key="scrim" className="ww-scrim" onClick={onClose} />, <div key="panel" ref={panel} tabIndex={-1} className="ww-panel" role="dialog" aria-modal="true" aria-label={`Wake Word Picker, ${slotName}`} onClick={e => e.stopPropagation()}>
     <div className="ww-ptop"><h2>Wake Word Picker</h2><button className="secondary" onClick={onClose}>Close</button></div>
-    <div className="ww-filter"><input className="ww-search" type="search" placeholder="Search words" aria-label="Search words" value={q} onChange={e => setQ(e.currentTarget.value)} />{langs.length > 1 && <Dropdown value={lang} options={[{
+    <div className="ww-filter"><input className="ww-search" type="search" placeholder={TEXT.ww_search} aria-label={TEXT.ww_search} value={q} onChange={e => setQ(e.currentTarget.value)} />{langs.length > 1 && <Dropdown value={lang} options={[{
         id: 'all',
         label: TEXT.ww_all_langs
       }, ...langs.map(l => ({
@@ -693,7 +693,7 @@ function WordDrawer({
     <div className="ww-picker-list">
       <div className="ww-opts" role="radiogroup" aria-label="Wake Word">
         {!q.trim() && lang === 'all' && <button type="button" role="radio" aria-checked={!current} className={current ? 'ww-opt' : 'ww-opt on'} disabled={busy} onClick={() => onPick(null)}>
-          <span className="ww-opt-label"><span className="ww-opt-word">No wake word</span></span>
+          <span className="ww-opt-label"><span className="ww-opt-word">{TEXT.ww_none}</span></span>
           <span className="ww-mark">{!current && <Check size={13} strokeWidth={3} />}</span>
         </button>}
         {shown.map((e: Entry) => {
@@ -747,25 +747,25 @@ function Sources({
     setUrl('');
   };
   return <article className="ww-card">
-    <div className="ww-head"><h2 className="ww-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16" /></svg><span>Wake Word Sources</span><HintBtn text={HINTS.wake_sources} /></h2></div>
+    <div className="ww-head"><h2 className="ww-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16" /></svg><span>{TEXT.ws_title}</span><HintBtn text={HINTS.wake_sources} /></h2></div>
     {sources.map(s => {
       const c = cat[s.url];
-      return <div key={s.url}><div className="ww-src"><a href={s.url} target="_blank" rel="noreferrer">{s.label}</a>{!c?.error && <small>{c?.entries ? `${c.entries.length} ${TEXT.ws_words}` : TEXT.ww_source_loading}</small>}<button className="ww-x" aria-label={`Remove ${s.label}`} onClick={() => setConfirm(s.url)}>Remove</button></div>
+      return <div key={s.url}><div className="ww-src"><a href={s.url} target="_blank" rel="noreferrer">{s.label}</a>{!c?.error && <small>{c?.entries ? `${c.entries.length} ${TEXT.ws_words}` : TEXT.ww_source_loading}</small>}<button className="ww-x" aria-label={`Remove ${s.label}`} onClick={() => setConfirm(s.url)}>{TEXT.ws_remove_c}</button></div>
         {c?.error && <p className="ww-note warn">{TEXT.ww_source_failed}</p>}
-        {confirm === s.url && <div className="ww-confirm"><span>Remove this source? Its words disappear from the picker. Words already installed keep working.</span><div><button className="secondary" onClick={() => setConfirm(null)}>Keep</button><button className="primary" onClick={() => {
+        {confirm === s.url && <div className="ww-confirm"><span>{TEXT.ws_remove_t} {TEXT.ws_remove_b}</span><div><button className="secondary" onClick={() => setConfirm(null)}>Keep</button><button className="primary" onClick={() => {
               setSources(sources.filter(x => x.url !== s.url));
               setConfirm(null);
-            }}>Remove</button></div></div>}</div>;
+            }}>{TEXT.ws_remove_c}</button></div></div>}</div>;
     })}
     {missing.length > 0 && <p className="ww-foot"><button type="button" className="ww-link" onClick={() => setSources([...missing, ...sources])}>{TEXT.ws_restore}</button></p>}
     <form className="ww-add" noValidate onSubmit={e => {
       e.preventDefault();
       add();
     }}>
-      <input type="url" placeholder="https://github.com/owner/repo" value={url} onChange={e => {
+      <input type="url" placeholder={TEXT.ws_ph} value={url} onChange={e => {
         setUrl(e.currentTarget.value);
         setBad(false);
-      }} aria-label="Source URL" /><button className="primary" type="submit" disabled={!url.trim()}>Add</button>
+      }} aria-label="Source URL" /><button className="primary" type="submit" disabled={!url.trim()}>{TEXT.ws_add}</button>
     </form>
     {bad && <p className="ww-note err">{TEXT.ws_bad_url}</p>}
     <p className="ww-foot">{TEXT.ws_footer_q}<a href={REQUEST_WORD_URL} target="_blank" rel="noopener">{TEXT.ws_request}</a>{TEXT.ws_or}<a href={TRAIN_URL} target="_blank" rel="noopener">{TEXT.ws_train}</a>.</p>
@@ -1056,7 +1056,7 @@ export function WakeTab({
         {pipe !== null && <>
           <span className="ww-flow-arrow" aria-hidden="true"><ArrowRight size={18} /></span>
           <div className="ww-flow-cell">
-            <span className="ww-flow-cap">Voice Pipeline</span>
+            <span className="ww-flow-cap">{TEXT.vp_label}</span>
             <button className={piping === i ? 'ww-flow-btn open' : 'ww-flow-btn'} aria-haspopup="dialog" onClick={() => setPiping(i)}>
               <span>{pipeLabel(pipe)}</span>
               <ChevronDown size={16} />

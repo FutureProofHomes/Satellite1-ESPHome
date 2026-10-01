@@ -678,7 +678,7 @@ function LD2450View({
             sel: null,
             hist: [...e.hist, e.points]
           })}>Remove corner</button>}
-          <button type="button" className="pr-btn" onClick={() => setEdit(null)}>Cancel</button>
+          <button type="button" className="pr-btn" onClick={() => setEdit(null)}>{TEXT.cancel}</button>
           <button type="button" className="pr-btn pr-btn-solid" disabled={!savable || busy} onClick={save}>Save</button>
           {edit.from != null && <button type="button" className="pr-btn pr-btn-danger" disabled={busy} onClick={del}>Delete</button>}
         </div>

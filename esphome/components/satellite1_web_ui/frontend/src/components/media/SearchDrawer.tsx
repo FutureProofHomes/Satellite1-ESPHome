@@ -198,7 +198,7 @@ export function SearchDrawer({
   if (!configured) {
     // The drawer says what it needs and offers the setup where it stands; the panel unfolds on the
     // button rather than greeting everyone with a token field.
-    body = <div className="search-empty">{I_SEARCH_SM}<div className="search-empty-t">{TEXT.search_need_ma_t}</div><p className="dim sm">Search rides a direct connection to your Music Assistant server. Set it up once and every browser signed into this device shares it.</p>{setupOpen ? setup : <button className="btn solid primary" onClick={() => setSetupOpen(true)}>{TEXT.search_setup_btn}</button>}</div>;
+    body = <div className="search-empty">{I_SEARCH_SM}<div className="search-empty-t">{TEXT.search_need_ma_t}</div><p className="dim sm">{TEXT.search_need_ma_b}</p>{setupOpen ? setup : <button className="btn solid primary" onClick={() => setSetupOpen(true)}>{TEXT.search_setup_btn}</button>}</div>;
   } else if (!wsOn) {
     // A refused token gets the panel's own error line and the panel itself, so the fix is where the
     // failure is.

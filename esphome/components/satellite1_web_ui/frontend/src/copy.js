@@ -296,8 +296,7 @@ export const TEXT = {
      password is the thing iOS made miserable enough to build all of this around. The three mode
      lines follow what the poll reports - the device picks how it can be answered when the window
      opens, and the page's only job is to say what to do right now. */
-  login_sub: "Your home. Your voice. Your AI.",
-  login_tap: "Use VoiceTap Sign-In",
+  login_tap: "Sign in with VoiceTap",
   // The pending instructions, one per mode. Each names the physical thing to do and nothing else;
   // the countdown beside them says how long it can wait.
   login_mode_button: "Press the action button on top of your Satellite1 - the ring is breathing while it waits.",
@@ -344,8 +343,6 @@ export const TEXT = {
   login_or: "or use the password",
   login_pw_placeholder: "Password",
   login_pw_submit: "Sign in",
-  login_show_pw: "Show password",
-  login_hide_pw: "Hide password",
   login_wrong: "That's not the password.",
   login_locked: "Too many tries. Wait %s seconds and try again.",
   login_unreachable: "Couldn't reach the device. Check the connection and try again.",
@@ -636,7 +633,6 @@ export const TEXT = {
   ma_token_ph: "Long-lived token",
   ma_connect_btn: "Connect",
   ma_disconnect_btn: "Disconnect",
-  ma_connected: "Connected to Music Assistant",
   ma_error: "Could not connect. Check the address and token, and that this browser can reach the server.",
 
   /* The server scan inside the connection panel (September 2026): browsers cannot browse mDNS, so
@@ -699,7 +695,7 @@ export const TEXT = {
   // The not-connected empty state, and the connecting/error moments of a configured socket.
   search_need_ma_t: "Search needs Music Assistant",
   search_need_ma_b:
-    "Connect this browser to your Music Assistant server to search and play music. The address and token are set once and remembered here.",
+    "Search rides a direct connection to your Music Assistant server. Set it up once and every browser signed into this device shares it.",
   search_setup_btn: "Set up connection",
   search_connecting: "Connecting to Music Assistant\u2026",
 
@@ -740,15 +736,12 @@ export const TEXT = {
      the copy's design of record) and the massive word list, which expands inline under a word's
      pill now. ww_pick_title, ww_card1/2 and ww_sources_btn retired with the modal sheet that
      carried them. */
-  ww_card: "Wake Words",
   // ww_settings ("Wake Word Settings") is retired with its card: the chime - the card's only
   // control - moved into the Wake Words card's own header as the bell toggle (v2, September 2026).
-  ww_search: "Search wake words",
+  ww_search: "Search words",
   // The empty route: one explanation, one action. "On the device, no cloud" is the fact worth
   // leading with for a first-time owner deciding whether to trust a microphone.
   ww_route_none: "This device isn't listening for anything yet. Pick a phrase and it starts listening for it - on the device, no cloud.",
-  ww_choose: "Choose a wake word",
-  ww_add: "+ Add word",
   // On the picker row the other slot already holds - the reason it is disabled, on the row itself.
   ww_on_other: "on the other slot",
 
@@ -771,8 +764,6 @@ export const TEXT = {
   // frost's "ignored" caption; the veil says that on its own).
   tn_axis: "Confidence",
   // The dimmed old row mid-swap: truthfully still listening until the replacement is ready.
-  mb_still: "still listening",
-  mb_off: "off",
   mb_swap_note: "\u201c%1\u201d is still listening until \u201c%2\u201d is ready.",
 
   /* The stop word's row: its pill IS the switch (green listening, red off), and the graph is gone
@@ -786,10 +777,9 @@ export const TEXT = {
   // September 2026) - their own README says "minimally trained and tested, not supported in any
   // way", and a word that never fires reads as our bug.
   //
-  // What the collapsed picker says when the slot holds nothing. The explicit "Disabled" list entry
-  // is gone (owner, September 2026 - it read as one of the words): a slot empties by unchecking
-  // the word it holds, and this line is the state that leaves behind.
-  ww_none: "No wake word selected.",
+  // The picker's first row, the one that empties the slot. Worded as an absence so it cannot read
+  // as one of the words - the reason the owner retired the older "Disabled" entry (September 2026).
+  ww_none: "No wake word",
   ww_all_langs: "All languages",
   // The n-more line when a search inside ~800 words still matches a crowd.
   ww_more: "more match - keep typing",
@@ -814,7 +804,6 @@ export const TEXT = {
   ww_waiting: "Waiting for the network to fetch this word\u2026",
   ww_retrying: "The device retries on its own.",
   ww_retry: "Retry",
-  ww_dismiss: "Dismiss",
   // Prefixes the specific reason from WW_ERR below. The previous word is still listening, which is
   // worth a clause because a failed swap otherwise reads as a device left deaf.
   ww_failed: "Couldn't load this wake word - the previous one is still active.",
@@ -824,8 +813,8 @@ export const TEXT = {
 
   /* The Wake Word Sources card. */
   ws_title: "Wake Word Sources",
-  ws_add: "Add source",
-  ws_ph: "Paste a GitHub repo or model .json URL",
+  ws_add: "Add",
+  ws_ph: "https://github.com/owner/repo",
   ws_bad_url: "That doesn't look like a GitHub repository or a model .json link.",
   ws_restore: "Restore default sources",
   // The footer sentence, split where its two links render: "Don't see your wake word? Request one,
@@ -835,9 +824,10 @@ export const TEXT = {
   ws_or: ", or ",
   ws_train: "train your own microWakeWord",
   ws_words: "words",
-  // The remove confirmation's one important fact.
+  // The remove confirmation's one important fact: the device remembers a word's link, not its
+  // source, so removing the source never breaks a word already in use.
   ws_remove_t: "Remove this source?",
-  ws_remove_b: "The list above loses its words. A word you already picked keeps working - the device remembers its link, not the source.",
+  ws_remove_b: "Its words disappear from the picker. Words already installed keep working.",
   ws_remove_c: "Remove",
 
   /* The v2 Wake Word Tuner: two user-paced phases on the Living Graph (the tuner-v2 canvas is the
@@ -902,9 +892,6 @@ export const TEXT = {
   // error - tuning works fine, the neighbours just aren't covered.
   tn_pm_unknown: "Can't check for nearby satellites - Home Assistant is unreachable.",
 
-  /* The dots' popover vocabulary (the retired detections card's exact-time story, told in place). */
-  det_just_now: "just now",
-
   /* Diagnostics: the Crash Reports card. The empty state is a good day and reads like one. The
      no-partition note names the one fix (a USB flash) rather than describing the partition table,
      which nobody flashing a device needs to picture. */
@@ -953,7 +940,6 @@ export const TEXT = {
   // which is better than explaining what happened when there were.
 
   confirm: "Confirm",
-  confirm_title: "Are you sure?",
   cancel: "Cancel",
 
   /* The Home Assistant data layer. Each of these is a different reason the area and player lists are
