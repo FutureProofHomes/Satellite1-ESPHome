@@ -34,14 +34,18 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   void stop() override;
   void finish() override;
 
+  // Speaker::is_stopped() is non-virtual; concrete callers also need to account for queued starts and live tasks.
+  bool is_stopped() const;
+
   void set_pause_state(bool pause_state) override { this->pause_state_ = pause_state; }
   bool get_pause_state() const override { return this->pause_state_; }
 
   /// @brief Plays the provided audio data.
-  /// Starts the speaker task, if necessary. Writes the audio data to the ring buffer.
+  /// Requests speaker task startup, if necessary. Returns zero until running; otherwise writes to the ring buffer.
   /// @param data Audio data in the format set by the parent speaker classes ``set_audio_stream_info`` method.
   /// @param length The length of the audio data in bytes.
   /// @param ticks_to_wait The FreeRTOS ticks to wait before writing as much data as possible to the ring buffer.
+  /// While not running, background callers back off by this duration before returning zero; main-loop callers do not.
   /// @return The number of bytes that were actually written to the ring buffer.
   size_t play(const uint8_t *data, size_t length, TickType_t ticks_to_wait);
   size_t play(const uint8_t *data, size_t length) override { return play(data, length, 0); }
@@ -61,12 +65,12 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
 
  protected:
   /// @brief Function for the FreeRTOS task handling audio output.
-  /// After receiving the COMMAND_START signal, allocates space for the buffers, starts the I2S driver, and reads
+  /// Task creation authorizes startup: allocates space for the buffers, starts the I2S driver, and reads
   /// audio from the ring buffer and writes audio to the I2S port. Stops immmiately after receiving the COMMAND_STOP
   /// signal and stops only after the ring buffer is empty after receiving the COMMAND_STOP_GRACEFULLY signal. Stops if
   /// the ring buffer hasn't read data for more than timeout_ milliseconds. When stopping, it deallocates the buffers,
-  /// stops the I2S driver, unlocks the I2S port, and deletes the task. It communicates the state and any errors via
-  /// event_group_.
+  /// reports STATE_STOPPED and waits for loop() to stop the channel and delete the task. It communicates the state
+  /// and any errors via event_group_.
   /// @param params I2SAudioSpeaker component
   static void speaker_task(void *params);
 
@@ -97,9 +101,8 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   ///         ESP_FAIL if setting the data out pin fails due to an IO error ESP_OK if successful
   esp_err_t start_i2s_driver_(audio::AudioStreamInfo &audio_stream_info);
 
-  /// @brief Deletes the speaker's task.
-  /// Deallocates the data_buffer_ and audio_ring_buffer_, if necessary, and deletes the task. Should only be called by
-  /// the speaker_task itself.
+  /// @brief Releases buffers and reports that loop() can delete the speaker's task.
+  /// Should only be called by the speaker_task itself.
   /// @param buffer_size The allocated size of the data_buffer_.
   void delete_task_(size_t buffer_size);
 
@@ -112,6 +115,9 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
 
   TaskHandle_t speaker_task_handle_{nullptr};
   EventGroupHandle_t event_group_{nullptr};
+  // Serializes caller intent with loop-owned task dispatch/teardown. The worker never takes this mutex.
+  mutable Mutex lifecycle_mutex_;
+  bool pending_start_{false};
 
   uint8_t *data_buffer_{nullptr};
   std::shared_ptr<ring_buffer::RingBuffer> audio_ring_buffer_;
