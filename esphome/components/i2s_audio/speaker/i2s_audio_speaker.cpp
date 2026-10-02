@@ -7,6 +7,7 @@
 #include "esphome/core/application.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
+#include "esphome/core/main_task.h"
 
 #include "esp_timer.h"
 
@@ -19,7 +20,7 @@ static const ssize_t TASK_PRIORITY = 19;
 static const char *const TAG = "i2s_audio.speaker";
 
 enum SpeakerEventGroupBits : uint32_t {
-  COMMAND_START = (1 << 0),            // starts the speaker task
+  COMMAND_START = (1 << 0),            // requests loop-owned speaker task creation
   COMMAND_STOP = (1 << 1),             // stops the speaker task
   COMMAND_STOP_GRACEFULLY = (1 << 2),  // Stops the speaker task once all data has been written
   STATE_STARTING = (1 << 10),
@@ -35,7 +36,8 @@ enum SpeakerEventGroupBits : uint32_t {
   ERR_ESP_FAIL = (1 << 20),
   ALL_ERR_ESP_BITS = ERR_ESP_INVALID_STATE | ERR_ESP_NOT_SUPPORTED | ERR_ESP_INVALID_ARG | ERR_ESP_INVALID_SIZE |
                      ERR_ESP_NO_MEM | ERR_ESP_FAIL,
-  ALL_BITS = 0x00FFFFFF,  // All valid FreeRTOS event group bits
+  ALL_REPORT_BITS =
+      STATE_STARTING | STATE_RUNNING | STATE_STOPPING | STATE_STOPPED | ERR_TASK_FAILED_TO_START | ALL_ERR_ESP_BITS,
 };
 
 // Translates a SpeakerEventGroupBits ERR_ESP bit to the corresponding esp_err_t
@@ -90,6 +92,10 @@ void I2SAudioSpeaker::dump_config() {
 }
 
 void I2SAudioSpeaker::loop() {
+  if (!this->is_ready() || this->event_group_ == nullptr) {
+    return;
+  }
+
   // Process deferred volume/mute changes in main loop to avoid I2C conflicts with I2S task
 #ifdef USE_AUDIO_DAC
   if (this->audio_dac_ != nullptr) {
@@ -108,23 +114,28 @@ void I2SAudioSpeaker::loop() {
   }
 #endif
 
-  uint32_t event_group_bits = xEventGroupGetBits(this->event_group_);
+  // Atomically capture all bits, acknowledging non-terminal reports only. Leave STOPPING/STOPPED latched until
+  // their public state is published so start() cannot mistake a winding-down worker for a healthy one.
+  // Worker stop commands remain visible until completion, including before the task has been scheduled.
+  uint32_t event_group_bits = xEventGroupClearBits(
+      this->event_group_, SpeakerEventGroupBits::ALL_REPORT_BITS &
+                              ~(SpeakerEventGroupBits::STATE_STOPPING | SpeakerEventGroupBits::STATE_STOPPED));
+  constexpr uint32_t stop_bits = SpeakerEventGroupBits::COMMAND_STOP | SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY;
 
   if (event_group_bits & SpeakerEventGroupBits::STATE_STARTING) {
     ESP_LOGD(TAG, "Starting Speaker");
     this->state_ = speaker::STATE_STARTING;
-    xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::STATE_STARTING);
   }
   if (event_group_bits & SpeakerEventGroupBits::STATE_RUNNING) {
     ESP_LOGD(TAG, "Started Speaker");
     this->state_ = speaker::STATE_RUNNING;
-    xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::STATE_RUNNING);
     this->status_clear_warning();
     this->status_clear_error();
   }
   if (event_group_bits & SpeakerEventGroupBits::STATE_STOPPING) {
     ESP_LOGD(TAG, "Stopping Speaker");
     this->state_ = speaker::STATE_STOPPING;
+    // Acknowledge only the captured report; this worker emits it once per run.
     xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::STATE_STOPPING);
   }
   if (event_group_bits & SpeakerEventGroupBits::STATE_STOPPED) {
@@ -137,15 +148,19 @@ void I2SAudioSpeaker::loop() {
     }
 
     this->stop_i2s_channel_();
-    xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::ALL_BITS);
+    // Retire the completed worker's stop commands. Leave START untouched: a source can request a restart
+    // during teardown (#19027), and restoring an earlier snapshot could undo a later stop_() cancellation.
+    xEventGroupClearBits(this->event_group_, stop_bits);
     this->status_clear_error();
 
     this->state_ = speaker::STATE_STOPPED;
+    // The worker has been deleted and its public state published. Retire the captured terminal report before
+    // dispatching a replacement; STOPPING, if captured too, was acknowledged above and STOPPED wins.
+    xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::STATE_STOPPED);
   }
 
   if (event_group_bits & SpeakerEventGroupBits::ERR_TASK_FAILED_TO_START) {
     this->status_set_error(LOG_STR("Failed to start speaker task"));
-    xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::ERR_TASK_FAILED_TO_START);
   }
 
   if (event_group_bits & SpeakerEventGroupBits::ALL_ERR_ESP_BITS) {
@@ -162,7 +177,24 @@ void I2SAudioSpeaker::loop() {
              this->audio_stream_info_.get_bits_per_sample());
   }
 
-  xEventGroupClearBits(this->event_group_, ALL_ERR_ESP_BITS);
+  // Active-worker commands stay latched; start() filters ordinary redundant requests at the source.
+  if (this->speaker_task_handle_ == nullptr && this->state_ == speaker::STATE_STOPPED) {
+    // Consume the idle command batch once. A coalesced stop cancels its start (#19089). A stop posted AFTER
+    // this atomic clear stays set for the new worker's initial check; dispatch must not clear commands again.
+    const uint32_t command_bits =
+        xEventGroupClearBits(this->event_group_, stop_bits | SpeakerEventGroupBits::COMMAND_START);
+    if ((command_bits & SpeakerEventGroupBits::COMMAND_START) && !(command_bits & stop_bits) && this->is_ready() &&
+        !this->is_failed() && !this->status_has_error() && this->parent_->access_permitted()) {
+      // Recheck XMOS access at dispatch. A denied request is consumed, not replayed when access returns.
+      this->state_ = speaker::STATE_STARTING;
+      xTaskCreate(I2SAudioSpeaker::speaker_task, "speaker_task", TASK_STACK_SIZE, (void *) this, TASK_PRIORITY,
+                  &this->speaker_task_handle_);
+      if (this->speaker_task_handle_ == nullptr) {
+        this->state_ = speaker::STATE_STOPPED;
+        xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::ERR_TASK_FAILED_TO_START);
+      }
+    }
+  }
 }
 
 void I2SAudioSpeaker::set_volume(float volume) {
@@ -202,29 +234,22 @@ void I2SAudioSpeaker::set_mute_state(bool mute_state) {
 }
 
 size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t ticks_to_wait) {
-  if (this->is_failed()) {
-    ESP_LOGE(TAG, "Cannot play audio, speaker failed to setup");
+  if (!this->is_ready() || this->is_failed() || this->event_group_ == nullptr) {
+    ESP_LOGE(TAG, "Cannot play audio, speaker is not ready");
     return 0;
   }
 
-  // If stopping, wait for it to fully stop first
-  if (this->state_ == speaker::STATE_STOPPING) {
-    ESP_LOGD(TAG, "play() called while stopping, waiting...");
-    uint32_t wait_start = millis();
-    while (this->state_ == speaker::STATE_STOPPING && (millis() - wait_start) < 1000) {
-      vTaskDelay(pdMS_TO_TICKS(10));
-    }
-  }
-
-  if (this->state_ != speaker::STATE_RUNNING && this->state_ != speaker::STATE_STARTING) {
-    ESP_LOGD(TAG, "play() starting speaker, state=%d", this->state_);
+  uint32_t event_group_bits = xEventGroupGetBits(this->event_group_);
+  if (this->state_ != speaker::STATE_RUNNING ||
+      (event_group_bits & (SpeakerEventGroupBits::COMMAND_STOP | SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY |
+                           SpeakerEventGroupBits::STATE_STOPPING | SpeakerEventGroupBits::STATE_STOPPED))) {
     this->start();
-  }
-
-  if (this->state_ != speaker::STATE_RUNNING) {
-    // Unable to write data to a running speaker, so delay the max amount of time so it can get ready
-    vTaskDelay(ticks_to_wait);
-    ticks_to_wait = 0;
+    // Task dispatch and teardown need loop() to run. Never delay that loop, but yield background callers so a
+    // higher-priority producer retrying play() cannot starve it while waiting for the speaker to become ready.
+    if (ticks_to_wait > 0 && xTaskGetCurrentTaskHandle() != esphome_main_task_handle) {
+      vTaskDelay(ticks_to_wait);
+    }
+    return 0;
   }
 
   size_t bytes_written = 0;
@@ -248,16 +273,11 @@ bool I2SAudioSpeaker::has_buffered_data() const {
 void I2SAudioSpeaker::speaker_task(void *params) {
   I2SAudioSpeaker *this_speaker = (I2SAudioSpeaker *) params;
 
-  uint32_t event_group_bits =
-      xEventGroupWaitBits(this_speaker->event_group_,
-                          SpeakerEventGroupBits::COMMAND_START | SpeakerEventGroupBits::COMMAND_STOP |
-                              SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY,  // Bit message to read
-                          pdTRUE,                                              // Clear the bits on exit
-                          pdFALSE,                                             // Don't wait for all the bits,
-                          portMAX_DELAY);                                      // Block indefinitely until a bit is set
+  // loop() creates this task only after consuming a start request. No separate wakeup can be lost or replayed.
+  uint32_t event_group_bits = xEventGroupGetBits(this_speaker->event_group_);
 
   if (event_group_bits & (SpeakerEventGroupBits::COMMAND_STOP | SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY)) {
-    // Received a stop signal before the task was requested to start
+    // Received a stop signal before the newly created task began startup
     this_speaker->delete_task_(0);
   }
 
@@ -312,11 +332,9 @@ void I2SAudioSpeaker::speaker_task(void *params) {
       event_group_bits = xEventGroupGetBits(this_speaker->event_group_);
 
       if (event_group_bits & SpeakerEventGroupBits::COMMAND_STOP) {
-        xEventGroupClearBits(this_speaker->event_group_, SpeakerEventGroupBits::COMMAND_STOP);
         break;
       }
       if (event_group_bits & SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY) {
-        xEventGroupClearBits(this_speaker->event_group_, SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY);
         stop_gracefully = true;
       }
       if (this_speaker->audio_stream_info_ != audio_stream_info) {
@@ -463,23 +481,20 @@ void I2SAudioSpeaker::speaker_task(void *params) {
 }
 
 void I2SAudioSpeaker::start() {
-  if (!this->is_ready() || this->is_failed() || this->status_has_error())
+  if (!this->is_ready() || this->is_failed() || this->status_has_error() || this->event_group_ == nullptr)
     return;
   if (!this->parent_->access_permitted())
     return;
-  if ((this->state_ == speaker::STATE_STARTING) || (this->state_ == speaker::STATE_RUNNING))
+  // A healthy starting/running worker already satisfies the request. Allow a restart when its stop command
+  // or stopping/stopped report is visible, even before loop() has updated the public state.
+  const uint32_t event_group_bits = xEventGroupGetBits(this->event_group_);
+  if ((this->state_ == speaker::STATE_STARTING || this->state_ == speaker::STATE_RUNNING) &&
+      !(event_group_bits & (SpeakerEventGroupBits::COMMAND_STOP | SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY |
+                            SpeakerEventGroupBits::STATE_STOPPING | SpeakerEventGroupBits::STATE_STOPPED))) {
     return;
-
-  if (this->speaker_task_handle_ == nullptr) {
-    xTaskCreate(I2SAudioSpeaker::speaker_task, "speaker_task", TASK_STACK_SIZE, (void *) this, TASK_PRIORITY,
-                &this->speaker_task_handle_);
-
-    if (this->speaker_task_handle_ != nullptr) {
-      xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::COMMAND_START);
-    } else {
-      xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::ERR_TASK_FAILED_TO_START);
-    }
   }
+  xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::COMMAND_START);
+  App.wake_loop_threadsafe();
 }
 
 void I2SAudioSpeaker::stop() { this->stop_(false); }
@@ -487,16 +502,24 @@ void I2SAudioSpeaker::stop() { this->stop_(false); }
 void I2SAudioSpeaker::finish() { this->stop_(true); }
 
 void I2SAudioSpeaker::stop_(bool wait_on_empty) {
-  if (this->is_failed())
+  if (!this->is_ready() || this->is_failed() || this->event_group_ == nullptr)
     return;
-  if (this->state_ == speaker::STATE_STOPPED)
-    return;
-
+  // Cancel starts queued before this clear, including a restart for an active worker. A concurrent start posted
+  // after the clear may request a restart; clear/set is not an atomic last-writer-wins transaction.
+  xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::COMMAND_START);
+  // Queue even while publicly stopped, so loop() can cancel a start that has not been dispatched yet.
   if (wait_on_empty) {
     xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY);
   } else {
     xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::COMMAND_STOP);
   }
+  App.wake_loop_threadsafe();
+}
+
+bool I2SAudioSpeaker::is_stopped() const {
+  return this->state_ == speaker::STATE_STOPPED && this->speaker_task_handle_ == nullptr &&
+         (this->event_group_ == nullptr ||
+          !(xEventGroupGetBits(this->event_group_) & SpeakerEventGroupBits::COMMAND_START));
 }
 
 bool I2SAudioSpeaker::send_esp_err_to_event_group_(esp_err_t err) {
@@ -568,6 +591,9 @@ bool IRAM_ATTR I2SAudioSpeaker::i2s_on_sent_cb(i2s_chan_handle_t handle, i2s_eve
 }
 
 esp_err_t I2SAudioSpeaker::start_i2s_driver_(audio::AudioStreamInfo &audio_stream_info) {
+  if (!this->is_ready() || this->is_failed() || !this->parent_->access_permitted()) {
+    return ESP_ERR_INVALID_STATE;
+  }
   if (this->has_fixed_i2s_rate() && (this->sample_rate_ != audio_stream_info.get_sample_rate())) {  // NOLINT
     // Can't reconfigure I2S bus, so the sample rate must match the configured value
     return ESP_ERR_NOT_SUPPORTED;
@@ -596,6 +622,7 @@ void I2SAudioSpeaker::delete_task_(size_t buffer_size) {
   }
 
   xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::STATE_STOPPED);
+  App.wake_loop_threadsafe();
 
   // Task will be deleted by loop() to avoid race condition
   while (true) {
