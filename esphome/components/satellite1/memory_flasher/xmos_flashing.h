@@ -4,6 +4,7 @@
 #include "esphome/components/ota/ota_backend.h"
 #include "esphome/components/spi/spi.h"
 #include "esphome/components/md5/md5.h"
+#include "esphome/core/defines.h"
 #include "esphome/core/preferences.h"
 
 #include "esphome/components/memory_flasher/memory_flasher.h"
@@ -51,6 +52,19 @@ class XMOSFlasher : public MemoryFlasher, public Satellite1SPIService {
   void request_factory_reset_reboot() override;
   bool boot_flash_pending() const { return this->pending_boot_action_; }
   bool factory_reset_pending() const override { return this->factory_reset_pending_; }
+
+#ifdef USE_XMOS_FIRMWARE_CATALOG
+  // Flash an image already downloaded and MD5-verified in RAM. The buffer must stay valid until the flasher is idle.
+  bool flash_staged_image(const uint8_t *data, size_t length, const std::string &md5);
+  // While the running XMOS firmware matches the pinned version, boot auto-flash leaves it alone.
+  void set_custom_image_pin(const uint8_t version[5]);
+  void clear_custom_image_pin() { this->custom_image_pin_set_ = false; }
+  bool custom_image_pinned() const {
+    return this->custom_image_pin_set_ && memcmp(this->custom_image_pin_, this->parent_->xmos_fw_version, 5) == 0;
+  }
+#else
+  bool custom_image_pinned() const { return false; }
+#endif
 
   bool flash_accessible() override {
     this->parent_->set_spi_flash_direct_access_mode(true);
@@ -121,6 +135,12 @@ class XMOSFlasher : public MemoryFlasher, public Satellite1SPIService {
   bool boot_recovery_active_{false};
   bool factory_reset_pending_{false};
   FlasherAction pending_boot_action_type_{ACTION_FLASH_EMBEDDED_IMAGE};
+
+#ifdef USE_XMOS_FIRMWARE_CATALOG
+  FlashImage staged_image_{};
+  bool custom_image_pin_set_{false};
+  uint8_t custom_image_pin_[5]{};
+#endif
 };
 
 }  // namespace satellite1

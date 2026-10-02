@@ -307,6 +307,9 @@ void XMOSFlasher::flash_remote_image() {
 
   this->error_code = FLASHER_OK;
   this->flash_attempted_this_boot_ = true;
+#ifdef USE_XMOS_FIRMWARE_CATALOG
+  this->staged_image_ = FlashImage{};
+#endif
 
   if (this->md5_expected_.empty() && !this->http_get_md5_()) {
     ESP_LOGE(TAG, "Couldn't receive expected md5 sum.");
@@ -342,6 +345,34 @@ void XMOSFlasher::flash_embedded_image() {
   this->state = FLASHER_INITIALIZING;
   this->publish();
 }
+
+#ifdef USE_XMOS_FIRMWARE_CATALOG
+bool XMOSFlasher::flash_staged_image(const uint8_t *data, size_t length, const std::string &md5) {
+  if (this->state != FLASHER_IDLE) {
+    ESP_LOGE(TAG, "XMOS flasher is busy, can't initiate new flash");
+    return false;
+  }
+  if (data == nullptr || length == 0 || length >= FLASH_BOOT_PARTITION_SIZE || md5.size() != MD5_SIZE) {
+    ESP_LOGE(TAG, "Invalid staged XMOS image");
+    return false;
+  }
+
+  this->error_code = FLASHER_OK;
+  this->flash_attempted_this_boot_ = true;
+  this->staged_image_ = FlashImage{data, length, md5, {}};
+  this->factory_reset_pending_ = false;
+  this->md5_expected_ = md5;
+  this->requested_action = ACTION_FLASH_REMOTE_IMAGE;
+  this->state = FLASHER_INITIALIZING;
+  this->publish();
+  return true;
+}
+
+void XMOSFlasher::set_custom_image_pin(const uint8_t version[5]) {
+  memcpy(this->custom_image_pin_, version, sizeof(this->custom_image_pin_));
+  this->custom_image_pin_set_ = true;
+}
+#endif
 
 bool XMOSFlasher::read_JEDECID_() {
   uint8_t manufacturer = 0;
@@ -669,6 +700,12 @@ bool XMOSFlasher::init_flashing_() {
       this->reader_ = new EmbeddedImageReader(this->embedded_image_);
       break;
     case ACTION_FLASH_REMOTE_IMAGE:
+#ifdef USE_XMOS_FIRMWARE_CATALOG
+      if (this->staged_image_.data != nullptr) {
+        this->reader_ = new EmbeddedImageReader(this->staged_image_);
+        break;
+      }
+#endif
       this->reader_ = new HttpImageReader(this->http_request_, this->url_);
       break;
     case ACTION_FULL_ERASE:
@@ -767,6 +804,9 @@ void XMOSFlasher::deinit_flashing_() {
 
   this->md5_computed_.clear();
   this->md5_expected_.clear();
+#ifdef USE_XMOS_FIRMWARE_CATALOG
+  this->staged_image_ = FlashImage{};
+#endif
 
   delay(5);
   this->deinit_flasher();

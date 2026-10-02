@@ -1,0 +1,134 @@
+# Developer-only XMOS firmware picker, included by config/satellite1.dev.yaml.
+# Lists XMOS images published as GitHub release assets (*.factory.bin with a matching
+# *.factory.md5) and flashes the chosen one without rebooting the ESP32.
+packages:
+  xmos_audio_shutdown: !include xmos_audio_shutdown.yaml
+
+xmos_firmware_catalog:
+  id: xmos_catalog
+  flasher_id: xflash
+  builtin_version: ${xmos_fw_version}
+  sources:
+    - github: FutureProofHomes/Satellite1-XMOS
+    # Private repositories need a fine-grained token with read-only "Contents" access:
+    # - github: FutureProofHomes/Satellite1-XMOS-Private
+    #   private: true
+    #   token: !secret xmos_github_token
+  firmware:
+    name: "XMOS Firmware Choice"
+  refresh:
+    name: "Refresh XMOS Firmware List"
+  install:
+    name: "Install Selected XMOS Firmware"
+  catalog:
+    name: "Available XMOS Firmware"
+  status:
+    name: "XMOS Firmware Install Status"
+  on_install_request:
+    - script.execute: xmos_catalog_install
+
+globals:
+  - id: xmos_catalog_resume_media
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+script:
+  # Audio stops before the download so the download has the most free memory and nothing is
+  # playing when the XMOS restarts.
+  - id: xmos_catalog_install
+    mode: single
+    then:
+      - lambda: |-
+          id(xmos_catalog_resume_media) =
+              id(external_media_player).state == media_player::MEDIA_PLAYER_STATE_PLAYING;
+      - script.execute: prepare_xmos_direct_flash
+      - script.wait: prepare_xmos_direct_flash
+      - if:
+          condition:
+            lambda: return id(xmos_audio_shutdown_complete);
+          then:
+            - lambda: id(xmos_catalog).begin_install();
+          else:
+            - lambda: id(xmos_catalog).abort_install("audio did not stop");
+      - wait_until:
+          condition:
+            lambda: return !id(xmos_catalog).busy();
+          timeout: 300s
+      - script.execute: xmos_catalog_restore_audio
+      - script.wait: xmos_catalog_restore_audio
+      # Music Assistant resumes its queue on play. Media started by URL can't be resumed:
+      # stopping it cleared its playlist.
+      - if:
+          condition:
+            lambda: return id(xmos_catalog_resume_media);
+          then:
+            # The built-in image counts as installed before the XMOS has restarted.
+            - wait_until:
+                condition:
+                  lambda: return id(xmos_audio_ready);
+                timeout: 30s
+            - if:
+                condition:
+                  lambda: return id(xmos_audio_ready);
+                then:
+                  # Lets refresh_audio_output activate the DAC first.
+                  - delay: 1s
+                  - media_player.play: external_media_player
+
+  # on_xmos_connected restores audio once a flashed XMOS boots; this covers attempts that
+  # ended without restarting the XMOS.
+  - id: xmos_catalog_restore_audio
+    mode: restart
+    then:
+      - delay: 3s
+      - if:
+          condition:
+            lambda: |-
+              return !id(xmos_audio_ready) && !id(xmos_catalog).busy() &&
+                     id(satellite1_id).is_xmos_connected();
+          then:
+            - lambda: id(xmos_audio_ready) = true;
+            - script.execute: refresh_audio_output
+            - script.execute: start_micro_wake_word
+            - logger.log: "Restored audio after an XMOS firmware install attempt"
+
+wifi:
+  on_connect:
+    # This package uses about 2 KB more internal RAM than satellite1.yaml, so when playback
+    # resumes while BLE is still enabled after boot, the speaker task can fail to start. The
+    # speaker then refuses to start again until its error is cleared.
+    - wait_until:
+        not: ble.enabled
+    - delay: 1s
+    - if:
+        condition:
+          lambda: return id(i2s_audio_speaker).status_has_error();
+        then:
+          - lambda: id(i2s_audio_speaker).status_clear_error();
+          - logger.log: "Cleared the speaker error left by low memory during boot"
+    # Leaves the firmware update check in satellite1.yaml its own turn at the network.
+    - delay: 10s
+    - lambda: id(xmos_catalog).request_auto_refresh();
+
+interval:
+  - interval: 1h
+    then:
+      - if:
+          condition:
+            not: ble.enabled
+          then:
+            - lambda: id(xmos_catalog).request_auto_refresh();
+
+api:
+  actions:
+    # xmos_version: "builtin" or a version listed by the "Available XMOS Firmware" sensor.
+    # Not "version": action variables can't share a name with an integration.
+    - action: install_xmos_firmware
+      variables:
+        xmos_version: string
+      then:
+        - lambda: id(xmos_catalog).request_install(xmos_version);
+    - action: refresh_xmos_firmware_list
+      then:
+        - lambda: id(xmos_catalog).request_refresh();
