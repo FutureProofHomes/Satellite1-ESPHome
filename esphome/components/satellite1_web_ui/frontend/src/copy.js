@@ -247,6 +247,13 @@ export const HINTS = {
   xmos_flash:
     "Restarts the device, then rewrites the audio chip's firmware from the image embedded in this build. The device is deaf and mute until the flash finishes, which takes about a minute after the restart. Do not cut power.",
 
+  /* The developer firmware picker, only on config/satellite1.dev.yaml builds. The surprising facts
+     are that picking is the install, and that a pick outlives restarts. */
+  xmos_install:
+    "Developer builds only. Lists the audio chip firmware published on the Satellite1-XMOS GitHub releases, beside the built-in copy this firmware carries. Picking one installs it - the device itself doesn't restart - and it stays installed across restarts until you pick Built-in again.",
+  xmos_refresh:
+    "Checks the Satellite1-XMOS GitHub releases for new firmware now, pre-releases included, instead of waiting for the device's own hourly check. New versions appear in the list above.",
+
   // xmos_erase was here. The row it explained is gone from the app: the full erase is a recovery
   // tool - it restarts the device, erases the audio chip's entire flash and reinstalls the embedded
   // firmware - and the Reflash row already covers the case a customer has. The ESPHome button still
@@ -1001,6 +1008,27 @@ export const TEXT = {
   crash_erase_row: "Crash history",
   crash_erase: "Erase history",
 
+  /* Recovery: the developer XMOS firmware picker. The dropdown's options are the device's own
+     ("Built-in (v1.1.0-alpha.0)", then each version). The stage lines replace the dropdown while an
+     install runs, above one progress bar; %s is the version, or xf_builtin_long. The install's
+     result is the device's own sentence ("Installed v1.1.0-dev.110", "Failed: ..."), shown as sent. */
+  xf_row: "Install firmware",
+  xf_builtin_long: "the built-in firmware (%s)",
+  xf_yes: "Yes, install",
+  xf_stopping: "Stopping audio\u2026",
+  xf_downloading: "Downloading %s\u2026",
+  xf_flashing: "Flashing %s\u2026",
+  xf_starting: "Starting %s\u2026",
+  xf_recovering: "That firmware didn't take. Restoring the built-in firmware\u2026",
+  xf_checking: "Checking GitHub for new firmware\u2026",
+  xf_list_error: "Couldn't check GitHub: %s",
+  xf_not_started: "The device didn't start the install. Try again in a moment.",
+  xf_refresh_row: "Firmware list",
+  xf_refresh: "Refresh",
+  xf_checked_new: "Found new XMOS firmware on GitHub",
+  xf_checked_none: "No new XMOS firmware on GitHub",
+  xf_check_not_started: "The device didn't start the check. Try again in a moment.",
+
   /* The community links row at the very bottom of Diagnostics, under ESP32 Recovery: the
      organisation's documentation, GitHub, YouTube and Discord. One word each - the glyph beside it
      carries the rest - and the aria label names the <nav> for screen readers, since the row itself
@@ -1194,6 +1222,11 @@ export const CONFIRM = {
   xmos_flash: {
     t: "Reflash the audio chip?",
     b: "Restarts the device, then rewrites the audio chip's firmware from a known-good copy. The flash takes about a minute after the restart, the microphones and speaker are silent throughout, and the device must stay powered.",
+  },
+  // Opened by the picker itself, so the title carries what was picked (%s, as in xf_builtin_long).
+  xmos_install: {
+    t: "Install %s?",
+    b: "Are you sure? The microphones and speaker stop for about a minute while the audio chip is flashed, then Music Assistant playback picks up where it left off. The device itself doesn't restart, and if the new firmware doesn't start, the built-in one is put back automatically. Keep the device powered.",
   },
   restart: {
     t: "Restart this device?",

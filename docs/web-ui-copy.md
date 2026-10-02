@@ -129,6 +129,8 @@ looking at a third of them was the more expensive problem.
 | `ha_ingress` | Home Assistant card title | Puts your Satellite1s in Home Assistant's sidebar, proxied through Home Assistant itself - so it works wherever Home Assistant does, on your local network or over a public https address. hass_ingress is a third-party integration, not part of this firmware. The YAML covers every Satellite1 Home Assistant knows about: this device is the one visible "Satellite1 Fleet" entry, the rest sit hidden behind it, and the device switcher reaches them all from inside the panel. Anyone who can open the panel reaches the devices' sign-in pages through it; the YAML limits the panel to admin users - remove the require_admin line to show it to everyone. |
 | `xmos` | XMOS firmware, and the XMOS Recovery card title | The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's. |
 | `xmos_flash` | Reflash XMOS vX.X.X | Rewrites the audio chip's firmware from the image embedded in this build. The device is deaf and mute until it finishes, which takes about a minute. Do not cut power. |
+| `xmos_install` | Install firmware | Developer builds only. Lists the audio chip firmware published on the Satellite1-XMOS GitHub releases, beside the built-in copy this firmware carries. Picking one installs it - the device itself doesn't restart - and it stays installed across restarts until you pick Built-in again. |
+| `xmos_refresh` | Firmware list | Checks the Satellite1-XMOS GitHub releases for new firmware now, pre-releases included, instead of waiting for the device's own hourly check. New versions appear in the list above. |
 | `radar_recovery` | LD2410 / LD2450 Recovery card title | The radar module's own recovery actions. Restart just power-cycles the module. Factory reset erases the settings stored on the module itself - detection range, gate thresholds, zones, everything tuned on the Presence page - and does not touch this device's settings. |
 | `maintenance` | ESP32 Recovery card title | Ways to restart or reset this device. None of them are part of everyday use. Restart is always safe - your settings survive it. Factory reset is the only row here that erases anything. |
 | `safe_mode` | Safe mode | Restarts with everything but Wi-Fi and the updater switched off. Use it when the device is crash-looping too fast to accept an update. |
@@ -180,6 +182,33 @@ at all rather than merely not showing it; the ESPHome button still exists for a 
 `xmos_flash`'s row label carries the version currently on the chip, from `Satellite1::status_string()`. That
 returns `v1.2.3` when the chip is talking and `XMOS not responding` or `Flashing Mode` when it is not, so
 the label falls back to a bare "Reflash XMOS" rather than printing a status where a version should be.
+
+The `xf_row` "Install firmware" and `xf_refresh_row` "Firmware list" rows ship in every build of the
+app but are drawn only on developer firmware, built from `config/satellite1.dev.yaml`: they read the
+`xmos_firmware_catalog` entities, and only `config/common/web_ui_xmos_catalog.yaml` maps them into
+the entity table, so on any other firmware they are absent and the rows never appear. The dropdown's
+options are the device's own — "Built-in (v1.1.0-alpha.0)" first, then every published version —
+with the one the chip is running selected. Picking a different one is the install: there is no
+separate button, the pick opens `CONFIRM.xmos_install` directly (proceed button `xf_yes` "Yes,
+install"), and Cancel leaves the dropdown on the running firmware. While the install runs the rows
+give way to one progress bar labelled by stage: `xf_stopping` "Stopping audio…", `xf_downloading`
+"Downloading %s…", `xf_flashing` "Flashing %s…", `xf_starting` "Starting %s…", and — on an amber
+bar — `xf_recovering` "That firmware didn't take. Restoring the built-in firmware…". In those labels
+and in the modal title the built-in copy reads as `xf_builtin_long` "the built-in firmware (%s)".
+The stages share one bar, weighted by how long each takes, rather than each restarting from zero.
+Under the install row: the device's own result line once an install ends (muted on success, red on
+failure), and `xf_not_started` "The device didn't start the install. Try again in a moment." when
+ten seconds pass after Yes without the device starting it (it ignores a request while another flash
+is running).
+
+The Firmware list row's `xf_refresh` "Refresh" button checks GitHub now rather than at the device's
+next hourly check. While a check runs — this one or the device's own — `xf_checking` "Checking
+GitHub for new firmware…" sits under it; a check that ends in an error shows `xf_list_error`
+"Couldn't check GitHub: %s" with the device's reason. A check you started and that succeeded ends in
+a toast: `xf_checked_new` "Found new XMOS firmware on GitHub" when the list changed, otherwise
+`xf_checked_none` "No new XMOS firmware on GitHub". `xf_check_not_started` "The device didn't start
+the check. Try again in a moment." covers a press the device ignored (during an install, or within
+two seconds of the last check).
 
 Two cards were renamed in the September 2026 pass: **Log** became **Logs**, and **Sat1 Device** became
 **ESP32 Recovery** (briefly "Maintenance", then "Power & Recovery") — the final name pairs it with
@@ -859,6 +888,7 @@ back out.
 | --- | --- | --- |
 | `update` | Install this update? | The device downloads the new firmware and restarts itself when it finishes. The assistant and any audio stop until it is back - a few minutes. Keep it powered the whole time. |
 | `xmos_restart` | Restart the audio chip? | The microphones and speaker drop out for a few seconds while it comes back. Nothing is erased and no settings change. |
+| `xmos_install` | Install %s? | Are you sure? The microphones and speaker stop for about a minute while the audio chip is flashed, then Music Assistant playback picks up where it left off. The device itself doesn't restart, and if the new firmware doesn't start, the built-in one is put back automatically. Keep the device powered. |
 | `xmos_flash` | Reflash the audio chip? | Rewrites the audio chip's firmware from a known-good copy. It takes about a minute, the microphones and speaker are silent throughout, and the device must stay powered. |
 | `pw_change` | Change the password? | Every other signed-in browser, pasted sign-in link and QR code stops working the moment it changes. This browser stays signed in, and Home Assistant's Web UI Password sensor shows the new value. |
 | `radar_restart` | Restart the radar module? | Presence detection drops out for a few seconds while the module comes back. Nothing is erased and no settings change. |

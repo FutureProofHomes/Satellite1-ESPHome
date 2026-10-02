@@ -15,14 +15,19 @@ xmos_firmware_catalog:
     #   private: true
     #   token: !secret xmos_github_token
   firmware:
+    id: xmos_fw_choice
     name: "XMOS Firmware Choice"
   refresh:
+    id: xmos_fw_refresh
     name: "Refresh XMOS Firmware List"
   install:
+    id: xmos_fw_install
     name: "Install Selected XMOS Firmware"
   catalog:
+    id: xmos_fw_list
     name: "Available XMOS Firmware"
   status:
+    id: xmos_fw_status
     name: "XMOS Firmware Install Status"
   on_install_request:
     - script.execute: xmos_catalog_install

@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CONFIRM, HINTS, TEXT } from '../copy.js';
-import { entity, entityPath, pathFor, post, request } from '../lib/device.js';
-import { takeIntent } from '../lib/toast.js';
+import { entity, entityPath, pathFor, post, request, requestJson } from '../lib/device.js';
+import { takeIntent, toast } from '../lib/toast.js';
 import type { Ctx } from '../ctx';
-import { ampMode, gainDbv, ingressYaml, kb, mb, uptime, usbFact } from '../lib/settings.js';
+import { ampMode, gainDbv, ingressYaml, kb, mb, uptime, usbFact, xmosChoices, xmosLabel, xmosProgress, xmosStatus } from '../lib/settings.js';
 import { MSlider } from './MSlider';
-import { DxCard, DxConfirm, DxFact, DxFacts, DxRow, DxSelect, useCopied } from './settings/dx';
+import { DxCard, DxConfirm, DxConfirmDialog, DxFact, DxFacts, DxRow, DxSelect, useCopied } from './settings/dx';
 import { Switch } from './controls';
 import { CrashCard, LogsCard } from './settings/Logs';
 import { AuthTokenCard, ChangePasswordCard } from './settings/Security';
@@ -248,6 +248,139 @@ function SpeakerAmpCard({
 }
 
 /**
+ * The developer XMOS firmware picker, drawn only by firmware built from config/satellite1.dev.yaml:
+ * web_ui_xmos_catalog.yaml is what maps the xmos_fw_* entities, so on any other build they are
+ * absent and this renders nothing. Choosing a firmware is the install: the dropdown opens the
+ * confirm itself, and Yes sets the select and presses Install, then swaps the row for one progress
+ * bar driven by the status sensor. An install started from Home Assistant shows the same bar.
+ *
+ * web_server sends a select's options only when the event stream opens, so the list is re-read
+ * whenever the catalog sensor says it changed. The device ignores an install while another flash
+ * runs, so a Yes it never acts on is reported after ten seconds rather than leaving the bar at
+ * "Stopping audio" for good. Refresh is the same press as Home Assistant's button, and is ignored
+ * the same way during an install or within two seconds of the last one.
+ */
+function XmosFirmwareRow({
+  ctx
+}: {
+  ctx: Ctx;
+}) {
+  const choice = entity(ctx, 'xmos_fw_choice');
+  const status = entity(ctx, 'xmos_fw_status');
+  const listText: string | undefined = entity(ctx, 'xmos_fw_list')?.value;
+  const choicePath = pathFor(ctx, 'xmos_fw_choice');
+  const installPath = pathFor(ctx, 'xmos_fw_install', 'press');
+  const refreshPath = pathFor(ctx, 'xmos_fw_refresh', 'press');
+  const [fresh, setFresh] = useState<string[] | null>(null);
+  const [ask, setAsk] = useState<string | null>(null);
+  const [pending, setPending] = useState<{
+    status: string;
+  } | null>(null);
+  const [stalled, setStalled] = useState(false);
+  const [check, setCheck] = useState<{
+    running: boolean;
+    status: string;
+    list: string | undefined;
+  } | null>(null);
+  const [checkStalled, setCheckStalled] = useState(false);
+  const pick = useRef<HTMLButtonElement>(null);
+  const statusText: string = status?.value ?? '';
+  const st = xmosStatus(statusText);
+  useEffect(() => {
+    if (!check || !check.running && statusText === check.status) return;
+    if (st.refreshing) {
+      if (!check.running) setCheck({
+        ...check,
+        running: true
+      });
+      return;
+    }
+    setCheck(null);
+    if (check.running && !st.refreshError) toast({
+      kind: 'ok',
+      key: 'xf-checked',
+      ttl: 4000,
+      title: listText === check.list ? TEXT.xf_checked_none : TEXT.xf_checked_new
+    });
+  }, [check, statusText]);
+  useEffect(() => {
+    if (!check || check.running) return undefined;
+    const t = setTimeout(() => {
+      setCheck(null);
+      setCheckStalled(true);
+    }, 10000);
+    return () => clearTimeout(t);
+  }, [check]);
+  useEffect(() => {
+    if (!choicePath) return undefined;
+    let live = true;
+    requestJson(`${choicePath}?detail=all`).then((j: any) => {
+      if (live && Array.isArray(j?.option)) setFresh(j.option);
+    }).catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [choicePath, listText]);
+  useEffect(() => {
+    if (pending && statusText !== pending.status) setPending(null);
+  }, [pending, statusText]);
+  useEffect(() => {
+    if (!pending) return undefined;
+    const t = setTimeout(() => {
+      setPending(null);
+      setStalled(true);
+    }, 10000);
+    return () => clearTimeout(t);
+  }, [pending]);
+  const all: string[] = fresh ?? choice?.option ?? [];
+  if (!choicePath || !installPath || !status || !all.length) return null;
+  const {
+    options,
+    value
+  } = xmosChoices(all, entity(ctx, 'xmos_firmware')?.value);
+  const progress = xmosProgress(st, !!pending);
+  const listError = st.refreshError || (listText?.startsWith('Unavailable: ') ? listText.slice(13) : null);
+  const refresh = () => {
+    setCheckStalled(false);
+    setCheck({
+      running: false,
+      status: statusText,
+      list: listText
+    });
+    post(refreshPath!).catch(() => {});
+  };
+  const install = (v: string) => {
+    setAsk(null);
+    setStalled(false);
+    setPending({
+      status: statusText
+    });
+    post(`${choicePath}/set?option=${encodeURIComponent(v)}`).then((r: any) => r.ok && post(installPath)).catch(() => {});
+  };
+  return <>
+      {progress ? <div className="dx-row dx-xf" role="status">
+          <div className="dx-xf-head"><span>{progress.label}</span><span className="dx-xf-pct">{progress.pct}%</span></div>
+          <div className={`dx-progress${progress.warn ? ' warn' : ''}`} role="progressbar" aria-label={progress.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.pct}>
+            <div style={{
+          width: `${progress.pct}%`
+        }} />
+          </div>
+        </div> : <DxRow label={TEXT.xf_row} hint={HINTS.xmos_install}>
+          <DxSelect value={value} options={options} label={TEXT.xf_row} buttonRef={pick} onChange={v => v !== value && setAsk(v)} />
+        </DxRow>}
+      {stalled && <p className="dx-err" role="alert">{TEXT.xf_not_started}</p>}
+      {!progress && !stalled && st.result && <p className={st.ok ? 'dx-muted dx-sm' : 'dx-err'}>{st.result}</p>}
+      {!progress && refreshPath && <DxRow label={TEXT.xf_refresh_row} hint={HINTS.xmos_refresh}>
+          <button className="dx-btn" disabled={!!check || st.refreshing} onClick={refresh}>{TEXT.xf_refresh}</button>
+        </DxRow>}
+      {!progress && st.refreshing && <p className="dx-muted dx-sm">{TEXT.xf_checking}</p>}
+      {!progress && !st.refreshing && listError && <p className="dx-err">{TEXT.xf_list_error.replace('%s', listError)}</p>}
+      {!progress && checkStalled && <p className="dx-err" role="alert">{TEXT.xf_check_not_started}</p>}
+      <DxConfirmDialog open={ask !== null} title={CONFIRM.xmos_install.t.replace('%s', xmosLabel(options, ask))} body={CONFIRM.xmos_install.b} confirmLabel={TEXT.xf_yes} returnFocus={pick} onCancel={() => setAsk(null)} onConfirm={() => ask !== null && install(ask)} />
+    </>;
+}
+
+/**
  * Only the buttons the firmware maps (web_ui.yaml's entity table) are drawn; erase_xmos_flash is
  * deliberately unmapped, for the reason recorded beside it in config/common/web_ui.yaml. The radar
  * card uses satellite1_radar's generic buttons, which exist on whichever module was detected,
@@ -303,6 +436,7 @@ function RecoveryCards({
           {xmosFlash && <DxRow label="Reflash XMOS firmware" hint={HINTS.xmos_flash}>
               <DxConfirm label="Reflash" ariaLabel="Reflash XMOS firmware" danger title={CONFIRM.xmos_flash.t} body={CONFIRM.xmos_flash.b} confirmLabel="Reflash now" onConfirm={() => post(xmosFlash)} />
             </DxRow>}
+          <XmosFirmwareRow ctx={ctx} />
         </DxCard>}
       {radar && <DxCard title={`${radar} Radar Control`} collapsible defaultOpen={true} hint={HINTS.radar_recovery}>
           <DxFacts>

@@ -3,6 +3,7 @@
 packages:
   base_image: !include satellite1.yaml
   xmos_catalog: !include common/xmos_firmware_catalog.yaml
+  xmos_catalog_web_ui: !include common/web_ui_xmos_catalog.yaml
 
 external_components:
   - source:

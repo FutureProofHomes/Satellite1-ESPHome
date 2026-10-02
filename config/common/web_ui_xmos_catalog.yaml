@@ -1,0 +1,31 @@
+# Web UI half of the developer XMOS firmware picker, included by config/satellite1.dev.yaml after
+# xmos_firmware_catalog.yaml. Adds the picker to Settings > Recovery, which draws it only when
+# all of these keys are in the entity table, so no other build shows it.
+satellite1_web_ui:
+  entities:
+    selects:
+      xmos_fw_choice: xmos_fw_choice
+    buttons:
+      xmos_fw_install: xmos_fw_install
+      xmos_fw_refresh: xmos_fw_refresh
+    text_sensors:
+      xmos_fw_list: xmos_fw_list
+      xmos_fw_status: xmos_fw_status
+
+xmos_firmware_catalog:
+  # Home Assistant reads select options only when it connects, so a changed firmware list asks it to
+  # reload this device's config entry, as mmwave.yaml does for new radar zones. If Home Assistant is
+  # not connected there is nothing to do: its next connection reads the new options anyway.
+  on_choices_changed:
+    - if:
+        condition: api.connected
+        then:
+          - logger.log: "XMOS firmware choices changed; asking Home Assistant to reload this device"
+          - homeassistant.service:
+              service: homeassistant.reload_config_entry
+              data_template:
+                entry_id: >-
+                  ${tts_self_entry_jinja}
+                  {{ ns.entry }}
+              variables:
+                mac: !lambda 'return esphome::get_mac_address_pretty();'

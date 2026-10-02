@@ -22,6 +22,11 @@ import {
   stamp,
   uptime,
   usbFact,
+  xmosBuiltin,
+  xmosChoices,
+  xmosLabel,
+  xmosProgress,
+  xmosStatus,
 } from "../src/lib/settings.js";
 
 test("sizes and durations read the way the design writes them", () => {
@@ -138,6 +143,61 @@ test("the ingress YAML puts every routable peer behind this device's panel", () 
   assert.ok(lines.includes("    url: http://192.168.4.32"));
   assert.ok(lines.includes("      host: 192.168.4.35"));
   assert.equal(lines.filter((l) => l.startsWith("    parent: satellite1_a4c2f8")).length, 2);
+});
+
+// The "XMOS Firmware Choice" select's options, as XmosFirmwareCatalog::update_select_options_
+// builds them: the built-in image first, then each published version.
+const XF_OPTIONS = ["Built-in (v1.1.0-alpha.0)", "v1.1.0-dev.110", "v1.1.0-dev.109"];
+
+test("the XMOS picker selects what the chip runs, not what the select last held", () => {
+  assert.equal(xmosBuiltin(XF_OPTIONS), "v1.1.0-alpha.0");
+  assert.equal(xmosChoices(XF_OPTIONS, "v1.1.0-dev.110").value, "v1.1.0-dev.110");
+  // Satellite1::status_string() drops a zero build number.
+  assert.equal(xmosChoices(XF_OPTIONS, "v1.1.0-alpha").value, "Built-in (v1.1.0-alpha.0)");
+  // Running something the list no longer carries, or a chip that isn't reporting a version.
+  assert.equal(xmosChoices(XF_OPTIONS, "v1.0.9").value, "v1.0.9");
+  assert.equal(xmosChoices(XF_OPTIONS, "Flashing Mode").value, "\u2014");
+  assert.equal(xmosChoices(XF_OPTIONS, undefined).value, "\u2014");
+  assert.equal(xmosLabel(XF_OPTIONS, XF_OPTIONS[0]), "the built-in firmware (v1.1.0-alpha.0)");
+  assert.equal(xmosLabel(XF_OPTIONS, "v1.1.0-dev.109"), "v1.1.0-dev.109");
+});
+
+test("the XMOS install status sensor reads as a stage", () => {
+  assert.deepEqual(xmosStatus("Stopping audio to install v1.1.0-dev.109..."), { stage: "requested", target: "v1.1.0-dev.109", pct: 0 });
+  assert.deepEqual(xmosStatus("Downloading v1.1.0-dev.109 (45%)"), { stage: "downloading", target: "v1.1.0-dev.109", pct: 45 });
+  assert.deepEqual(xmosStatus("Flashing built-in v1.1.0-alpha.0 (3%)"), { stage: "flashing", target: "built-in v1.1.0-alpha.0", pct: 3 });
+  assert.deepEqual(xmosStatus("Starting v1.1.0-dev.109..."), { stage: "starting", target: "v1.1.0-dev.109", pct: 0 });
+  assert.deepEqual(xmosStatus("Restoring built-in v1.1.0-alpha.0..."), { stage: "recovering", target: "v1.1.0-alpha.0", pct: 0 });
+  assert.deepEqual(xmosStatus("Restoring built-in v1.1.0-alpha.0 (60%)"), { stage: "recovering", target: "v1.1.0-alpha.0", pct: 60 });
+  assert.deepEqual(xmosStatus("Installed v1.1.0-dev.109"), { stage: "idle", result: "Installed v1.1.0-dev.109", ok: true });
+  assert.equal(xmosStatus("Failed: the install did not start").ok, false);
+  assert.equal(xmosStatus("Refreshing firmware list...").refreshing, true);
+  assert.deepEqual(xmosStatus("Refresh failed: FutureProofHomes/Satellite1-XMOS: HTTP 403"), {
+    stage: "idle",
+    refreshing: false,
+    refreshError: "FutureProofHomes/Satellite1-XMOS: HTTP 403",
+  });
+  assert.deepEqual(xmosStatus("Idle"), { stage: "idle", refreshing: false });
+  assert.deepEqual(xmosStatus(undefined), { stage: "idle", refreshing: false });
+});
+
+test("an XMOS install moves one bar forward through every stage", () => {
+  const at = (text) => xmosProgress(xmosStatus(text), false);
+  assert.equal(at("Idle"), null);
+  assert.deepEqual(xmosProgress(xmosStatus("Idle"), true), { label: "Stopping audio\u2026", pct: 0 });
+  assert.deepEqual(at("Stopping audio to install v1.1.0-dev.109..."), { label: "Stopping audio\u2026", pct: 0 });
+  assert.deepEqual(at("Downloading v1.1.0-dev.109 (50%)"), { label: "Downloading v1.1.0-dev.109\u2026", pct: 13 });
+  assert.deepEqual(at("Flashing v1.1.0-dev.109 (0%)"), { label: "Flashing v1.1.0-dev.109\u2026", pct: 20 });
+  assert.deepEqual(at("Flashing v1.1.0-dev.109 (100%)"), { label: "Flashing v1.1.0-dev.109\u2026", pct: 95 });
+  assert.deepEqual(at("Starting v1.1.0-dev.109..."), { label: "Starting v1.1.0-dev.109\u2026", pct: 97 });
+  // The built-in image has nothing to download, so its flash spans the bar.
+  assert.deepEqual(at("Flashing built-in v1.1.0-alpha.0 (50%)"), {
+    label: "Flashing the built-in firmware (v1.1.0-alpha.0)\u2026",
+    pct: 52,
+  });
+  assert.deepEqual(at("Restoring built-in v1.1.0-alpha.0 (40%)"), { label: TEXT.xf_recovering, pct: 40, warn: true });
+  // A finished install's result is not a stage.
+  assert.equal(at("Installed v1.1.0-dev.109"), null);
 });
 
 test("a device renamed off the mac-suffix convention gets its own entry only", () => {

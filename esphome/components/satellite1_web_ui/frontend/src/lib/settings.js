@@ -61,6 +61,96 @@ export function ampMode(amp) {
 export const gainDbv = (v) => `${(11 + v / 2).toFixed(1)} dBV`;
 
 /* ------------------------------------------------------------------ */
+/* The XMOS firmware picker                                            */
+/* ------------------------------------------------------------------ */
+
+// The picker reads the developer firmware's xmos_firmware_catalog entities. The strings matched
+// here are that component's own, from xmos_firmware_catalog.cpp: the first select option is
+// "Built-in (<version>)", and the status sensor's wording is parsed below.
+const XF_VERSION = /^v?(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc|dev))?(?:\.(\d+))?$/;
+
+/** One XMOS version, however it is written: Satellite1::status_string() drops a zero build number. */
+function xmosVersionKey(v) {
+  const m = XF_VERSION.exec(String(v || "").trim());
+  return m ? `${+m[1]}.${+m[2]}.${+m[3]}-${m[4] || ""}.${+(m[5] || 0)}` : null;
+}
+
+const sameXmosVersion = (a, b) => {
+  const ka = xmosVersionKey(a);
+  return ka !== null && ka === xmosVersionKey(b);
+};
+
+/** The built-in image's version, from the select's first option. */
+export const xmosBuiltin = (options) => /\((v[^)]+)\)$/.exec(options?.[0] || "")?.[1] ?? "";
+
+/**
+ * The firmware select's options with the one the chip is running as the value - not the select's
+ * own value, which is only what Home Assistant last picked for its Install button. A running
+ * version the list doesn't carry shows as itself, and no reading at all as a dash.
+ */
+export function xmosChoices(options, running) {
+  const builtin = xmosBuiltin(options);
+  const match = builtin && sameXmosVersion(running, builtin) ? options[0] : options.slice(1).find((o) => sameXmosVersion(o, running));
+  return { options, value: match ?? (xmosVersionKey(running) ? running : "\u2014") };
+}
+
+/** An option, or a status message's target, in prose: the built-in copy is named as such. */
+export function xmosLabel(options, v) {
+  if (v === options?.[0]) return TEXT.xf_builtin_long.replace("%s", xmosBuiltin(options));
+  if (String(v).startsWith("built-in ")) return TEXT.xf_builtin_long.replace("%s", v.slice(9));
+  return v;
+}
+
+const XF_STATUS = [
+  ["requested", /^Stopping audio to install (.+)\.\.\.$/],
+  ["downloading", /^Downloading (.+) \((\d+)%\)$/],
+  ["flashing", /^Flashing (.+) \((\d+)%\)$/],
+  ["starting", /^Starting (.+)\.\.\.$/],
+  ["recovering", /^Restoring built-in (\S+?)(?:\.\.\.| \((\d+)%\))$/],
+];
+
+/**
+ * The install status sensor's text as a stage. `result` is a finished install's outcome, which the
+ * sensor keeps showing until the next refresh or install; anything else idle reads as no stage.
+ */
+export function xmosStatus(text) {
+  const s = String(text || "");
+  for (const [stage, re] of XF_STATUS) {
+    const m = re.exec(s);
+    if (m) return { stage, target: m[1], pct: Math.min(100, +(m[2] || 0)) };
+  }
+  if (s.startsWith("Installed ")) return { stage: "idle", result: s, ok: true };
+  if (s.startsWith("Failed: ")) return { stage: "idle", result: s, ok: false };
+  if (s.startsWith("Refresh failed: ")) return { stage: "idle", refreshing: false, refreshError: s.slice(16) };
+  return { stage: "idle", refreshing: s === "Refreshing firmware list..." };
+}
+
+// Where each stage sits on the one bar, weighted by how long it takes on the device: about five
+// seconds to stop audio, a few to download, most of a minute to flash, a few for the chip to start.
+const XF_STAGES = { requested: [0, 5], downloading: [5, 20], flashing: [20, 95], starting: [97, 97] };
+const XF_LABELS = {
+  requested: "xf_stopping",
+  downloading: "xf_downloading",
+  flashing: "xf_flashing",
+  starting: "xf_starting",
+};
+
+/**
+ * The install as one bar, because each stage's own percentage restarting from zero reads as going
+ * backwards. The built-in image has no download, so its flash spans the bar. `pending` covers the
+ * moment between Yes and the device reporting the install. Null when nothing is running.
+ */
+export function xmosProgress(status, pending) {
+  if (status.stage === "idle") return pending ? { label: TEXT.xf_stopping, pct: 0 } : null;
+  if (status.stage === "recovering") return { label: TEXT.xf_recovering, pct: status.pct, warn: true };
+  const builtin = status.target.startsWith("built-in ");
+  const [from, to] = status.stage === "flashing" && builtin ? [5, 99] : XF_STAGES[status.stage];
+  const moving = status.stage === "downloading" || status.stage === "flashing";
+  const label = TEXT[XF_LABELS[status.stage]].replace("%s", xmosLabel(null, status.target));
+  return { label, pct: Math.round(from + (moving ? ((to - from) * status.pct) / 100 : 0)) };
+}
+
+/* ------------------------------------------------------------------ */
 /* The log                                                             */
 /* ------------------------------------------------------------------ */
 

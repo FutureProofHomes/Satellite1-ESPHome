@@ -139,21 +139,44 @@ export function DxConfirm({
 }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
-  const cancel = useRef<HTMLButtonElement>(null);
   return <>
       <button ref={trigger} className={`dx-btn${solid ? ' solid' : ''}${danger ? ' danger' : ''}`} disabled={disabled} aria-label={ariaLabel} onClick={() => setOpen(true)}>{label}</button>
-      <Presence>{open && <Drawer label={title} role="alertdialog" initialFocus={cancel} returnFocus={trigger} onClose={() => setOpen(false)} className="dx-modal">
-            <p className="dx-modal-title">{title}</p>
-            <p className="dx-modal-body">{body}</p>
-            <div className="dx-modal-actions">
-              <button ref={cancel} className="dx-btn" onClick={() => setOpen(false)}>{TEXT.cancel}</button>
-              <button className={`dx-btn solid${danger ? ' danger' : ''}`} onClick={() => {
-          setOpen(false);
-          onConfirm();
-        }}>{confirmLabel}</button>
-            </div>
-          </Drawer>}</Presence>
+      <DxConfirmDialog open={open} title={title} body={body} confirmLabel={confirmLabel} danger={danger} returnFocus={trigger} onCancel={() => setOpen(false)} onConfirm={() => {
+      setOpen(false);
+      onConfirm();
+    }} />
     </>;
+}
+
+/** DxConfirm's dialog on its own, for a confirm something other than a button opens. */
+export function DxConfirmDialog({
+  open,
+  title,
+  body,
+  confirmLabel,
+  danger = false,
+  returnFocus,
+  onCancel,
+  onConfirm
+}: {
+  open: boolean;
+  title: string;
+  body: string;
+  confirmLabel: string;
+  danger?: boolean;
+  returnFocus?: React.RefObject<HTMLElement>;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const cancel = useRef<HTMLButtonElement>(null);
+  return <Presence>{open && <Drawer label={title} role="alertdialog" initialFocus={cancel} returnFocus={returnFocus} onClose={onCancel} className="dx-modal">
+        <p className="dx-modal-title">{title}</p>
+        <p className="dx-modal-body">{body}</p>
+        <div className="dx-modal-actions">
+          <button ref={cancel} className="dx-btn" onClick={onCancel}>{TEXT.cancel}</button>
+          <button className={`dx-btn solid${danger ? ' danger' : ''}`} onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </Drawer>}</Presence>;
 }
 
 /**
@@ -164,12 +187,14 @@ export function DxSelect({
   value,
   options,
   onChange,
-  label
+  label,
+  buttonRef
 }: {
   value: string;
   options: (string | [string, string])[];
   onChange: (v: string) => void;
   label?: string;
+  buttonRef?: React.RefObject<HTMLButtonElement>;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -189,7 +214,7 @@ export function DxSelect({
   const pairs = options.map(o => Array.isArray(o) ? o : [o, o]);
   const shown = pairs.find(([v]) => v === value)?.[1] ?? value;
   return <div ref={ref} className="dx-sel">
-      <button className={`dx-sel-btn${open ? ' open' : ''}`} aria-haspopup="listbox" aria-expanded={open} aria-label={label} onClick={() => setOpen(v => !v)}>
+      <button ref={buttonRef} className={`dx-sel-btn${open ? ' open' : ''}`} aria-haspopup="listbox" aria-expanded={open} aria-label={label} onClick={() => setOpen(v => !v)}>
         <span>{shown}</span>
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
           <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />

@@ -934,8 +934,13 @@ void XmosFirmwareCatalog::apply_refresh_results_(CatalogJob &job) {
   }
   ESP_LOGI(TAG, "Firmware list refreshed: %u image(s)%s%s", static_cast<unsigned>(this->entries_.size()),
            first_error.empty() ? "" : "; ", first_error.c_str());
-  if (this->install_state_ == InstallState::IDLE)
+  if (this->install_state_ != InstallState::IDLE)
+    return;
+  if (!first_error.empty()) {
+    this->set_status_("Refresh failed: " + first_error);
+  } else {
     this->set_status_(this->last_result_.empty() ? "Idle" : this->last_result_);
+  }
 }
 
 bool XmosFirmwareCatalog::rebuild_entries_() {
