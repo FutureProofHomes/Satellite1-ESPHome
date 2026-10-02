@@ -203,7 +203,7 @@ void EthernetComponent::ethernet_lazy_init_() {
       .command_bits = 0,
       .address_bits = 0,
       .dummy_bits = 0,
-      .mode = 0,
+      .mode = this->spi_mode_,
       .duty_cycle_pos = 0,
       .cs_ena_pretrans = 0,
       .cs_ena_posttrans = 0,
@@ -921,6 +921,8 @@ void EthernetComponent::set_cs_pin(uint8_t cs_pin) { this->cs_pin_ = cs_pin; }
 void EthernetComponent::set_interrupt_pin(uint8_t interrupt_pin) { this->interrupt_pin_ = interrupt_pin; }
 void EthernetComponent::set_reset_pin(uint8_t reset_pin) { this->reset_pin_ = reset_pin; }
 void EthernetComponent::set_clock_speed(int clock_speed) { this->clock_speed_ = clock_speed; }
+
+void EthernetComponent::set_spi_mode(uint8_t spi_mode) { this->spi_mode_ = spi_mode; }
 void EthernetComponent::set_interface(spi_host_device_t interface) { this->interface_ = interface; }
 #ifdef USE_ETHERNET_SPI_POLLING_SUPPORT
 void EthernetComponent::set_polling_interval(uint32_t polling_interval) { this->polling_interval_ = polling_interval; }
