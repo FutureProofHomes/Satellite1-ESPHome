@@ -33,20 +33,20 @@
   animation: mspin .9s linear infinite;
   pointer-events: none;
 }
-.mplay.busy::after { border-top-color: var(--orb-a, var(--accent2)); }
+.mplay.busy::after { border-top-color: var(--orb-ctl); }
 .madd-glyph { position: relative; display: inline-flex; }
 .madd button:disabled { cursor: default; }
 
 .mnote { margin: 0 0 10px; color: var(--muted); font-size: 12px; line-height: 1.45; }
 
-.mapanel-hint { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.mapanel-hint { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .mascan-btn { align-self: flex-start; padding: 0 14px; }
 .mascan-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 8px 12px; background: transparent; border: 1px solid var(--line); border-radius: 12px; text-align: left; font-size: 13px; }
-.mascan-row.on { border-color: var(--orb-a, var(--accent)); box-shadow: inset 0 0 0 .5px var(--orb-a, var(--accent)); }
+.mascan-row.on { border-color: var(--orb-ctl); box-shadow: inset 0 0 0 .5px var(--orb-ctl); }
 
 .search-spin { display: block; flex: none; width: 14px; height: 14px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; animation: mspin .9s linear infinite; }
 .search-status:has(.search-spin) { text-align: center; }
-.search-status .search-spin { width: 22px; height: 22px; border-width: 2.5px; border-color: var(--line); border-top-color: var(--orb-a, var(--accent)); margin: 8px auto 10px; }
+.search-status .search-spin { width: 22px; height: 22px; border-width: 2.5px; border-color: var(--line); border-top-color: var(--orb-ctl); margin: 8px auto 10px; }
 .search-empty .mapanel { width: 100%; text-align: left; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -55,5 +55,19 @@
   .mplay.busy::after,
   .madd .busy .madd-glyph::after,
   .search-spin { animation: none; border-color: currentColor; opacity: .4; }
-  .mplay.busy::after { border-color: var(--orb-a, var(--accent2)); }
+  .mplay.busy::after { border-color: var(--orb-ctl); }
 }
+
+/* The album's colour washes down from the top of the media drawers, as it runs across the bar. */
+.dw-panel.msheet, .dw-panel.mpanel, .dw-panel.search-drawer { background: linear-gradient(180deg, var(--tint) 0%, transparent 75%) var(--surface); }
+
+/* Search: its own rows run edge to edge, so the drawer drops its side padding. With the socket up it
+   opens at full height, so results arriving do not resize it under the finger. */
+.dw-panel.search-drawer { padding: 0; }
+.dw-panel.search-drawer > .dw-grab { margin: 0; }
+.dw-panel.search-drawer.tall { height: min(85dvh, calc(100dvh - var(--sat) - 16px)); }
+@media (min-width: 1024px) { .dw-panel.search-drawer.tall { height: min(720px, calc(100dvh - 64px)); } }
+
+.mspk-ico, .mbar-vol-ico { position: relative; display: inline-flex; color: var(--text); }
+.mspk-badge { position: absolute; top: -3px; right: -4px; min-width: 8px; height: 8px; border-radius: 999px; background: var(--orb-fill); color: #fff; font-size: 9px; font-weight: 700; font-style: normal; line-height: 12px; text-align: center; }
+.mspk-badge.n { min-width: 12px; height: 12px; padding: 0 2px; }

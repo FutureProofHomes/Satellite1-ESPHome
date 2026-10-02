@@ -8,7 +8,6 @@ import test from "node:test";
 import {
   addRecent,
   artThumb,
-  averageHsl,
   fmtTime,
   groupLabel,
   groupRows,
@@ -25,6 +24,7 @@ import {
   subOf,
   tintOf,
   toHsl,
+  vibrantHsl,
   wsPausedOf,
 } from "../src/lib/media.js";
 
@@ -205,17 +205,36 @@ test("the queue clock runs while playing and is clamped to the track", () => {
   assert.equal(queueClock(null, 0), null);
 });
 
-test("the tint is the artwork's average, clamped to a readable lightness", () => {
-  const [h, s, l] = toHsl(1, 0, 0);
-  assert.equal(h, 0);
-  assert.equal(s, 1);
-  assert.equal(l, 0.5);
-  assert.deepEqual(toHsl(0, 0, 0), [0, 0.04, 0.34]);
-  assert.deepEqual(toHsl(1, 1, 1), [0, 0.04, 0.72]);
-  const px = [255, 0, 0, 255, 0, 0, 255, 255];
-  assert.deepEqual(averageHsl(px), toHsl(0.5, 0, 0.5));
-  assert.equal(tintOf([30, 0.6, 0.45]), "hsla(30,60%,45%,.22)");
+test("hsl conversion", () => {
+  assert.deepEqual(toHsl(1, 0, 0), [0, 1, 0.5]);
+  assert.deepEqual(toHsl(0, 0, 0), [0, 0, 0]);
+  assert.deepEqual(toHsl(1, 1, 1), [0, 0, 1]);
+  assert.equal(toHsl(0, 0, 1)[0], 240);
+});
+
+const px = (...rgbs) => rgbs.flatMap(([r, g, b]) => [r, g, b, 255]);
+
+test("the tint is the artwork's most vivid colour family, not its average", () => {
+  // A red cover on a mostly black background: the average is a dark brown, the tint is red.
+  const cover = px(...Array(12).fill([8, 8, 8]), [220, 30, 40], [200, 20, 30], [235, 50, 60]);
+  const [h, s] = vibrantHsl(cover);
+  assert.ok(h >= 350 || h <= 5, `hue ${h}`);
+  assert.ok(s > 0.6);
+  // Greys, blacks and whites carry no vote.
+  assert.equal(vibrantHsl(px([0, 0, 0], [128, 128, 128], [255, 255, 255])), null);
+  // Transparent pixels are skipped.
+  assert.equal(vibrantHsl([255, 0, 0, 0]), null);
+  // A family split across a bucket edge still wins over a bigger single bucket's neighbour.
+  const split = px([255, 120, 0], [255, 120, 0], [255, 135, 0], [255, 135, 0], [40, 40, 245], [40, 40, 245], [40, 40, 245]);
+  assert.ok(vibrantHsl(split)[0] < 60);
+});
+
+test("the tint wash is floored and clamped per theme", () => {
   assert.equal(tintOf(null), "transparent");
+  assert.equal(tintOf([30, 0.6, 0.45]), "hsla(30,60%,45%,0.5)");
+  assert.equal(tintOf([30, 0.1, 0.1]), "hsla(30,45%,40%,0.5)");
+  assert.equal(tintOf([30, 1, 0.9], "light"), "hsla(30,90%,62%,0.42)");
+  assert.equal(tintOf([30, 0.6, 0.45], "light"), "hsla(30,60%,50%,0.42)");
 });
 
 test("search asks for every type under All and a real page under a pill", () => {

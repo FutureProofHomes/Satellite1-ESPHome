@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { HINTS } from '../copy.js';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { HINTS, TEXT } from '../copy.js';
 import { entity, pathFor, post } from '../lib/device.js';
 import type { Ctx, Orb } from '../ctx';
 import { Mic, MicOff } from '../icons';
 import { hexToRgb, hsvToRgb, isOn, orbView, pctTo255, rgbHue, ringPct } from '../lib/orb.js';
+import { tipDone } from '../lib/tips.js';
+import { Drawer, Presence } from './Drawer';
 const PARTICLE_COUNT = 720;
 const TWO_PI = Math.PI * 2;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
@@ -332,10 +333,7 @@ function LedRange({
     return () => el.removeEventListener('change', on);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return <label className="hue-label"><small className="muted" style={{
-      display: 'block',
-      marginBottom: 6
-    }}>{label}</small><span>{text(shown)}</span><input ref={input} className={'hue' + (className ? ' ' + className : '')} type="range" min={0} max={max} value={shown} onChange={e => setDraft(Number(e.currentTarget.value))} aria-label={ariaLabel} /></label>;
+  return <label className="hue-label"><small className="muted hue-cap">{label}</small><span>{text(shown)}</span><input ref={input} className={'hue' + (className ? ' ' + className : '')} type="range" min={0} max={max} value={shown} onChange={e => setDraft(Number(e.currentTarget.value))} aria-label={ariaLabel} /></label>;
 }
 const ORB_PRESETS = [{
   label: 'Adaptive',
@@ -373,40 +371,75 @@ const ORB_PRESETS = [{
 const hueFrom = (h: number) => `hsl(${h}, 70%, 70%)`;
 const hueTo = (h: number) => `hsl(${(h + 40) % 360}, 65%, 55%)`;
 const sizeFor = (w: number) => w >= 1024 ? 220 : w >= 640 ? 200 : 180;
+// The canvas keeps room the particles reach only at their widest - the speaking ripple and the
+// connecting ring both stop about 13% short of its edge - so that much of it may overlap the pills
+// above and the label below instead of standing as empty space around the sphere. It is transparent
+// there and lets clicks through, so it covers nothing.
+const ORB_OVERLAP = 0.1;
+// The tap target: the resting sphere's diameter (ParticlesOrb's baseRadius, 0.62 of the half-size),
+// so a tap counts where the orb is drawn and not in the transparent margin around it.
+const ORB_TAP = 0.62;
+const TAPPABLE = ['idle', 'listening', 'thinking', 'speaking'];
+/** How long each tip under a resting orb stays, and its crossfade (.orb-tips in home.css). */
+const TIP_MS = 7000;
+const TIP_FADE_MS = 450;
+
+/**
+ * The tip a resting orb shows, moving on every TIP_MS while the page is in view, and the one it is
+ * fading out from. The count carries across conversations, so the rotation resumes where it was
+ * rather than starting over each time the orb goes back to rest.
+ */
+function useTip(tips: string[], resting: boolean) {
+  const [n, setN] = useState(0);
+  const on = resting && tips.length > 0;
+  useEffect(() => {
+    if (!on) return;
+    const id = setInterval(() => {
+      if (!document.hidden) setN(k => k + 1);
+    }, TIP_MS);
+    return () => clearInterval(id);
+  }, [on]);
+  const tip = on ? tips[n % tips.length] : null;
+  const last = useRef<string | null>(null);
+  const [leaving, setLeaving] = useState<string | null>(null);
+  // Before paint, so the outgoing tip never misses a frame.
+  useLayoutEffect(() => {
+    const was = last.current;
+    last.current = tip;
+    if (!was || !tip || was === tip) return;
+    setLeaving(was);
+    const id = setTimeout(() => setLeaving(null), TIP_FADE_MS);
+    return () => clearTimeout(id);
+  }, [tip]);
+  return { tip, leaving: tip ? leaving : null };
+}
+
 /**
  * The assistant's orb: its state follows the phase the Home tab polls, its colours are the shell's
- * persisted `orb`, and the picker writes the LED ring. `onOrbColor` fires only on a person's pick,
- * so mounting never overwrites the saved choice.
+ * persisted `orb`, and the picker writes the LED ring and keeps it lit while open. `onOrbColor`
+ * fires only on a person's pick, so mounting never overwrites the saved choice. At rest, `tips`
+ * (orbTips) take the label's place; the label stays in the accessibility tree, so a screen reader
+ * hears the state change and not every tip.
  */
 export function VoiceOrb({
   ctx,
   phase,
   orb,
-  onOrbColor
+  onOrbColor,
+  onTalk,
+  tips = []
 }: {
   ctx: Ctx;
   phase: number | undefined;
   orb: Orb;
   onOrbColor: (from: string, to: string) => void;
+  onTalk?: () => void;
+  tips?: string[];
 }) {
   const [colorPanel, setColorPanel] = useState(false);
-  useEffect(() => {
-    if (colorPanel) document.body.classList.add('has-drawer');else document.body.classList.remove('has-drawer');
-    return () => document.body.classList.remove('has-drawer');
-  }, [colorPanel]);
-  useEffect(() => {
-    if (!colorPanel) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setColorPanel(false);
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [colorPanel]);
   const [sel, setSel] = useState(() => ORB_PRESETS.find(p => p.from === orb.a && p.to === orb.b)?.label ?? 'Custom');
   const [customHue, setCustomHue] = useState(() => Number(/^hsl\(\s*([\d.]+)/.exec(orb.a)?.[1] ?? 290));
   const [orbSize, setOrbSize] = useState(180);
-  const orbPanelRef = useRef<HTMLElement>(null);
-  const orbDragStartY = useRef<number | null>(null);
   useEffect(() => {
     const on = () => setOrbSize(sizeFor(window.innerWidth));
     on();
@@ -416,7 +449,27 @@ export function VoiceOrb({
   const mute = entity(ctx, 'mute_mics');
   const muted = isOn(mute);
   const view = orbView(phase, ctx.connected, muted);
+  // The sphere is the action button's press-to-talk (common/web_ui_assist.yaml), on firmware that
+  // has it - `onTalk` is the Home tab's, which knows whose pipeline the open tab is. Not while muted,
+  // and not while Home Assistant is gone ("Not ready") or the page has lost the device - the device
+  // would refuse, and a tap that does nothing reads as a broken orb.
+  const talk = !!onTalk && !view.muted && TAPPABLE.includes(view.state);
+  const running = view.state !== 'idle';
+  const shown = useTip(tips, !view.muted && view.state === 'idle');
   const ring = entity(ctx, 'ring');
+  const hasRing = !!ring;
+  // The ring is lit for as long as the picker is open, so each pick shows on the device as it is
+  // made, and goes dark when the picker closes by any route - Done, the scrim, Escape, the handle,
+  // or leaving the page (owner, October 2026). Requests are single-flight, so a slider commit made
+  // just before Done still lands ahead of the turn_off.
+  useEffect(() => {
+    if (!colorPanel || !hasRing) return;
+    post(pathFor(ctx, 'ring', 'turn_on'));
+    return () => {
+      post(pathFor(ctx, 'ring', 'turn_off'));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [colorPanel, hasRing]);
   const ringColor = ring?.color || { r: 255, g: 255, b: 255 };
   // Every colour pick posts turn_on with the colour, so picking on a dark ring lights it in that
   // colour - one gesture instead of toggle-then-pick (owner, September 2026).
@@ -427,76 +480,33 @@ export function VoiceOrb({
     onOrbColor(hueFrom(h), hueTo(h));
   };
   return <div className="orb-wrap">
-    <div>
+    <div className="orb-stage" style={{
+      margin: `${-Math.round(orbSize * ORB_OVERLAP)}px 0`,
+      pointerEvents: 'none'
+    }}>
       <ParticlesOrb state={view.state} size={orbSize} colorFrom={view.muted ? '#ef4444' : orb.a} colorTo={view.muted ? '#b91c1c' : orb.b} paused={view.muted} />
+      {talk && <button className="orb-tap" style={{
+        width: Math.round(orbSize * ORB_TAP),
+        height: Math.round(orbSize * ORB_TAP)
+      }} aria-label={running ? TEXT.orb_stop : TEXT.orb_talk} title={running ? TEXT.orb_stop : TEXT.orb_talk} onClick={onTalk} />}
     </div>
     <div className="orb-meta">
-      <span className="orb-label" aria-live="polite" style={view.muted ? {
-        color: '#ef4444'
-      } : undefined}>{view.label}</span>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6
-      }}>
-      <button className="orb-hint customize-btn" onClick={() => setColorPanel(true)} aria-label="Customize orb color"><span aria-hidden="true" style={{
-            width: 15,
-            height: 15,
-            borderRadius: '50%',
-            flexShrink: 0,
-            background: 'conic-gradient(red,yellow,lime,cyan,blue,magenta,red)',
-            boxShadow: 'inset 0 0 0 1px rgba(0,0,0,.08)'
-          }} /><span>Customize</span></button>
-      {mute && <button className="orb-hint customize-btn" onClick={() => post(pathFor(ctx, 'mute_mics', muted ? 'turn_off' : 'turn_on'))} aria-pressed={muted} aria-label={muted ? 'Unmute microphone' : 'Mute microphone'} title={HINTS.mute} style={{
-          opacity: 1,
-          color: muted ? '#ef4444' : 'var(--text)',
-          background: muted ? 'rgba(239,68,68,.12)' : 'transparent',
-          width: 44,
-          justifyContent: 'center'
-        }}>{muted ? <MicOff size={18} strokeWidth={2.2} /> : <Mic size={18} />}</button>}
+      <div className="orb-say">
+        <span className={'orb-label' + (shown.tip ? ' tipped' : '') + (view.muted ? ' muted-on' : '')} aria-live="polite">{view.label}</span>
+        {shown.tip && <span className="orb-tips">{shown.leaving && <span key={'out' + shown.leaving} className="out" aria-hidden="true">{shown.leaving}</span>}<span key={shown.tip} className="in">{shown.tip}</span></span>}
+      </div>
+      <div className="orb-tools">
+      <button className="orb-hint customize-btn" onClick={() => {
+          tipDone('color');
+          setColorPanel(true);
+        }} aria-label="Customize orb color"><span aria-hidden="true" className="customize-dot" /><span>Customize</span></button>
+      {mute && <button className="orb-hint customize-btn mute-btn" onClick={() => {
+          tipDone('mute');
+          post(pathFor(ctx, 'mute_mics', muted ? 'turn_off' : 'turn_on'));
+        }} aria-pressed={muted} aria-label={muted ? 'Unmute microphone' : 'Mute microphone'} title={HINTS.mute}>{muted ? <MicOff size={18} strokeWidth={2.2} /> : <Mic size={18} />}</button>}
       </div>
     </div>
-    {colorPanel && createPortal([<div key="scrim" className="scrim" onClick={() => setColorPanel(false)} />, <aside key="panel" ref={orbPanelRef} className="sheet orb-sheet color-panel" onClick={e => e.stopPropagation()} role="dialog" aria-label="Orb color">
-        <div className="handle" role="button" aria-label="Close" style={{
-        touchAction: 'none',
-        cursor: 'grab'
-      }} onPointerDown={e => {
-        if (window.innerWidth >= 1024) return;
-        orbDragStartY.current = e.clientY;
-        e.currentTarget.setPointerCapture(e.pointerId);
-        if (orbPanelRef.current) orbPanelRef.current.style.transition = 'none';
-      }} onPointerMove={e => {
-        if (orbDragStartY.current === null) return;
-        const dy = Math.max(0, e.clientY - orbDragStartY.current);
-        if (orbPanelRef.current) {
-          orbPanelRef.current.style.transform = `translateX(-50%) translateY(${dy}px)`;
-          orbPanelRef.current.style.opacity = String(Math.max(0, 1 - dy / 220));
-        }
-      }} onPointerUp={e => {
-        if (orbDragStartY.current === null) return;
-        const dy = Math.max(0, e.clientY - orbDragStartY.current);
-        const dismiss = () => setColorPanel(false);
-        if (dy > 80) {
-          if (orbPanelRef.current) {
-            orbPanelRef.current.style.transition = 'transform .22s ease, opacity .22s ease';
-            orbPanelRef.current.style.transform = 'translateX(-50%) translateY(120%)';
-            orbPanelRef.current.style.opacity = '0';
-            setTimeout(dismiss, 210);
-          } else dismiss();
-        } else if (orbPanelRef.current) {
-          orbPanelRef.current.style.transition = 'transform .22s ease, opacity .22s ease';
-          orbPanelRef.current.style.transform = 'translateX(-50%)';
-          orbPanelRef.current.style.opacity = '1';
-        }
-        orbDragStartY.current = null;
-        setTimeout(() => {
-          if (orbPanelRef.current) {
-            orbPanelRef.current.style.transition = '';
-            orbPanelRef.current.style.transform = '';
-            orbPanelRef.current.style.opacity = '';
-          }
-        }, 250);
-      }} />
+    <Presence>{colorPanel && <Drawer label="Orb color" onClose={() => setColorPanel(false)} className="orb-sheet color-panel">
         <span className="eyebrow">ORB COLOR</span>
         <h2>Pick a glow.</h2>
         {ring && <p className="muted">Also updates your device LED ring.</p>}
@@ -505,7 +515,6 @@ export function VoiceOrb({
           setSel(s.label);
           onOrbColor(s.from, s.to);
           if (ring) ringRgb(hexToRgb(s.from));
-          setColorPanel(false);
         }}><span className="swatch-dot" style={{
             background: `linear-gradient(135deg, ${s.from}, ${s.to})`
           }} /><small>{s.label}</small></button>)}
@@ -516,15 +525,12 @@ export function VoiceOrb({
             background: 'conic-gradient(red,yellow,lime,cyan,blue,magenta,red)'
           }} /><small>Custom</small></button>
         </div>
-        {sel === 'Custom' && <label className="hue-label"><small className="muted" style={{
-          display: 'block',
-          marginBottom: 6
-        }}>Orb / theme color</small><span>Hue · {customHue}°</span><input className="hue" type="range" min={0} max={359} value={customHue} onChange={e => pickCustom(Number(e.target.value))} aria-label="Custom hue" /></label>}
+        {sel === 'Custom' && <label className="hue-label"><small className="muted hue-cap">Orb / theme color</small><span>Hue · {customHue}°</span><input className="hue" type="range" min={0} max={359} value={customHue} onChange={e => pickCustom(Number(e.target.value))} aria-label="Custom hue" /></label>}
         {sel === 'Custom' && ring && <LedRange label="LED Ring color" text={v => `Hue · ${v}°`} value={rgbHue(ringColor.r, ringColor.g, ringColor.b)} max={359} tol={2} ariaLabel="LED ring hue" onCommit={h => ringRgb(hsvToRgb(h, 1))} />}
         {sel === 'Custom' && ring && <LedRange label="LED Brightness" text={v => `${v}%`} value={ringPct(ring)} max={100} tol={1} className="led-bright" ariaLabel="LED brightness" onCommit={v => v === 0 ? post(pathFor(ctx, 'ring', 'turn_off')) : ringOn({
           brightness: pctTo255(v)
         })} />}
-        {sel === 'Custom' && <button className="primary wide" onClick={() => setColorPanel(false)}>Done</button>}
-      </aside>], document.body)}
+        <button className="primary wide" onClick={() => setColorPanel(false)}>Done</button>
+      </Drawer>}</Presence>
   </div>;
 }

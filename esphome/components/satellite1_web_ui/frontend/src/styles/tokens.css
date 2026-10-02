@@ -1,0 +1,82 @@
+/* The palette, both themes. Every surface, line, control track and overlay reads from here; nothing
+   else in the stylesheets should name a colour for one theme and patch it for the other.
+
+   The two themes were each a step too far from the middle (owner, October 2026): dark sat on a
+   near-black that cards barely lifted from, light on a near-white that cards vanished into. Dark is
+   lifted and its surfaces spaced further apart; light is a grey page that white cards stand off. */
+:root {
+  color-scheme: dark;
+  --bg: #131317;
+  --surface: #202027;
+  --surface2: #2b2b33;
+  --pop: #2b2b33;
+  --text: #f4f4f6;
+  --muted: #a1a1ad;
+  --line: rgba(255, 255, 255, .09);
+  --line-strong: rgba(255, 255, 255, .17);
+  --fill-hover: rgba(255, 255, 255, .07);
+  --fill-press: rgba(255, 255, 255, .12);
+  --track: rgba(255, 255, 255, .14);
+  --sw-off: rgba(255, 255, 255, .2);
+  --handle: rgba(255, 255, 255, .3);
+  --scrim: rgba(0, 0, 0, .55);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, .3);
+  --shadow-pop: 0 12px 40px rgba(0, 0, 0, .45);
+  --toast-bg: rgba(43, 43, 51, .94);
+  --accent: #2563eb;
+  --accent2: #93b4fd;
+  --green: #22c55e;
+  --danger: #f87171;
+  --danger-fill: #dc2626;
+
+  /* The orb's tokens, as bits.tsx paints them for the default violet, so the page is right before
+     the script runs and wherever it never does. */
+  --orb-a: #a78bfa;
+  --orb-b: #818cf8;
+  --orb-a20: rgba(167, 139, 250, .2);
+  --orb-a35: rgba(167, 139, 250, .35);
+  --orb-a55: rgba(167, 139, 250, .55);
+  --orb-fill: #7e55f8;
+  --orb-ink: #a78bfa;
+  --orb-ctl: #a78bfa;
+  --orb-ctl-on: #111113;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #e8eaf0;
+  --surface: #fbfbfd;
+  --surface2: #eef0f4;
+  --pop: #ffffff;
+  --text: #111113;
+  --muted: #5d5d6b;
+  --line: rgba(0, 0, 0, .1);
+  --line-strong: rgba(0, 0, 0, .18);
+  --fill-hover: rgba(0, 0, 0, .05);
+  --fill-press: rgba(0, 0, 0, .09);
+  --track: rgba(0, 0, 0, .12);
+  --sw-off: rgba(0, 0, 0, .16);
+  --handle: rgba(0, 0, 0, .22);
+  --scrim: rgba(20, 20, 32, .38);
+  --shadow-card: 0 1px 3px rgba(16, 24, 40, .08), 0 1px 2px rgba(16, 24, 40, .04);
+  --shadow-pop: 0 10px 32px rgba(16, 24, 40, .16);
+  --toast-bg: rgba(255, 255, 255, .96);
+  --accent: #2563eb;
+  --accent2: #1d4ed8;
+  --green: #16a34a;
+  --danger: #dc2626;
+  --danger-fill: #dc2626;
+  --orb-fill: #7e55f8;
+  --orb-ink: #6b3df7;
+  --orb-ctl: #7e55f8;
+  --orb-ctl-on: #fff;
+}
+
+/* The album tint (MediaBar) crossfades between tracks rather than snapping: a registered colour
+   interpolates where a bare custom property would jump. */
+@property --tint {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
+html { transition: --tint .8s ease; }

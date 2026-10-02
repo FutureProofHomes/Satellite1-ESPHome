@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { TEXT } from '../copy.js';
 import { logout, peerLogin, primeOtherOrigin, probePeer, putPanelHandoff } from '../lib/auth.js';
 import { deviceIdentity, entity, haBlocked, onLogAlert, onWriteError, peerOrigin, proxied, useDeviceState, useEvents, useHaData, useSelection } from '../lib/device.js';
+import { tipDone } from '../lib/tips.js';
 import { archiveAllNotifs, archiveNotif, listNotifs, notifCount, setNotifDevice, subscribeNotifs } from '../lib/notif.js';
 import { setSparkDevice, sparkRecord } from '../lib/sparkhist.js';
 import { dismissToast, subscribeToasts, tapToast, toast, toastIntent } from '../lib/toast.js';
 import type { Ctx, Orb, Tab } from '../ctx';
-import { AlertTriangle, Info, XCircle, Clock, X, LogOut } from '../icons';
-import { parseRoute, routeHash } from '../lib/routes.js';
+import { AlertTriangle, AudioLines, ChevronLeft, ChevronRight, Clock, House, Info, LogOut, RadarIcon, Settings, Volume2, X, XCircle } from '../icons';
+import { parseRoute, routeDir, routeHash } from '../lib/routes.js';
 import { AudioTab } from './AudioTab';
-import { Icon, useTheme } from './bits';
+import { Icon, ORB_KEY, ThemeMenu, paintOrb, readOrb, reduceMotion } from './bits';
 import { DiagnosticsTab, SETTINGS_ROUTES } from './DiagnosticsTab';
+import { Drawer, Presence } from './Drawer';
 import { HaGate } from './HaGate';
 import { HomeTab } from './HomeTab';
 import { MediaBar } from './MediaBar';
@@ -31,7 +32,34 @@ type Toast = {
   act?: string;
 };
 type Remote = { base: string; key: string } | null;
+type Route = { tab: string; sub: string | null };
+type VtDoc = Document & { startViewTransition?: (update: () => Promise<void>) => { finished: Promise<void> } };
+
+let slides = 0;
+/**
+ * Swaps the page inside a view transition that slides it the way the nav reads (styles/motion.css)
+ * while the header, nav and media bar hold still. The class scopes those rules to route changes, so
+ * the theme's crossfade keeps its own; a newer slide supersedes an older one's cleanup.
+ */
+function slide(from: Route, to: Route, swap: () => void) {
+  const dir = routeDir(from, to);
+  const html = document.documentElement;
+  if (dir) html.dataset.dir = dir;
+  const doc = document as VtDoc;
+  if (!dir || !doc.startViewTransition || reduceMotion() || document.hidden) return swap();
+  const n = ++slides;
+  html.classList.add('vt-route');
+  // Preact renders on a microtask; the timeout lets the new page commit before the snapshot.
+  doc.startViewTransition(() => {
+    swap();
+    return new Promise(res => setTimeout(res, 0));
+  }).finished.catch(() => {}).then(() => {
+    if (n === slides) html.classList.remove('vt-route');
+  });
+}
 const TABS: Tab[] = ['NOW', 'WAKE', 'PRESENCE', 'AUDIO', 'SETTINGS'];
+const TAB_ICON = { NOW: House, WAKE: AudioLines, PRESENCE: RadarIcon, AUDIO: Volume2, SETTINGS: Settings };
+const TAB_LABEL = { NOW: TEXT.nav_home, WAKE: TEXT.nav_wake, PRESENCE: TEXT.nav_presence, AUDIO: TEXT.nav_audio, SETTINGS: TEXT.nav_settings };
 const TOAST_ICONS = {
   info: Info,
   warn: AlertTriangle,
@@ -98,7 +126,7 @@ function ToastPill({
   }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
       <Ico size={18} className="toast-icon" aria-hidden="true" />
       <span className="toast-msg">{label}</span>
-      <button type="button" className="toast-x" aria-label={TEXT.dismiss} onClick={() => onDismiss(toast.id)}><X size={14} /></button>
+      <button type="button" className="toast-x" aria-label={TEXT.dismiss} onClick={() => onDismiss(toast.id)}><X size={16} /></button>
     </div>;
 }
 
@@ -248,92 +276,6 @@ function useToastSources({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [updState]);
 }
-function hexToRgba(hex: string, a: number): string {
-  if (!hex.startsWith('#')) return `color-mix(in srgb, ${hex} ${Math.round(a * 100)}%, transparent)`;
-  const h = hex.replace('#', '');
-  const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
-  const n = parseInt(full, 16);
-  return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
-}
-function Sheet({
-  kind,
-  close,
-  children
-}: {
-  kind: Sheet;
-  close: () => void;
-  children: React.ReactNode;
-}) {
-  const panelRef = useRef<HTMLElement>(null);
-  const dragStartY = useRef<number | null>(null);
-  const closeRef = useRef(close);
-  closeRef.current = close;
-  useEffect(() => {
-    if (!kind) return;
-    document.body.classList.add('has-drawer');
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current();
-    window.addEventListener('keydown', esc);
-    return () => {
-      document.body.classList.remove('has-drawer');
-      window.removeEventListener('keydown', esc);
-    };
-  }, [kind]);
-  if (!kind) return null;
-  const dismiss = close;
-  return createPortal([<div key="scrim" className="scrim" onClick={close} />, <aside key="sheet" ref={panelRef} className="sheet" onClick={e => e.stopPropagation()}><div className="handle" role="button" aria-label="Close" style={{
-      touchAction: 'none',
-      cursor: 'grab'
-    }} onPointerDown={e => {
-      if (window.innerWidth >= 1024) return;
-      dragStartY.current = e.clientY;
-      e.currentTarget.setPointerCapture(e.pointerId);
-      if (panelRef.current) panelRef.current.style.transition = 'none';
-    }} onPointerMove={e => {
-      if (dragStartY.current === null) return;
-      const dy = Math.max(0, e.clientY - dragStartY.current);
-      if (panelRef.current) {
-        panelRef.current.style.transform = `translateX(-50%) translateY(${dy}px)`;
-        panelRef.current.style.opacity = String(Math.max(0, 1 - dy / 220));
-      }
-    }} onPointerUp={e => {
-      if (dragStartY.current === null) return;
-      const dy = Math.max(0, e.clientY - dragStartY.current);
-      if (dy > 80) {
-        if (panelRef.current) {
-          panelRef.current.style.transition = 'transform .22s ease, opacity .22s ease';
-          panelRef.current.style.transform = 'translateX(-50%) translateY(120%)';
-          panelRef.current.style.opacity = '0';
-          setTimeout(dismiss, 210);
-        } else dismiss();
-      } else {
-        if (panelRef.current) {
-          panelRef.current.style.transition = 'transform .22s ease, opacity .22s ease';
-          panelRef.current.style.transform = 'translateX(-50%)';
-          panelRef.current.style.opacity = '1';
-        }
-      }
-      dragStartY.current = null;
-      setTimeout(() => {
-        if (panelRef.current) {
-          panelRef.current.style.transition = '';
-          panelRef.current.style.transform = '';
-          panelRef.current.style.opacity = '';
-        }
-      }, 250);
-    }} />{children}</aside>], document.body);
-}
-const ORB_KEY = 'sat1.orb';
-const ORB_DEFAULT: Orb = { a: '#a78bfa', b: '#818cf8' };
-function readOrb(): Orb {
-  try {
-    const o = JSON.parse(localStorage.getItem(ORB_KEY) || 'null');
-    if (typeof o?.a === 'string' && typeof o?.b === 'string') return o;
-  } catch {
-    /* private mode or a hand-edited value: the default stands */
-  }
-  return ORB_DEFAULT;
-}
-
 /**
  * The signed-in app: one device's session. Owns the data hooks every tab reads through ctx, the
  * hash route, the toast and notification surfaces, the device switcher and the Home Assistant gate.
@@ -364,8 +306,8 @@ export function Satellite1Now({
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
   }, []);
-  const [theme, toggleTheme] = useTheme();
-  const [route, setRoute] = useState(() => parseRoute(location.hash));
+  const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
+  const shownRoute = useRef(route);
   useEffect(() => {
     // A bookmark from the previous UI (#/controls, #/config, #/diagnostics) or an unknown hash is
     // rewritten in place to the page it resolved to, so the address bar never disagrees with what
@@ -374,7 +316,8 @@ export function Satellite1Now({
       const r = parseRoute(location.hash);
       const canon = routeHash(r.tab, r.sub ?? undefined);
       if (location.hash && location.hash !== canon) history.replaceState(null, '', canon);
-      setRoute(r);
+      slide(shownRoute.current, r, () => setRoute(r));
+      shownRoute.current = r;
     };
     on();
     window.addEventListener('hashchange', on);
@@ -505,13 +448,7 @@ export function Satellite1Now({
       /* the choice holds for this session */
     }
   }, []);
-  const orbVars = {
-    '--orb-a': orb.a,
-    '--orb-b': orb.b,
-    '--orb-a20': hexToRgba(orb.a, 0.2),
-    '--orb-a35': hexToRgba(orb.a, 0.35),
-    '--orb-a55': hexToRgba(orb.a, 0.55)
-  } as React.CSSProperties;
+  useLayoutEffect(() => paintOrb(orb.a, orb.b), [orb]);
   // This browser only - Sign out everywhere lives on Settings > Security, where its blast radius can
   // be explained. The reload lands on the boot probe, which finds no session and shows sign-in.
   const signOut = async () => {
@@ -520,60 +457,40 @@ export function Satellite1Now({
     location.reload();
   };
   // The header dot is Home Assistant's connection, not the device's reachability: this is the
-  // device serving the page, so that would be a light that could never go out. While a peer is
+  // device serving the page, so that would be a light that could never go out. The address is the
+  // device sheet's, a tap away - too technical for the chip (owner, October 2026). While a peer is
   // remote-controlled the chip says so in one word, because every device's name has the same shape
   // and the single-origin switch changes nothing else about the page.
   const haText = device?.ha ? TEXT.ha_connected : TEXT.ha_disconnected;
   const openFix = () => setFixOpen(true);
   const activeToast = cur;
-  return <main className="app" ref={appRef} data-theme={theme} style={orbVars}><header ref={headerRef} className={`app-header${activeToast ? ' toast-active' : ''}`}><div className="header-left"><div className="header-device-slot"><button className="device-chip" onClick={() => setSheet('device')}><span className={'dot' + (device?.ha ? '' : ' off')} title={haText} /> <span>{label || 'Satellite1'}</span><small>{device?.ip || '\u00a0'}{remote ? ` · ${TEXT.remote_tag}` : ''}</small></button></div><div className="header-toast-slot" aria-live="polite">{ghost && <ToastPill key={`leaving-${ghost.id}`} toast={ghost} leaving onDismiss={() => {}} />}{activeToast && <ToastPill key={`active-${activeToast.id}`} toast={activeToast} onDismiss={dismissToast} onTap={() => {
+  return <main className="app" ref={appRef}><header ref={headerRef} className={`app-header${activeToast ? ' toast-active' : ''}`}><div className="header-left"><div className="header-device-slot"><button className="device-chip" onClick={() => {
+                tipDone('switch');
+                setSheet('device');
+              }}><span className={'dot' + (device?.ha ? '' : ' off')} title={haText} /> <span>{label || 'Satellite1'}</span>{remote && <small>{TEXT.remote_tag}</small>}</button></div><div className="header-toast-slot" aria-live="polite">{ghost && <ToastPill key={`leaving-${ghost.id}`} toast={ghost} leaving onDismiss={() => {}} />}{activeToast && <ToastPill key={`active-${activeToast.id}`} toast={activeToast} onDismiss={dismissToast} onTap={() => {
               tapToast(activeToast.id);
               runAct(activeToast, openFix);
-            }} />}</div></div><div className="header-actions"><button className="icon-button" onClick={() => setSheet('notice')} aria-label={bellLabel} title={bellLabel}><Icon name="bell" />{notifN > 0 && <b>{notifN > 99 ? '99+' : notifN}</b>}</button><button className="theme-toggle" onClick={toggleTheme} aria-label={theme === 'dark' ? TEXT.theme_to_light : TEXT.theme_to_dark}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button></div></header>
+            }} />}</div></div><div className="header-actions"><button className="icon-button" onClick={() => setSheet('notice')} aria-label={bellLabel} title={bellLabel}><Icon name="bell" size={20} />{notifN > 0 && <b>{notifN > 99 ? '99+' : notifN}</b>}</button><ThemeMenu className="theme-toggle" /></div></header>
     <div key={tab} className="tab-content-enter">{tab === 'NOW' && <HomeTab ctx={ctx} orb={orb} onOrbColor={onOrbColor} />}
     {tab !== 'NOW' && <ControlPanel key={tab} tab={tab} sub={sub} ctx={ctx} />}</div>
-    <nav className="side-nav" aria-label="Sections">{TABS.map(item => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => go(item, item === 'SETTINGS' ? lastSub.current : undefined)}><span>{item === 'NOW' ? 'HOME' : item}</span></button>)}{tab === 'SETTINGS' && <div className="side-sub" role="list">{SETTINGS_ROUTES.map(r => <button key={r.slug} role="listitem" className={'side-sub-item' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{r.label}</button>)}</div>}<div className="side-nav-foot" style={{
-        marginTop: 'auto',
-        padding: '12px 8px 88px',
-        borderTop: '1px solid var(--line)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 2
-      }}><span style={{
-          fontSize: 13,
-          fontWeight: 600,
-          color: 'var(--text)',
-          opacity: 0.85
-        }}>{label || 'Satellite1'}</span><span style={{
-          fontSize: 11,
-          color: 'var(--muted)'
-        }}>{[device?.ip, device?.fw && `Firmware ${device.fw}`].filter(Boolean).join(' · ')}</span><button type="button" onClick={signOut} style={{
-          marginTop: 10,
-          alignSelf: 'flex-start',
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 8,
-          background: 'transparent',
-          border: '1px solid var(--line)',
-          borderRadius: 999,
-          padding: '6px 12px',
-          minHeight: 34,
-          fontSize: 12,
-          fontWeight: 600,
-          color: 'var(--muted)'
-        }}><LogOut size={14} aria-hidden="true" /><span>{TEXT.logout}</span></button></div></nav>
-    <nav className="tabs" data-tab={tab} style={{
-      translate: "0px -8px"
-    }}><div className="tabs-track" style={{
+    <nav className="side-nav" aria-label="Sections">{TABS.map(item => {
+      const I = TAB_ICON[item];
+      return <button key={item} className={tab === item ? 'selected' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => go(item, item === 'SETTINGS' ? lastSub.current : undefined)}><I size={18} strokeWidth={1.9} aria-hidden="true" /><span>{TAB_LABEL[item]}</span></button>;
+    })}{tab === 'SETTINGS' && <div className="side-sub" role="list">{SETTINGS_ROUTES.map(r => <button key={r.slug} role="listitem" className={'side-sub-item' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{r.label}</button>)}</div>}<div className="side-nav-foot"><span className="side-nav-name">{label || 'Satellite1'}</span><span className="side-nav-meta">{[device?.ip, device?.fw && `Firmware ${device.fw}`].filter(Boolean).join(' · ')}</span><button type="button" className="signout" onClick={signOut}><LogOut size={14} aria-hidden="true" /><span>{TEXT.logout}</span></button></div></nav>
+    <nav className="tabs" data-tab={tab} aria-label="Sections"><div className="tabs-track" style={{
         transform: navLayer === 0 ? 'translateX(0%)' : 'translateX(-50%)'
-      }}><div className="tabs-layer tabs-main">{TABS.map(item => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => go(item, item === 'SETTINGS' ? lastSub.current : undefined)}>{item === 'NOW' ? 'HOME' : item}</button>)}</div><div className="tabs-layer tabs-sub"><button className="tabs-back" aria-label="Back to main menu" onClick={() => {
+      }}><div className="tabs-layer tabs-main">{TABS.map(item => {
+          const I = TAB_ICON[item];
+          return <button key={item} className={tab === item ? 'selected' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => go(item, item === 'SETTINGS' ? lastSub.current : undefined)}><span className="tab-ico"><I size={20} strokeWidth={1.9} aria-hidden="true" /></span><span className="tab-lbl">{TAB_LABEL[item]}</span></button>;
+        })}</div><div className="tabs-layer tabs-sub"><button className="tabs-back" aria-label="Back to main menu" onClick={() => {
             lastSub.current = 'device-info';
             go('NOW');
-          }}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m10 4-5 4 5 4" /></svg></button><div className="tabs-sub-scroll">{SETTINGS_ROUTES.map(r => <button key={r.slug} className={'tabs-sub-pill' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{r.label}</button>)}</div></div></div></nav><MediaBar ctx={ctx} />
-    <Sheet kind={sheet} close={() => setSheet(null)}>{sheet === 'device' && <DeviceSheet ctx={ctx} label={label} area={area} remote={remote} localMac={localMac} onRemote={onRemote} onLocal={onLocal} onSignOut={signOut} />}{sheet === 'notice' && <Notice onAct={t => {
+          }}><ChevronLeft size={20} strokeWidth={2} aria-hidden="true" /></button><div className="tabs-sub-scroll">{SETTINGS_ROUTES.map(r => <button key={r.slug} className={'tabs-sub-pill' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{r.label}</button>)}</div></div></div></nav><MediaBar ctx={ctx} />
+    <Presence>{sheet === 'device' && <Drawer label={TEXT.switcher_label} onClose={() => setSheet(null)}><DeviceSheet ctx={ctx} label={label} area={area} remote={remote} localMac={localMac} onRemote={onRemote} onLocal={onLocal} onSignOut={signOut} /></Drawer>}</Presence>
+    <Presence>{sheet === 'notice' && <Drawer label={TEXT.notif_title} onClose={() => setSheet(null)}><Notice onAct={t => {
           setSheet(null);
           runAct(t, openFix);
-        }} />}</Sheet>
+        }} /></Drawer>}</Presence>
     {!gateDone && <HaGate ctx={ctx} onDone={() => setGateDone(true)} />}
     {fixOpen && <HaGate ctx={ctx} fix onDone={() => setFixOpen(false)} />}
   </main>;
@@ -739,7 +656,7 @@ function DeviceSheet({
     const url = peerOrigin(d);
     const up = isUp(d);
     const cls = up ? '' : 'offline';
-    const body = <><span className="dot" title={up ? TEXT.peer_up : TEXT.peer_down} /><span><b>{d[1]}</b><small>{meta(d, url)}</small></span><Icon name="chevron" /></>;
+    const body = <><span className="dot" title={up ? TEXT.peer_up : TEXT.peer_down} /><span><b>{d[1]}</b><small>{meta(d, url)}</small></span><ChevronRight size={18} className="peer-go" aria-hidden="true" /></>;
     if (isHome(d)) return <a key={d[3]} className={cls} href={`${location.origin}${location.pathname}${hash}`} onClick={e => {
       if (e.button !== 0 || e.metaKey || e.ctrlKey) return;
       e.preventDefault();
@@ -820,21 +737,7 @@ function DeviceSheet({
   // An empty roster has two honest readings: nothing else in the house, or a roster the device is
   // not allowed to fetch. While actions are blocked the empty line says so, instead of promising
   // rows that cannot arrive.
-  return <div className="device-sheet"><span className="eyebrow">DEVICE SWITCHER</span><h2>{label || 'This device'}</h2><p className="muted">{ownMeta}{ownRadar && <>{ownMeta ? ' · ' : ''}<span className={myLit ? 'green' : 'dim'} title={myLit ? TEXT.presence_on : TEXT.presence_off}>●</span> {ownRadar}</>}{ownNet && ` · ${ownNet}`}</p><div className="peer-list">{ordered.map(peerRow)}</div>{peers.length === 0 && <div className="empty">{haBlocked(ha) ? TEXT.no_devices_blocked : TEXT.no_devices}</div>}<button type="button" onClick={onSignOut} style={{
-      marginTop: 10,
-      alignSelf: 'flex-start',
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 8,
-      background: 'transparent',
-      border: '1px solid var(--line)',
-      borderRadius: 999,
-      padding: '6px 12px',
-      minHeight: 34,
-      fontSize: 12,
-      fontWeight: 600,
-      color: 'var(--muted)'
-    }}><LogOut size={14} aria-hidden="true" /><span>{TEXT.logout}</span></button></div>;
+  return <div className="device-sheet"><span className="eyebrow">DEVICE SWITCHER</span><h2>{label || 'This device'}</h2><p className="muted">{ownMeta}{ownRadar && <>{ownMeta ? ' · ' : ''}<span className={myLit ? 'green' : 'dim'} title={myLit ? TEXT.presence_on : TEXT.presence_off}>●</span> {ownRadar}</>}{ownNet && ` · ${ownNet}`}</p><div className="peer-list">{ordered.map(peerRow)}</div>{peers.length === 0 && <div className="empty">{haBlocked(ha) ? TEXT.no_devices_blocked : TEXT.no_devices}</div>}<button type="button" className="signout" onClick={onSignOut}><LogOut size={14} aria-hidden="true" /><span>{TEXT.logout}</span></button></div>;
 }
 
 /** "just now", "12m ago", "3h ago" - the history covers 24 hours, so hours are the ceiling. */

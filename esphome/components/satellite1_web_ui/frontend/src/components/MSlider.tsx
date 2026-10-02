@@ -86,10 +86,10 @@ export function MSlider({
   return <div className={`mslider${disabled ? ' disabled' : ''}${className ? ` ${className}` : ''}`}>
       {format && <div className="mslider-top"><span className="mslider-val">{format(shown)}</span></div>}
       <div className="mslider-track">
-        {/* A native thumb travels between half its own width from either end (26px, app.css), so
+        {/* A native thumb travels between half its own width from either end (--thumb, styles/controls.css), so
             the notch is placed along that travel rather than the bare track. */}
         {snap !== undefined && <span className="mslider-notch" aria-hidden="true" style={{
-        left: `calc(13px + (100% - 26px) * ${pctOf(snap, min, max).slice(0, -1)} / 100)`
+        left: `calc(var(--thumb) / 2 + (100% - var(--thumb)) * ${pctOf(snap, min, max).slice(0, -1)} / 100)`
       }} />}
         <input ref={inputRef} type="range" className="mslider-input" min={min} max={max} step={step} value={shown} disabled={disabled} aria-label={ariaLabel} style={{
         '--pct': pctOf(shown, min, max)

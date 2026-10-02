@@ -1,8 +1,10 @@
-import type { CSSProperties } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { TEXT } from '../copy.js';
 import type { Ctx } from '../ctx';
 import { relayPausedOf, tintOf, wsPausedOf } from '../lib/media.js';
+import { tipDone } from '../lib/tips.js';
+import { useTheme } from './bits';
+import { Presence } from './Drawer';
 import { Art, NowPlaying } from './media/NowPlaying';
 import { PlayersPanel } from './media/PlayersPanel';
 import { SearchDrawer } from './media/SearchDrawer';
@@ -36,7 +38,14 @@ export function MediaBar({
   const wsPaused = wsPausedOf(tiers.wsOn, tiers.ws.me, tiers.wsOn ? tiers.ws.queue : null);
   const relayPaused = relayPausedOf(tiers.wsOn, tiers.ma, Date.now());
   const model = useMediaModel(wsPaused || relayPaused);
-  const tint = tintOf(useArtColor(model.art));
+  const { theme } = useTheme();
+  const tint = tintOf(useArtColor(model.art), theme);
+  // On the root rather than the bar, so the drawers portaled to <body> wash in it too.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty('--tint', tint);
+    return () => root.style.removeProperty('--tint');
+  }, [tint]);
 
   // The group stream stopping means paused somewhere or ended; the transition is the one moment
   // Home Assistant has a fresh answer, so it is asked exactly then.
@@ -58,22 +67,6 @@ export function MediaBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relayPaused, open, panel]);
 
-  // The three drawers share one blur and one Escape, which closes the topmost.
-  const drawer = open || panel || search;
-  useEffect(() => {
-    if (!drawer) return undefined;
-    document.body.classList.add('has-drawer');
-    const esc = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (search) setSearch(false);else if (panel) setPanel(false);else setOpen(false);
-    };
-    document.addEventListener('keydown', esc);
-    return () => {
-      document.body.classList.remove('has-drawer');
-      document.removeEventListener('keydown', esc);
-    };
-  }, [drawer, search, panel]);
-
   if (!model.media) return null;
   const { media, mediaCmd, srcParam, active, announcing } = model;
   const title = model.title || model.stateText || TEXT.media_idle_bar;
@@ -83,48 +76,28 @@ export function MediaBar({
   // The bar is a div with a click because its controls are buttons, and buttons do not nest. The
   // volume row stops the click on the row rather than the input, so a miss beside the slider does
   // not open Now Playing mid-drag.
-  return <div className="mroot" style={{
-    '--tint': tint
-  } as CSSProperties}>
-    <div className="mbar" onClick={() => setOpen(true)}>
+  return <div className="mroot">
+    <div className="mbar" onClick={() => {
+      tipDone('music');
+      setOpen(true);
+    }}>
       <div className="mbar-row">
         <Art art={model.art} title={model.title} cls="mbar-art" />
         <button className="mbar-meta" aria-label="Open media view" aria-expanded={open}><b>{title}</b>{sub && <small>{sub}</small>}</button>
         <button className="mbtn mspk" aria-label={TEXT.media_players_title} onClick={e => {
           e.stopPropagation();
+          tipDone('group');
           setPanel(true);
-        }}><span style={{
-            position: 'relative',
-            display: 'inline-flex',
-            color: '#fff'
-          }}><Svg size={24}>{I_SPK_BOX}</Svg>{gcount > 0 && <span aria-hidden="true" style={{
-              position: 'absolute',
-              top: -3,
-              right: -4,
-              minWidth: gcount > 1 ? 12 : 8,
-              height: gcount > 1 ? 12 : 8,
-              padding: gcount > 1 ? '0 2px' : 0,
-              borderRadius: 999,
-              background: 'var(--orb-a, var(--accent))',
-              color: '#fff',
-              fontSize: 8,
-              fontWeight: 700,
-              lineHeight: '12px',
-              textAlign: 'center',
-              fontStyle: 'normal'
-            }}>{gcount > 1 ? gcount : ''}</span>}</span></button>
+        }}><span className="mspk-ico"><Svg size={24}>{I_SPK_BOX}</Svg>{gcount > 0 && <span aria-hidden="true" className={gcount > 1 ? 'mspk-badge n' : 'mspk-badge'}>{gcount > 1 ? gcount : ''}</span>}</span></button>
         {active && !announcing && <PlayButton model={model} sm />}
       </div>
-      {media.volume != null && <div className="mbar-vol" onClick={e => e.stopPropagation()}><span style={{
-          display: 'inline-flex',
-          color: '#fff'
-        }}><Svg size={24}>{I_VOL}</Svg></span><Vol value={model.groupHeld ? media.ss_volume : media.volume} label="Volume" onCommit={v => mediaCmd('volume', { v, src: srcParam })} /></div>}
+      {media.volume != null && <div className="mbar-vol" onClick={e => e.stopPropagation()}><span className="mbar-vol-ico"><Svg size={24}>{I_VOL}</Svg></span><Vol value={model.groupHeld ? media.ss_volume : media.volume} label="Volume" onCommit={v => mediaCmd('volume', { v, src: srcParam })} /></div>}
     </div>
-    {open && <NowPlaying model={model} tiers={tiers} ip={ctx.device?.ip} onClose={() => setOpen(false)} onPlayers={() => setPanel(true)} onSearch={() => {
+    <Presence>{open && <NowPlaying model={model} tiers={tiers} ip={ctx.device?.ip} onClose={() => setOpen(false)} onPlayers={() => setPanel(true)} onSearch={() => {
       setOpen(false);
       setSearch(true);
-    }} />}
-    {panel && <PlayersPanel model={model} tiers={tiers} haReady={!!ctx.ha?.d} onClose={() => setPanel(false)} />}
-    {search && <SearchDrawer tiers={tiers} ip={ctx.device?.ip} onClose={() => setSearch(false)} />}
+    }} />}</Presence>
+    <Presence>{panel && <PlayersPanel model={model} tiers={tiers} haReady={!!ctx.ha?.d} onClose={() => setPanel(false)} />}</Presence>
+    <Presence>{search && <SearchDrawer tiers={tiers} ip={ctx.device?.ip} onClose={() => setSearch(false)} />}</Presence>
   </div>;
 }

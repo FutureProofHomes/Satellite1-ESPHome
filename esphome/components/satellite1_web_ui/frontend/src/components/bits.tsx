@@ -1,26 +1,198 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { TEXT } from '../copy.js';
+import { Check, CircleHalf, Moon, Sun } from '../icons';
+import { orbTokens } from '../lib/orb.js';
+import { THEME_COLOR, THEME_KEY, THEME_PREFS, parseThemePref, resolveTheme } from '../lib/theme.js';
+
+export type ThemePref = 'auto' | 'light' | 'dark';
+type Theme = 'dark' | 'light';
+
+/** The orb colour, persisted per browser; read here too so sign-in paints in it before the app mounts. */
+export const ORB_KEY = 'sat1.orb';
+export const ORB_DEFAULT = { a: '#a78bfa', b: '#818cf8' };
+export function readOrb(): { a: string; b: string } {
+  try {
+    const o = JSON.parse(localStorage.getItem(ORB_KEY) || 'null');
+    if (typeof o?.a === 'string' && typeof o?.b === 'string') return o;
+  } catch {
+    /* private mode or a hand-edited value: the default stands */
+  }
+  return ORB_DEFAULT;
+}
+
+const darkQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
+const stored = () => {
+  try {
+    return localStorage.getItem(THEME_KEY);
+  } catch {
+    return null;
+  }
+};
+const look = {
+  pref: parseThemePref(stored()) as ThemePref,
+  theme: 'dark' as Theme,
+  orb: readOrb()
+};
+look.theme = resolveTheme(look.pref, !!darkQuery?.matches) as Theme;
+const lookSubs = new Set<() => void>();
 
 /**
- * Light or dark, remembered per browser under the same key as the previous UI, so a choice made
- * there survives the update. index.html applies it before the first paint, so this reads the
- * attribute rather than storage - the two cannot disagree if the write ever fails (localStorage
- * throws with site data blocked).
+ * The theme and the orb's colour tokens, written on the root element rather than the app's <main>,
+ * so drawers portaled to <body> inherit them as well. index.html's pre-paint script has already set
+ * the theme; this repeats it with the orb tokens alongside.
  */
-export function useTheme(): ['dark' | 'light', () => void] {
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
-  const toggle = () => {
-    const next = theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.dataset.theme = next;
-    setTheme(next);
-    try {
-      localStorage.setItem('sat1.theme', next);
-    } catch {
-      /* The page is already in the right theme; not remembering it is survivable. */
-    }
+function paint() {
+  const root = document.documentElement;
+  root.dataset.theme = look.theme;
+  const t = orbTokens(look.orb.a, look.theme);
+  const vars: Record<string, string> = {
+    '--orb-a': look.orb.a,
+    '--orb-b': look.orb.b,
+    '--orb-a20': t.a20,
+    '--orb-a35': t.a35,
+    '--orb-a55': t.a55,
+    '--orb-fill': t.fill,
+    '--orb-ink': t.ink,
+    '--orb-ctl': t.ctl,
+    '--orb-ctl-on': t.ctlOn
   };
-  return [theme, toggle];
+  for (const k in vars) root.style.setProperty(k, vars[k]);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOR[look.theme]);
+}
+paint();
+
+export const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+function show(theme: Theme) {
+  if (theme === look.theme) return;
+  look.theme = theme;
+  const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown };
+  if (doc.startViewTransition && !reduceMotion() && !document.hidden) doc.startViewTransition(paint);else paint();
+}
+darkQuery?.addEventListener?.('change', e => {
+  if (look.pref !== 'auto') return;
+  show(e.matches ? 'dark' : 'light');
+  lookSubs.forEach(f => f());
+});
+
+/** Auto, Light or Dark, remembered under the key the previous UI's toggle used, so its choice survives. */
+export function setThemePref(pref: ThemePref) {
+  look.pref = pref;
+  try {
+    localStorage.setItem(THEME_KEY, pref);
+  } catch {
+    /* The page is already in the right theme; not remembering it is survivable. */
+  }
+  show(resolveTheme(pref, !!darkQuery?.matches) as Theme);
+  lookSubs.forEach(f => f());
+}
+
+/** A person's orb pick, repainting every orb-derived token. */
+export function paintOrb(a: string, b: string) {
+  if (a === look.orb.a && b === look.orb.b) return;
+  look.orb = { a, b };
+  paint();
+}
+
+/** The appearance preference and the theme it currently shows, shared by every screen. */
+export function useTheme(): { pref: ThemePref; theme: Theme; setPref: (p: ThemePref) => void } {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const f = () => bump(n => n + 1);
+    lookSubs.add(f);
+    return () => {
+      lookSubs.delete(f);
+    };
+  }, []);
+  return { pref: look.pref, theme: look.theme, setPref: setThemePref };
+}
+
+const THEME_ICON = { auto: CircleHalf, light: Sun, dark: Moon };
+const THEME_LABEL = { auto: TEXT.theme_auto, light: TEXT.theme_light, dark: TEXT.theme_dark };
+
+/**
+ * The header's theme button and the Auto / Light / Dark menu it opens. The menu is portaled and
+ * placed in viewport coordinates, so the header's own button styling never reaches its rows. It
+ * behaves as a menu: arrow keys move, Escape closes back to the button, a pick closes it.
+ */
+export function ThemeMenu({
+  className
+}: {
+  className: string;
+}) {
+  const {
+    pref,
+    setPref
+  } = useTheme();
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{
+    top: number;
+    right: number;
+  } | null>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!open || !btn.current) {
+      setPos(null);
+      return;
+    }
+    const r = btn.current.getBoundingClientRect();
+    setPos({
+      top: r.bottom + 8,
+      right: Math.max(8, window.innerWidth - r.right)
+    });
+  }, [open]);
+  useEffect(() => {
+    if (!open) return undefined;
+    const items = () => Array.from(menu.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') || []);
+    const outside = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!btn.current?.contains(t) && !menu.current?.contains(t)) setOpen(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setOpen(false);
+        btn.current?.focus();
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const all = items();
+        const i = all.indexOf(document.activeElement as HTMLElement);
+        all[(i + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length]?.focus();
+      } else if (e.key === 'Tab') setOpen(false);
+    };
+    const close = () => setOpen(false);
+    document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('keydown', key, true);
+    window.addEventListener('resize', close);
+    const id = requestAnimationFrame(() => (items().find(el => el.getAttribute('aria-checked') === 'true') || items()[0])?.focus());
+    return () => {
+      cancelAnimationFrame(id);
+      document.removeEventListener('pointerdown', outside, true);
+      document.removeEventListener('keydown', key, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [open]);
+  const Cur = THEME_ICON[pref];
+  return <>
+    <button ref={btn} className={className} aria-haspopup="menu" aria-expanded={open} aria-label={`${TEXT.theme_menu}: ${THEME_LABEL[pref]}`} title={TEXT.theme_menu} onClick={() => setOpen(v => !v)}><Cur size={20} strokeWidth={1.8} /></button>
+    {open && createPortal(<div ref={menu} className="theme-menu" role="menu" aria-label={TEXT.theme_menu} style={pos ? {
+      top: pos.top,
+      right: pos.right
+    } : {
+      visibility: 'hidden'
+    }}>
+      {(THEME_PREFS as ThemePref[]).map(p => {
+        const I = THEME_ICON[p];
+        return <button key={p} type="button" role="menuitemradio" aria-checked={pref === p} className="theme-opt" onClick={() => {
+          setPref(p);
+          setOpen(false);
+          btn.current?.focus();
+        }}><I size={18} strokeWidth={1.8} /><span>{THEME_LABEL[p]}{p === 'auto' && <small>{TEXT.theme_auto_sub}</small>}</span>{pref === p && <Check size={16} strokeWidth={2.5} className="theme-tick" />}</button>;
+      })}
+    </div>, document.body)}
+  </>;
 }
 export function Icon({
   name,

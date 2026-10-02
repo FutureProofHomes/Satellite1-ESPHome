@@ -177,8 +177,7 @@ export function queueClock(q, now) {
 /* The album tint                                                      */
 /* ------------------------------------------------------------------ */
 
-/** RGB in 0-1 to [h, s, l], with saturation lifted a step (averaging muddies it) and lightness
- *  clamped to where light and dark text both still read on it. */
+/** RGB in 0-1 to [h (degrees), s, l]. */
 export function toHsl(r, g, b) {
   const mx = Math.max(r, g, b);
   const mn = Math.min(r, g, b);
@@ -191,28 +190,61 @@ export function toHsl(r, g, b) {
     h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
     h *= 60;
   }
-  return [h, Math.min(1, s * 1.3 + 0.04), Math.min(0.72, Math.max(0.34, l))];
+  return [h, s, l];
 }
 
-/** The average colour of RGBA pixel data (a canvas readback) as toHsl's triple. */
-export function averageHsl(data) {
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  const n = data.length / 4;
+const HUE_BUCKETS = 12;
+
+/**
+ * The artwork's most vivid colour family, as [h, s, l], from RGBA pixel data (a canvas readback).
+ * Averaging every pixel turns a red cover on black into brown, so pixels vote by chroma into hue
+ * buckets and the strongest bucket, with its neighbours so a family split across a boundary still
+ * counts as one, gives the colour. Greys, blacks and whites carry no chroma and so no vote; null
+ * when the artwork has nothing else.
+ */
+export function vibrantHsl(data) {
+  const b = Array.from({ length: HUE_BUCKETS }, () => ({ w: 0, x: 0, y: 0, s: 0, l: 0 }));
   for (let i = 0; i < data.length; i += 4) {
-    r += data[i];
-    g += data[i + 1];
-    b += data[i + 2];
+    if (data[i + 3] < 128) continue;
+    const r = data[i] / 255;
+    const g = data[i + 1] / 255;
+    const bl = data[i + 2] / 255;
+    const w = Math.max(r, g, bl) - Math.min(r, g, bl);
+    if (w < 0.08) continue;
+    const [h, s, l] = toHsl(r, g, bl);
+    const k = b[Math.floor(h / (360 / HUE_BUCKETS)) % HUE_BUCKETS];
+    k.w += w;
+    k.x += Math.cos((h * Math.PI) / 180) * w;
+    k.y += Math.sin((h * Math.PI) / 180) * w;
+    k.s += s * w;
+    k.l += l * w;
   }
-  return toHsl(r / n / 255, g / n / 255, b / n / 255);
+  const at = (i) => b[(i + HUE_BUCKETS) % HUE_BUCKETS];
+  let best = -1;
+  let score = 0;
+  for (let i = 0; i < HUE_BUCKETS; i++) {
+    const sc = at(i - 1).w / 2 + at(i).w + at(i + 1).w / 2;
+    if (sc > score) [best, score] = [i, sc];
+  }
+  if (best < 0) return null;
+  const fam = [at(best - 1), at(best), at(best + 1)];
+  const sum = (key) => fam.reduce((n, k) => n + k[key], 0);
+  const w = sum("w");
+  return [Math.round(((Math.atan2(sum("y"), sum("x")) * 180) / Math.PI + 360) % 360), sum("s") / w, sum("l") / w];
 }
 
-/** The colour as the design's --tint wash, at the design's .22 alpha. */
-export function tintOf(col) {
+/**
+ * The colour as the --tint wash behind the media bar and sheets. Saturation is floored so a muted
+ * cover still gives the bar a colour, and lightness is held where the bar's text reads in each
+ * theme - mid-dark under dark mode's light text, mid-light under light mode's dark text.
+ */
+export function tintOf(col, theme = "dark") {
   if (!col) return "transparent";
   const [h, s, l] = col;
-  return `hsla(${h | 0},${(s * 100) | 0}%,${(l * 100) | 0}%,.22)`;
+  const light = theme === "light";
+  const sat = Math.min(0.9, Math.max(0.45, s));
+  const lit = light ? Math.min(0.62, Math.max(0.5, l)) : Math.min(0.55, Math.max(0.4, l));
+  return `hsla(${Math.round(h)},${Math.round(sat * 100)}%,${Math.round(lit * 100)}%,${light ? 0.42 : 0.5})`;
 }
 
 /* ------------------------------------------------------------------ */

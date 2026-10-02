@@ -5,7 +5,8 @@ import { takeIntent } from '../lib/toast.js';
 import type { Ctx } from '../ctx';
 import { ampMode, gainDbv, ingressYaml, kb, mb, uptime, usbFact } from '../lib/settings.js';
 import { MSlider } from './MSlider';
-import { DxCard, DxConfirm, DxFact, DxFacts, DxRow, DxSelect, DxToggle, useCopied } from './settings/dx';
+import { DxCard, DxConfirm, DxFact, DxFacts, DxRow, DxSelect, useCopied } from './settings/dx';
+import { Switch } from './controls';
 import { CrashCard, LogsCard } from './settings/Logs';
 import { AuthTokenCard, ChangePasswordCard } from './settings/Security';
 
@@ -138,7 +139,7 @@ function FirmwareCard({
       </div>
       {!upd && <p className="dx-muted dx-sm">This firmware build does not check for updates.</p>}
       {beta && <DxRow label="Beta updates" hint={HINTS.beta}>
-          <DxToggle checked={isOn(beta)} label="Beta updates" onChange={v => post(pathFor(ctx, 'beta_firmware', v ? 'turn_on' : 'turn_off'))} />
+          <Switch on={isOn(beta)} label="Beta updates" onChange={v => post(pathFor(ctx, 'beta_firmware', v ? 'turn_on' : 'turn_off'))} />
         </DxRow>}
     </DxCard>;
 }

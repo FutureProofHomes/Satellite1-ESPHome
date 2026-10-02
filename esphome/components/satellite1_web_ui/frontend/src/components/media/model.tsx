@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { TEXT } from '../../copy.js';
 import { useMaData, useMedia } from '../../lib/device.js';
 import { maCfgFetch, maSettings, useMaSocket } from '../../lib/ma.js';
-import { GROUP_PENDING_MAX_MS, MEDIA_STATE, PENDING_MAX_MS, averageHsl, groupRows, holdEnds, mediaView, prune, settleGroup } from '../../lib/media.js';
+import { GROUP_PENDING_MAX_MS, MEDIA_STATE, PENDING_MAX_MS, groupRows, holdEnds, mediaView, prune, settleGroup, vibrantHsl } from '../../lib/media.js';
 
 /** A row as the tiers report it: [id, name, volume 0-100 or -1]. */
 export type Row = [string, string, number];
@@ -225,8 +225,9 @@ export function useTiers(ha: any, mac: string | undefined, wake: boolean) {
 export type Tiers = ReturnType<typeof useTiers>;
 
 /**
- * The artwork's average colour through a 6x6 canvas, for the bar's --tint. Only works when the art
- * host allows this origin to read pixels back; a tainted canvas throws and the tint stays off.
+ * The artwork's most vivid colour family, read from a 16x16 canvas, for the bar's --tint. Only works
+ * when the art host allows this origin to read pixels back; a tainted canvas throws and the tint
+ * stays off. Art with no colour in it at all (vibrantHsl's null) leaves it off as well.
  */
 export function useArtColor(art: string) {
   const [col, setCol] = useState<number[] | null>(null);
@@ -240,10 +241,10 @@ export function useArtColor(art: string) {
       if (!live) return;
       try {
         const c = document.createElement('canvas');
-        c.width = c.height = 6;
+        c.width = c.height = 16;
         const g = c.getContext('2d')!;
-        g.drawImage(img, 0, 0, 6, 6);
-        setCol(averageHsl(g.getImageData(0, 0, 6, 6).data));
+        g.drawImage(img, 0, 0, 16, 16);
+        setCol(vibrantHsl(g.getImageData(0, 0, 16, 16).data));
       } catch {
         /* tainted canvas: an art host without CORS */
       }

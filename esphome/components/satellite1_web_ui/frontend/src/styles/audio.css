@@ -5,9 +5,37 @@
 .au-ha-state { margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: var(--muted); }
 .au-ha-state p { margin: 0; }
 .au-ha-state p + p { margin-top: 6px; }
-.au-fix { display: inline; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--accent2); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.au-fix { display: inline; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--orb-ink); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .au-missing { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
 
 /* Each card's backdrop-filter makes it a stacking context, so the mic guard's list would open
    underneath the Area Ducking card below it. */
 .au-card:has(.au-sel-pop) { position: relative; z-index: 10; }
+
+/* The layout fixes below outrank the design's rules on specificity, not just order. */
+
+/* The design capped the scroll container itself at 900px, so on a wide window the page and its
+   scrollbar stopped short of the window's edge, where every other tab fills it. */
+@media (min-width: 1024px) {
+  .app > .tab-content-enter > section.control.au-route { max-width: none; }
+}
+
+/* One column for every box in a tree and one for every name. An area row's box sits after its 16px
+   caret and a 10px gap, so Local Speaker and the players, which have no caret, start 40px in too. */
+.au-tree .au-tree-ps { padding-left: 40px; }
+.au-tree > .au-tree-self { padding-left: 40px; column-gap: 10px; }
+
+/* The cards sit side by side from 640px, the app's breakpoint, where each is under 300px wide. So a
+   name wraps between words, never inside one, the greyed-row reason wraps rather than taking the
+   name's room, and Local Speaker's stepper drops to its own line when a word would not fit beside it. */
+.au-tree-p .au-tree-player-name { min-width: auto; overflow-wrap: break-word; word-break: normal; }
+.au-tree-p .au-tree-why { white-space: normal; text-align: right; }
+
+.au-step { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.au-step .au-sel-btn { width: 40px; padding: 0; justify-content: center; }
+.au-step .mslider-val { min-width: 30px; text-align: center; }
+
+/* "Local Speaker" stays on one line; when the volume stepper does not fit beside it, the stepper
+   takes its own line rather than squeezing the name. */
+.au-tree-self { row-gap: 6px; }
+.au-tree-self .au-tree-player-name { flex: 1 0 auto; white-space: nowrap; }

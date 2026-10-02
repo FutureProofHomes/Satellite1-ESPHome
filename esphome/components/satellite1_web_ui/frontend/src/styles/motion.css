@@ -1,0 +1,45 @@
+/* Route changes. The page slides the way the nav reads (data-dir, set by Satellite1Now) and fades,
+   while the header, nav and media bar hold still. The page is the root snapshot rather than a named
+   pane because a pane can be replaced mid-slide (Presence swaps "Looking for a radar module" for the
+   radar's own view), which cancels a transition; the chrome is never replaced, so it carries the
+   names and swaps at once. */
+html { --vt-x: 28px; }
+html[data-dir='back'] { --vt-x: -28px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  html.vt-route .app-header { view-transition-name: vt-header; }
+  html.vt-route .tabs { view-transition-name: vt-tabs; }
+  html.vt-route .side-nav { view-transition-name: vt-side; }
+  html.vt-route .mbar { view-transition-name: vt-mbar; }
+  html.vt-route::view-transition-group(vt-header),
+  html.vt-route::view-transition-group(vt-tabs),
+  html.vt-route::view-transition-group(vt-side),
+  html.vt-route::view-transition-group(vt-mbar),
+  html.vt-route::view-transition-new(vt-header),
+  html.vt-route::view-transition-new(vt-tabs),
+  html.vt-route::view-transition-new(vt-side),
+  html.vt-route::view-transition-new(vt-mbar) { animation: none; }
+  html.vt-route::view-transition-old(vt-header),
+  html.vt-route::view-transition-old(vt-tabs),
+  html.vt-route::view-transition-old(vt-side),
+  html.vt-route::view-transition-old(vt-mbar) { display: none; }
+  html.vt-route::view-transition-old(root) { animation: vtOut .2s cubic-bezier(.4, 0, 1, 1) both; mix-blend-mode: normal; }
+  html.vt-route::view-transition-new(root) { animation: vtIn .34s cubic-bezier(.2, .8, .2, 1) both; mix-blend-mode: normal; }
+
+  /* Without view transitions the new page still slides in; only the old one's exit is lost. */
+  @supports not (view-transition-name: none) {
+    .app > .tab-content-enter > :is(.now, .control) { animation: vtIn .3s cubic-bezier(.2, .8, .2, 1) backwards; }
+  }
+
+  /* Cards land in a short cascade, at most six steps deep so a long page is not still arriving. */
+  .control :is(.card, .pr-card, .au-card, .dx-card, .ww-card) { animation: cardIn .4s cubic-bezier(.2, .8, .2, 1) backwards; }
+  .control :is(.card, .pr-card, .au-card, .dx-card, .ww-card):nth-child(2) { animation-delay: 40ms; }
+  .control :is(.card, .pr-card, .au-card, .dx-card, .ww-card):nth-child(3) { animation-delay: 80ms; }
+  .control :is(.card, .pr-card, .au-card, .dx-card, .ww-card):nth-child(4) { animation-delay: 120ms; }
+  .control :is(.card, .pr-card, .au-card, .dx-card, .ww-card):nth-child(5) { animation-delay: 160ms; }
+  .control :is(.card, .pr-card, .au-card, .dx-card, .ww-card):nth-child(n+6) { animation-delay: 200ms; }
+}
+
+@keyframes vtOut { to { opacity: 0; transform: translateX(calc(var(--vt-x) * -1)); } }
+@keyframes vtIn { from { opacity: 0; transform: translateX(var(--vt-x)); } }
+@keyframes cardIn { from { opacity: 0; transform: translateY(10px); } }

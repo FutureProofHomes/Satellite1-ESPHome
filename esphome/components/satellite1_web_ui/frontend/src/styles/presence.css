@@ -1,11 +1,10 @@
 /* Presence: the states the design's mock never had to draw. */
 
 .pr-wait { font-size: 13px; color: var(--muted); margin: 0; }
-.pr-switch:disabled { opacity: .4; cursor: default; }
 
 /* The restart row: a label with a line of explanation under it. */
 .pr-row-label.pr-row-stack { flex-direction: column; align-items: flex-start; gap: 2px; }
-.pr-row-sub { font-size: 11px; line-height: 1.4; color: var(--muted); }
+.pr-row-sub { font-size: 12px; line-height: 1.4; color: var(--muted); }
 
 /* The gate rows are divs acting as sliders, so the global button focus ring does not reach them. */
-.pr-gate-track:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; border-radius: 6px; }
+.pr-gate-track:focus-visible { outline: 2px solid var(--orb-ink); outline-offset: 2px; border-radius: 6px; }

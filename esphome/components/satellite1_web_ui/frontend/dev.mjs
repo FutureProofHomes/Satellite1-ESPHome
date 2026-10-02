@@ -4,8 +4,9 @@
  *
  *   DEVICE=http://satellite1-a4c2f8.local npm run dev     # then open http://localhost:5173/
  *
- * Without DEVICE the page still loads, which is enough for layout work against mock data: the static
- * images the firmware serves from flash come from ../assets/ instead, and every API call answers 502.
+ * Without DEVICE the page still loads, which is enough for layout work against mock data: every API
+ * call answers 502. The static images the firmware serves from flash always come from ../assets/,
+ * the files __init__.py embeds, so they show whether DEVICE is a real device or a mock of one.
  *
  * The forwarded Host header is the device's own, so the session gate's DNS-rebinding checks see the
  * name they expect. The setup wizard's writes still refuse to run through here - they also require
@@ -99,7 +100,7 @@ createServer(async (req, res) => {
     res.end(readFileSync(page));
     return;
   }
-  if (!device && req.method === "GET" && STATIC[path]) {
+  if (req.method === "GET" && STATIC[path]) {
     const [file, type] = STATIC[path];
     res.writeHead(200, { "Content-Type": type });
     res.end(readFileSync(join(assets, file)));

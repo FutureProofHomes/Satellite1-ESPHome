@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { HINTS, TEXT } from '../copy.js';
 import { entity, haSyncOnce, pathFor, post } from '../lib/device.js';
+import { tipDone } from '../lib/tips.js';
 import { NEED_MEDIA, NEED_VOLUME, areaCount, areaLocked, areaState, eligible, haProblem, hasTargets, isLive, looseCount, looseLocked, looseState, nudge, rowOn, rowWhy, toggleArea, toggleLoose, togglePlayer, treePayload } from '../lib/audio.js';
 import { HintBtn } from './bits';
 import { MSlider } from './MSlider';
+import { Check, Switch } from './controls';
+import type { CheckState } from './controls';
 import type { Ctx } from '../ctx';
 
 /**
@@ -31,7 +34,6 @@ type Sel = {
 };
 type Selection = { local: boolean; area: string; routing: Sel; duck: Sel };
 type Problem = { text: string; fix?: boolean; soft?: boolean } | null;
-type CheckState = 'on' | 'off' | 'mixed';
 
 const has = (ctx: Ctx, key: string) => !!ctx.device?.e?.[key];
 const switchOn = (e: any) => !!e && (e.value === true || e.state === 'ON' || e.state === 'on');
@@ -65,21 +67,6 @@ function useHeld(value: number, tol: number): [number, (v: number) => void] {
   return [held && !arrived ? held.v : value, (v: number) => setHeld({ v, at: Date.now() })];
 }
 
-function AuToggle({
-  checked,
-  disabled,
-  label,
-  onChange
-}: {
-  checked: boolean;
-  disabled?: boolean;
-  label: string;
-  onChange: (v: boolean) => void;
-}) {
-  return <button role="switch" aria-checked={checked} aria-label={label} disabled={disabled} onClick={() => onChange(!checked)} className={`au-toggle${checked ? ' on' : ''}${disabled ? ' disabled' : ''}`}>
-      <span className="au-toggle-thumb" />
-    </button>;
-}
 function AuSelect({
   value,
   options,
@@ -111,10 +98,7 @@ function AuSelect({
   return <div ref={ref} className={`au-sel${disabled ? ' disabled' : ''}`}>
       <button className={`au-sel-btn${open ? ' open' : ''}`} disabled={disabled} aria-label={label} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(v => !v)}>
         <span>{value}</span>
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true" style={{
-        transform: open ? 'rotate(180deg)' : undefined,
-        transition: 'transform .2s'
-      }}>
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
           <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
@@ -128,49 +112,6 @@ function AuSelect({
             </button>)}
         </div>}
     </div>;
-}
-/**
- * The tri-state box, a button rather than an input: an indeterminate checkbox needs a ref to set
- * the property, and there is no attribute for it. Its marks are drawn - an SVG tick, a CSS dash -
- * rather than typed, because the device serves no webfont and U+25EA, the half-filled square a typed
- * third state would use, is missing from most system fonts and arrives as an empty rectangle. A
- * tri-state control whose third state renders as a blank box is worse than none.
- */
-function AuCheck({
-  state,
-  disabled,
-  onClick,
-  label
-}: {
-  state: CheckState;
-  disabled?: boolean;
-  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
-  label: string;
-}) {
-  return <button role="checkbox" aria-checked={state === 'mixed' ? 'mixed' : state === 'on'} aria-label={label} disabled={disabled} onClick={onClick} className={`au-check au-check-${state}${disabled ? ' disabled' : ''}`} style={{
-    width: 44,
-    height: 44,
-    minWidth: 44,
-    minHeight: 44,
-    background: 'transparent',
-    border: 'none',
-    borderRadius: 0,
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 0
-  }}>
-      <span className={`au-check au-check-${state}`} style={{
-      width: 22,
-      height: 22,
-      minWidth: 22,
-      minHeight: 22,
-      pointerEvents: 'none'
-    }}>
-        {state === 'on' && <svg width="12" height="12" viewBox="0 0 10 10"><path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg>}
-        {state === 'mixed' && <span className="au-check-dash" />}
-      </span>
-    </button>;
 }
 /** A row of players under a heading with its own bulk box, for a real area and for "No Area
  *  Assigned": the two behave differently enough to be worth one shared shell and two callers rather
@@ -195,22 +136,16 @@ function Group({
   children?: React.ReactNode;
 }) {
   return <div className="au-tree-a">
-      <div className="au-tree-h" onClick={onExpand} style={{
-      minHeight: 48,
-      cursor: 'pointer'
-    }}>
+      <div className="au-tree-h" onClick={onExpand}>
         <button className="au-tree-caret" aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`} aria-expanded={expanded} onClick={e => {
         e.stopPropagation();
         onExpand();
       }}>
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true" style={{
-          transform: expanded ? 'rotate(90deg)' : undefined,
-          transition: 'transform .2s'
-        }}>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
             <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
-        <AuCheck state={state} disabled={disabled} onClick={e => {
+        <Check state={state} disabled={disabled} onClick={e => {
         e.stopPropagation();
         onBulk();
       }} label={label} />
@@ -260,19 +195,15 @@ function TargetTree({
     const [id, name] = row;
     const ok = eligible(row, need);
     const why = rowWhy(row, need);
-    return <div className={`au-tree-p${ok && isLive(row) ? '' : ' au-tree-off'}`} key={id} style={{
-      minHeight: 44,
-      paddingTop: 10,
-      paddingBottom: 10
-    }}>
-        <AuCheck state={rowOn(sel, areaId, row, need) ? 'on' : 'off'} disabled={!ok} onClick={() => onSel(togglePlayer(sel, areaId, id))} label={name} />
+    return <div className={`au-tree-p${ok && isLive(row) ? '' : ' au-tree-off'}`} key={id}>
+        <Check state={rowOn(sel, areaId, row, need) ? 'on' : 'off'} disabled={!ok} onClick={() => onSel(togglePlayer(sel, areaId, id))} label={name} />
         <span className="au-tree-player-name">{name}</span>
         {why && <span className="au-tree-why">{why}</span>}
       </div>;
   };
   return <div className="au-tree">
       {local !== null && <div className="au-tree-p au-tree-self">
-          <AuCheck state={local ? 'on' : 'off'} onClick={() => onLocal && onLocal(!local)} label="Local Speaker" />
+          <Check state={local ? 'on' : 'off'} onClick={() => onLocal && onLocal(!local)} label="Local Speaker" />
           <span className="au-tree-player-name">Local Speaker</span>
           {local && localLevel}
         </div>}
@@ -336,28 +267,11 @@ function LocalLevel({
       value: v
     });
   };
-  return <span style={{
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6
-  }}>
+  return <span className="au-step">
       <HintBtn text={HINTS.voice_override} />
-      <button type="button" className="au-sel-btn" aria-label="Decrease local speaker volume" style={{
-      width: 36,
-      minHeight: 36,
-      padding: 0,
-      justifyContent: 'center'
-    }} disabled={shown <= min} onClick={() => set(-1)}>−</button>
-      <span className="mslider-val" aria-live="polite" style={{
-      minWidth: 30,
-      textAlign: 'center'
-    }}>{shown === 0 ? 'auto' : shown}</span>
-      <button type="button" className="au-sel-btn" aria-label="Increase local speaker volume" style={{
-      width: 36,
-      minHeight: 36,
-      padding: 0,
-      justifyContent: 'center'
-    }} disabled={shown >= max} onClick={() => set(1)}>+</button>
+      <button type="button" className="au-sel-btn" aria-label="Decrease local speaker volume" disabled={shown <= min} onClick={() => set(-1)}>−</button>
+      <span className="mslider-val" aria-live="polite">{shown === 0 ? 'auto' : shown}</span>
+      <button type="button" className="au-sel-btn" aria-label="Increase local speaker volume" disabled={shown >= max} onClick={() => set(1)}>+</button>
     </span>;
 }
 
@@ -433,11 +347,11 @@ function RemoteRouting({
         </div>}
       {has(ctx, 'remote_wake_chime') && <div className="au-row">
           <div className="au-row-label"><span>Remote wake chime</span><HintBtn text={HINTS.remote_wake_chime} /></div>
-          <AuToggle checked={switchOn(entity(ctx, 'remote_wake_chime'))} disabled={!active} label="Remote wake chime" onChange={v => send(ctx, 'remote_wake_chime', v ? 'turn_on' : 'turn_off')} />
+          <Switch on={switchOn(entity(ctx, 'remote_wake_chime'))} disabled={!active} label="Remote wake chime" onChange={v => send(ctx, 'remote_wake_chime', v ? 'turn_on' : 'turn_off')} />
         </div>}
       {has(ctx, 'remote_timer_ring') && <div className="au-row">
           <div className="au-row-label"><span>Remote timer ring</span><HintBtn text={HINTS.remote_timer_ring} /></div>
-          <AuToggle checked={switchOn(entity(ctx, 'remote_timer_ring'))} disabled={!active} label="Remote timer ring" onChange={v => send(ctx, 'remote_timer_ring', v ? 'turn_on' : 'turn_off')} />
+          <Switch on={switchOn(entity(ctx, 'remote_timer_ring'))} disabled={!active} label="Remote timer ring" onChange={v => send(ctx, 'remote_timer_ring', v ? 'turn_on' : 'turn_off')} />
         </div>}
       {guard && <div className="au-row au-row-last">
           <div className="au-row-label"><span>Remote mic guard</span><HintBtn text={HINTS.remote_sync_guard} /></div>
@@ -493,6 +407,7 @@ export function AudioTab({
   // the device's cached copy; this is what asks Home Assistant for a fresh one.
   useEffect(() => {
     haSyncOnce(ctx.haRefresh);
+    tipDone('route');
     // haSyncOnce guards itself, so the effect runs once by design.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

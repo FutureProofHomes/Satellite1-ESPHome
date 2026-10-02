@@ -1,18 +1,189 @@
-/* ===== Home: transcript wake-word tabs ===== */
-.tt-tabs{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px;flex-shrink:0}
-.tt-tab{white-space:nowrap;font-size:11px;font-weight:600;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:7px 11px;min-height:36px;transition:color .18s,background .18s,border-color .18s}
-.tt-tab.on{background:var(--orb-a20,rgba(167,139,250,.18));border-color:transparent;color:var(--orb-a,var(--accent2))}
-.transcript p.transcript-empty{margin:auto;max-width:none;text-align:center;color:var(--muted);background:transparent}
+/* ===== Home: layout ===== */
+/* The section's height already stops at the nav and media bar, safe area included, so the design's
+   bottom padding was only a dead band under the transcript. The page dots carry their own space
+   above and below, so .now-right keeps only a sliver under them (owner, October 2026). */
+main.app > .tab-content-enter > section.now.now-compact{padding-bottom:0 !important}
+section.now.now-compact>.now-right{padding-bottom:2px !important}
+
+/* ===== Home: the orb's tips ===== */
+/* A tip's last line sits on the label's and a second rises into the orb's transparent lower margin,
+   which the resting sphere stops well short of, so tips take no height from the windows below. The
+   label stays under it, unseen but still the live region. */
+.orb-meta,.orb-say{align-self:stretch}
+.orb-say{position:relative;display:flex;justify-content:center}
+.orb-label.tipped{opacity:0}
+.orb-tips{position:absolute;bottom:0;left:0;right:0;max-width:340px;margin:0 auto;display:grid;pointer-events:none}
+.orb-tips>span{grid-area:1/1;align-self:end;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;text-align:center;text-wrap:balance;font-size:13px;line-height:1.35;color:var(--muted)}
+@media (min-width:640px){.orb-tips>span{font-size:14px}}
+.orb-tips>.in{animation:tipIn .45s ease both}
+.orb-tips>.out{animation:tipOut .45s ease both}
+@keyframes tipIn{from{opacity:0;transform:translateY(4px)}}
+@keyframes tipOut{to{opacity:0;transform:translateY(-4px)}}
+@media (prefers-reduced-motion:reduce){.orb-tips>span{animation:none}.orb-tips>.out{display:none}}
+
+/* ===== Home: the wake word windows ===== */
+/* A strip of windows on the native horizontal scroll, so a swipe has the platform's own momentum
+   and snap. The strip runs 16px past .now-right's content into its padding, so whichever window is
+   in front lines up with everything above it and the other one peeks in from the edge. The
+   trailing spacer is the end padding, which Safari leaves out of a scroller's width. */
+.tt-pager{--tt-bleed:16px;--tt-gap:6px;flex:1;min-height:0;display:flex;flex-direction:column}
+.tt-track{flex:1;min-height:0;display:flex;align-items:stretch;gap:var(--tt-gap);overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;scrollbar-width:none;margin:0 calc(-1 * var(--tt-bleed));padding:0 0 0 var(--tt-bleed);scroll-padding:0 var(--tt-bleed);outline:none}
+.tt-track::-webkit-scrollbar{display:none}
+.tt-track::after{content:'';flex:0 0 calc(var(--tt-bleed) - var(--tt-gap))}
+/* The two-column layout gives .now-right no left padding and clips it, so it reaches back over
+   the left column's padding by the bleed, leaving its content where it was. */
+@media (min-width:640px) and (max-width:1023px){section.now.now-compact>.now-right{width:calc(100% + 16px) !important;padding-left:16px !important;margin-left:-16px !important}}
+/* The page is what snaps and the card inside it is what moves: browsers snap to the transformed
+   box, so a receding card would otherwise pull its own snap point in. */
+.tt-page{flex:0 0 calc(100% - var(--tt-bleed));min-width:0;display:flex;scroll-snap-align:start;scroll-snap-stop:always}
+.tt-page:last-child{scroll-snap-align:end}
+/* --k is how far a window is from the front, 0 to 1, set from the scroll position as it moves: it
+   recedes and dims on the side away from the front window, so its peeking edge holds still. */
+.tt-card{position:relative;flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;padding:0;transform:scale(calc(1 - var(--k,0) * .06));opacity:calc(1 - var(--k,0) * .45);will-change:transform}
+@media (prefers-reduced-motion:reduce){.tt-card{transform:none}}
+/* A window that is not in front answers a tap as a whole, by coming forward. */
+.tt-card:not(.on){cursor:pointer}
+.tt-card:not(.on)>*{pointer-events:none}
+.tt-card>.tt-scroll,.tt-card>.composer,.tt-card>.tt-vacant{position:relative}
+.tt-card>.composer{flex:none;min-height:0;overflow:visible;margin:0;padding:4px 8px 8px}
+
+/* The title bar, frosted over the conversation that scrolls up under it. */
+.tt-head{position:absolute;top:0;left:0;right:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:8px;height:38px;padding:0 4px 0 2px;background:color-mix(in srgb,var(--surface) 76%,transparent);-webkit-backdrop-filter:blur(18px) saturate(1.6);backdrop-filter:blur(18px) saturate(1.6);border-bottom:1px solid var(--line)}
+.tt-word{display:inline-flex;align-items:center;gap:4px;min-width:0;align-self:stretch;min-height:0;padding:0 10px;border-radius:10px;background:transparent;color:var(--text);font-size:13px;font-weight:500;transition:background .18s}
+.tt-word span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tt-word svg{flex:none;color:var(--muted)}
+.tt-word:not(:disabled):active{background:var(--surface2)}
+.tt-word.empty{color:var(--muted)}
+.tt-word.err{color:#f87171}
+.tt-word.plain{cursor:default}
+.tt-word:disabled{opacity:.75;cursor:default}
+/* The tuning capsule: the accent once tuned, amber until then, inside a full-height tap target. */
+.tt-tune{flex:none;display:grid;place-items:center;align-self:stretch;min-height:0;padding:0 4px;background:transparent}
+.tt-cap{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:11px;font-size:11px;font-weight:500;background:rgba(245,158,11,.14);color:#d97706;transition:transform .15s}
+.tt-tune.tuned .tt-cap{background:var(--orb-a20);color:var(--orb-ink)}
+.tt-tune:active .tt-cap{transform:scale(.94)}
+[data-theme='dark'] .tt-tune:not(.tuned) .tt-cap{color:#fbbf24}
+.tt-busy{width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:ttSpin .8s linear infinite}
+@keyframes ttSpin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.tt-busy{animation:none}}
+
+/* An empty slot's window: what it is for, and the picker. */
+.tt-vacant{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:50px 28px 24px;text-align:center}
+.transcript .tt-vacant p{margin:0;max-width:34ch;padding:0;font-size:13px;line-height:1.45;color:var(--muted);background:transparent}
+.tt-vacant button{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 18px;border-radius:22px;font-size:14px;font-weight:600}
+
+/* The page dots, iOS's: the front window's stretches into a pill, and --p (0 to 1, from the scroll)
+   moves the stretch from one to the other as the strip moves. A dot whose window has something new
+   glows in the accent until it is looked at. */
+.tt-dots{flex:none;display:flex;justify-content:center;height:16px;margin-top:2px}
+.tt-dot{display:grid;place-items:center;width:26px;height:16px;min-height:0;padding:0;background:transparent}
+.tt-dot::before{content:'';display:block;width:6px;height:6px;border-radius:3px;background:var(--text);opacity:.22}
+.tt-dot:nth-child(1)::before{width:calc(6px + 12px * (1 - var(--p,0)));opacity:calc(.22 + .58 * (1 - var(--p,0)))}
+.tt-dot:nth-child(2)::before{width:calc(6px + 12px * var(--p,0));opacity:calc(.22 + .58 * var(--p,0))}
+.tt-dot.new::before{background:var(--orb-ctl);opacity:1;animation:ttGlow 1.8s ease-in-out infinite}
+@keyframes ttGlow{50%{box-shadow:0 0 0 4px var(--orb-a20,rgba(37,99,235,.2))}}
+@media (prefers-reduced-motion:reduce){.tt-dot.new::before{animation:none}}
+
+.transcript p.transcript-empty{margin:auto;max-width:34ch;line-height:1.45;text-align:center;color:var(--muted);background:transparent}
+
+/* ===== Home: a window's conversation ===== */
+.tt-scroll{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;padding:46px 12px 4px;scrollbar-width:none}
+.tt-scroll::-webkit-scrollbar{display:none}
+/* ===== Home: transcript bubbles, laid out as iMessage lays them out ===== */
+/* The auto margin sits a short conversation at the bottom, and resolves to nothing once the lines
+   overflow, so unlike justify-content:flex-end it leaves the top of a long one scrollable. */
+.tt-scroll>:first-child{margin-top:auto}
+.transcript p.user,.transcript p.assistant{position:relative;border-radius:17px}
+.transcript p.assistant{margin-right:auto}
+.transcript p.user{text-align:left}
+.transcript p.run{margin-top:3px}
+.transcript p.user.tail{border-bottom-right-radius:0}
+.transcript p.assistant.tail{border-bottom-left-radius:0}
+/* The tail sits beside the bubble rather than over it, because the user's bubble is translucent
+   and an overlap would show as a darker patch. */
+.transcript p.tail::after{content:'';position:absolute;bottom:0;width:7px;height:14px;background:inherit}
+.transcript p.user.tail::after{right:-7px;-webkit-mask:radial-gradient(7px 14px at 100% 0,#0000 96%,#000);mask:radial-gradient(7px 14px at 100% 0,#0000 96%,#000)}
+.transcript p.assistant.tail::after{left:-7px;-webkit-mask:radial-gradient(7px 14px at 0 0,#0000 96%,#000);mask:radial-gradient(7px 14px at 0 0,#0000 96%,#000)}
+.transcript .tstamp{display:block;flex-shrink:0;margin:16px 0 8px;text-align:center;font-size:12px;color:var(--muted)}
+.transcript .tstamp b{font-weight:600}
+.transcript .tstamp+p{margin-top:0}
+.transcript p.in{animation:homeBubbleIn .3s cubic-bezier(.2,.9,.3,1.2)}
+.transcript p.user.in{transform-origin:100% 100%}
+.transcript p.assistant.in{transform-origin:0 100%}
+@keyframes homeBubbleIn{from{opacity:0;transform:scale(.6)}}
+
+/* ===== Home: the answer's typing bubble ===== */
+/* As tall as a one-line answer, so the answer replaces it without the box jumping. Its tail is
+   iMessage's pair of small circles; the answer bubble is opaque, so they may overlap it. */
+.transcript p.typing{display:flex;align-items:center;gap:5px;width:fit-content;padding:14px 13px}
+.transcript p.typing::before,.transcript p.typing::after{content:'';position:absolute;border-radius:50%;background:inherit}
+.transcript p.typing::before{left:-2px;bottom:-2px;width:11px;height:11px}
+.transcript p.typing::after{left:-7px;bottom:-7px;width:5px;height:5px}
+.typing i{width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.3;animation:homeTyping 1.4s ease-in-out infinite}
+.typing i:nth-child(2){animation-delay:.2s}
+.typing i:nth-child(3){animation-delay:.4s}
+@keyframes homeTyping{0%,60%,100%{opacity:.3;transform:scale(1)}30%{opacity:.85;transform:scale(1.15)}}
+@media (prefers-reduced-motion:reduce){.typing i{animation:none;opacity:.6}.transcript p.in{animation:none}}
+
+/* ===== Home: the orb's tap ===== */
+/* A transparent circle over the sphere; the canvas under it gives way a little while pressed, so a
+   tap that has to cross the network to start anything still answers the finger at once. */
+.orb-stage{position:relative}
+.orb-stage canvas{transition:transform .18s cubic-bezier(.2,.9,.3,1.2)}
+.orb-tap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);border-radius:50%;background:transparent;padding:0;min-height:0;pointer-events:auto;-webkit-tap-highlight-color:transparent}
+.orb-stage:has(.orb-tap:active) canvas{transform:scale(.94)}
+@media (prefers-reduced-motion:reduce){.orb-stage canvas{transition:none}}
+
+/* ===== Home: the message field ===== */
+/* One rounded row like iMessage's: the pipeline chip, the field, and the round send button inside
+   it. 16px text because iOS zooms the page into any smaller field it focuses. */
+.composer{flex-shrink:0}
+.composer-row{display:flex;align-items:center;gap:6px;min-height:40px;padding:3px 3px 3px 12px;background:var(--surface);border:1px solid var(--line);border-radius:20px}
+.composer-row:focus-within{border-color:var(--orb-ctl)}
+.composer-row.off{opacity:.55}
+.composer-row input{flex:1;min-width:0;min-height:32px;border:0;background:transparent;color:var(--text);font-size:16px;padding:0;outline:none}
+/* Smaller than the text, which is what keeps it whole beside the chip on a 375px phone; iOS judges
+   the zoom by the field's own size, not its placeholder's. */
+.composer-row input::placeholder{color:var(--muted);font-size:14px}
+.composer-row input:focus-visible{outline:none !important}
+.composer-send{flex:none;display:grid;place-items:center;width:32px;height:32px;min-height:0;border-radius:50%;background:var(--orb-fill);color:#fff;transition:opacity .15s,transform .15s}
+.composer-send:disabled{opacity:.35;cursor:default}
+.composer-send:not(:disabled):active{transform:scale(.9)}
+/* The select sits invisibly over its chip, so the chip is what shows and the native picker is what
+   opens. */
+.composer-agent{position:relative;flex:none;display:inline-flex;align-items:center;gap:3px;max-width:38%;margin-right:4px;padding-right:8px;border-right:1px solid var(--line);font-size:12px;font-weight:600;color:var(--orb-ink)}
+.composer-agent span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.composer-agent svg{flex:none}
+.composer-agent select{position:absolute;inset:0;width:100%;min-height:0;opacity:0;cursor:pointer;font-size:16px}
+.composer-note{margin:6px 4px 0;font-size:12px;color:var(--muted)}
+/* The agent question: a sentence for a title, so smaller than a drawer's name, and clear of Close. */
+.agent-panel .dw-top{align-items:flex-start}
+.agent-panel .dw-top h2{line-height:1.25}
 
 /* ===== Home: timers (read-only) ===== */
 .timer-pill{min-height:44px;padding-right:14px}
-.timer-pill-label small{color:var(--muted);font-size:11px}
+.timer-pill-label small{color:var(--muted);font-size:12px}
 .timer-pill.paused .timer-pill-time{color:var(--muted)}
 
 /* ===== Home: sensor pills and calibration ===== */
+/* Sized by their content - reading, label, and the calibration caret tucked under it - so the
+   transcript gets the height back. Top-aligned so the presence pill, which has no caret, lines its
+   reading up with the others' while the row stretches it to their height. */
+.pills .sensor{justify-content:flex-start !important;min-height:0 !important;padding-top:8px !important;padding-bottom:5px !important;gap:1px !important}
+.pills .sensor-caret{margin-top:1px}
 .pills .sensor.skel>*{visibility:hidden}
 .pills .sensor.skel{border-color:transparent;background:linear-gradient(90deg,var(--surface) 25%,var(--surface2) 50%,var(--surface) 75%) 0 0/200% 100%;animation:homeSkel 1.4s linear infinite}
 @keyframes homeSkel{to{background-position:-200% 0}}
 .sensor-drawer-body .cal-hint{margin:8px 0 0;line-height:1.45}
-.sensor-drawer-body .spark path{fill:none;stroke:var(--orb-a,var(--accent2));stroke-width:2;vector-effect:non-scaling-stroke}
+.sensor-drawer-body .spark path{fill:none;stroke:var(--orb-ctl);stroke-width:2;vector-effect:non-scaling-stroke}
 .stepper button:disabled,.cal-actions button:disabled{opacity:.4;cursor:default}
+/* The steppers sit on the drawer surface, where a surface-coloured button vanishes in light mode. */
+.sensor-drawer-body .stepper button,.sensor-drawer-body .cal-actions button:not(.done){width:44px;height:44px;min-width:44px;border-radius:12px;background:var(--surface2);border:1px solid var(--line-strong);color:var(--text);font-size:20px;line-height:1;transition:background .12s,transform .12s}
+.sensor-drawer-body .stepper button:not(:disabled):active,.sensor-drawer-body .cal-actions button:not(:disabled):active{background:var(--fill-press);transform:scale(.94)}
+.sensor-drawer-body .cal-actions .done{min-height:44px;border-radius:12px;background:var(--orb-fill);color:#fff;padding:0 20px}
+
+.orb-tools { display: flex; align-items: center; gap: 6px; }
+.customize-dot { width: 15px; height: 15px; flex-shrink: 0; border-radius: 50%; background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .08); }
+.orb-hint.mute-btn { width: 44px; justify-content: center; opacity: 1; color: var(--text); }
+.orb-hint.mute-btn[aria-pressed='true'] { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.orb-label.muted-on { color: var(--danger); }

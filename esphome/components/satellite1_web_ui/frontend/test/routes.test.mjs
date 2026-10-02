@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseRoute, routeHash } from "../src/lib/routes.js";
+import { parseRoute, routeDir, routeHash } from "../src/lib/routes.js";
 
 test("each tab parses from its own hash", () => {
   assert.deepEqual(parseRoute("#/home"), { tab: "NOW", sub: null });
@@ -49,4 +49,15 @@ test("every route survives a round trip", () => {
     const { tab, sub } = parseRoute(h);
     assert.equal(routeHash(tab, sub), h);
   }
+});
+
+test("the page slides the way the nav reads", () => {
+  const r = (h) => parseRoute(h);
+  assert.equal(routeDir(r("#/home"), r("#/audio")), "fwd");
+  assert.equal(routeDir(r("#/audio"), r("#/wake-word")), "back");
+  assert.equal(routeDir(r("#/presence"), r("#/settings/logs")), "fwd");
+  assert.equal(routeDir(r("#/settings/logs"), r("#/settings/updates")), "back");
+  assert.equal(routeDir(r("#/settings/updates"), r("#/settings/community")), "fwd");
+  assert.equal(routeDir(r("#/settings"), r("#/settings/device")), null);
+  assert.equal(routeDir(r("#/controls"), r("#/home")), null);
 });

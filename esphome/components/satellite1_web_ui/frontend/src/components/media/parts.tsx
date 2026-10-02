@@ -1,4 +1,4 @@
-import type { CSSProperties, MutableRefObject, PointerEvent as RPointerEvent, ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { useState } from 'react';
 import { pct } from '../../lib/media.js';
 import { useHeld } from './model';
@@ -86,65 +86,3 @@ export function PlayButton({
     model.playPause();
   }}><Svg size={sm ? 16 : 22}>{model.playing ? I_PAUSE : I_PLAY}</Svg></button>;
 }
-
-/** The design's swipe-down handle for the bottom drawers on narrow screens; a tap closes too.
- *  `at` is the drawer's resting transform, which the drag rides on. */
-export const dragHandle = (ref: MutableRefObject<number | null>, sel: string, dismiss: () => void, at = 'translateX(-50%)') => ({
-  role: 'button',
-  'aria-label': 'Close',
-  tabIndex: 0,
-  style: {
-    touchAction: 'none' as const,
-    cursor: 'grab'
-  },
-  onKeyDown: (e: KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      dismiss();
-    }
-  },
-  onPointerDown: (e: RPointerEvent<HTMLDivElement>) => {
-    if (window.innerWidth >= 1024) return;
-    ref.current = e.clientY;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const s = e.currentTarget.closest(sel) as HTMLElement | null;
-    if (s) s.style.transition = 'none';
-  },
-  onPointerMove: (e: RPointerEvent<HTMLDivElement>) => {
-    if (ref.current === null) return;
-    const dy = Math.max(0, e.clientY - ref.current);
-    const s = e.currentTarget.closest(sel) as HTMLElement | null;
-    if (s) {
-      s.style.transform = `${at} translateY(${dy}px)`;
-      s.style.opacity = String(Math.max(0, 1 - dy / 240));
-    }
-  },
-  onPointerUp: (e: RPointerEvent<HTMLDivElement>) => {
-    if (ref.current === null) return;
-    const dy = Math.max(0, e.clientY - ref.current);
-    const s = e.currentTarget.closest(sel) as HTMLElement | null;
-    if (dy > 90) {
-      if (s) {
-        s.style.transition = 'transform .22s ease,opacity .22s ease';
-        s.style.transform = `${at} translateY(120%)`;
-        s.style.opacity = '0';
-        setTimeout(dismiss, 210);
-      } else dismiss();
-    } else {
-      if (s) {
-        s.style.transition = 'transform .22s ease,opacity .22s ease';
-        s.style.transform = at || 'none';
-        s.style.opacity = '1';
-      }
-      if (dy < 6) dismiss();
-    }
-    ref.current = null;
-    setTimeout(() => {
-      if (s) {
-        s.style.transition = '';
-        s.style.transform = '';
-        s.style.opacity = '';
-      }
-    }, 250);
-  }
-});

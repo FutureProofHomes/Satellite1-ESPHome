@@ -1,11 +1,13 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Dispatch, PointerEvent as RPointerEvent, ReactNode, SetStateAction } from 'react';
 import { HINTS, PRESENCE, TEXT } from '../copy.js';
 import { BASE, entity, pathFor, post, RADAR_LIVE_MS, useRadar } from '../lib/device.js';
+import { tipDone } from '../lib/tips.js';
 import { RadarIcon } from '../icons';
 import { clampShift, direction, distLabel, feetOn, gateArray, gateLabel, grabCorner, inPolygon, labelPoint, nearest, presenceLabel, rangeLabel, realTargets, shapeBody, stepTrails } from '../lib/presence.js';
 import { HintBtn } from './bits';
 import { MSlider } from './MSlider';
+import { Switch } from './controls';
 import type { Ctx } from '../ctx';
 
 /**
@@ -89,21 +91,6 @@ type ViewProps = {
 };
 const num = (v: unknown) => Number(v) || 0;
 const polygonPoints = (pts: Pt[]) => pts.map(p => `${p.x},${p.y}`).join(' ');
-function Switch({
-  on,
-  onChange,
-  label,
-  disabled
-}: {
-  on: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-  disabled?: boolean;
-}) {
-  return <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)} className={`pr-switch${on ? ' on' : ''}`}>
-      <span className="pr-switch-thumb" />
-    </button>;
-}
 
 /**
  * Slider writes, sent only when the value changed. MSlider commits on every pointer-up and key-up,
@@ -940,6 +927,8 @@ export function PresenceTab({
   onGoDevice?: () => void;
 }) {
   const radar = useRadar(true);
+  // The orb's "add a radar" tip has done its job once someone has come to look.
+  useEffect(() => tipDone('radar'), []);
   // The distance unit is an internal ESPHome switch, so a wall tablet and a phone agree and a
   // reboot keeps the choice. One read for the whole tab: the plot's ring labels, the gate rows,
   // both settings cards and the Distance pill follow it.

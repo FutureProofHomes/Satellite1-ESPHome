@@ -8,6 +8,51 @@
 :root { --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); }
 html[data-embed] { --sat: 0px; --sab: 0px; }
 
+/* An iOS Home Screen app is drawn under the status bar, but innerHeight, 100dvh and height:100% all
+   come out the top inset short of the screen (WebKit bugs 254868 and 301994), so a page sized by
+   them stops that far above the bottom with the page background showing beneath it. 100lvh still
+   measures the whole screen, and a root that tall makes iOS correct the others (measured on a
+   physical iPhone, get-bb/bb 2356aee). Standalone only: in a Safari tab lvh is the height with the
+   toolbars retracted, taller than what shows. */
+@media (display-mode: standalone) { html { height: 100lvh; } }
+
+/* If iOS still leaves the viewport short, index.html sets data-short. The home indicator then sits
+   in the strip below the page, so the bottom inset would only pad the media bar a second time, and
+   the background is the bar's so the strip reads as part of it. */
+html[data-short] { --sab: 0px; }
+html[data-short], html[data-short] body { background: var(--surface); }
+
+/* The header clears the status bar itself. app.css's last word on its padding is a flat 14px while
+   an earlier rule still adds the inset to its min-height, so on a notched iPhone the header grew by
+   the inset and centred its contents in that, leaving an empty band under the device chip.
+   Its controls are 44px, the smallest comfortable touch target (owner: they felt small, October
+   2026). The padding around them is trimmed to 6px for room on a phone; on a notched one the top
+   is the inset itself and no less, so no control reaches into the status bar, where a tap is
+   iOS's scroll-to-top. */
+.app > header { padding-top: max(6px, var(--sat)) !important; padding-bottom: 6px !important; min-height: 0 !important; }
+.app > header .header-left { min-height: 44px; }
+.app > header .device-chip { min-height: 44px !important; font-size: 14px !important; }
+.app > header .header-actions { gap: 12px !important; }
+.app > header .header-actions button { width: 44px !important; height: 44px !important; min-width: 44px !important; min-height: 44px !important; }
+.header-toast-pill { min-height: 44px; padding: 3px 3px 3px 12px; }
+.header-toast-pill .toast-x { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }
+
+/* The nav grows to 60px from 640px (app.css) and every page's height subtracts --tabs-h, so the
+   variable has to grow with it or each page's last 8px sits under the nav. Above 1024px the nav is
+   gone and nothing subtracts it. */
+@media (min-width: 640px) and (max-width: 1023px) { .app { --tabs-h: 60px; } }
+
+/* The appearance menu (bits.tsx ThemeMenu), portaled and placed under its button. */
+.theme-menu { position: fixed; z-index: 500; min-width: 210px; padding: 6px; background: var(--pop); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-pop); animation: menuIn .16s cubic-bezier(.2,.8,.2,1); transform-origin: top right; }
+@keyframes menuIn { from { opacity: 0; transform: scale(.96) translateY(-4px); } }
+.theme-opt { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 8px 12px; border-radius: 10px; background: transparent; color: var(--text); font-size: 15px; font-weight: 500; text-align: left; }
+.theme-opt span { flex: 1; display: flex; flex-direction: column; }
+.theme-opt small { color: var(--muted); font-size: 12px; font-weight: 400; margin-top: 1px; }
+.theme-opt:hover, .theme-opt:focus-visible { background: var(--fill-hover); outline: none; }
+.theme-opt:active { background: var(--fill-press); }
+.theme-opt[aria-checked='true'] { color: var(--orb-ink); font-weight: 600; }
+.theme-tick { flex: none; }
+
 /* The boot splash from index.html, over everything until the app's first real screen removes it. */
 #splash { position: fixed; inset: 0; z-index: 1000; }
 
@@ -22,13 +67,13 @@ html[data-embed] { --sat: 0px; --sab: 0px; }
 .notice.err { border-color: #ff6c88; }
 .notice.err b { color: #ff6c88; }
 .notice.archived { opacity: .55; }
-.notice-foot { text-align: center; color: var(--muted); font-size: 11px; margin: 14px 0 0; }
+.notice-foot { text-align: center; color: var(--muted); font-size: 12px; margin: 14px 0 0; }
 
 /* VoiceTap's pending view */
 .voice-mode { font-size: 13px; line-height: 1.5; color: var(--text); margin: 6px auto 0; max-width: 320px; }
 .voice-mode.warn { color: #ffc45e; }
 .voice-hint { font-size: 12px; line-height: 1.5; color: var(--muted); margin: 0 auto 8px; max-width: 320px; }
-.challenge b.done { border-color: var(--accent2); color: var(--accent2); opacity: .6; }
+.challenge b.done { border-color: var(--orb-ctl); color: var(--orb-ink); opacity: .6; }
 
 /* The Home Assistant gate. The card centres with margin rather than flex alignment so a tall
    walk-through on a short screen scrolls instead of losing its top. */

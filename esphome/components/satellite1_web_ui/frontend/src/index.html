@@ -21,7 +21,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Satellite1">
-<meta name="theme-color" content="#0d0d0f">
+<meta name="theme-color" content="#202027">
 <!-- Pre-paint, in <head> rather than in main.tsx: the app script sits at the end of <body>, late
      enough that a phone remembering a theme would first flash the other one. Inline and tiny because
      a separate request is a second round trip on a seven-socket server.
@@ -31,15 +31,22 @@
      notch twice: a blank band the height of the status bar above the header (owner's companion-app
      screenshots, September 2026). The same page served directly still runs full-bleed, where the
      insets are load-bearing.
-     The remembered theme: dark is this design's default. localStorage throws rather than no-ops with
-     site data blocked, so it is guarded, and the cost of failure is the default theme.
+     The theme: the one picked under Appearance, else the system's (Auto, the default; bits.tsx
+     follows it from here). localStorage throws rather than no-ops with site data blocked, so it is
+     guarded, and the cost of failure is Auto. theme-color repeats lib/theme.js's THEME_COLOR.
      iOS Safari auto-zooms onto any focused text control under 16px and leaves the page zoomed after -
      the sign-in field made every first visit end up magnified. maximum-scale=1 turns that off, and
      iOS has ignored it for real pinch gestures since iOS 10, so zoom still works. iOS only (the
      platform test catches iPadOS masquerading as a Mac): Android Chrome would honour it by blocking
-     pinch zoom, an accessibility cost for a bug it never had. -->
-<script>if(location.pathname.length>1)document.documentElement.dataset.embed="1";
-try{var t=localStorage.getItem("sat1.theme");document.documentElement.dataset.theme=t==="light"?"light":"dark"}catch(e){document.documentElement.dataset.theme="dark"}
+     pinch zoom, an accessibility cost for a bug it never had.
+     data-short marks a Home Screen app drawn under the status bar (a top inset) whose viewport still
+     stops short of the screen - the iOS bug shell.css explains, if its 100lvh root did not cure it.
+     Checked pre-paint, then again on load, a second later and on every resize, because the insets
+     can still read 0 this early and settling them fires no event of its own. -->
+<script>function sat1Short(){var d=document.documentElement,h=innerHeight,s=screen,f=Math.abs(s.height-h)<Math.abs(s.width-h)?s.height:s.width,p=document.createElement("i");p.style.cssText="position:fixed;top:0;height:env(safe-area-inset-top)";(document.body||d).appendChild(p);var t=p.getBoundingClientRect().height;p.remove();if((navigator.standalone||matchMedia("(display-mode: standalone)").matches)&&t>0&&f-h>20)d.dataset.short="1";else delete d.dataset.short}
+sat1Short();addEventListener("resize",sat1Short);addEventListener("load",function(){sat1Short();setTimeout(sat1Short,1000)});
+if(location.pathname.length>1)document.documentElement.dataset.embed="1";
+var t;try{t=localStorage.getItem("sat1.theme")}catch(e){}if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=t;document.querySelector("meta[name=theme-color]").content=t==="light"?"#fbfbfd":"#202027";
 if(/iPhone|iPod|iPad/.test(navigator.userAgent)||(navigator.maxTouchPoints>1&&/Mac/.test(navigator.platform)))document.querySelector("meta[name=viewport]").content+=",maximum-scale=1";</script>
 <style>/*%CSS%*/</style>
 </head>

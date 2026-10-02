@@ -1,0 +1,128 @@
+/* ===== Surfaces: one card, one row, one button, one dropdown ===== */
+/* The pages grew a card, a row, a button and a dropdown each (pr-, au-, dx-, ww-), every one drawn
+   twice with a light-theme patch. They share these now, from the palette in tokens.css. */
+
+/* ----- Page titles ----- */
+.control h1:not(.wiz-h) { font-size: clamp(30px, 8vw, 38px); font-weight: 800; letter-spacing: -.045em; line-height: 1.05; margin: 8px 0 22px; }
+.control h1:not(.wiz-h) em { font-style: normal; color: var(--orb-ink); }
+/* The wake page is a flex column with a 14px gap, which supplies the rest of the same spacing. */
+.control.wake-section > h1 { margin: 4px 0 8px; }
+
+/* ----- Cards ----- */
+.card, .pr-card, .au-card, .dx-card, .ww-card { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow-card); }
+.pr-card, .au-card { padding: 16px; margin-bottom: 14px; }
+.dx-card { position: relative; margin-bottom: 14px; overflow: visible; }
+.ww-card { padding: 18px; }
+.dx-card-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); border-radius: 20px 20px 0 0; overflow: hidden; cursor: default; }
+.dx-card-head.clickable:hover { background: var(--fill-hover); }
+
+/* ----- Rows ----- */
+.pr-row, .au-row, .dx-row { display: flex; align-items: center; gap: 12px; font-size: 14px; }
+.pr-row { padding: 13px 0; border-bottom: 1px solid var(--line); }
+.au-row { padding: 13px 0; border-top: 1px solid var(--line); }
+.dx-row { padding: 12px 16px; border-top: 1px solid var(--line); }
+.dx-fact { padding: 11px 16px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); }
+@media (max-width: 480px) { .dx-fact { border-right: none; } }
+.dx-pwc { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-top: 1px solid var(--line); }
+.dx-log-bar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.dx-log-foot { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); }
+.ww-src { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+
+/* A slider beside its label is too short to aim on a phone: there it takes the row's full width
+   under the label, and its reading moves up onto the label's line. */
+.pr-row .mslider { width: 44%; flex-shrink: 0; }
+.au-row .mslider { width: 44%; min-width: 120px; flex-shrink: 0; }
+@media (max-width: 639px) {
+  .pr-row:has(> .mslider), .au-row:has(> .mslider), .dx-row:has(.mslider) { position: relative; flex-wrap: wrap; row-gap: 4px; }
+  .pr-row > .mslider, .au-row > .mslider, .dx-row .dx-row-val:has(> .mslider) { flex: 1 0 100%; width: 100%; }
+  .dx-row .dx-row-val .mslider { min-width: 0; }
+  .pr-row:has(> .mslider) .mslider-top, .au-row:has(> .mslider) .mslider-top { position: absolute; top: 14px; right: 0; }
+  .dx-row:has(.mslider) .mslider-top { position: absolute; top: 13px; right: 16px; }
+  .pr-row:has(> .mslider) > :first-child, .au-row:has(> .mslider) > :first-child, .dx-row:has(.mslider) > :first-child { padding-right: 72px; }
+}
+
+/* ----- Inner panels ----- */
+.pr-pill { flex: 1; min-width: 0; min-height: 0; padding: 10px 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface2); color: var(--text); text-align: center; cursor: default; transition: border-color .15s, background .15s; }
+.pr-pill.open { border-color: var(--orb-ctl); background: var(--orb-a20); }
+.pr-pill-l { display: block; margin-top: 3px; font-size: 11px; letter-spacing: .06em; color: var(--muted); }
+.pr-pill-expand { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 12px; border-radius: 12px; background: var(--surface2); font-size: 13px; }
+.pr-plot { width: 100%; margin: 0 0 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--surface2); }
+.pr-editor { margin-bottom: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface2); }
+.pr-editor-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.au-tree { margin-bottom: 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; }
+.au-tree-a { border-bottom: 1px solid var(--line); }
+.au-tree-h:hover { background: var(--fill-hover); }
+.au-tree .au-tree-h { background: var(--fill-hover); }
+.au-tree .au-tree-h:hover { background: var(--fill-press); }
+.ww-confirm { margin-top: 10px; padding: 12px; border-radius: 12px; background: var(--fill-hover); font-size: 13px; line-height: 1.5; color: var(--muted); }
+.dx-links a { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 72px; padding: 14px 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--fill-hover); color: var(--muted); font-size: 12px; font-weight: 600; text-decoration: none; transition: background .15s, color .15s; }
+.dx-links a:hover { background: var(--fill-press); color: var(--text); }
+
+/* ----- Fields ----- */
+.dx-in, .dx-log-search, .ww-search { width: 100%; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface2); color: var(--text); outline: none; transition: border-color .15s, box-shadow .15s; }
+.dx-log-search { flex: 1; min-width: 0; padding: 8px 12px; }
+.ww-search { flex: 1; min-width: 0; padding: 12px 14px; }
+.dx-in:focus, .dx-log-search:focus, .ww-search:focus { border-color: var(--orb-ctl); box-shadow: 0 0 0 3px var(--orb-a20); }
+
+/* ----- Buttons ----- */
+.pr-btn, .dx-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 8px 16px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--fill-hover); color: var(--text); font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: background .15s, transform .1s; }
+.pr-btn:hover, .dx-btn:hover { background: var(--fill-press); }
+.pr-btn:disabled, .dx-btn:disabled { opacity: .4; cursor: default; }
+.pr-btn-solid, .dx-btn.solid, .dx-btn.active { border-color: transparent; background: var(--orb-fill); color: #fff; }
+.pr-btn-solid:hover, .dx-btn.solid:hover, .dx-btn.active:hover { background: color-mix(in srgb, var(--orb-fill) 86%, #000); }
+.pr-btn-danger, .dx-btn.danger { border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: color-mix(in srgb, var(--danger) 13%, transparent); color: var(--danger); }
+.pr-btn-danger:hover, .dx-btn.danger:hover { background: color-mix(in srgb, var(--danger) 22%, transparent); }
+.dx-btn.solid.danger { border-color: transparent; background: var(--danger-fill); color: #fff; }
+.dx-btn.sm { min-height: 34px; padding: 6px 12px; font-size: 12px; }
+.ww-tune { flex: 0 0 100%; width: 100%; min-height: 44px; margin: 20px 0 0 auto; padding: 10px 14px; border-radius: 12px; background: var(--orb-fill); color: #fff; font-size: 14px; font-weight: 700; box-shadow: 0 4px 16px var(--orb-a35); transition: transform .1s; }
+.ww-speak, .ww-bell { display: grid; place-items: center; width: 36px; height: 36px; min-height: 0 !important; padding: 0; border-radius: 50%; background: var(--fill-hover); color: var(--text); transition: background .12s; }
+
+/* ----- Pressed states: touch has no hover, so a press is the only feedback a finger gets ----- */
+.pr-btn:not(:disabled):active, .dx-btn:not(:disabled):active, .secondary:not(:disabled):active, .primary:not(:disabled):active, .ww-tune:active, .wiz-btn:active, .ha-block-btn:active, .search-act:active { transform: scale(.97); }
+.ww-speak:active, .ww-bell:active, .mbtn:active, .icon-button:active, .dx-links a:active { background: var(--fill-press); }
+.pr-pill:active, .sensor:active, .dx-card-head.clickable:active, .au-tree-h:active { background: var(--fill-press); }
+
+/* ----- Dropdowns: one button, one list, for every page's ----- */
+.au-sel-btn, .dx-sel-btn, .ww-dd-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 40px !important; padding: 8px 12px; border: 1px solid var(--line-strong) !important; border-radius: 12px; background: var(--fill-hover); color: var(--text); font-size: 14px; font-weight: 500; cursor: pointer; transition: border-color .15s, background .15s, box-shadow .15s; }
+.ww-dd-btn { width: auto; min-width: 160px; }
+.au-sel-btn:hover, .dx-sel-btn:hover, .ww-dd-btn:hover { background: var(--fill-press); }
+.au-sel-btn.open, .dx-sel-btn.open, .ww-dd-btn.open, .ww-dd-btn:focus-visible { border-color: var(--orb-ctl) !important; box-shadow: 0 0 0 3px var(--orb-a20); outline: none; }
+.au-sel-pop, .dx-sel-pop, .ww-dd-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 50; min-width: 100%; margin: 0; padding: 4px; list-style: none; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--pop); box-shadow: var(--shadow-pop); animation: popIn .16s ease; }
+.dx-sel-pop { z-index: 1000; }
+@keyframes popIn { from { opacity: 0; transform: translateY(-6px); } }
+.au-sel-opt, .dx-sel-opt, .ww-dd-opt { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px !important; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font-size: 14px; text-align: left; white-space: nowrap; cursor: pointer; transition: background .12s; }
+.ww-dd-opt { justify-content: space-between; }
+.au-sel-opt:hover, .dx-sel-opt:hover, .ww-dd-opt:hover, .ww-dd-opt:focus-visible { background: var(--fill-hover); outline: none; }
+.au-sel-opt.active, .dx-sel-opt.active, .ww-dd-opt.on { color: var(--orb-ink); font-weight: 600; }
+.au-sel-opt svg, .dx-sel-opt svg, .ww-dd-opt svg { color: var(--orb-ink); }
+.ww-flow-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px; padding: 10px 14px; border: 1px solid var(--line-strong) !important; border-radius: 999px; background: var(--fill-hover); color: var(--text); font-size: 14px; font-weight: 600; text-align: left; transition: border-color .15s; }
+.ww-flow-btn.open, .ww-flow-btn:hover { border-color: var(--orb-ctl) !important; }
+
+/* ----- Hints ----- */
+/* The circle stays small in the text; ::before is its 44px target. */
+.hint-btn { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; min-width: 0 !important; min-height: 0 !important; padding: 0; border: 1px solid var(--line-strong); border-radius: 50%; background: transparent; color: var(--muted); font: italic 600 11px/1 serif; cursor: pointer; transition: border-color .15s, color .15s; }
+.hint-btn::before { content: ''; position: absolute; inset: -13px; }
+.hint-btn:hover { border-color: var(--muted); color: var(--text); }
+.hint-btn[aria-expanded="true"] { border-color: var(--orb-ink); color: var(--orb-ink); }
+.hint-bubble { position: fixed; z-index: 9999; max-width: min(280px, calc(100vw - 16px)); padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--pop); box-shadow: var(--shadow-pop); color: var(--text); font-size: 13px; font-weight: 400; line-height: 1.5; letter-spacing: 0; text-align: left; pointer-events: auto; }
+
+/* ----- The wake word graph ----- */
+.lg-fire { fill: var(--orb-ctl); }
+.lg-halo-a { fill: var(--orb-a20); }
+.lg-rip { fill: none; stroke: var(--orb-ctl); stroke-width: 1; animation: lgRip 2.4s ease-out infinite; }
+.lg-near { fill: none; stroke: var(--orb-ctl); stroke-width: 1.5; }
+.lg-tint { fill: color-mix(in srgb, var(--orb-a) 10%, transparent); }
+.lg-veil { fill: rgba(0, 0, 0, .22); }
+[data-theme='light'] .lg-veil { fill: rgba(0, 0, 0, .06); }
+.lg-stem { stroke: var(--orb-ctl); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.lg-knob { fill: var(--orb-ctl); cursor: ew-resize; }
+.lg-knob.held { fill: var(--orb-ink); }
+.lg-heldring { fill: var(--orb-a20); }
+
+/* ----- Settings and nav pills ----- */
+.side-sub-item.on { background: var(--orb-a20); color: var(--orb-ink); }
+
+/* Chevrons turn with their control's state. */
+.au-sel-btn svg, .dx-sel-btn svg, .au-tree-caret svg { transition: transform .2s; }
+.au-sel-btn.open svg, .dx-sel-btn.open svg { transform: rotate(180deg); }
+.au-tree-caret[aria-expanded='true'] svg { transform: rotate(90deg); }

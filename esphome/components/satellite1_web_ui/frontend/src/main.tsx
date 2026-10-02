@@ -8,5 +8,7 @@
 import { render } from 'preact';
 
 import { App } from './App';
+import { installRangeTouch } from './lib/range.js';
 
+installRangeTouch();
 render(<App />, document.getElementById('root')!);

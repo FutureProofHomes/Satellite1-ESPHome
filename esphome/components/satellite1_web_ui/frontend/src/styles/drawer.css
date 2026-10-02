@@ -1,0 +1,75 @@
+/* ===== Drawers (components/Drawer.tsx) ===== */
+/* One sheet for every panel. Its height stops short of the status bar, its padding keeps content
+   above the home indicator, and nothing in it reaches either edge's system gesture zone; the only
+   gesture it adds is a pull down, which iOS does not use inside a page. */
+.dw { position: fixed; inset: 0; }
+.dw-out { pointer-events: none; }
+
+/* --dw-p is the share of the panel still showing while it is dragged, so the scrim thins with it. */
+.dw-scrim { position: absolute; inset: 0; background: var(--scrim); opacity: var(--dw-p, 1); animation: dwFade .3s ease; transition: opacity .26s ease; }
+.dw-out .dw-scrim { opacity: 0; animation: none; }
+
+.dw-panel {
+  position: absolute; left: 0; right: 0; bottom: 0; margin: 0 auto;
+  width: 100%; max-width: 560px; max-height: calc(100dvh - var(--sat) - 16px);
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: 0 20px calc(20px + var(--sab));
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--line); border-bottom: 0; border-radius: 24px 24px 0 0;
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, .25);
+  outline: none;
+  animation: dwUp .36s cubic-bezier(.32, .72, 0, 1);
+  transition: transform .26s cubic-bezier(.32, .72, 0, 1);
+}
+.dw-out .dw-panel { transform: translate3d(0, 105%, 0); animation: none; }
+.dw-drag .dw-panel, .dw-drag .dw-scrim { transition: none; }
+@keyframes dwUp { from { transform: translate3d(0, 100%, 0); } }
+@keyframes dwFade { from { opacity: 0; } }
+
+/* The grab strip: the handle's tap and drag target, the panel's full width. It stays put while the
+   content scrolls, so the handle is always there to pull. */
+.dw-grab {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; justify-content: center; align-items: flex-start;
+  height: 28px; margin: 0 -20px; padding-top: 10px;
+  touch-action: none; cursor: grab;
+}
+.dw-drag .dw-grab { cursor: grabbing; }
+.dw-handle { display: block; width: 40px; height: 5px; min-height: 0 !important; padding: 0; border-radius: 3px; background: var(--handle); transition: background .15s, width .15s; }
+.dw-grab:hover .dw-handle, .dw-drag .dw-handle { background: var(--muted); }
+.dw-drag .dw-handle { width: 48px; }
+
+/* A panel whose list scrolls inside it, under a title that stays: the panel itself holds still. */
+.dw-panel.dw-fixed { display: flex; flex-direction: column; overflow: hidden; }
+.dw-fixed > .dw-grab { position: static; flex: none; }
+.dw-fixed > .dw-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 -20px; padding: 0 20px; }
+
+/* A drawer's title row: the name, and its one way out for anyone who never finds the handle. */
+.dw-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.dw-top h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 22px; line-height: 1.2; letter-spacing: -.02em; }
+.dw-x { position: relative; flex: none; display: grid; place-items: center; width: 36px; height: 36px; min-height: 36px !important; padding: 0; border-radius: 50%; background: var(--fill-hover); color: var(--muted); transition: background .12s, color .12s; }
+.dw-x::before { content: ''; position: absolute; inset: -4px; }
+.dw-x:hover { color: var(--text); }
+.dw-x:active { background: var(--fill-press); }
+
+/* From 1024px a drawer is a dialog in the middle of the screen, closed by its button, Escape or the
+   scrim; there is nothing to pull. */
+@media (min-width: 1024px) {
+  .dw-panel {
+    top: 0; bottom: 0; margin: auto; height: fit-content;
+    width: calc(100% - 64px); max-width: 520px; max-height: min(760px, calc(100dvh - 64px));
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--line); border-radius: 20px;
+    box-shadow: var(--shadow-pop);
+    animation-name: dwPop; animation-duration: .24s;
+    transition: transform .2s ease, opacity .2s ease;
+  }
+  .dw-out .dw-panel { transform: scale(.96); opacity: 0; }
+  .dw-grab { position: static; height: 20px; padding: 0; cursor: default; }
+  .dw-handle { visibility: hidden; }
+}
+@keyframes dwPop { from { opacity: 0; transform: scale(.96); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .dw-panel, .dw-scrim { animation: none; transition: none; }
+}

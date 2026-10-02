@@ -13,14 +13,14 @@
  */
 import type { ReactNode } from 'react';
 import { Fragment, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { TEXT } from '../../copy.js';
 import { maHttpBase } from '../../lib/ma.js';
 import { toast } from '../../lib/toast.js';
 import { ALL_SHOWN, SEARCH_TYPES, addRecent, artThumb, groupLabel, searchArgs, searchGroups, subOf } from '../../lib/media.js';
+import { Drawer } from '../Drawer';
 import { MaPanel } from './MaPanel';
 import type { Tiers } from './model';
-import { I_NEXT, I_PLAY, I_PLUS, dragHandle, mi } from './parts';
+import { I_NEXT, I_PLAY, I_PLUS, mi } from './parts';
 
 /** The pause between the last keystroke and the search, the same order of magnitude as MA's own
  *  modal; Enter skips it. */
@@ -137,7 +137,6 @@ export function SearchDrawer({
   const httpBase = maHttpBase(maCfg.url);
   const { res, busy, runNow } = useMaSearch(ws.cmd, wsOn, q, filter);
   const inputRef = useRef<HTMLInputElement>(null);
-  const drag = useRef<number | null>(null);
   useEffect(() => {
     if (wsOn) inputRef.current?.focus();
   }, [wsOn]);
@@ -220,8 +219,7 @@ export function SearchDrawer({
   }
   const target = groupLabel(members, ws.me?.name || '');
 
-  return createPortal([<div key="scrim" className="scrim search-scrim" onClick={onClose} />, <div key="drawer" className={`search-drawer${wsOn ? ' tall' : ''}`} role="dialog" aria-label={TEXT.search_title}>
-    <div className="mpanel-handle" {...dragHandle(drag, '.search-drawer', onClose, '')} />
+  return <Drawer label={TEXT.search_title} onClose={onClose} className={`dw-fixed search-drawer${wsOn ? ' tall' : ''}`}>
     {wsOn && <div className="search-field">
       {I_SEARCH_SM}
       <input ref={inputRef} className="search-in" type="text" enterKeyHint="search" value={q} placeholder={TEXT.search_ph} aria-label={TEXT.search_title} onInput={e => setQ(e.currentTarget.value)} onKeyDown={e => {
@@ -237,5 +235,5 @@ export function SearchDrawer({
     </div>}
     <div className="search-body">{body}</div>
     {wsOn && target && <div className="search-foot dim"><span className="dot ok" /><span>{TEXT.search_target} <strong>{target}</strong> {'\u00b7'} {TEXT.search_via}</span></div>}
-  </div>], document.body);
+  </Drawer>;
 }

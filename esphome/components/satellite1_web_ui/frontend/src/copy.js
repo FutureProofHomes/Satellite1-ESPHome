@@ -589,6 +589,7 @@ export const TEXT = {
   // On the roster row that is the device serving this page, visible only while another device is
   // being controlled. It marks the way back - a plain return, not another cross-sign-in.
   switcher_home: "This page",
+  switcher_label: "Device switcher",
 
   // The failed-write toast, shown on any route. First line is the one fact every failure shares;
   // the control involved has already put its old value back, which is why "hasn't been applied"
@@ -600,7 +601,93 @@ export const TEXT = {
   // Shown in place of the transcript, not instead of the card. The card carries the assistant's phase in
   // its header, so it has something to say from the moment the device answers; this only fills the space
   // where the lines will go. Reworded to the owner's text, September 2026.
-  nothing_said: "Voice transcriptions are displayed here.",
+  nothing_said: "Voice and typed conversations appear here.",
+  // The transcript's time headers, worded as iMessage words them (owner request, October 2026):
+  // "Today 3:12 AM", "Yesterday 9:40 PM", the weekday within the week, then "Sep 24 at 9:40 PM".
+  transcript_today: "Today",
+  transcript_yesterday: "Yesterday",
+  transcript_at: "at %s",
+
+  // The orb's tap (owner request, October 2026): the action button's press-to-talk, from the page,
+  // to the open transcript tab's wake word's pipeline. A tap while the assistant runs stops it, as a
+  // second press of the button does.
+  orb_talk: "Tap to talk",
+  orb_stop: "Tap to stop",
+
+  // The tips under a resting orb, in place of "Ready" (owner's list, October 2026). orbTips in
+  // src/lib/orb.js picks the true ones: {word} is the front window's wake word, {other} the other
+  // window's, {room} this device's Home Assistant area with its article ("the Living Room"). The
+  // spoken examples follow the word's agent - Home Assistant's own understands set phrasings and
+  // applies "the lights" to the device's room; an AI agent takes open requests. Two lines at most
+  // on a phone.
+  tip_orb: "Tap the orb to start a voice conversation.",
+  tip_ai_room: "Say, \u201c{word}, what devices can you control in {room}?\u201d",
+  tip_ai_home: "Say, \u201c{word}, what devices can you control in my home?\u201d",
+  tip_ai_song: "Say, \u201c{word}, play that one song about a yellow submarine.\u201d",
+  tip_ai_combo: "Say, \u201c{word}, turn off all the downstairs lights and close the garage door.\u201d",
+  tip_ai_cozy: "Say, \u201c{word}, make {room} cozy for movie night.\u201d",
+  tip_ha_lights: "Say, \u201c{word}, turn off the lights.\u201d It knows you're in {room}.",
+  tip_ha_dim: "Say, \u201c{word}, set the lights to 50 percent.\u201d",
+  tip_ha_list: "Say, \u201c{word}, add milk to my shopping list.\u201d",
+  tip_ha_time: "Say, \u201c{word}, what time is it?\u201d",
+  tip_timer: "Say, \u201c{word}, set a pizza timer for ten minutes.\u201d",
+  tip_stop: "Say \u201cStop\u201d to cut off an answer or a ringing timer. No wake word needed.",
+  tip_swipe: "Swipe the conversation to talk to \u201c{other}\u201d instead.",
+  tip_type: "Rather not talk? Type below to reach the same assistant.",
+  tip_tune: "Tap \u201cTune it\u201d below to make \u201c{word}\u201d more accurate.",
+  tip_pick: "Tap \u201c{word}\u201d at the top of the conversation to change the wake word.",
+  tip_sensors_radar: "Tap a sensor to calibrate it, or Presence to see the radar.",
+  tip_sensors: "Tap a sensor reading to calibrate it.",
+  tip_music: "Tap what's playing below to search your music.",
+  tip_group: "Tap the speaker icon in the media bar to group speakers.",
+  tip_switch: "Tap the device name in the header to switch to another Satellite1.",
+  tip_mute: "Tap the mic icon to mute the microphones.",
+  tip_color: "Tap \u201cCustomize\u201d to set your LED ring and theme colors.",
+  tip_route: "Route answers to other Satellite1s, or even Sonos speakers, from the Audio tab.",
+  tip_radar: "Add an mmWave radar and your Satellite1 can turn on the lights when you walk in.",
+
+  // The Home page's windows, one per wake word slot: the one in front is who the orb talks to, its
+  // title changes its word, and the capsule beside the title is its tuning.
+  tt_label: "Wake words",
+  tt_add: "Add wake word",
+  tt_change: "Change wake word",
+  tt_tuned: "\u201c%s\u201d is tuned. Adjust",
+  tt_untuned: "\u201c%s\u201d isn't tuned yet. Tune it",
+  tt_tuned_short: "Tuned",
+  tt_tune_short: "Tune it",
+  // After nothing_said in an empty window, and in an empty slot's, wherever there are two windows
+  // to swipe between (owner's wording, October 2026).
+  tt_swipe: "Swipe to switch wake words - each can talk to a different assistant.",
+  // An empty slot's window.
+  tt_empty: "No wake word",
+  // The one window while the slots aren't known yet, or on a device without them.
+  tt_one: "Conversations",
+
+  // The message field at the bottom of each window, typing to that window's wake word. Its
+  // menu is the word's voice pipeline; the message goes to that pipeline's conversation agent, since
+  // a pipeline takes no text - common/web_ui_assist.yaml has why, and what that costs.
+  ask_placeholder: "Say the wake word or type\u2026",
+  // The field's name for a screen reader, which has no menu chip to see who it goes to.
+  ask_label: "Message %s",
+  ask_send: "Send",
+  ask_default_agent: "Home Assistant",
+  // Asked once per pipeline when its name matches no agent (or it is Preferred): Home Assistant
+  // doesn't tell the device which agent a pipeline uses. %s is the quoted pipeline name.
+  ask_which: "Which conversation agent does the %s pipeline use?",
+  // Over the choices when an earlier answer is asked again (see setupStamp in src/lib/orb.js).
+  ask_changed: "Your Home Assistant pipelines or conversation agents have changed since you chose this. Check it's still right.",
+  // Under the question's choices.
+  ask_why: "Home Assistant doesn't tell the Satellite1 which agent a pipeline uses. Pick the one this pipeline is set to - it's saved on the device, so you won't be asked again.",
+  // The pipeline menu's last entry, which asks again. %s is the agent typing goes to now.
+  ask_reask: "Typing goes to %s - change\u2026",
+  // Why the field is greyed out. The checkbox wording matches the ESPHome integration's own.
+  ask_no_ha: "Typing needs Home Assistant to be connected",
+  ask_blocked: "Typing needs \u201cAllow the device to perform Home Assistant actions\u201d",
+  ask_too_old: "Typing needs Home Assistant 2025.12 or newer",
+  // A message that got no answer. The draft has already gone, so these say what happened to it.
+  ask_err: "Home Assistant couldn\u2019t answer that.",
+  ask_timeout: "No answer from Home Assistant yet.",
+  ask_offline: "Home Assistant wasn\u2019t connected, so that wasn\u2019t sent.",
 
   // The media footer's idle line. The footer stays on every page - the volume inside still sets the
   // level whatever plays next arrives at - so this fills the space the track title will use.
@@ -1068,12 +1155,21 @@ export const TEXT = {
   blocked_toast_t: "Home Assistant actions are off.",
   blocked_toast_s: "Speaker lists, assistants and other devices are unavailable. Tap for the fix.",
 
-  /* The theme toggle. Deliberately not offering an "Auto" that follows the phone, because the device is
-     often used in a room whose lighting has nothing to do with what the phone last decided. Phrased as
-     an action rather than a state: the button shows the theme it switches to, and a bare "Dark theme"
-     read aloud gives no clue whether that is the current setting or the one on offer. */
-  theme_to_dark: "Switch to dark theme",
-  theme_to_light: "Switch to light theme",
+  /* The appearance menu on the header's theme button (owner, October 2026). Auto follows the phone and
+     is where a first visit starts; Light and Dark pin it, for a device in a room whose lighting has
+     nothing to do with what the phone last decided. */
+  theme_menu: "Appearance",
+  theme_auto: "Auto",
+  theme_auto_sub: "Match this device",
+  theme_light: "Light",
+  theme_dark: "Dark",
+
+  /* The bottom bar's and side rail's labels, title case under their icons. */
+  nav_home: "Home",
+  nav_wake: "Wake",
+  nav_presence: "Presence",
+  nav_audio: "Audio",
+  nav_settings: "Settings",
 };
 
 /**

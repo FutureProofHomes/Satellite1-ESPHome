@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
-import ReactDOM from 'react-dom';
+import { Drawer, Presence } from '../Drawer';
 import { TEXT } from '../../copy.js';
 import { HintBtn } from '../bits';
 
@@ -140,65 +140,9 @@ export function DxConfirm({
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
-  const modalPanelRef = useRef<HTMLDivElement>(null);
-  const modalDragStartY = useRef<number | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    document.body.classList.add('has-drawer');
-    cancel.current?.focus();
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
-    document.addEventListener('keydown', esc);
-    return () => {
-      document.body.classList.remove('has-drawer');
-      document.removeEventListener('keydown', esc);
-      trigger.current?.focus();
-    };
-  }, [open]);
-  return <span style={{
-    display: 'contents'
-  }}>
+  return <>
       <button ref={trigger} className={`dx-btn${solid ? ' solid' : ''}${danger ? ' danger' : ''}`} disabled={disabled} aria-label={ariaLabel} onClick={() => setOpen(true)}>{label}</button>
-      {open && ReactDOM.createPortal([<div key="scrim" className="dx-modal-over" onClick={() => setOpen(false)} />, <div key="modal" ref={modalPanelRef} className="dx-modal" role="alertdialog" aria-modal="true" aria-label={title} onClick={e => e.stopPropagation()}>
-            <div className="handle" role="button" aria-label="Close" style={{
-        touchAction: 'none',
-        cursor: 'grab'
-      }} onPointerDown={e => {
-        if (window.innerWidth >= 1024) return;
-        modalDragStartY.current = e.clientY;
-        e.currentTarget.setPointerCapture(e.pointerId);
-        if (modalPanelRef.current) modalPanelRef.current.style.transition = 'none';
-      }} onPointerMove={e => {
-        if (modalDragStartY.current === null) return;
-        const dy = Math.max(0, e.clientY - modalDragStartY.current);
-        if (modalPanelRef.current) {
-          modalPanelRef.current.style.transform = `translateX(-50%) translateY(${dy}px)`;
-          modalPanelRef.current.style.opacity = String(Math.max(0, 1 - dy / 220));
-        }
-      }} onPointerUp={e => {
-        if (modalDragStartY.current === null) return;
-        const dy = Math.max(0, e.clientY - modalDragStartY.current);
-        const dismiss = () => setOpen(false);
-        if (dy > 80) {
-          if (modalPanelRef.current) {
-            modalPanelRef.current.style.transition = 'transform .22s ease, opacity .22s ease';
-            modalPanelRef.current.style.transform = 'translateX(-50%) translateY(120%)';
-            modalPanelRef.current.style.opacity = '0';
-            setTimeout(dismiss, 210);
-          } else dismiss();
-        } else if (modalPanelRef.current) {
-          modalPanelRef.current.style.transition = 'transform .22s ease, opacity .22s ease';
-          modalPanelRef.current.style.transform = 'translateX(-50%)';
-          modalPanelRef.current.style.opacity = '1';
-        }
-        modalDragStartY.current = null;
-        setTimeout(() => {
-          if (modalPanelRef.current) {
-            modalPanelRef.current.style.transition = '';
-            modalPanelRef.current.style.transform = '';
-            modalPanelRef.current.style.opacity = '';
-          }
-        }, 250);
-      }} />
+      <Presence>{open && <Drawer label={title} role="alertdialog" initialFocus={cancel} returnFocus={trigger} onClose={() => setOpen(false)} className="dx-modal">
             <p className="dx-modal-title">{title}</p>
             <p className="dx-modal-body">{body}</p>
             <div className="dx-modal-actions">
@@ -208,21 +152,8 @@ export function DxConfirm({
           onConfirm();
         }}>{confirmLabel}</button>
             </div>
-          </div>], document.body)}
-    </span>;
-}
-export function DxToggle({
-  checked,
-  onChange,
-  label
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label?: string;
-}) {
-  return <button role="switch" aria-checked={checked} aria-label={label} className={`dx-toggle${checked ? ' on' : ''}`} onClick={() => onChange(!checked)}>
-      <span className="dx-toggle-thumb" />
-    </button>;
+          </Drawer>}</Presence>
+    </>;
 }
 
 /**
@@ -257,16 +188,10 @@ export function DxSelect({
   }, [open]);
   const pairs = options.map(o => Array.isArray(o) ? o : [o, o]);
   const shown = pairs.find(([v]) => v === value)?.[1] ?? value;
-  return <div ref={ref} className="dx-sel" style={{
-    position: 'relative',
-    zIndex: 20
-  }}>
+  return <div ref={ref} className="dx-sel">
       <button className={`dx-sel-btn${open ? ' open' : ''}`} aria-haspopup="listbox" aria-expanded={open} aria-label={label} onClick={() => setOpen(v => !v)}>
         <span>{shown}</span>
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true" style={{
-        transform: open ? 'rotate(180deg)' : undefined,
-        transition: 'transform .2s'
-      }}>
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
           <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>

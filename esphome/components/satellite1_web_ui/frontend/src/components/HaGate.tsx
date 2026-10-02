@@ -128,7 +128,7 @@ export function HaGate({
   // The label admits only what is actually missing: where Home Assistant is fine and the actions
   // channel alone is shut, "without Home Assistant" would overclaim.
   const proceed = <button className="ha-block-btn ghost" onClick={() => setLeaving(true)}>{fix ? 'Close' : v === 'blocked' || v === 'old' ? TEXT.splash_continue_actions : TEXT.splash_continue}</button>;
-  return <div className={'ha-block-screen gate' + (leaving ? ' out' : '')} role="status" data-theme={document.documentElement.dataset.theme}>
+  return <div className={'ha-block-screen gate' + (leaving ? ' out' : '')} role="status">
       {!card ? <div className="gate-wait"><Logo cls="login-logo" /><div className="wiz-wait"><span className="wiz-pulse" /><span>{status}</span></div></div> : <div className="ha-block-card">
         <AlertTriangle size={40} className="ha-block-icon" />
         {v === 'blocked' && <>

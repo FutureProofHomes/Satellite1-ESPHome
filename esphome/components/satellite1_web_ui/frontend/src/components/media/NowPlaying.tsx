@@ -1,12 +1,12 @@
 import type { CSSProperties } from 'react';
-import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useState } from 'react';
 import { TEXT } from '../../copy.js';
 import { REPEAT_MODE, SUP, fmtTime, groupLabel, nextRepeat, pct, queueClock } from '../../lib/media.js';
+import { Drawer } from '../Drawer';
 import { MaPanel } from './MaPanel';
 import { usePlayhead } from './model';
 import type { Model, Tiers } from './model';
-import { I_NEXT, I_NOTE, I_PREV, I_REPEAT, I_SEARCH, I_SHUFFLE, I_SPK_BOX, PlayButton, Svg, dragHandle, useRange } from './parts';
+import { I_NEXT, I_NOTE, I_PREV, I_REPEAT, I_SEARCH, I_SHUFFLE, I_SPK_BOX, PlayButton, Svg, useRange } from './parts';
 
 /** The artwork, or the note glyph while there is none or it will not load. Keyed by URL so a track
  *  change swaps the element instead of the old picture lingering while the new one loads. */
@@ -69,7 +69,6 @@ export function NowPlaying({
 }) {
   const { media, mediaCmd, sendspin, playing, active, announcing, srcParam, pending, startPending } = model;
   const { ws, wsOn, me, maCmd, members } = tiers;
-  const drag = useRef<number | null>(null);
   const { pos, dur } = usePlayhead(media, playing);
 
   // With the socket up the queue's own clock, ticked by every queue_time_updated, drives the
@@ -125,11 +124,8 @@ export function NowPlaying({
   // the guard against a double-send the device would replay.
   const btn = (key: string, on?: boolean) => 'mbtn' + (on ? ' on' : '') + (pending[key] ? ' busy' : '');
 
-  return createPortal([<div key="scrim" className="mscrim" onClick={onClose} />, <section key="msheet" className="msheet" role="dialog" aria-label="Now playing" onClick={e => e.stopPropagation()}>
-    <div className="msheet-top">
-      <div className="handle" {...dragHandle(drag, '.msheet', onClose)} />
-      <button className="mbtn msheet-search" aria-label={TEXT.search_open} onClick={onSearch}><Svg size={18}>{I_SEARCH}</Svg></button>
-    </div>
+  return <Drawer label="Now playing" onClose={onClose} className="msheet">
+    <button className="mbtn msheet-search" aria-label={TEXT.search_open} onClick={onSearch}><Svg size={18}>{I_SEARCH}</Svg></button>
     <Art art={model.art} title={model.title} cls="mart" />
     <div className="mmeta">
       <h2>{model.title || (active ? '' : TEXT.media_idle_bar)}</h2>
@@ -147,5 +143,5 @@ export function NowPlaying({
     </div>}
     <button className="mchip" onClick={onPlayers}><Svg>{I_SPK_BOX}</Svg><span>{groupLabel(members, TEXT.media_players_title)}</span></button>
     <MaPanel tiers={tiers} ip={ip} />
-  </section>], document.body);
+  </Drawer>;
 }

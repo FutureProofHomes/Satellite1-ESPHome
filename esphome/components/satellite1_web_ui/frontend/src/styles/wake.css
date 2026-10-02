@@ -22,15 +22,19 @@ svg.ww-graph:not(.drag) { touch-action: auto; }
 .lg-hit { fill: transparent; cursor: ew-resize; }
 .ww-graph:not(.drag) .lg-hit { cursor: pointer; }
 .ww-graph:focus { outline: none; }
-.ww-graph:focus-visible, .ww-speak:focus-visible { outline: 2px solid var(--accent2); outline-offset: 3px; border-radius: 8px; }
+.ww-graph:focus-visible, .ww-speak:focus-visible { outline: 2px solid var(--orb-ink); outline-offset: 3px; border-radius: 8px; }
 
 /* The picker scrolls its own list under the sticky filter; every other drawer scrolls whole. */
-div.ww-panel { overflow-y: auto; }
-div.ww-panel:has(> .ww-picker-list) { overflow-y: hidden; }
-div.ww-panel:focus { outline: none; }
 
 .ww-sec .hint-wrap { margin-left: 8px; vertical-align: -4px; }
 .ww-sec .hint-btn { letter-spacing: 0; text-transform: none; }
 
-.ww-foot a { color: var(--accent2); }
-.ww-link { background: none; padding: 0; min-height: 0; font: inherit; color: var(--accent2); text-decoration: underline; }
+.ww-foot a { color: var(--orb-ink); }
+.ww-link { background: none; padding: 0; min-height: 0; font: inherit; color: var(--orb-ink); text-decoration: underline; }
+
+/* The Stop Word card switches from its title row. */
+.ww-head.ww-head-sw { margin-bottom: 14px; }
+
+/* The word picker holds its height while the list filters, so the search field stays put. */
+.dw-panel.ww-words { height: min(85dvh, calc(100dvh - var(--sat) - 16px)); }
+@media (min-width: 1024px) { .dw-panel.ww-words { height: min(720px, calc(100dvh - 64px)); } }

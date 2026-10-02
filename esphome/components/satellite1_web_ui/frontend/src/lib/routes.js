@@ -55,3 +55,16 @@ export function routeHash(tab, sub) {
   if (name !== "settings") return `#/${name}`;
   return `#/settings/${(SUBS.find(([, s]) => s === sub) || SUBS[0])[0]}`;
 }
+
+/** A route's place in reading order: the tabs in nav order, then Settings' pages in theirs. */
+const rank = (r) => TABS.findIndex(([, t]) => t === r.tab) * 100 + Math.max(0, SUBS.findIndex(([, s]) => s === r.sub));
+
+/**
+ * Which way the page slides between two routes: "fwd" toward a later tab or Settings page, "back"
+ * toward an earlier one, null when both name the same page and nothing should move.
+ */
+export function routeDir(from, to) {
+  const a = rank(from);
+  const b = rank(to);
+  return a === b ? null : b > a ? "fwd" : "back";
+}

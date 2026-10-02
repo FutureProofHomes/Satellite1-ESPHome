@@ -1,0 +1,33 @@
+/* ===== The bottom nav (phones and tablets) ===== */
+/* Icon over a title-case label, with the orb's pill behind the current page's icon. Its height is
+   --tabs-h, which every page's height subtracts, so the two can never disagree. */
+.tabs { height: var(--tabs-h) !important; background: var(--surface) !important; border-top: 1px solid var(--line); box-shadow: none !important; }
+.tabs-layer { padding: 3px 6px; }
+.tabs-main { gap: 2px; justify-content: space-around; }
+.tabs .tabs-main button { flex: 1 1 0; min-width: 0; max-width: 96px; height: 100%; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0; border-radius: 12px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0; transition: color .2s ease; -webkit-tap-highlight-color: transparent; }
+.tabs .tabs-main button:hover { opacity: 1; color: var(--text); }
+.tab-ico { display: grid; place-items: center; width: 52px; height: 28px; border-radius: 14px; transition: background .25s ease, color .2s ease, transform .15s ease; }
+.tab-lbl { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 14px; }
+.tabs .tabs-main button.selected { color: var(--text); }
+.tabs .tabs-main button.selected .tab-ico { background: var(--orb-fill); color: #fff; }
+.tabs .tabs-main button:not(.selected):active .tab-ico { background: var(--fill-press); transform: scale(.94); }
+
+/* Settings' own row: back, then its pages as pills. */
+.tabs .tabs-back { width: 44px; border-radius: 12px 0 0 12px; }
+.tabs .tabs-sub-pill { flex-shrink: 0; min-height: 36px; padding: 8px 12px; border-radius: 10px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0; white-space: nowrap; transition: color .18s, background .18s, transform .15s; }
+.tabs .tabs-sub-pill.on { background: var(--orb-a20); color: var(--orb-ink); }
+
+/* ===== The side nav (from 1024px) ===== */
+.side-nav > button svg { flex: none; }
+.side-nav > button:active { background: var(--fill-press); }
+.side-nav-foot { display: flex; flex-direction: column; gap: 2px; margin-top: auto; padding: 12px 8px calc(var(--mbar-h) + 8px); border-top: 1px solid var(--line); }
+.side-nav-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.side-nav-meta { font-size: 12px; color: var(--muted); }
+
+/* Sign out, in the side nav's foot and at the bottom of the device sheet. */
+.signout { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; min-height: 36px !important; margin-top: 12px; padding: 6px 14px; border: 1px solid var(--line-strong); border-radius: 999px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; transition: background .15s, color .15s; }
+.signout:hover { background: var(--fill-hover); color: var(--text); }
+.signout:active { background: var(--fill-press); }
+
+/* The device sheet's rows lead somewhere, so they point right. */
+.peer-list .peer-go { flex: none; color: var(--muted); }

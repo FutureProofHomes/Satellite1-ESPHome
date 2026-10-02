@@ -1,0 +1,71 @@
+/* ===== Controls: one switch, one checkbox, one radio mark, one slider ===== */
+/* Each wears the orb's colour when on: --orb-ctl is the raw orb on dark, and on light the deeper
+   shade a white tick reads against (lib/orb.js). */
+
+/* The switch (components/controls.tsx). Its box is 30px tall; ::before widens the tap target to
+   44px without moving anything beside it. */
+.sw { position: relative; flex: none; display: inline-flex; align-items: center; width: 50px; height: 30px; min-height: 30px !important; padding: 2px; border: 0; border-radius: 15px; background: var(--sw-off); cursor: pointer; transition: background .2s ease; -webkit-tap-highlight-color: transparent; }
+.sw::before { content: ''; position: absolute; inset: -7px -3px; }
+.sw-knob { width: 26px; height: 26px; border-radius: 13px; background: #fff; box-shadow: 0 2px 4px rgba(0, 0, 0, .22), 0 0 0 .5px rgba(0, 0, 0, .06); transition: transform .24s cubic-bezier(.3, .7, .4, 1.15), width .16s ease; }
+.sw[aria-checked='true'] { background: var(--orb-ctl); }
+.sw[aria-checked='true'] .sw-knob { transform: translateX(20px); }
+.sw:not(:disabled):active .sw-knob { width: 31px; }
+.sw[aria-checked='true']:not(:disabled):active .sw-knob { transform: translateX(15px); }
+.sw:disabled { opacity: .4; cursor: default; }
+
+/* The checkbox: a 22px box inside a 44px target. */
+.ck { flex: none; display: inline-grid; place-items: center; width: 44px; height: 44px; min-width: 44px; min-height: 44px !important; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.ck-box { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--muted); color: var(--orb-ctl-on); transition: background .15s, border-color .15s, transform .12s; }
+.ck[aria-checked='true'] .ck-box, .ck[aria-checked='mixed'] .ck-box { background: var(--orb-ctl); border-color: var(--orb-ctl); }
+.ck-dash { width: 10px; height: 2px; border-radius: 1px; background: currentColor; }
+.ck:not(:disabled):active .ck-box { transform: scale(.88); }
+.ck:disabled { opacity: .4; cursor: default; }
+
+/* The radio mark, on the wake word and pipeline pickers' rows. */
+.ww-opt { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 2px; background: transparent; border-bottom: 1px solid var(--line) !important; font-size: 15px; font-weight: 500; color: var(--text); text-align: left; transition: background .12s; }
+.ww-opt:not(:disabled):active { background: var(--fill-hover); }
+.ww-mark { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--muted); color: var(--orb-ctl-on); transition: background .15s, border-color .15s; }
+.ww-opt.on .ww-mark { background: var(--orb-ctl); border-color: var(--orb-ctl); }
+
+/* ===== Sliders ===== */
+/* Every range input: an 8px track filled to --pct in the orb's colour, and a white thumb big enough
+   for a thumb - 32px wherever the pointer is a finger. lib/range.js reads --thumb to make a tap on
+   the track land the value under it, which iOS's native slider will not do. */
+:root { --thumb: 28px; }
+@media (pointer: coarse) { :root { --thumb: 32px; } }
+input[type=range] {
+  --trk: 8px;
+  --track-bg: linear-gradient(to right, var(--orb-ctl) var(--pct, 0%), var(--track) var(--pct, 0%));
+  -webkit-appearance: none; appearance: none;
+  display: block; width: 100%; height: 44px; min-height: 44px; margin: 0; padding: 0; border: 0;
+  background: transparent; cursor: pointer; accent-color: var(--orb-ctl);
+  -webkit-tap-highlight-color: transparent;
+}
+input[type=range]::-webkit-slider-runnable-track { height: var(--trk); border-radius: calc(var(--trk) / 2); background: var(--track-bg); }
+input[type=range]::-moz-range-track { height: var(--trk); border-radius: calc(var(--trk) / 2); background: var(--track-bg); }
+input[type=range]::-moz-range-progress { background: transparent; }
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: var(--thumb); height: var(--thumb); margin-top: calc((var(--trk) - var(--thumb)) / 2);
+  border: 0; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .3), 0 0 0 .5px rgba(0, 0, 0, .1);
+  transition: transform .12s ease;
+}
+input[type=range]::-moz-range-thumb { width: var(--thumb); height: var(--thumb); border: 0; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .3), 0 0 0 .5px rgba(0, 0, 0, .1); }
+input[type=range]:not(:disabled):active::-webkit-slider-thumb { transform: scale(1.1); }
+input[type=range]:disabled { cursor: default; }
+input[type=range]:focus-visible { outline-offset: 0 !important; border-radius: 8px; }
+
+/* The colour pickers' tracks show what they pick. */
+input[type=range].hue { --trk: 12px; --track-bg: linear-gradient(90deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+input[type=range].hue.led-bright { --track-bg: linear-gradient(90deg, #4a4a52, #fff); }
+
+/* MSlider: the reading above, the track below. */
+.mslider-val { font: 600 13px/1.2 'SF Mono', ui-monospace, monospace; color: var(--orb-ink); }
+.mslider-notch { position: absolute; top: 50%; z-index: 0; width: 3px; height: 16px; margin-left: -1.5px; transform: translateY(-50%); border-radius: 2px; background: var(--muted); opacity: .7; pointer-events: none; }
+.mslider-input { position: relative; z-index: 1; }
+
+/* The media bar's sliders sit in rows of buttons, so they take the row's height, not 44px; the
+   bar's own is 30px, which --mbar-h (app.css) counts on. */
+.mbar-vol input[type=range], .mvol-row input[type=range], input[type=range].mseek { height: 36px; min-height: 36px; }
+.mbar-vol input[type=range] { height: 30px; min-height: 30px; }

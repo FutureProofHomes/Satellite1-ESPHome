@@ -7,7 +7,7 @@ import { TEXT } from '../copy.js';
 import { openHomeAssistant } from '../lib/openha.js';
 import { portalPass, probeSetup, setupMode, setupStatus, wifiJoin, wifiScan, wifiStatus } from '../lib/setup.js';
 import { actionsOk, afterAdd, entryStep, joinProblem, joinRead, mergeScan, onHomeOrigin, probeOrigins, probeStreak } from '../lib/setup-flow.js';
-import { Logo, cogStep, useTheme } from './bits';
+import { Logo, cogStep } from './bits';
 
 /**
  * The onboarding wizard a factory-fresh device serves instead of the sign-in screen, mounted while
@@ -127,7 +127,6 @@ export function SetupWizard({
   status: SetupStatus;
   onDone: () => void;
 }) {
-  const [theme] = useTheme();
   const onDoneRef = useRef(onDone);
   useEffect(() => {
     onDoneRef.current = onDone;
@@ -384,7 +383,7 @@ export function SetupWizard({
   };
   const pwField = (focus: boolean) => <input type="text" className="wifi-mask" name="wifi-key" aria-label={TEXT.setup_wifi_pw_placeholder} placeholder={TEXT.setup_wifi_pw_placeholder} {...NO_MANAGERS} autoFocus={focus} value={pw} onInput={e => setPw((e.target as HTMLInputElement).value)} />;
   const idx = WIZ_ORDER.indexOf(step) + 1;
-  return <main className="app setup-fullscreen" data-theme={theme}><section className="control setup wiz">
+  return <main className="app setup-fullscreen"><section className="control setup wiz">
       {idx > 0 && <span className="eyebrow">SETUP · {String(idx).padStart(2, '0')} / 06</span>}
       <Logo cls="wiz-logo" />
       <h1 className="wiz-h">{TEXT.setup_title}</h1>

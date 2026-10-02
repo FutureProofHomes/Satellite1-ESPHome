@@ -697,10 +697,13 @@ export const PHASE = {
  * A second while a timer is counting or the assistant is mid-exchange, five seconds otherwise. The
  * fast rate is there so a timer's remaining seconds move; polling that hard when nothing is
  * happening would be a request every second, forever, on a device that also has to do audio.
+ * `fast` is the caller asking for it too - a tap on the orb before the device reports the run, or
+ * a typed message awaiting its reply - and any change to it polls at once, so the reply that ends
+ * the wait shows without waiting out a slow interval.
  */
-export function useVoice(enabled) {
+export function useVoice(enabled, fast = false) {
   const [voice, setVoice] = useState(null);
-  const busy = voice ? voice.running || voice.timers.some((t) => t.active) : false;
+  const busy = fast || (voice ? voice.running || voice.timers.some((t) => t.active) : false);
 
   useEffect(() => {
     if (!enabled) return;
@@ -723,7 +726,7 @@ export function useVoice(enabled) {
       live = false;
       if (timer) clearTimeout(timer);
     };
-  }, [enabled, busy]);
+  }, [enabled, busy, fast]);
 
   return voice;
 }
