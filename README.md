@@ -196,23 +196,6 @@ For WiFi setup and troubleshooting see also:
 1. [Flashing via usb-c](https://docs.futureproofhomes.net/satellite1-flash-via-usb-c/)
 2. [Troubleshooting](https://docs.futureproofhomes.net/satellite1-troubleshooting/)
 
-### Testing XMOS Firmware (Developer Builds)
-`config/satellite1.dev.yaml` is `satellite1.yaml` plus an XMOS firmware picker. Production releases and ESPHome Device Builder configurations don't include it.
-```bash
-esphome run config/satellite1.dev.yaml
-```
-
-The picker lists every `*.factory.bin` with a matching `*.factory.md5` attached to a [Satellite1-XMOS release](https://github.com/FutureProofHomes/Satellite1-XMOS/releases), newest upload first, next to the XMOS image built into the ESP32 firmware. In Home Assistant, choose an image with **XMOS Firmware Choice**, then press **Install Selected XMOS Firmware**. Audio stops, then the image is downloaded, MD5-checked and flashed; the ESP32 does not reboot, and audio comes back if anything fails before flashing starts. A flashed image is kept across reboots until you install **Built-in** again. If a new image fails to flash or never starts, the built-in image is restored automatically. The `install_xmos_firmware` (`xmos_version`: a listed version or `builtin`) and `refresh_xmos_firmware_list` actions do the same from automations.
-
-Development builds share the `v0.0.0-dev` pre-release. Name each image `vX.Y.Z-dev.N.factory.bin` so the picker can read its version, and upload it with its checksum:
-```bash
-md5 -q v1.1.0-dev.111.factory.bin > v1.1.0-dev.111.factory.md5   # Linux: md5sum ... | cut -d' ' -f1
-gh release upload v0.0.0-dev v1.1.0-dev.111.factory.bin v1.1.0-dev.111.factory.md5 -R FutureProofHomes/Satellite1-XMOS
-```
-The list refreshes on its own shortly after boot and every hour; press **Refresh XMOS Firmware List** to check right away. Right after the device boots it may not have enough free memory yet, so a manual refresh then asks you to try again in a minute. Home Assistant only reads the choices when it connects, so when the list changes the device asks it to reconnect; the device shows as unavailable for a moment.
-
-To list a private repository, add it to `sources` in `config/common/xmos_firmware_catalog.yaml` with `private: true` and a fine-grained token that has read-only *Contents* access, stored in `secrets.yaml`.
-
 ## Home Assistant Voice Assistant Debugging
 
 1. [Set up you local pipeline](https://www.home-assistant.io/voice_control/voice_remote_local_assistant/)
