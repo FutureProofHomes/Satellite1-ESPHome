@@ -1,0 +1,12 @@
+# Developer build: satellite1.yaml plus the XMOS firmware picker.
+#   esphome run config/satellite1.dev.yaml
+packages:
+  base_image: !include satellite1.yaml
+  xmos_catalog: !include common/xmos_firmware_catalog.yaml
+
+external_components:
+  - source:
+      type: local
+      path: ../esphome/components
+    components:
+      - xmos_firmware_catalog
