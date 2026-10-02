@@ -181,6 +181,14 @@ class Satellite1WebUI : public Component {
 
   /// Called from the on_stt_end and on_tts_start lambdas in common/voice_assistant.yaml.
   void push_utterance(const std::string &text, bool heard) { this->handler_.push_utterance(text, heard); }
+
+  /// Called from the typed exchange in common/web_ui_assist.yaml. See WebUIHandler::push_typed.
+  void push_typed(const std::string &text, bool heard, const std::string &word) {
+    this->handler_.push_typed(text, heard, word);
+  }
+
+  /// Called by assist_start_by_hand in common/web_ui_assist.yaml. See WebUIHandler::note_manual_start.
+  void note_manual_start(const std::string &word) { this->handler_.note_manual_start(word); }
 #endif
 
 #ifdef USE_MICRO_WAKE_WORD
@@ -297,6 +305,13 @@ class Satellite1WebUI : public Component {
   /// `delay:` in it would still be a mistake - it would stall the queue rather than corrupt it.
   Trigger<std::string, std::string> *get_ha_select_trigger() { return &this->ha_select_trigger_; }
 
+  /// Fired from loop() for the Home page's message field (POST /api/sat1/ask) with the text, the
+  /// conversation agent and the wake word whose tab it was typed under, and for the orb's tap
+  /// (POST /api/sat1/talk) with the open tab's wake word. Both are implemented in
+  /// common/web_ui_assist.yaml: the first is a Home Assistant action, the second starts the assistant.
+  Trigger<std::string, std::string, std::string> *get_ask_trigger() { return &this->ask_trigger_; }
+  Trigger<std::string> *get_talk_trigger() { return &this->talk_trigger_; }
+
   /// The Music Assistant relay's triggers, all fired from loop() and all implemented in
   /// common/web_ui_media.yaml, one homeassistant.action each - the same split as the pair above.
   /// The refresh is the sync script; the rest carry the entity a browser named (validated against
@@ -364,6 +379,8 @@ class Satellite1WebUI : public Component {
   std::string fsd_known_;
   Trigger<> ha_refresh_trigger_;
   Trigger<std::string, std::string> ha_select_trigger_;
+  Trigger<std::string, std::string, std::string> ask_trigger_;
+  Trigger<std::string> talk_trigger_;
   Trigger<> ma_refresh_trigger_;
   Trigger<std::string> ma_like_trigger_;
   Trigger<std::string, std::string> ma_join_trigger_;

@@ -163,23 +163,13 @@ binary_sensor:
                                         - media_player.pause:
                                             id: external_media_player
                                       else:
-                                        - if:
-                                            condition:
-                                              and:
-                                                - switch.is_off: master_mute_switch
-                                                - not: voice_assistant.is_running
-                                            then:
-                                              # A press names no wake word, so it takes the Primary
-                                              # slot's finished speaking detection - copied onto Home
-                                              # Assistant's select ahead of the start, with the press
-                                              # chime's 300ms covering the write (voice_assistant.yaml).
-                                              - lambda: id(web_ui_app)->queue_fsd_for_slot(0);
-                                              - script.execute:
-                                                  id: play_sound
-                                                  priority: true
-                                                  sound_file: "center_button_press_sound"
-                                              - delay: 300ms
-                                              - voice_assistant.start:
+                                        # Chime, then listen - shared with the web app's orb tap
+                                        # (common/web_ui_assist.yaml), which owns the mute and
+                                        # already-running checks. No wake word, so Home Assistant
+                                        # runs the first slot's pipeline.
+                                        - script.execute:
+                                            id: assist_start_by_hand
+                                            word: ""
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:

@@ -201,6 +201,10 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
       return Route::SEL_SET;
     if (url == "/api/sat1/mutehold")
       return Route::MUTE_HOLD;
+    if (url == "/api/sat1/ask")
+      return Route::ASK;
+    if (url == "/api/sat1/talk")
+      return Route::TALK;
 #ifdef USE_WIFI
     if (url == "/api/sat1/wifi/join")
       return Route::WIFI_JOIN;
@@ -428,6 +432,12 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
       break;
     case Route::MUTE_HOLD:
       this->handle_mute_hold_(request);
+      break;
+    case Route::ASK:
+      this->handle_ask_(request);
+      break;
+    case Route::TALK:
+      this->handle_talk_(request);
       break;
 #ifdef USE_WIFI
     case Route::WIFI_SCAN:
@@ -1981,6 +1991,104 @@ void WebUIHandler::handle_ha_select_(AsyncWebServerRequest *request) {
   request->send(200, "application/json", "{\"queued\":1}");
 }
 
+/// Control characters have no business in a message from a one-line field, an entity id or a wake
+/// word phrase, and refusing them keeps a stray newline out of the transcript and the action call.
+static bool has_control_char(const std::string &s) {
+  for (const char c : s) {
+    const unsigned char u = static_cast<unsigned char>(c);
+    if (u < 0x20 || u == 0x7f)
+      return true;
+  }
+  return false;
+}
+
+/// Queues a typed message from the Home page (common/web_ui_assist.yaml has the call it becomes).
+///
+/// Form fields, so the text rides the body rather than the 512-byte URI: `t` the message, `a` the
+/// conversation agent the open tab is set to (empty for Home Assistant's built-in one), `w` the wake
+/// word whose tab it was typed under. One request rather than entity writes because the three
+/// belong together, and a text entity tops out at 255 bytes, which the message alone can fill.
+///
+/// Not a general action relay, by the select endpoint's rule: the agent must be a conversation
+/// entity the last Home Assistant payload listed, so a bug in the app cannot aim this anywhere else.
+void WebUIHandler::handle_ask_(AsyncWebServerRequest *request) {
+  auto *text_param = request->getParam("t");
+  auto *agent_param = request->getParam("a");
+  auto *word_param = request->getParam("w");
+  if (text_param == nullptr) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  AskRequest ask{text_param->value(), agent_param != nullptr ? agent_param->value() : std::string(),
+                 word_param != nullptr ? word_param->value() : std::string()};
+  if (ask.text.empty() || ask.text.size() > WU_ASK_TEXT_MAX || ask.agent.size() > WU_ASK_AGENT_MAX ||
+      ask.word.size() > WU_WAKE_PHRASE_MAX || has_control_char(ask.text) || has_control_char(ask.agent) ||
+      has_control_char(ask.word)) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  if (ask.agent.empty()) {
+    ask.agent = "conversation.home_assistant";
+  } else if (ask.agent.rfind("conversation.", 0) != 0 || !this->ha_payload_names_(ask.agent)) {
+    // 404 like the select endpoint: an agent removed since the payload the browser holds.
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+
+  {
+    LockGuard guard{this->ask_lock_};
+    if (this->ask_ready_.load(std::memory_order_acquire)) {
+      request->send(409, "application/json", "{\"ok\":0}");
+      return;
+    }
+    this->ask_pending_ = std::move(ask);
+    this->ask_ready_.store(true, std::memory_order_release);
+  }
+  // Queued, not answered: the reply arrives as a transcript line, and web_ui_ask_status says where
+  // the message stands meanwhile.
+  request->send(200, "application/json", "{\"queued\":1}");
+}
+
+/// Queues an orb tap. `w` is the wake word whose tab is open, which the start passes on as its wake
+/// word phrase so Home Assistant runs that word's pipeline; empty asks for the first slot's, as the
+/// action button does. A tap waiting from before is replaced rather than refused.
+void WebUIHandler::handle_talk_(AsyncWebServerRequest *request) {
+  auto *word_param = request->getParam("w");
+  std::string word = word_param != nullptr ? word_param->value() : std::string();
+  if (word.size() > WU_WAKE_PHRASE_MAX || has_control_char(word)) {
+    request->send(400, "application/json", "{\"ok\":0}");
+    return;
+  }
+  {
+    LockGuard guard{this->ask_lock_};
+    this->talk_word_ = std::move(word);
+    this->talk_ready_.store(true, std::memory_order_release);
+  }
+  request->send(200, "application/json", "{\"queued\":1}");
+}
+
+bool WebUIHandler::take_ask(AskRequest &out) {
+  if (!this->ask_ready_.load(std::memory_order_acquire))
+    return false;
+  LockGuard guard{this->ask_lock_};
+  out = std::move(this->ask_pending_);
+  this->ask_pending_ = AskRequest{};
+  this->ask_ready_.store(false, std::memory_order_relaxed);
+  return true;
+}
+
+bool WebUIHandler::take_talk(std::string &word) {
+  if (!this->talk_ready_.load(std::memory_order_acquire))
+    return false;
+  LockGuard guard{this->ask_lock_};
+  word = std::move(this->talk_word_);
+  this->talk_word_.clear();
+  this->talk_ready_.store(false, std::memory_order_relaxed);
+  return true;
+}
+
 bool WebUIHandler::queue_select_write(const std::string &entity, const std::string &option) {
   LockGuard guard{this->select_lock_};
 
@@ -2726,21 +2834,28 @@ void WebUIHandler::push_utterance(const std::string &text, bool heard) {
   if (text.empty())
     return;
   // The initiating wake word, for the Home page's per-word transcript tabs. A heard line follows
-  // its wake within the same pipeline run, so the newest detection is its initiator; a reply
-  // belongs to the exchange its heard line opened, so it inherits that line's word rather than
-  // re-reading the detections - a "stop" firing mid-reply must not re-attribute the answer.
+  // its wake within the same pipeline run, so the newest detection is its initiator - unless the
+  // run was started by hand after it, which files the line under the word the start named (none
+  // for the action button). A reply belongs to the exchange its heard line opened, so it inherits
+  // that line's word rather than re-reading the detections - a "stop" firing mid-reply must not
+  // re-attribute the answer - and a typed line in between is some other exchange's.
   std::string word;
-#ifdef USE_MICRO_WAKE_WORD
   if (heard) {
+    bool by_hand = this->manual_start_;
+#ifdef USE_MICRO_WAKE_WORD
     LockGuard guard{this->detection_lock_};
-    if (!this->detections_.empty())
+    by_hand = by_hand && (this->detections_.empty() ||
+                          static_cast<int32_t>(this->manual_start_ms_ - this->detections_.back().at_ms) >= 0);
+    if (!by_hand && !this->detections_.empty())
       word = this->detections_.back().word;
-  }
 #endif
+    if (by_hand)
+      word = this->manual_word_;
+  }
   LockGuard guard{this->transcript_lock_};
   if (!heard) {
     for (auto it = this->transcript_.rbegin(); it != this->transcript_.rend(); ++it) {
-      if (it->heard) {
+      if (it->heard && !it->typed) {
         word = it->word;
         break;
       }
@@ -2749,6 +2864,15 @@ void WebUIHandler::push_utterance(const std::string &text, bool heard) {
   if (this->transcript_.size() >= WU_TRANSCRIPT_RING)
     this->transcript_.erase(this->transcript_.begin());
   this->transcript_.push_back({text, static_cast<uint32_t>(millis_64() / 1000), heard, word});
+}
+
+void WebUIHandler::push_typed(const std::string &text, bool heard, const std::string &word) {
+  if (text.empty())
+    return;
+  LockGuard guard{this->transcript_lock_};
+  if (this->transcript_.size() >= WU_TRANSCRIPT_RING)
+    this->transcript_.erase(this->transcript_.begin());
+  this->transcript_.push_back({text, static_cast<uint32_t>(millis_64() / 1000), heard, word, true});
 }
 
 /// Timers and the assistant's phase, neither of which web_server can express.

@@ -130,6 +130,9 @@ packages:
   # After web_ui_ha, whose rung global and connect gating it rides. The media footer's Music
   # Assistant half: the group-members sync and the relayed commands.
   web_ui_media: !include common/web_ui_media.yaml
+  # The Home page's orb tap and typed messages, and the press-to-talk start the action button
+  # shares with the tap. After web_ui_login and web_ui_ha, whose globals it reads.
+  web_ui_assist: !include common/web_ui_assist.yaml
   mmwave: !include common/mmwave.yaml
   sendspin: !include common/sendspin.yaml
 

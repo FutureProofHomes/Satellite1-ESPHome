@@ -70,12 +70,14 @@ static constexpr size_t WU_TRANSCRIPT_RING = 8;
 /// One heard-or-said line. `heard` distinguishes the two so the UI can attribute them without
 /// carrying a second string per entry. `word` is the wake word that initiated the exchange (the
 /// most recent detection for heard lines, the exchange's heard line for replies), which is what
-/// lets the Home page show one transcript tab per wake word; empty when unknown.
+/// lets the Home page show one transcript tab per wake word; empty when unknown. `typed` marks a
+/// line from the Home page's message field, which a spoken reply must not take its word from.
 struct Utterance {
   std::string text;
   uint32_t at_uptime;
   bool heard;
   std::string word;
+  bool typed{false};
 };
 
 #ifdef USE_MICRO_WAKE_WORD
@@ -126,6 +128,21 @@ enum class MaCmd : uint8_t { NONE = 0, LIKE, JOIN, UNJOIN, VOL, SEEK };
 /// Bound on the queue. Commands are taps, not drags - volume writes coalesce by entity below - so
 /// six outstanding means a browser is misbehaving, and refusal tells it so.
 static constexpr size_t WU_MA_QUEUE = 6;
+
+/// One typed message from the Home page, waiting for the main loop to send it to Home Assistant
+/// (common/web_ui_assist.yaml): the text, the conversation agent it goes to, and the wake word whose
+/// transcript tab it was typed under, which names the tab its exchange lands in ("" for none).
+struct AskRequest {
+  std::string text;
+  std::string agent;
+  std::string word;
+};
+
+/// A typed message's ceiling in bytes, which the app's field enforces too. The other two only bound
+/// a misbehaving browser: conversation entity ids and wake word phrases are short.
+static constexpr size_t WU_ASK_TEXT_MAX = 255;
+static constexpr size_t WU_ASK_AGENT_MAX = 120;
+static constexpr size_t WU_WAKE_PHRASE_MAX = 64;
 
 #ifdef USE_MEDIA_PLAYER
 /// The transport commands POST /api/sat1/media/<cmd> accepts. The footer's set and no more: stop,
@@ -282,6 +299,20 @@ class WebUIHandler : public AsyncWebHandler {
   /// Called from the on_stt_end and on_tts_start triggers. Runs on the main loop, and the ring is
   /// read from the httpd task, so both sides take the lock.
   void push_utterance(const std::string &text, bool heard);
+
+  /// A typed exchange's line, from common/web_ui_assist.yaml: filed under the wake word whose tab it
+  /// was typed in, since no wake word opened it. Main loop only, like push_utterance.
+  void push_typed(const std::string &text, bool heard, const std::string &word);
+
+  /// A pipeline run started by hand rather than by a wake word: the action button's press, which
+  /// names no word, or the orb's tap, which names the open tab's. Its heard lines are filed under
+  /// that word until the next wake word fires, instead of under whichever word fired last. Main
+  /// loop only, like push_utterance's caller.
+  void note_manual_start(const std::string &word) {
+    this->manual_start_ms_ = millis();
+    this->manual_start_ = true;
+    this->manual_word_ = word;
+  }
 #endif
 
   /// Reserves the PSRAM buffer the next payload is written into, or nullptr if it could not grow.
@@ -370,6 +401,13 @@ class WebUIHandler : public AsyncWebHandler {
   /// Hands back the oldest queued Music Assistant command, if any - the select queue's shape, one
   /// per main-loop iteration so the trigger behind it is never re-entered.
   bool take_ma_write(MaWrite &out);
+
+  /// Hands back the typed message POST /api/sat1/ask queued, if there is one. Main loop only.
+  bool take_ask(AskRequest &out);
+
+  /// Hands back the wake word an orb tap named (POST /api/sat1/talk; "" for none), if a tap is
+  /// waiting. Main loop only.
+  bool take_talk(std::string &word);
 
   /// Hands back the oldest queued select write, if there is one. Runs on the main loop.
   ///
@@ -550,6 +588,8 @@ class WebUIHandler : public AsyncWebHandler {
     SEL,
     SEL_SET,
     MUTE_HOLD,
+    ASK,   // POST /api/sat1/ask  (t, a, w - the Home page's message field)
+    TALK,  // POST /api/sat1/talk (w - the orb's tap)
 #ifdef USE_WIFI
     // The setup wizard's provisioning trio. Reachable without a session only while the device is
     // un-onboarded - the session gate owns that exemption (and its host check); this handler just
@@ -618,6 +658,8 @@ class WebUIHandler : public AsyncWebHandler {
   void handle_ha_(AsyncWebServerRequest *request);
   void handle_ha_refresh_(AsyncWebServerRequest *request);
   void handle_ha_select_(AsyncWebServerRequest *request);
+  void handle_ask_(AsyncWebServerRequest *request);
+  void handle_talk_(AsyncWebServerRequest *request);
 
   /// True if the last Home Assistant payload contained `entity` as a complete JSON string.
   ///
@@ -811,6 +853,15 @@ class WebUIHandler : public AsyncWebHandler {
   Mutex ma_queue_lock_;
   std::atomic<bool> ma_pending_{false};
 
+  /// The typed message and the orb tap, each waiting for the main loop - the select queue's
+  /// deferral, one deep. A second message before the loop has taken the first is refused (the app
+  /// sends one at a time); a second tap replaces the first, since both name what to start now.
+  AskRequest ask_pending_;
+  std::string talk_word_;
+  Mutex ask_lock_;
+  std::atomic<bool> ask_ready_{false};
+  std::atomic<bool> talk_ready_{false};
+
   Selection *selection_{nullptr};
 
   /// Ceiling on a posted selection, comfortably above what the store itself accepts, so an oversized
@@ -905,6 +956,9 @@ class WebUIHandler : public AsyncWebHandler {
   std::function<int()> voice_phase_fn_{};
   std::vector<Utterance> transcript_;
   Mutex transcript_lock_;
+  uint32_t manual_start_ms_{0};
+  bool manual_start_{false};
+  std::string manual_word_;
 #endif
 
 #ifdef USE_MEDIA_PLAYER

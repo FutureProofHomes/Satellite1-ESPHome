@@ -139,6 +139,14 @@ void Satellite1WebUI::loop() {
   if (this->handler_.take_select_write(pending))
     this->ha_select_trigger_.trigger(pending.entity, pending.option);
 
+  // The endpoints run on the httpd task; what these start are scripts.
+  AskRequest ask;
+  if (this->handler_.take_ask(ask))
+    this->ask_trigger_.trigger(ask.text, ask.agent, ask.word);
+  std::string talk_word;
+  if (this->handler_.take_talk(talk_word))
+    this->talk_trigger_.trigger(talk_word);
+
 #ifdef USE_WIFI
   // The setup wizard's deferred wifi work, both on the main loop because both drive the wifi
   // component's state machine (and save_wifi_sta writes NVS besides).

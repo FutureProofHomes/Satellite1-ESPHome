@@ -79,7 +79,8 @@ substitutions:
   #             "http://192.168.4.31", 1, "s3cret", "e", 2450, 1, "192.168.4.31"]],
   #    "asst": {"o": ["Home Assistant Cloud", "OllamaBradStudio"],
   #             "s": [["select.sat1_wake_word", "Hey Jarvis", "select.sat1_assistant", "preferred"],
-  #                   ["select.sat1_wake_word_2", "no_wake_word", "select.sat1_assistant_2", "preferred"]]}}
+  #                   ["select.sat1_wake_word_2", "no_wake_word", "select.sat1_assistant_2", "preferred"]]},
+  #    "cv": [["conversation.home_assistant", "Home Assistant"], ["conversation.ollama", "Ollama"]]}
   #
   # `i` is the area id and `aid` this device's own. Both are ids rather than names because the stored
   # selection references areas, `area_entities()` takes an id directly, and an id survives a rename -
@@ -233,6 +234,11 @@ substitutions:
   #
   # Requires Home Assistant 2025.10, which is where the second slot arrived, and that is not a new
   # floor: this whole file already needs 2025.12 for action replies.
+  #
+  # `cv` is every conversation agent Home Assistant has, as [entity_id, name] sorted by name: what
+  # the Home page's typed messages (common/web_ui_assist.yaml) match a pipeline's name against, and
+  # the choices when it asks. Typed messages cannot go through a pipeline, and conversation.process
+  # takes an agent, but nothing a template can read maps a pipeline to its agent.
   #
   # Areas with no eligible player are dropped rather than sent empty: the frontend has nothing to
   # offer for them, and on the installation above that is 11 areas of the 22.
@@ -411,9 +417,13 @@ substitutions:
                   if p1 | count == 1 and p2 | count == 1 and w1 | count == 1 and w2 | count == 1
                   else {} %}
     {% set fsd = [sl.f | first, states(sl.f | first)] if sl.f | count == 1 else [] %}
+    {% set cvn = namespace(l=[]) %}
+    {% for s in states.conversation | sort(attribute='name', case_sensitive=false) %}
+      {% set cvn.l = cvn.l + [[s.entity_id, s.name]] %}
+    {% endfor %}
     {% set lim = 24000 - (out.dev | to_json | length) - (out.loose | to_json | length)
                        - (asst | to_json | length) - (fsd | to_json | length)
-                       - (out.cand | to_json | length) %}
+                       - (cvn.l | to_json | length) - (out.cand | to_json | length) %}
     {% set keep = namespace(a=[], n=0) %}
     {% for ar in out.areas %}
       {% set sz = (ar | to_json | length) + 1 %}
@@ -427,6 +437,7 @@ substitutions:
                             ~ ',"t":' ~ (1 if keep.a | count < out.areas | count else 0)
                             ~ ',"asst":' ~ (asst | to_json)
                             ~ ',"fsd":' ~ (fsd | to_json)
+                            ~ ',"cv":' ~ (cvn.l | to_json)
                             ~ ',"dev":[']) %}
     {% for d in out.dev %}
       {% set P.l = P.l + [(d | to_json) ~ ('' if loop.last else ',')] %}

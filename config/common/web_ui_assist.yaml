@@ -1,0 +1,228 @@
+####################################################################################################
+# The Home page's two ways to the assistant besides a wake word: tapping the orb, and typing. Both
+# follow the transcript tab that is open - the tabs are the wake word slots - so the tab is how a
+# person picks which assistant they are talking to, and the message field's menu is that wake
+# word's voice pipeline.
+#
+# Tapping is the action button's single press, minus the button's jobs that are not talking - it
+# pauses no music and approves no sign-in. A sign-in approval in particular must never be reachable
+# from here: the press proves a hand on the device, and a tap proves only a browser that is already
+# signed in. The start itself is one script both share, so the two cannot drift apart. A tap names
+# the open tab's wake word as the start's wake word phrase, and Home Assistant runs the pipeline of
+# the slot holding that word - the same match it makes when the word is said.
+#
+# Typing cannot use the voice pipeline at all. ESPHome's VoiceAssistantRequest carries a start flag,
+# a conversation id, audio settings and a wake word phrase - no text - so Home Assistant only ever
+# starts this device's pipeline at wake word or speech-to-text. What the device can do is call
+# conversation.process itself and read the reply, the call web_ui_ha.yaml's rung 2 already makes.
+# That call names no device, which has three consequences worth knowing before changing anything:
+#   - Home Assistant cannot tell which room is asking, so "turn off the lights" has no area, while
+#     "turn off the kitchen lights" works.
+#   - Timers are device-scoped intents, so "set a timer" cannot land on this device.
+#   - The agent is the pipeline's only as far as the app can tell. Home Assistant gives a device no
+#     way to read which agent a pipeline uses - its pipeline select holds names only - so the app
+#     matches the pipeline's name against the conversation agents Home Assistant lists (`cv` in
+#     web_ui_ha.yaml's payload), and asks the person once for a pipeline it cannot match, keeping
+#     the answer below. The pipeline's other settings (its language, preferring local intents) do
+#     not apply to typed messages.
+# Needs what the rest of the app's Home Assistant features need: 2025.12 for action replies, and
+# "Allow the device to perform Home Assistant actions" ticked.
+####################################################################################################
+
+# The component queues both from their endpoints (POST /api/sat1/ask, /api/sat1/talk) and fires these
+# from its main loop. Merged into the block in common/web_ui.yaml.
+satellite1_web_ui:
+  on_ask:
+    - script.execute:
+        id: web_ui_ask_send
+        message: !lambda 'return text;'
+        agent: !lambda 'return agent;'
+        word: !lambda 'return word;'
+  on_talk:
+    - script.execute:
+        id: web_ui_orb_tap
+        word: !lambda 'return word;'
+
+script:
+  # A press-to-talk start: chime, then listen, with nothing done while muted or already running.
+  # Shared by the action button's single press (common/buttons.yaml), which names no wake word, and
+  # the orb's tap below, which names the open tab's.
+  #
+  # The word picks the pipeline (an empty one leaves Home Assistant on the first slot's) and the
+  # finished speaking detection - its slot's value, or the Primary slot's for none - copied onto Home
+  # Assistant's select ahead of the start, with the press chime's 300ms covering the write
+  # (voice_assistant.yaml). note_manual_start files the exchange under the word instead of whichever
+  # wake word fired last.
+  - id: assist_start_by_hand
+    parameters:
+      word: string
+    then:
+      - if:
+          condition:
+            and:
+              - switch.is_off: master_mute_switch
+              - not: voice_assistant.is_running
+          then:
+            - lambda: |-
+                id(web_ui_app)->note_manual_start(word);
+                if (word.empty())
+                  id(web_ui_app)->queue_fsd_for_slot(0);
+                else
+                  id(web_ui_app)->queue_fsd_for(word);
+            - script.execute:
+                id: play_sound
+                priority: true
+                sound_file: "center_button_press_sound"
+            - delay: 300ms
+            - voice_assistant.start:
+                wake_word: !lambda 'return word;'
+
+  # The orb's tap: silence a ringing timer, stop a running assistant, or start one - the button's
+  # single press in the same order, without its media pause. Nothing during start-up, as the button,
+  # and nothing while a sign-in window is open, whose own announcements and listening would collide
+  # with a conversation.
+  - id: web_ui_orb_tap
+    parameters:
+      word: string
+    then:
+      - if:
+          condition:
+            and:
+              - lambda: return !id(init_in_progress);
+              - lambda: return !id(login_window_active);
+          then:
+            - if:
+                condition:
+                  switch.is_on: timer_ringing
+                then:
+                  - switch.turn_off: timer_ringing
+                else:
+                  - if:
+                      condition:
+                        voice_assistant.is_running:
+                      then:
+                        - voice_assistant.stop:
+                      else:
+                        - script.execute:
+                            id: assist_start_by_hand
+                            word: !lambda 'return word;'
+
+  # One typed message to the open tab's pipeline's agent. The script ends as soon as the call is sent; the reply
+  # comes back on on_success, after the script has finished, so a second message is never blocked
+  # behind the first one's answer. on_success and on_error get the script's parameters too, held
+  # with the pending call, so the reply is filed under the same tab.
+  #
+  # The conversation id is this device's own fixed string per wake word rather than the id Home
+  # Assistant hands back, so each tab keeps its own context. Home Assistant keeps a session under any
+  # id that is not one of its own ULIDs, so follow-ups share context until the session idles out
+  # (five minutes) and the next message quietly starts a fresh one under the same name.
+  #
+  # Text, agent and id go through data_template variables, so a message with braces or quotes in it
+  # is text rather than template.
+  #
+  # The reply is rendered on Home Assistant's side to the speech alone. Home Assistant runs the
+  # rendered template through literal_eval, which turns the object into a dict; a reply that defeats
+  # that arrives as the raw string instead, and the lambda parses it itself.
+  - id: web_ui_ask_send
+    mode: queued
+    parameters:
+      message: string
+      agent: string
+      word: string
+    then:
+      - if:
+          condition:
+            and:
+              - api.connected:
+              - lambda: 'return id(ha_supports_action_replies);'
+          then:
+            - lambda: 'id(web_ui_app)->push_typed(message, true, word);'
+            - text_sensor.template.publish:
+                id: web_ui_ask_status
+                state: "busy"
+            - script.execute: web_ui_ask_watchdog
+            - homeassistant.action:
+                action: conversation.process
+                capture_response: true
+                data_template:
+                  text: "{{ t }}"
+                  agent_id: "{{ a }}"
+                  conversation_id: "{{ c }}"
+                variables:
+                  t: !lambda 'return message;'
+                  a: !lambda 'return agent;'
+                  c: !lambda |-
+                    std::string cid = "satellite1-" + esphome::get_mac_address() + "-typed";
+                    if (!word.empty()) {
+                      cid += '-';
+                      for (const char ch : word)
+                        cid += isalnum(static_cast<unsigned char>(ch)) ? static_cast<char>(tolower(static_cast<unsigned char>(ch))) : '_';
+                    }
+                    return cid;
+                response_template: >-
+                  {% set r = response.get('response') or {} %}{% set p = (r.get('speech') or {}).get('plain') or {} %}{{ {'s': p.get('speech') or ''} | to_json }}
+                on_success:
+                  - script.stop: web_ui_ask_watchdog
+                  - lambda: |-
+                      JsonDocument doc;
+                      JsonVariantConst r = response["response"];
+                      if (r.is<const char *>() &&
+                          deserializeJson(doc, r.as<const char *>()) == DeserializationError::Ok)
+                        r = doc.as<JsonVariantConst>();
+                      const char *reply = r["s"] | "";
+                      id(web_ui_app)->push_typed(reply, false, word);
+                      id(web_ui_ask_status).publish_state(reply[0] != '\0' ? "" : "err");
+                on_error:
+                  - script.stop: web_ui_ask_watchdog
+                  - lambda: |-
+                      ESP_LOGW("web_ui", "Typed message failed: %s", error.c_str());
+                      id(web_ui_ask_status).publish_state("err");
+          else:
+            - text_sensor.template.publish:
+                id: web_ui_ask_status
+                state: "offline"
+
+  # A reply that never comes. ESPHome never times out a pending response, and Home Assistant drops a
+  # call silently when the actions checkbox is off. A minute leaves room for a slow local model. A
+  # reply arriving later still lands in the transcript and clears the status.
+  - id: web_ui_ask_watchdog
+    mode: restart
+    then:
+      - delay: 60s
+      - text_sensor.template.publish:
+          id: web_ui_ask_status
+          state: "timeout"
+
+# The app's handles on typed messages, all internal: they are web UI controls, not Home Assistant
+# entities. web_server serves internal entities (include_internal in common/web_ui.yaml), and the
+# entity table there maps each to a key.
+text:
+  # The person's answers to "which agent does this pipeline use?", as a JSON object of pipeline name
+  # to conversation entity id without its "conversation." prefix ("preferred" for the Preferred
+  # pipeline). Only pipelines whose name matches no agent are asked about. Stored on the device so
+  # every browser types to the same agent; the app keeps it under the 255 bytes by dropping the
+  # oldest answers, and sends the resolved agent with each message. Each answer is written to flash
+  # at once rather than at the next preferences sync, since the promise is never to ask again and a
+  # power cut within the minute would otherwise take it back.
+  - platform: template
+    id: web_ui_pipeline_agents
+    name: "Web UI Pipeline Agents"
+    internal: true
+    mode: text
+    max_length: 255
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    on_value:
+      - lambda: global_preferences->sync();
+
+text_sensor:
+  # Where the typed message stands, for the message field: "busy" while a reply is awaited, empty
+  # once it arrived, "err" when Home Assistant reported a failure or answered with nothing, "timeout"
+  # from the watchdog, "offline" when Home Assistant was not there to ask. Its presence is also how
+  # the app knows this build has the field and the orb's tap.
+  - platform: template
+    id: web_ui_ask_status
+    name: "Web UI Ask Status"
+    internal: true
+    update_interval: never

@@ -451,10 +451,14 @@ satellite1_web_ui:
       # state GET /api/sat1/amp reports. The index (0-20) travels; the app renders it as dBV.
       amp_gain: amp_gain_level
 
-    # No `texts:` block. The routing target list used to be here, as a text entity the tree wrote a
+    # The routing target list is not here. It used to be a text entity the tree wrote a
     # comma-separated list into on every change - and that entity caps at 255 characters, which is
     # roughly half of what one area's worth of players needs. The selection moved into this component
     # and the app reads and writes it at /api/sat1/sel instead.
+    texts:
+      # Which agent each pipeline types to, where its name did not say, for the Home page's message
+      # field (common/web_ui_assist.yaml). The message itself goes to POST /api/sat1/ask.
+      pipeline_agents: web_ui_pipeline_agents
 
     lights:
       ring: led_ring
@@ -536,6 +540,7 @@ satellite1_web_ui:
       # from a C++ literal shared by both handlers, so it has no id to map and does not need one.
       radar_module: radar_detected_text
       remote_tts_status: tts_routing_status
+      ask_status: web_ui_ask_status
 
     events:
       action_button: action_button_press_event

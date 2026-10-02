@@ -96,6 +96,8 @@ CONF_SENDSPIN_HUB_ID = "sendspin_hub_id"
 CONF_SPEAKER_AMP_ID = "speaker_amp_id"
 CONF_ON_HA_REFRESH = "on_ha_refresh"
 CONF_ON_HA_SELECT = "on_ha_select"
+CONF_ON_ASK = "on_ask"
+CONF_ON_TALK = "on_talk"
 CONF_ON_MA_REFRESH = "on_ma_refresh"
 CONF_ON_MA_LIKE = "on_ma_like"
 CONF_ON_MA_JOIN = "on_ma_join"
@@ -254,6 +256,11 @@ CONFIG_SCHEMA = cv.All(
             # other control in the app there is no local state to write - only an action to call, and
             # calling it belongs in YAML beside the ladder.
             cv.Optional(CONF_ON_HA_SELECT): automation.validate_automation(single=True),
+            # The Home page's message field and orb tap (common/web_ui_assist.yaml). on_ask gets
+            # `text`, `agent` and `word` - the message, the conversation entity it goes to and the
+            # wake word whose transcript tab it was typed under; on_talk gets the open tab's `word`.
+            cv.Optional(CONF_ON_ASK): automation.validate_automation(single=True),
+            cv.Optional(CONF_ON_TALK): automation.validate_automation(single=True),
             # The per-wake-word Finished Speaking Detection selects, Primary slot first. Home
             # Assistant keeps one such select per satellite (the payload's `fsd`) and reads it when a
             # pipeline starts, so queue_fsd_for copies the firing slot's value onto it through the
@@ -486,6 +493,18 @@ async def to_code(config):
             var.get_ha_select_trigger(),
             [(cg.std_string, "entity"), (cg.std_string, "option")],
             config[CONF_ON_HA_SELECT],
+        )
+
+    if CONF_ON_ASK in config:
+        await automation.build_automation(
+            var.get_ask_trigger(),
+            [(cg.std_string, "text"), (cg.std_string, "agent"), (cg.std_string, "word")],
+            config[CONF_ON_ASK],
+        )
+
+    if CONF_ON_TALK in config:
+        await automation.build_automation(
+            var.get_talk_trigger(), [(cg.std_string, "word")], config[CONF_ON_TALK]
         )
 
     for slot, sel_id in enumerate(config.get(CONF_FSD_SELECTS, [])):
