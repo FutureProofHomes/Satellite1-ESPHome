@@ -158,6 +158,7 @@ api:
 binary_sensor:
   - platform: gpio
     id: line_out_sensor
+    use_interrupt: false
     pin:
       pcm5122:
       number: 3
