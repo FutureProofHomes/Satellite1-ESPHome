@@ -74,6 +74,7 @@ FINAL_VALIDATE_SCHEMA = _final_validate
 
 async def to_code(config):
     include_builtin_idf_component("json")
+    include_builtin_idf_component("esp_http_server")
     device_class_indices = {
         "distance": register_device_class("distance"),
         "illuminance": register_device_class("illuminance"),
