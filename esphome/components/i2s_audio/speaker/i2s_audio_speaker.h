@@ -113,11 +113,9 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   /// @return True if a higher priority task was interrupted
   static bool IRAM_ATTR i2s_on_sent_cb(i2s_chan_handle_t handle, i2s_event_data_t *event, void *user_ctx);
 
+  // Only loop() creates/deletes tasks and writes the handle; callers post commands through event_group_.
   TaskHandle_t speaker_task_handle_{nullptr};
   EventGroupHandle_t event_group_{nullptr};
-  // Serializes caller intent with loop-owned task dispatch/teardown. The worker never takes this mutex.
-  mutable Mutex lifecycle_mutex_;
-  bool pending_start_{false};
 
   uint8_t *data_buffer_{nullptr};
   std::shared_ptr<ring_buffer::RingBuffer> audio_ring_buffer_;

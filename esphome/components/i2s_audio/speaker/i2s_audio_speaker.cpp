@@ -20,6 +20,7 @@ static const ssize_t TASK_PRIORITY = 19;
 static const char *const TAG = "i2s_audio.speaker";
 
 enum SpeakerEventGroupBits : uint32_t {
+  COMMAND_START = (1 << 0),            // requests loop-owned speaker task creation
   COMMAND_STOP = (1 << 1),             // stops the speaker task
   COMMAND_STOP_GRACEFULLY = (1 << 2),  // Stops the speaker task once all data has been written
   STATE_STARTING = (1 << 10),
@@ -113,10 +114,13 @@ void I2SAudioSpeaker::loop() {
   }
 #endif
 
-  LockGuard lifecycle_lock(this->lifecycle_mutex_);
-  // Atomically capture and acknowledge reports. Never clear the worker's stop commands here: they must remain
-  // visible until the current task has stopped, including when it hasn't been scheduled yet.
-  uint32_t event_group_bits = xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::ALL_REPORT_BITS);
+  // Atomically capture all bits, acknowledging non-terminal reports only. Leave STOPPING/STOPPED latched until
+  // their public state is published so start() cannot mistake a winding-down worker for a healthy one.
+  // Worker stop commands remain visible until completion, including before the task has been scheduled.
+  uint32_t event_group_bits = xEventGroupClearBits(
+      this->event_group_, SpeakerEventGroupBits::ALL_REPORT_BITS &
+                              ~(SpeakerEventGroupBits::STATE_STOPPING | SpeakerEventGroupBits::STATE_STOPPED));
+  constexpr uint32_t stop_bits = SpeakerEventGroupBits::COMMAND_STOP | SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY;
 
   if (event_group_bits & SpeakerEventGroupBits::STATE_STARTING) {
     ESP_LOGD(TAG, "Starting Speaker");
@@ -131,6 +135,8 @@ void I2SAudioSpeaker::loop() {
   if (event_group_bits & SpeakerEventGroupBits::STATE_STOPPING) {
     ESP_LOGD(TAG, "Stopping Speaker");
     this->state_ = speaker::STATE_STOPPING;
+    // Acknowledge only the captured report; this worker emits it once per run.
+    xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::STATE_STOPPING);
   }
   if (event_group_bits & SpeakerEventGroupBits::STATE_STOPPED) {
     ESP_LOGD(TAG, "Stopped Speaker");
@@ -142,11 +148,15 @@ void I2SAudioSpeaker::loop() {
     }
 
     this->stop_i2s_channel_();
-    xEventGroupClearBits(this->event_group_,
-                         SpeakerEventGroupBits::COMMAND_STOP | SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY);
+    // Retire the completed worker's stop commands. Leave START untouched: a source can request a restart
+    // during teardown (#19027), and restoring an earlier snapshot could undo a later stop_() cancellation.
+    xEventGroupClearBits(this->event_group_, stop_bits);
     this->status_clear_error();
 
     this->state_ = speaker::STATE_STOPPED;
+    // The worker has been deleted and its public state published. Retire the captured terminal report before
+    // dispatching a replacement; STOPPING, if captured too, was acknowledged above and STOPPED wins.
+    xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::STATE_STOPPED);
   }
 
   if (event_group_bits & SpeakerEventGroupBits::ERR_TASK_FAILED_TO_START) {
@@ -167,27 +177,21 @@ void I2SAudioSpeaker::loop() {
              this->audio_stream_info_.get_bits_per_sample());
   }
 
-  if (this->pending_start_) {
-    if (this->speaker_task_handle_ != nullptr) {
-      // A start on a healthy active task is redundant. During a requested or reported stop, retain one restart.
-      if (!(event_group_bits & (SpeakerEventGroupBits::COMMAND_STOP | SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY |
-                                SpeakerEventGroupBits::STATE_STOPPING)) &&
-          this->state_ != speaker::STATE_STOPPING) {
-        this->pending_start_ = false;
-      }
-    } else {
-      this->pending_start_ = false;
-      // Recheck permission at dispatch, not just when the caller queued the start. Do not replay a denied start later.
-      if (this->is_ready() && !this->is_failed() && !this->status_has_error() && this->parent_->access_permitted()) {
-        xEventGroupClearBits(this->event_group_,
-                             SpeakerEventGroupBits::COMMAND_STOP | SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY);
-        this->state_ = speaker::STATE_STARTING;
-        xTaskCreate(I2SAudioSpeaker::speaker_task, "speaker_task", TASK_STACK_SIZE, (void *) this, TASK_PRIORITY,
-                    &this->speaker_task_handle_);
-        if (this->speaker_task_handle_ == nullptr) {
-          this->state_ = speaker::STATE_STOPPED;
-          xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::ERR_TASK_FAILED_TO_START);
-        }
+  // Active-worker commands stay latched; start() filters ordinary redundant requests at the source.
+  if (this->speaker_task_handle_ == nullptr && this->state_ == speaker::STATE_STOPPED) {
+    // Consume the idle command batch once. A coalesced stop cancels its start (#19089). A stop posted AFTER
+    // this atomic clear stays set for the new worker's initial check; dispatch must not clear commands again.
+    const uint32_t command_bits =
+        xEventGroupClearBits(this->event_group_, stop_bits | SpeakerEventGroupBits::COMMAND_START);
+    if ((command_bits & SpeakerEventGroupBits::COMMAND_START) && !(command_bits & stop_bits) && this->is_ready() &&
+        !this->is_failed() && !this->status_has_error() && this->parent_->access_permitted()) {
+      // Recheck XMOS access at dispatch. A denied request is consumed, not replayed when access returns.
+      this->state_ = speaker::STATE_STARTING;
+      xTaskCreate(I2SAudioSpeaker::speaker_task, "speaker_task", TASK_STACK_SIZE, (void *) this, TASK_PRIORITY,
+                  &this->speaker_task_handle_);
+      if (this->speaker_task_handle_ == nullptr) {
+        this->state_ = speaker::STATE_STOPPED;
+        xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::ERR_TASK_FAILED_TO_START);
       }
     }
   }
@@ -477,12 +481,20 @@ void I2SAudioSpeaker::speaker_task(void *params) {
 }
 
 void I2SAudioSpeaker::start() {
-  LockGuard lifecycle_lock(this->lifecycle_mutex_);
   if (!this->is_ready() || this->is_failed() || this->status_has_error() || this->event_group_ == nullptr)
     return;
   if (!this->parent_->access_permitted())
     return;
-  this->pending_start_ = true;
+  // A healthy starting/running worker already satisfies the request. Allow a restart when its stop command
+  // or stopping/stopped report is visible, even before loop() has updated the public state.
+  const uint32_t event_group_bits = xEventGroupGetBits(this->event_group_);
+  if ((this->state_ == speaker::STATE_STARTING || this->state_ == speaker::STATE_RUNNING) &&
+      !(event_group_bits & (SpeakerEventGroupBits::COMMAND_STOP | SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY |
+                            SpeakerEventGroupBits::STATE_STOPPING | SpeakerEventGroupBits::STATE_STOPPED))) {
+    return;
+  }
+  xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::COMMAND_START);
+  App.wake_loop_threadsafe();
 }
 
 void I2SAudioSpeaker::stop() { this->stop_(false); }
@@ -490,23 +502,24 @@ void I2SAudioSpeaker::stop() { this->stop_(false); }
 void I2SAudioSpeaker::finish() { this->stop_(true); }
 
 void I2SAudioSpeaker::stop_(bool wait_on_empty) {
-  LockGuard lifecycle_lock(this->lifecycle_mutex_);
-  this->pending_start_ = false;
   if (!this->is_ready() || this->is_failed() || this->event_group_ == nullptr)
     return;
-  if (this->speaker_task_handle_ == nullptr)
-    return;
-
+  // Cancel starts queued before this clear, including a restart for an active worker. A concurrent start posted
+  // after the clear may request a restart; clear/set is not an atomic last-writer-wins transaction.
+  xEventGroupClearBits(this->event_group_, SpeakerEventGroupBits::COMMAND_START);
+  // Queue even while publicly stopped, so loop() can cancel a start that has not been dispatched yet.
   if (wait_on_empty) {
     xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::COMMAND_STOP_GRACEFULLY);
   } else {
     xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::COMMAND_STOP);
   }
+  App.wake_loop_threadsafe();
 }
 
 bool I2SAudioSpeaker::is_stopped() const {
-  LockGuard lifecycle_lock(this->lifecycle_mutex_);
-  return this->state_ == speaker::STATE_STOPPED && this->speaker_task_handle_ == nullptr && !this->pending_start_;
+  return this->state_ == speaker::STATE_STOPPED && this->speaker_task_handle_ == nullptr &&
+         (this->event_group_ == nullptr ||
+          !(xEventGroupGetBits(this->event_group_) & SpeakerEventGroupBits::COMMAND_START));
 }
 
 bool I2SAudioSpeaker::send_esp_err_to_event_group_(esp_err_t err) {
@@ -609,6 +622,7 @@ void I2SAudioSpeaker::delete_task_(size_t buffer_size) {
   }
 
   xEventGroupSetBits(this->event_group_, SpeakerEventGroupBits::STATE_STOPPED);
+  App.wake_loop_threadsafe();
 
   // Task will be deleted by loop() to avoid race condition
   while (true) {
