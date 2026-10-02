@@ -93,30 +93,45 @@ script:
             - script.execute: start_micro_wake_word
             - logger.log: "Restored audio after an XMOS firmware install attempt"
 
-wifi:
-  on_connect:
-    # This package uses about 2 KB more internal RAM than satellite1.yaml, so when playback
-    # resumes while BLE is still enabled after boot, the speaker task can fail to start. The
-    # speaker then refuses to start again until its error is cleared.
-    - wait_until:
-        not: ble.enabled
-    - delay: 1s
-    - if:
-        condition:
-          lambda: return id(i2s_audio_speaker).status_has_error();
-        then:
-          - lambda: id(i2s_audio_speaker).status_clear_error();
-          - logger.log: "Cleared the speaker error left by low memory during boot"
-    # Leaves the firmware update check in satellite1.yaml its own turn at the network.
-    - delay: 10s
-    - lambda: id(xmos_catalog).request_auto_refresh();
+# WiFi and Ethernet builds both use this package, and only WiFi builds have BLE (for Improv), so
+# these conditions are lambdas rather than ble.enabled, which won't compile without it.
+esphome:
+  on_boot:
+    - priority: -100
+      then:
+        # This package uses about 2 KB more internal RAM than satellite1.yaml, so when playback
+        # resumes while BLE is still enabled after boot, the speaker task can fail to start. The
+        # speaker then refuses to start again until its error is cleared.
+        - wait_until:
+            condition:
+              lambda: |-
+                #ifdef USE_ESP32_BLE
+                if (esp32_ble::global_ble != nullptr && esp32_ble::global_ble->is_active())
+                  return false;
+                #endif
+                return network::is_connected();
+        - delay: 1s
+        - if:
+            condition:
+              lambda: return id(i2s_audio_speaker).status_has_error();
+            then:
+              - lambda: id(i2s_audio_speaker).status_clear_error();
+              - logger.log: "Cleared the speaker error left by low memory during boot"
+        # Leaves the firmware update check in satellite1.yaml its own turn at the network.
+        - delay: 10s
+        - lambda: id(xmos_catalog).request_auto_refresh();
 
 interval:
   - interval: 1h
     then:
       - if:
           condition:
-            not: ble.enabled
+            lambda: |-
+              #ifdef USE_ESP32_BLE
+              if (esp32_ble::global_ble != nullptr && esp32_ble::global_ble->is_active())
+                return false;
+              #endif
+              return true;
           then:
             - lambda: id(xmos_catalog).request_auto_refresh();
 
