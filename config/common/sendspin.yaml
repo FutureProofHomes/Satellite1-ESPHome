@@ -5,6 +5,7 @@ sendspin:
 media_source:
   - platform: sendspin
     id: sendspin_media_source
+    codecs: [FLAC, PCM]
 
 media_player:
   - platform: sendspin
