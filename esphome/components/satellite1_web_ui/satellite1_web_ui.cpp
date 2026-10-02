@@ -42,7 +42,7 @@ void Satellite1WebUI::setup() {
   this->selection_.add_on_change_callback([this]() { this->selection_changed_.store(true); });
 
   // add_handler, not add_handler_without_auth: the app reaches every entity this device has,
-  // Factory Reset and XMOS Erase Chip included.
+  // Factory Reset and XMOS Full Erase and Reinstall included.
   web_server_base::global_web_server_base->add_handler(&this->handler_);
 
 #ifdef USE_SWITCH

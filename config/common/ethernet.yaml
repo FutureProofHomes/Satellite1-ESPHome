@@ -19,6 +19,9 @@ ethernet:
     - script.execute: control_leds
     - script.execute: set_network_connection_str
     - script.execute: refresh_audio_output
+    # update_http_request polls on update_interval: never (satellite1.yaml); the check only ever
+    # fires from a network on_connect, same as the WiFi path in common/wifi_improv.yaml.
+    - component.update: update_http_request
   on_disconnect:
     - script.execute: set_network_connection_str
 

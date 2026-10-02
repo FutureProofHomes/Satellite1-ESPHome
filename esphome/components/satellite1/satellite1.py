@@ -19,10 +19,6 @@ XMOSConnectedStateTrigger = namespace.class_(
     "XMOSConnectedStateTrigger", automation.Trigger
 )
 
-FlashConnectedStateTrigger = namespace.class_(
-    "FlashConnectedStateTrigger", automation.Trigger
-)
-
 XMOSNoResponseStateTrigger = namespace.class_(
     "XMOSNoResponseStateTrigger", automation.Trigger
 )
@@ -33,7 +29,6 @@ CONF_SATELLITE1 = "satellite1"
 CONF_XMOS_RST_PIN = "xmos_rst_pin"
 CONF_ON_XMOS_NO_RESPONSE = "on_xmos_no_response"
 CONF_ON_XMOS_CONNECTED = "on_xmos_connected"
-CONF_ON_FLASH_CONNECTED = "on_flash_connected"
 
 SAT1_CONFIG_SCHEMA = (
      cv.Schema({
@@ -42,9 +37,6 @@ SAT1_CONFIG_SCHEMA = (
 
         cv.Optional(CONF_ON_XMOS_CONNECTED): automation.validate_automation({
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(XMOSConnectedStateTrigger),
-        }),
-        cv.Optional(CONF_ON_FLASH_CONNECTED): automation.validate_automation({
-                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(FlashConnectedStateTrigger),
         }),
         cv.Optional(CONF_ON_XMOS_NO_RESPONSE): automation.validate_automation({
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(XMOSNoResponseStateTrigger),
@@ -63,10 +55,6 @@ async def register_satellite1(config) :
     cg.add(var.set_xmos_rst_pin(rst_pin))
     
     for conf in config.get(CONF_ON_XMOS_CONNECTED, []):
-         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var )
-         await automation.build_automation(trigger, [], conf)
-    
-    for conf in config.get(CONF_ON_FLASH_CONNECTED, []):
          trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var )
          await automation.build_automation(trigger, [], conf)
     

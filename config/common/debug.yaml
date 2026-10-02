@@ -55,6 +55,6 @@ button:
   # Flashes Sat1 HAT with specific XMOS firmware
   - id: !extend flash_satellite
     internal: false
-  # Wipes the Satellite1 HAT XMOS Chip
+  # Erases all XMOS flash and reinstalls the embedded firmware after reboot.
   - id: !extend erase_xmos_flash
     internal: false

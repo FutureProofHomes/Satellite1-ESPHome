@@ -22,6 +22,7 @@ audio_dac:
   - platform: tas2780
     id: speaker_dac
     address: 0x3F
+    activation_guard: !lambda return id(xmos_audio_ready);
   - platform: satellite1
     id: dac_proxy
     speaker_dac: speaker_dac
@@ -130,33 +131,16 @@ script:
     mode: single
     then:
       - tas2780.activate:
+      - wait_until:
+          lambda: return !id(speaker_dac).is_activation_pending();
       - lambda: id(tas2780_active) = id(speaker_dac).is_active();
 
   # Both DACs require the XMOS-provided I2S clocks before their outputs are selected.
   - id: activate_audio_output
     mode: restart
     then:
-      # Flashing holds the XMOS in reset for as long as it runs, so the outputs have to stay put
-      # until it is done, however long that takes.
-      - while:
-          condition:
-            memory_flasher.in_progress:
-          then:
-            - delay: 1s
-      # Wait for the XMOS, but not forever. It gives up after three attempts about four seconds in,
-      # and a device whose XMOS never answers is better off driving its outputs deaf than staying
-      # silent until the next reboot.
       - wait_until:
-          condition:
-            lambda: return id(xmos_audio_ready);
-          timeout: 20s
-      - if:
-          condition:
-            lambda: return !id(xmos_audio_ready);
-          then:
-            - logger.log:
-                level: WARN
-                format: "XMOS never reported ready; activating audio output without it"
+          lambda: return id(xmos_audio_ready);
       # A restored line-out selection is invalid when no jack is connected.
       - if:
           condition:

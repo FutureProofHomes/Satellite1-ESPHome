@@ -242,11 +242,11 @@ script:
               media_player.is_announcing:
                 id: external_media_player
           timeout: 10s
-      # Listening phase. micro_wake_word.start is for the device that has never seen Home
+      # Listening phase. start_micro_wake_word is for the device that has never seen Home
       # Assistant - on_client_connected is what normally starts the detector, and a never-connected
       # device would otherwise have nothing running to hear the answer. Idempotent when it already
-      # is.
-      - micro_wake_word.start:
+      # is, and gated on XMOS readiness like every other start (voice_assistant.yaml).
+      - script.execute: start_micro_wake_word
       - lambda: |-
           if (!id(hey_jarvis).is_enabled()) id(hey_jarvis).enable();
           if (!id(okay_nabu).is_enabled()) id(okay_nabu).enable();

@@ -245,11 +245,12 @@ export const HINTS = {
   xmos: "The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's.",
 
   xmos_flash:
-    "Rewrites the audio chip's firmware from the image embedded in this build. The device is deaf and mute until it finishes, which takes about a minute. Do not cut power.",
+    "Restarts the device, then rewrites the audio chip's firmware from the image embedded in this build. The device is deaf and mute until the flash finishes, which takes about a minute after the restart. Do not cut power.",
 
-  // xmos_erase was here. The row it explained is gone from the app: erasing leaves the audio chip blank,
-  // which takes the microphones, the speaker and the wake word with it, and the only way back is the
-  // Reflash row - which needs the chip it just erased to be talking. Reflash overwrites anyway.
+  // xmos_erase was here. The row it explained is gone from the app: the full erase is a recovery
+  // tool - it restarts the device, erases the audio chip's entire flash and reinstalls the embedded
+  // firmware - and the Reflash row already covers the case a customer has. The ESPHome button still
+  // exists for bench recovery, deliberately unmapped in config/common/web_ui.yaml.
 
   /* The LD2410/LD2450 Recovery card's title. The distinction that needs drawing is against the ESP32
      card two rows down: this factory reset erases settings stored on the radar module itself - the
@@ -1192,7 +1193,7 @@ export const CONFIRM = {
   },
   xmos_flash: {
     t: "Reflash the audio chip?",
-    b: "Rewrites the audio chip's firmware from a known-good copy. It takes about a minute, the microphones and speaker are silent throughout, and the device must stay powered.",
+    b: "Restarts the device, then rewrites the audio chip's firmware from a known-good copy. The flash takes about a minute after the restart, the microphones and speaker are silent throughout, and the device must stay powered.",
   },
   restart: {
     t: "Restart this device?",

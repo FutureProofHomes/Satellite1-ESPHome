@@ -26,6 +26,10 @@ wifi:
         id(network_setup_completed) = true;
     - script.execute: control_leds
     - script.execute: set_wifi_connection_str
+    - wait_until:
+        not: ble.enabled
+    - delay: 1s  # Allow BLE allocations to be released before starting TLS.
+    - component.update: update_http_request
 
   on_disconnect:
     - script.execute: control_leds

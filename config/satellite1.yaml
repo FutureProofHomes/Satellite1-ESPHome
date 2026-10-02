@@ -56,6 +56,7 @@ update:
     name: None
     id: update_http_request
     source: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/manifest.json
+    update_interval: never
 
 # The two entities the web app can only be told about from here. HTTP-request OTA and its beta
 # channel switch are local-build-only - the ESPHome Device Builder path includes satellite1.base.yaml

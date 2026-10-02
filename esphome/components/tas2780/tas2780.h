@@ -6,6 +6,8 @@
 #include "esphome/core/defines.h"
 #include "esphome/core/hal.h"
 
+#include <functional>
+
 namespace esphome {
 namespace tas2780 {
 
@@ -21,6 +23,9 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   void reset();
   void activate();
   void deactivate();
+  void set_activation_guard(std::function<bool()> activation_guard) {
+    this->activation_guard_ = std::move(activation_guard);
+  }
   bool is_active() const { return this->active_; }
   /// The power mode finish_activation_() selected from the measured supplies: 2 when PVDD carries a
   /// high-voltage USB-PD contract (full output), 0 when running from the 5 V VBAT1S rail (reduced
@@ -30,7 +35,7 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   uint8_t power_mode() const { return this->power_mode_; }
   /// True during the ~100 ms activation window while the SAR ADC settles and the mode above is
   /// still being chosen.
-  bool activation_pending() const { return this->activation_pending_; }
+  bool is_activation_pending() const { return this->activation_pending_; }
   /// How far open the digital volume control is, 0-100: the mapped fraction write_volume_() last
   /// programmed the DVC register from (volume through the configured range), 0 when muted. The
   /// number a person should read as "what the amp is actually being fed", which is why it is the
@@ -90,6 +95,7 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   float vol_range_min_{.3};
   float vol_range_max_{1.};
   ChannelSelect selected_channel_{MONO_DWN_MIX};
+  std::function<bool()> activation_guard_{};
 };
 
 }  // namespace tas2780

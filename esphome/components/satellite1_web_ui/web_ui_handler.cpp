@@ -2671,7 +2671,7 @@ void WebUIHandler::handle_amp_(AsyncWebServerRequest *request) {
   const int len = snprintf(body, sizeof(body), R"({"mode":%d,"active":%d,"pending":%d,"dvc":%d,"muted":%d})",
                            static_cast<int>(this->speaker_amp_->power_mode()),
                            this->speaker_amp_->is_active() ? 1 : 0,
-                           this->speaker_amp_->activation_pending() ? 1 : 0, this->speaker_amp_->dvc_percent(),
+                           this->speaker_amp_->is_activation_pending() ? 1 : 0, this->speaker_amp_->dvc_percent(),
                            this->speaker_amp_->is_muted() ? 1 : 0);
   if (len <= 0 || static_cast<size_t>(len) >= sizeof(body)) {
     request->send(500, "application/json", "{\"ok\":0}");
