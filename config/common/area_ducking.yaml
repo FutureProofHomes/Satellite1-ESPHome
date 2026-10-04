@@ -893,7 +893,16 @@ script:
 # concatenates lists when merging packages, so these arrive alongside the triggers already defined
 # there instead of replacing them.
 voice_assistant:
-  on_start:
+  # on_listening (stt-start), not on_start (run-start), because only stt-start says Home Assistant
+  # accepted this device. When several satellites hear one wake word, every one of them gets
+  # run-start; Home Assistant then checks for a duplicate wake-up (the same phrase accepted within
+  # the last 2s, assist_pipeline's accept_wake_word) and answers the losers with
+  # error duplicate_wake_up_detected and run-end. Ducking on run-start, the loser snapshotted and
+  # ducked the room, then its on_error release played its own snapshot back - and the room came up
+  # to full volume while the winner was still listening. stt-start is sent in the same event-loop
+  # tick as run-start, after that check and before any audio, so waiting for it costs nothing.
+  # A loser never sets either duck flag, so its release below is a no-op.
+  on_listening:
     - script.execute: area_duck_start
   # tts_targets_volume_apply is not triggered here: tts_route_response executes it just before the
   # play_media call, which is as late as the lift can happen - see the script's own comment.

@@ -307,7 +307,7 @@ sequenceDiagram
 
     Sat->>HA: wake word: remote_wake_chime_send
     HA->>Tgt: "play_media audio-file://... (bypass_proxy)"
-    Note over Sat,HA: on_start
+    Note over Sat,HA: "on_listening (stt-start)"
     Sat->>HA: "scene.create sat1_duck_<dev> + sat1_ducktts_<dev>"
     Sat->>HA: media_player.volume_set (duck level)
     HA->>Room: turn down
@@ -325,7 +325,19 @@ sequenceDiagram
     HA->>Tgt: restore
 ```
 
-The order in that diagram is load-bearing in two places.
+The order in that diagram is load-bearing in three places.
+
+**The room is ducked at `on_listening` (`stt-start`), not `on_start` (`run-start`).** When several
+Satellite1s hear one wake word, every one of them asks Home Assistant to start and every one gets
+`run-start`. Only then does Home Assistant check for a duplicate wake-up — the same phrase accepted
+within the last 2 s (`accept_wake_word` in `assist_pipeline`) — and it answers every request but the
+first with `error duplicate_wake_up_detected` and `run-end`. Only the accepted device gets
+`stt-start`. Ducking on `run-start` made the losers snapshot and duck the room as well, and their
+`on_error` release then played those snapshots back: the room came up to full volume while the
+winner was still listening. `stt-start` goes out in the same event-loop tick as `run-start`, so
+waiting for it costs no time. "First" means the first request to reach Home Assistant, not the
+first device to hear the word, and a device with **Wake sound** off asks up to 300 ms sooner than
+one playing its chime, so it usually wins.
 
 **The response is sent at `on_intent_progress`, not `on_tts_end`.** Home Assistant mints the
 `tts_proxy` token before the speech exists and sends it as `tts_start_streaming`; device logs put
@@ -649,6 +661,10 @@ instead used to cut the wake chime off mid-sound, since it shares the announceme
 - **A target already speaking a routed response has it cut short by a remote wake chime**, though
   saying the wake word again during a response is handled as "stop talking" before any chime is
   considered.
+- **When several Satellite1s hear one wake word, each sends its remote wake chime**, so a peer
+  can play two overlapping chimes. The chime goes out the moment the wake word is detected, before
+  Home Assistant has picked which device answers; only the accepted one ducks and listens. Waiting
+  for that verdict would delay every remote chime by roughly 0.3–0.5 s, which is the worse trade.
 - **Moving a target's Voice Override across `0` mid-interaction** can set a level that was never
   snapshotted, since `tts_volume_targets_jinja` is rendered once for the snapshot and once for the
   call.
@@ -677,7 +693,7 @@ instead used to cut the wake chime off mid-sound, since it shares the announceme
 - **Device-served sounds need speaker-to-satellite HTTP.** A VLAN that blocks it silences the
   remote ring and chime with no error anywhere; see the check above.
 - **The sign-in prompt is not ducked on the targets** — the ducking snapshot rides the pipeline's
-  `on_start`, which the announce path never fires. The prompt plays at each target's standing
+  `on_listening`, which the announce path never fires. The prompt plays at each target's standing
   volume, plus `extra.volume` on Sonos.
 
 ## Troubleshooting

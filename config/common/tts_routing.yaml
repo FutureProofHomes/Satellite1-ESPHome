@@ -1648,6 +1648,10 @@ voice_assistant:
                 not:
                   media_player.is_announcing: external_media_player
               timeout: 30s
-          - lambda: 'ESP_LOGI("tts_routing", "Error during remote routing, restoring local playback");'
+          # Losing a wake-word race to another satellite arrives here too, and is not a failure.
+          - lambda: |-
+              if (code != "duplicate_wake_up_detected") {
+                ESP_LOGI("tts_routing", "Error during remote routing, restoring local playback");
+              }
           - lambda: 'id(tts_routing_to_remote) = false;'
           - script.execute: audio_gain_reconcile
