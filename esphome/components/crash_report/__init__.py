@@ -14,7 +14,7 @@ raw dump from /api/sat1/crash* when this component is in the build.
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import logger, time
+from esphome.components import esp32, logger, time
 from esphome.const import CONF_ID, CONF_TIME_ID
 
 CODEOWNERS = ["@FutureProofHomes"]
@@ -54,6 +54,10 @@ async def to_code(config):
     # Compiles the logger's listener vector in (USE_LOG_LISTENERS), the same channel the wake word
     # tuner scores through - the flight recorder subscribes to every formatted log line.
     logger.request_log_listener()
+
+    # espcoredump is in ESPHome's default IDF exclusions, and crash_report.cpp needs its
+    # esp_core_dump.h.
+    esp32.include_builtin_idf_component("espcoredump")
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
