@@ -673,7 +673,13 @@ so they are still there long after a busy stretch has turned the main ring over.
 a logger listener, which ESPHome only ever calls on the main loop task, and both are allocated from
 generated code before `App.setup()`, so the history starts with the boot. Neither touches internal
 RAM, and neither survives a reboot: the crash report's RTC ring covers the seconds before a crash.
-The cost is about 288KB of PSRAM. It is on for every build; `log_history: false` on
+The cost is about 288KB of PSRAM (measured on an ethernet unit: 297KB less PSRAM free, internal
+heap and loop time unchanged, static RAM identical with it on and off). How far back the main ring
+reaches depends on the device. Measured at DEBUG, an idle unit writes under 1KB a minute, so the
+ring holds many hours. Voice requests and playback peaked at 19KB a minute, which is about a
+quarter of an hour of ring at that pace, and a mixed 20 minutes averaged under 4KB a minute, about
+an hour. The alert ring saw seven warnings in those 20 minutes, so it holds days of them. It is on
+for every build; `log_history: false` on
 `satellite1_web_ui` turns it off, and a block changes `size`, `alerts_size` or `level`:
 
 ```yaml
