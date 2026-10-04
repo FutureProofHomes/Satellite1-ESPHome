@@ -1,3 +1,7 @@
+logger:
+  logs:
+    ltr_als_ps: ERROR
+
 globals:
   # The last ambient light reading as the hardware gave it, before the offset filter. Not restored: it is
   # replaced by the first measurement after boot, and a value from the previous power-on describes a room
