@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CONFIRM, HINTS, TEXT } from '../../copy.js';
 import { apiUrl, post, request, requestJson } from '../../lib/device.js';
 import type { Ctx } from '../../ctx';
@@ -6,18 +6,29 @@ import { ALL_CHIPS, chipCounts, crashWhen, filterLog, LOG_CHIPS, logExport, logF
 import { Caret, DxCard, DxConfirm, DxRow, saveBlob } from './dx';
 
 type LogLine = {
+  id: number;
   lvl: string;
   text: string;
   at: number;
+  ms: number | null;
+};
+type LineRef = {
+  at: number;
+  ms?: number | null;
+  text: string;
 };
 export type LogIntent = {
   card: 'log';
   levels?: string[];
-  line?: {
-    at: number;
-    text: string;
-  };
+  line?: LineRef;
 } | null;
+
+/** Rows drawn at once. With the device's history in, the ring is a few thousand lines, and drawing
+ *  every one of them on each new line is a diff the size of the ring several times a second. */
+const SHOW_STEP = 1500;
+
+/** The device's uptime when both sides have it, since that survives a reload; arrival time when not. */
+const isLine = (l: LogLine, r: LineRef) => l.text === r.text && (r.ms != null && l.ms != null ? l.ms === r.ms : l.at === r.at);
 
 /* ESPHome's own console palette, so nobody learns a second scheme. Verbose alone stays grey: it is
    the chatter you filter out, and colouring it would leave nothing dim to compare against. */
@@ -46,11 +57,11 @@ const partsOf = (l: LogLine) => {
 };
 
 /**
- * The device's own log, live from /events. Registered as the log's reader while mounted, which
- * both lets new lines re-render it and silences the warning toasts for the person already reading;
- * the ring fills either way, which is what shows the recent past on arrival. A toast's intent seeds
- * the lit chips, so a warning's tap lands on the warnings rather than the debug firehose that buried
- * them, and names a line to scroll to and flash.
+ * The device's own log: its history from GET /api/sat1/log, read on opening, then live from
+ * /events. Registered as the log's reader while mounted, which both lets new lines re-render it and
+ * silences the warning toasts for the person already reading; the ring fills from the stream either
+ * way. A toast's intent seeds the lit chips, so a warning's tap lands on the warnings rather than
+ * the debug firehose that buried them, and names a line to scroll to and flash.
  */
 export function LogsCard({
   ctx,
@@ -64,10 +75,15 @@ export function LogsCard({
     logSeq,
     pausedRef,
     logWatch,
-    clearLog
+    clearLog,
+    loadLog
   } = ctx;
   const [paused, setPaused] = useState(false);
-  useEffect(() => logWatch(), []);
+  useEffect(() => {
+    const release = logWatch();
+    loadLog();
+    return release;
+  }, []);
   const [chips, setChips] = useState<string[]>(intent?.levels || ALL_CHIPS);
   const [hl, setHl] = useState(intent?.line || null);
   // An intent arriving while the card already stands: a write-failed toast, or a notification
@@ -82,6 +98,21 @@ export function LogsCard({
   const lines: LogLine[] = filterLog(log, chips, filter);
   const counts = chipCounts(log, filter);
   const toggleChip = (c: string) => setChips(on => on.includes(c) ? on.filter(x => x !== c) : [...on, c]);
+  const [limit, setLimit] = useState(SHOW_STEP);
+  const shown = lines.length > limit ? lines.slice(lines.length - limit) : lines;
+  const hidden = lines.length - shown.length;
+  // Earlier rows land above the ones being read, so the scroll moves down by exactly what they
+  // added and the view stays put.
+  const heightBefore = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (heightBefore.current === null || !box.current) return;
+    box.current.scrollTop += box.current.scrollHeight - heightBefore.current;
+    heightBefore.current = null;
+  }, [limit]);
+  const showEarlier = () => {
+    heightBefore.current = box.current?.scrollHeight ?? null;
+    setLimit(n => n + SHOW_STEP);
+  };
 
   // Follows the newest line only while the view is already at the bottom: reading anything on a
   // chatty device is impossible if every line yanks the view away.
@@ -94,8 +125,8 @@ export function LogsCard({
 
   // The panel scrolls itself rather than scrollIntoView, which would fight the page's own scroll to
   // the card, and atBottom is parked so the live stream cannot yank the view away mid-flash. A line
-  // that has left the 1000-line ring (or never entered it, arriving while paused) falls back to the
-  // freshest view, unflashed rather than lighting a stranger.
+  // that has left the ring (or never entered it, arriving while paused) falls back to the freshest
+  // view, unflashed rather than lighting a stranger.
   useEffect(() => {
     if (!hl) return undefined;
     const el = box.current?.querySelector<HTMLElement>('.dx-log-line.hl');
@@ -112,8 +143,9 @@ export function LogsCard({
     const next = !paused;
     setPaused(next);
     // Paused stops the ring taking lines, not just the scrolling: a noisy boot would otherwise push
-    // the line being read out of the 1000-line ring.
+    // the line being read out of the ring. Resuming reads the pause's lines back from the device.
     pausedRef.current = next;
+    if (!next) loadLog();
   };
   return <DxCard title="Device Logs" collapsible defaultOpen={true} forceOpen={!!intent} hint={HINTS.log} id="card-log">
       <div className="dx-log-bar">
@@ -134,9 +166,12 @@ export function LogsCard({
       atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
     }}>
         {lines.length === 0 && <p className="dx-muted dx-sm">{log.length === 0 ? 'Waiting for the device to say something.' : chips.length === 0 ? 'Every level is off. Turn one on to see its lines.' : 'No lines match. Every line is filtered out.'}</p>}
-        {lines.map((l, i) => {
+        {hidden > 0 && <button className="dx-btn sm dx-log-more" onClick={showEarlier}>
+            {`Show ${Math.min(hidden, SHOW_STEP)} earlier lines`}
+          </button>}
+        {shown.map(l => {
         const p = partsOf(l);
-        return <div key={i} className={`dx-log-line ${LVL_CLASS[l.lvl] || ''}${hl && l.at === hl.at && l.text === hl.text ? ' hl' : ''}`}>
+        return <div key={l.id} className={`dx-log-line ${LVL_CLASS[l.lvl] || ''}${hl && isLine(l, hl) ? ' hl' : ''}`}>
               <span className="dx-log-ts">{stamp(l.at)}</span>
               <span className="dx-log-lvl">{l.lvl === '?' ? '' : l.lvl}</span>
               <span className="dx-log-tag">{p.tag}</span>
@@ -148,7 +183,7 @@ export function LogsCard({
         <span className="dx-muted dx-xs" style={{
         padding: 0,
         flex: 1
-      }}>{lines.length === log.length ? `${log.length} lines` : `${lines.length} of ${log.length} lines`}</span>
+      }}>{lines.length === log.length ? `${log.length} lines` : `${lines.length} of ${log.length} lines`}{log.length > 0 ? ` since ${stamp(log[0].at).slice(0, 8)}` : ''}</span>
         <button className={`dx-btn sm${!paused ? ' active' : ''}`} aria-pressed={!paused} onClick={togglePause}>{paused ? 'Resume' : 'Following'}</button>
         <button className="dx-btn sm" disabled={log.length === 0} onClick={() => {
         setHl(null);

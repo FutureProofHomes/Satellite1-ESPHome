@@ -24,6 +24,8 @@ export type Ctx = {
   clearLog: () => void;
   /** Call while something displays the log; returns the release. */
   logWatch: () => () => void;
+  /** Reads the device's log history (GET /api/sat1/log) into `log`: what was said before anyone looked. */
+  loadLog: () => Promise<void>;
   /** GET /api/sat1/ha: the Home Assistant payload (`ha.d` the data, `ha.rung`, `ha.actions`). */
   ha: any;
   haRefresh: () => Promise<void>;

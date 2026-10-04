@@ -185,7 +185,7 @@ function useToastSources({
     go: '#/settings/logs',
     intent: { card: 'log' }
   })), []);
-  useEffect(() => onLogAlert(({ lvl, tag, text, at }: { lvl: string; tag: string; text: string; at: number }) => {
+  useEffect(() => onLogAlert(({ lvl, tag, text, at, ms }: { lvl: string; tag: string; text: string; at: number; ms: number | null }) => {
     const err = lvl !== 'W';
     toast({
       kind: err ? 'err' : 'warn',
@@ -198,8 +198,9 @@ function useToastSources({
       go: '#/settings/logs',
       // The line rides by the same {at, text} identity the log ring holds (src/lib/device.js stamps
       // both from one clock), so the reveal lands on the exact line - and a coalescing burst adopts
-      // the newest line as it counts up.
-      intent: { card: 'log', levels: [err ? 'E' : 'W'], line: { at, text } }
+      // the newest line as it counts up. `ms` is the device's uptime for it, which still finds the
+      // line after a reload, when the ring holds it as the history's copy with an `at` of its own.
+      intent: { card: 'log', levels: [err ? 'E' : 'W'], line: { at, ms, text } }
     });
   }), []);
   // The nudge, on the rising edge only: once on entering a blocked app (arriving through the gate's

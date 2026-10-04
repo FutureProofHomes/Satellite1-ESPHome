@@ -9,6 +9,7 @@
  * the device serves.
  */
 import { useEffect, useReducer, useRef, useState } from "preact/hooks";
+import { LOG_LEVEL, mergeLogHistory, msSince, parseLogHistory } from "./loghistory.js";
 
 /* ------------------------------------------------------------------ */
 /* The remote-control target                                           */
@@ -105,8 +106,9 @@ function reportWriteError(path, why) {
 /**
  * Warning and error log lines, announced as they arrive on the stream - the toast wiring in the
  * shell is the listener, and the same no-cycle reasoning as onWriteError puts the registry here.
- * The stream is live-only, so these fire within milliseconds of the device emitting the line and
- * never for history: a warning from before the page loaded is in the ring, not on this channel.
+ * Stream lines only, so these fire within milliseconds of the device emitting the line and never
+ * for history: a warning from before the page loaded comes in with the device's log history, into
+ * the ring and not onto this channel.
  */
 const logAlertListeners = new Set();
 export function onLogAlert(fn) {
@@ -1153,9 +1155,13 @@ export function useAssist(ha, haRefresh, enabled) {
 
 /** The logger writes ANSI colour runs into every message before the "[D][tag:line]" header. */
 const ANSI = /\u001b\[[0-9;]*m/g;
-const LEVEL = /^\[(VV|V|D|I|W|E|C)\]/;
 
-export const LOG_RING = 1000;
+/** Room for the device's whole history - its 256KB ring is a few thousand lines - plus the
+ *  warnings its alert ring kept from before, which are the oldest lines and the first to go. */
+export const LOG_RING = 5000;
+
+/** Ring entries' render keys. Unique for the page's life; order comes from the ring, not these. */
+let nextLogId = 1;
 
 /**
  * Merge, never replace.
@@ -1207,6 +1213,59 @@ export function useEvents() {
   // around the clock: on a debug-level device that is tens of vdom diffs a second bought by a tab
   // sitting on the home page, which is exactly the tab a wall-mounted tablet is.
   const logWatchRef = useRef(0);
+  // Where the device's history stood at the last read, so the next one asks only for what is newer,
+  // and the uptime Clear happened at, so a read after it does not bring the cleared lines back.
+  const histRef = useRef({ boot: null, end: null, gen: 0, floorMs: null, floorGen: -1 });
+  // Device boots this page has seen, counted from 0. Every ring entry carries the one it came from:
+  // uptime restarts at a reboot, so lines are in uptime order within a boot and boot order across.
+  const genRef = useRef(0);
+  // The newest uptime heard, for telling a reboot from the next line.
+  const lastMsRef = useRef(null);
+  const loadingRef = useRef(null);
+
+  // Reads the device's own log history into the ring - all of it the first time, then only what is
+  // newer - so the card shows what happened before anyone opened it. Single-flight, because the
+  // card mounting and the stream reopening can both ask at once. Quiet on failure: a build without
+  // log_history answers 404, and the card is then the stream alone, as it always was. A read that
+  // lands while paused is dropped unread, and Resume reads again from the same place.
+  const loadLog = () => {
+    if (loadingRef.current) return loadingRef.current;
+    const h = histRef.current;
+    const path = h.boot ? `/api/sat1/log?boot=${h.boot}&from=${h.end}` : "/api/sat1/log";
+    loadingRef.current = request(path)
+      .then((r) => {
+        const hist = r.ok ? parseLogHistory(r.text) : null;
+        if (!hist || pausedRef.current) return;
+        const rebooted = h.boot != null && hist.boot !== h.boot;
+        // A reboot no stream line has shown yet - it happened while nothing was streaming - still
+        // starts a new generation, after every line already held.
+        if (rebooted && genRef.current === h.gen) genRef.current += 1;
+        const gen = genRef.current;
+        const ring = logRef.current;
+        const first = ring.findIndex((l) => l.gen === gen);
+        const earlier = first < 0 ? ring.slice() : ring.slice(0, first);
+        const current = first < 0 ? [] : ring.slice(first);
+        const merged = earlier.concat(
+          mergeLogHistory(current, hist, {
+            receivedAt: Date.now(),
+            gen,
+            floorMs: h.floorGen === gen ? h.floorMs : null,
+            nextId: () => nextLogId++,
+          }),
+        );
+        // In place, like clearLog: consumers hold the array itself.
+        ring.length = 0;
+        for (let i = Math.max(0, merged.length - LOG_RING); i < merged.length; i++) ring.push(merged[i]);
+        Object.assign(h, { boot: hist.boot, end: hist.end, gen });
+        if (rebooted || lastMsRef.current == null) lastMsRef.current = hist.now;
+        setLogSeq((n) => n + 1);
+      })
+      .catch(() => {})
+      .finally(() => {
+        loadingRef.current = null;
+      });
+    return loadingRef.current;
+  };
 
   useEffect(() => {
     let es = null;
@@ -1241,8 +1300,8 @@ export function useEvents() {
 
     const onLog = (e) => {
       lastSeen = Date.now();
-      const text = e.data.replace(ANSI, "");
-      const m = LEVEL.exec(text);
+      const text = e.data.replace(ANSI, "").replace(/\n+$/, "");
+      const m = LOG_LEVEL.exec(text);
       const lvl = m ? m[1] : lastLvl;
       lastLvl = lvl;
       // `at` is the browser's clock at arrival, because the line itself carries no wall time - the
@@ -1251,6 +1310,15 @@ export function useEvents() {
       // being produced or not at all. Stamped once, here, so the alert payload below and the ring
       // entry carry the same clock - it is the identity a toast's reveal uses to find its line.
       const at = Date.now();
+      // The device's uptime when it said this: web_server sends millis() as each log event's id.
+      // It is what lines these up with the history, and a step back is a reboot - from here on the
+      // lines are a new boot's, kept after the old one's rather than sorted in among them.
+      const id = Number(e.lastEventId);
+      const ms = e.lastEventId !== "" && Number.isFinite(id) ? id : null;
+      if (ms != null) {
+        if (lastMsRef.current != null && msSince(ms, lastMsRef.current) < -1000) genRef.current += 1;
+        lastMsRef.current = ms;
+      }
       // The alert channel, deliberately ahead of the pause check below: pausing the Logs card to
       // read something must hold the ring, not silence error toasts app-wide. And deliberately
       // quiet while anyone is reading the log (the same watch count that gates the render): a
@@ -1259,10 +1327,10 @@ export function useEvents() {
       // replayed whenever a log client subscribes.
       if (m && (lvl === "E" || lvl === "W") && logWatchRef.current === 0) {
         const tag = LOG_TAG.exec(text)?.[1] || "";
-        for (const fn of logAlertListeners) fn({ lvl, tag, text, at });
+        for (const fn of logAlertListeners) fn({ lvl, tag, text, at, ms });
       }
       if (pausedRef.current) return;
-      logRef.current.push({ lvl, text, at });
+      logRef.current.push({ id: nextLogId++, lvl, text, at, ms, gen: genRef.current });
       if (logRef.current.length > LOG_RING) logRef.current.splice(0, logRef.current.length - LOG_RING);
       // The ring is a ref and the counter is the state, so a burst of log lines costs one render
       // rather than one render per line (a noisy boot is several hundred lines in a second) - and
@@ -1278,7 +1346,12 @@ export function useEvents() {
       // reason the key rides query strings at all (it can set no headers), so this line is the one
       // the whole cross-origin auth design is shaped around.
       es = new EventSource(apiUrl("/events"));
-      es.onopen = markUp;
+      es.onopen = () => {
+        markUp();
+        // A reopened stream missed whatever was said while it was down; a card showing the log
+        // reads that back from the device.
+        if (logWatchRef.current > 0 && !pausedRef.current) loadLog();
+      };
       es.onerror = markDown;
       es.addEventListener("state", (e) => {
         lastSeen = Date.now();
@@ -1315,6 +1388,8 @@ export function useEvents() {
   // reference; the sequence bump is what makes anyone re-render.
   const clearLog = () => {
     logRef.current.length = 0;
+    histRef.current.floorMs = lastMsRef.current;
+    histRef.current.floorGen = genRef.current;
     setLogSeq((n) => n + 1);
   };
 
@@ -1327,7 +1402,7 @@ export function useEvents() {
     };
   };
 
-  return { states, connected, log: logRef.current, logSeq, pausedRef, clearLog, logWatch };
+  return { states, connected, log: logRef.current, logSeq, pausedRef, clearLog, logWatch, loadLog };
 }
 
 /* ------------------------------------------------------------------ */
