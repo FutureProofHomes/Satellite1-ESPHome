@@ -1095,6 +1095,7 @@ section.now.now-compact .timer {
 .dx-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 0; padding: 0; }
 .dx-fact:nth-child(2n) { border-right: none; }
 .dx-fact:nth-last-child(-n+2) { border-bottom: none; }
+.dx-fact:only-child { grid-column: 1 / -1; border-right: none; }
 @media (max-width: 480px) {
   .dx-facts { grid-template-columns: 1fr; }
   .dx-fact:nth-last-child(-n+2) { border-bottom: 1px solid var(--line); }

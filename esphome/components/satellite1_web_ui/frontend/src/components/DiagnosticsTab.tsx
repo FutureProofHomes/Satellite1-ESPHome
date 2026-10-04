@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CONFIRM, HINTS, TEXT } from '../copy.js';
 import { entity, entityPath, pathFor, post, request, requestJson } from '../lib/device.js';
+import { releaseNotes } from '../lib/notes.js';
 import { takeIntent, toast } from '../lib/toast.js';
 import type { Ctx } from '../ctx';
-import { ampMode, gainDbv, ingressYaml, kb, mb, uptime, usbFact, xmosChoices, xmosLabel, xmosProgress, xmosStatus } from '../lib/settings.js';
+import { ampMode, builtWith, gainDbv, ingressYaml, kb, mb, releaseApi, releaseEsphome, uptime, usbFact, xmosChoices, xmosFact, xmosLabel, xmosProgress, xmosStatus } from '../lib/settings.js';
 import { MSlider } from './MSlider';
 import { DxCard, DxConfirm, DxConfirmDialog, DxFact, DxFacts, DxRow, DxSelect, useCopied } from './settings/dx';
 import { Switch } from './controls';
@@ -11,6 +12,7 @@ import { CrashCard, LogsCard } from './settings/Logs';
 import { AuthTokenCard, ChangePasswordCard } from './settings/Security';
 
 const RELEASES_URL = 'https://github.com/FutureProofHomes/Satellite1-ESPHome/releases';
+const XMOS_RELEASES_URL = 'https://github.com/FutureProofHomes/Satellite1-XMOS/releases';
 const HASS_INGRESS_URL = 'https://github.com/lovelylain/hass_ingress';
 const isOn = (e: any) => !!e && (e.value === true || e.state === 'ON');
 
@@ -35,11 +37,9 @@ function Pending({
  * colouring it would only train people to ignore the colour.
  */
 function DeviceCard({
-  ctx,
-  onUpdates
+  ctx
 }: {
   ctx: Ctx;
-  onUpdates: () => void;
 }) {
   const d = ctx.device;
   if (!d) return <Pending ctx={ctx} title="Device" />;
@@ -49,6 +49,14 @@ function DeviceCard({
   // ESP32 Temp and USB-C Power Supply are the entity-backed facts, so a build without the sensor
   // omits the row rather than showing a dash for a reading that will never come. Temperature
   // follows temp_unit_f so the app never shows mixed units; its tone stays on the published °C.
+  // XMOS Firmware is judged by the key table instead: every build reports it, and gating on the
+  // value would slide the facts below it down the grid a beat after the card draws.
+  const xmos = d.e?.xmos_firmware ? xmosFact(entity(ctx, 'xmos_firmware')?.value) : null;
+  // The radar fact is gated as the Recovery page's radar card is: radar_module names a model only
+  // once satellite1_radar's detection succeeds ("UNKNOWN" while it runs, "None" with nothing fitted).
+  // It comes last because that verdict rides /events, so arriving can push nothing down.
+  const mod = entity(ctx, 'radar_module')?.value;
+  const radar = mod === 'LD2410' || mod === 'LD2450' ? mod : null;
   const temp = entity(ctx, 'esp_temp');
   const tempC = Number(temp?.value);
   const isF = isOn(entity(ctx, 'temp_unit_f'));
@@ -56,7 +64,8 @@ function DeviceCard({
   const heapPct = d.heap.total ? d.heap.free / d.heap.total * 100 : 100;
   return <DxCard title="Device" collapsible defaultOpen={true}>
       <DxFacts>
-        <DxFact label="Sat1 Firmware" value={<a href={RELEASES_URL} target="_blank" rel="noopener noreferrer" className="dx-link">{d.fw || '—'}</a>} sub={available ? <button type="button" className="dx-inline" onClick={onUpdates}>Update available: {upd.value}</button> : installing ? 'Installing…' : upd ? 'Up to date' : undefined} />
+        <DxFact label="Sat1 Firmware" value={<a href={RELEASES_URL} target="_blank" rel="noopener noreferrer" className="dx-link">{d.fw || '—'}</a>} unit={builtWith(d.esphome)} sub={installing ? 'Installing…' : upd && !available ? 'Up to date' : undefined} />
+        {xmos && <DxFact label="XMOS Firmware" value={xmos.version ? <a href={XMOS_RELEASES_URL} target="_blank" rel="noopener noreferrer" className="dx-link">{xmos.value}</a> : xmos.value} hint={HINTS.xmos} tone={xmos.tone} />}
         <DxFact label="Internal RAM free" value={kb(d.heap.free)} unit={` of ${kb(d.heap.total)}`} hint={HINTS.heap} tone={heapPct < 10 ? 'err' : heapPct < 20 ? 'warn' : undefined} />
         {d.psram?.installed !== false && <DxFact label="PSRAM free" value={mb(d.psram.free)} unit={` of ${mb(d.psram.total)}`} hint={HINTS.psram} />}
         <DxFact label="Longest loop" value={d.loop_ms} unit=" ms" hint={HINTS.loop} tone={d.loop_ms > 500 ? 'err' : d.loop_ms > 150 ? 'warn' : undefined} />
@@ -65,6 +74,7 @@ function DeviceCard({
         <DxFact label="Last restart" value={d.reset || '—'} hint={HINTS.reset} />
         {usb && <DxFact label="USB-C Power Supply" value={usb.value} sub={usb.sub} hint={HINTS.usb_power} />}
         <DxFact label="Network Type" value={d.net === 'ethernet' ? 'Ethernet' : d.rssi != null ? `Wi-Fi ${d.rssi} dBm` : 'Wi-Fi'} sub={<span><span className="dx-mono">{d.ip}</span><span className="dx-mono">{d.mac}</span></span>} />
+        {radar && <DxFact label={`Radar ${radar}`} value={ctx.states['text_sensor/Radar Firmware']?.value || '—'} hint={HINTS.radar_module} />}
       </DxFacts>
     </DxCard>;
 }
@@ -98,13 +108,60 @@ function ButtonsCard({
     </DxCard>;
 }
 
+type Release = {
+  esphome: string | null;
+  html: string;
+};
+
+/* One read per release per page load; a failed read is dropped so the next visit retries. */
+const releaseReads = new Map<string, Promise<Release>>();
+
+/**
+ * The offered firmware's GitHub release: the ESPHome version it was built with and its notes as
+ * GitHub renders them. The update manifest carries neither, and the device relays only its
+ * version, title, summary and release link, so the browser reads the release that link names. The
+ * full media type is what returns body_html beside the markdown. Undefined while the read is in
+ * flight, null once it has failed: offline or rate limited (60 reads an hour per address without a
+ * token), the card falls back to a plain link.
+ */
+function useRelease(url?: string) {
+  const [rel, setRel] = useState<Release | null | undefined>(undefined);
+  useEffect(() => {
+    const api = releaseApi(url);
+    setRel(api ? undefined : null);
+    if (!api) return undefined;
+    let read = releaseReads.get(api);
+    if (!read) {
+      read = fetch(api, {
+        headers: {
+          Accept: 'application/vnd.github.full+json'
+        },
+        signal: AbortSignal.timeout(10000)
+      }).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))).then((j: any) => ({
+        esphome: releaseEsphome(j?.body),
+        html: typeof j?.body_html === 'string' ? j.body_html : ''
+      }));
+      read.catch(() => releaseReads.delete(api));
+      releaseReads.set(api, read);
+    }
+    let live = true;
+    read.then(x => live && setRel(x), () => live && setRel(null));
+    return () => {
+      live = false;
+    };
+  }, [url]);
+  return rel;
+}
+
 /**
  * The firmware update entity and the beta channel switch, both optional (satellite1.yaml adds
  * them). Install is a POST to the update entity; the device restarts itself when it finishes.
  * ESPHome's update entity reports UNKNOWN, NO UPDATE, UPDATE AVAILABLE or INSTALLING, and
  * INSTALLING keeps the update row standing: treated as nothing to offer, it would vanish the
  * instant Install is pressed, which reads as a failed press at the one moment the device is too
- * busy to answer for a while.
+ * busy to answer for a while. The card describes only the offered firmware, never the running one,
+ * which is Device Info's to show, and carries that release's notes so they can be read before
+ * pressing Update (owner calls, October 2026).
  */
 function FirmwareCard({
   ctx,
@@ -117,9 +174,12 @@ function FirmwareCard({
   const beta = entity(ctx, 'beta_firmware');
   const available = upd?.state === 'UPDATE AVAILABLE';
   const installing = upd?.state === 'INSTALLING';
-  const fw = ctx.device?.fw || upd?.current_version || '—';
+  const offered = available || installing;
+  const rel = useRelease(offered ? upd.release_url : undefined);
+  const notes = useMemo(() => releaseNotes(rel?.html), [rel]);
+  const linkOnly = offered && rel !== undefined && !notes && upd.release_url;
   return <DxCard title="Updates" collapsible defaultOpen={true} forceOpen={reveal} id="card-firmware">
-      <div className={`dx-row${available || installing ? ' dx-upd-row' : ''}`} style={{
+      {upd ? <div className={`dx-row${offered ? ' dx-upd-row' : ''}`} style={{
       alignItems: 'center'
     }}>
         <div style={{
@@ -129,15 +189,18 @@ function FirmwareCard({
         flexDirection: 'column'
       }}>
           <div className="dx-fact-label"><span>Sat1 Firmware</span></div>
-          <span className="dx-fact-v"><a href={RELEASES_URL} target="_blank" rel="noopener noreferrer" className="dx-link">{fw}</a></span>
-          {upd && <div className="dx-fact-sub">
-              {installing ? <span>Installing {upd.value}…</span> : available ? <span>{upd.value} available</span> : <span>Up to date</span>}
-              {(available || installing) && upd.release_url && <a className="dx-link" href={upd.release_url} target="_blank" rel="noopener noreferrer">Release notes</a>}
+          {offered ? <span><span className="dx-fact-v">{upd.value}</span><span className="dx-fact-unit">{builtWith(rel?.esphome)}</span></span> : <span className="dx-fact-v">Up to date</span>}
+          {(installing || linkOnly) && <div className="dx-fact-sub">
+              {installing && <span>Installing…</span>}
+              {linkOnly && <a className="dx-link" href={upd.release_url} target="_blank" rel="noopener noreferrer">Release notes</a>}
             </div>}
         </div>
-        {(available || installing) && <DxConfirm solid label={installing ? 'Do not cut power' : 'Update'} disabled={installing} title={CONFIRM.update.t} body={CONFIRM.update.b} confirmLabel={`Install ${upd.value}`} onConfirm={() => post(pathFor(ctx, 'firmware', 'install'))} />}
-      </div>
-      {!upd && <p className="dx-muted dx-sm">This firmware build does not check for updates.</p>}
+        {offered && <DxConfirm solid label={installing ? 'Do not cut power' : 'Update'} disabled={installing} title={CONFIRM.update.t} body={CONFIRM.update.b} confirmLabel={`Install ${upd.value}`} onConfirm={() => post(pathFor(ctx, 'firmware', 'install'))} />}
+      </div> : <p className="dx-muted dx-sm">This firmware build does not check for updates.</p>}
+      {offered && notes && <div className="dx-notes">
+          {notes}
+          <a className="dx-notes-src" href={upd.release_url} target="_blank" rel="noopener noreferrer">View on GitHub</a>
+        </div>}
       {beta && <DxRow label="Beta updates" hint={HINTS.beta}>
           <Switch on={isOn(beta)} label="Beta updates" onChange={v => post(pathFor(ctx, 'beta_firmware', v ? 'turn_on' : 'turn_off'))} />
         </DxRow>}
@@ -413,7 +476,6 @@ function RecoveryCards({
       <DxCard title="ESP32 System Control" collapsible defaultOpen={true} hint={HINTS.maintenance}>
         <DxFacts>
           <DxFact label="ESPHome Version" value={d.esphome || '—'} />
-          <DxFact label="Built" value={d.built || '—'} />
         </DxFacts>
         {restart && <DxRow label="Restart">
             <DxConfirm label="Restart" title={CONFIRM.restart.t} body={CONFIRM.restart.b} confirmLabel="Restart" onConfirm={() => post(restart)} />
@@ -440,8 +502,7 @@ function RecoveryCards({
         </DxCard>}
       {radar && <DxCard title={`${radar} Radar Control`} collapsible defaultOpen={true} hint={HINTS.radar_recovery}>
           <DxFacts>
-            <DxFact label="Radar Module" value={radar} />
-            <DxFact label="Radar Firmware" value={radarFw?.value || '—'} />
+            <DxFact label={`Radar ${radar}`} value={radarFw?.value || '—'} />
           </DxFacts>
           <DxRow label="Restart radar">
             <DxConfirm label="Restart" ariaLabel="Restart radar" title={CONFIRM.radar_restart.t} body={CONFIRM.radar_restart.b} confirmLabel="Restart radar" onConfirm={() => post(entityPath('button/Radar Restart', 'press'))} />
@@ -620,12 +681,10 @@ function useReveal(intent: any, page: string, root: React.RefObject<HTMLElement>
 }
 export function DiagnosticsTab({
   ctx,
-  subRoute = 'device-info',
-  onSubRouteChange
+  subRoute = 'device-info'
 }: {
   ctx: Ctx;
   subRoute?: string;
-  onSubRouteChange?: (v: string) => void;
 }) {
   const [visible, setVisible] = useState(true);
   const [displayedRoute, setDisplayedRoute] = useState(subRoute);
@@ -672,7 +731,7 @@ export function DiagnosticsTab({
     }}>
       <span className="eyebrow">SETTINGS · {active.label.toUpperCase()}</span>
       <h1><span>{headline.prefix}</span><em>{headline.em}</em></h1>
-      {active.slug === 'device-info' && <DeviceCard ctx={ctx} onUpdates={() => onSubRouteChange?.('updates')} />}
+      {active.slug === 'device-info' && <DeviceCard ctx={ctx} />}
       {active.slug === 'device-info' && <ButtonsCard ctx={ctx} />}
       {active.slug === 'updates' && <FirmwareCard ctx={ctx} reveal={intent?.card === 'firmware'} />}
       {active.slug === 'security' && <AuthTokenCard ctx={ctx} />}

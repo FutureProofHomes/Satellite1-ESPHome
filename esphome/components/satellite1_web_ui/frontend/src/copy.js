@@ -259,6 +259,11 @@ export const HINTS = {
   // firmware - and the Reflash row already covers the case a customer has. The ESPHome button still
   // exists for bench recovery, deliberately unmapped in config/common/web_ui.yaml.
 
+  /* Device Info's Radar LD2410/LD2450 fact, there only once a module has been detected. Points to
+     where the radar is actually used, since the fact itself is just a model and firmware number. */
+  radar_module:
+    "The mmWave presence sensor fitted to this Satellite1, found automatically at startup. It runs its own firmware from the module's maker. Its live view and settings are on the Presence page.",
+
   /* The LD2410/LD2450 Recovery card's title. The distinction that needs drawing is against the ESP32
      card two rows down: this factory reset erases settings stored on the radar module itself - the
      tuning the Presence page edits - not the device's. */

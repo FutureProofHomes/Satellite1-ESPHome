@@ -476,7 +476,7 @@ export function Satellite1Now({
     <nav className="side-nav" aria-label="Sections">{TABS.map(item => {
       const I = TAB_ICON[item];
       return <button key={item} className={tab === item ? 'selected' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => go(item, item === 'SETTINGS' ? lastSub.current : undefined)}><I size={18} strokeWidth={1.9} aria-hidden="true" /><span>{TAB_LABEL[item]}</span></button>;
-    })}{tab === 'SETTINGS' && <div className="side-sub" role="list">{SETTINGS_ROUTES.map(r => <button key={r.slug} role="listitem" className={'side-sub-item' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{r.label}</button>)}</div>}<div className="side-nav-foot"><span className="side-nav-name">{label || 'Satellite1'}</span><span className="side-nav-meta">{[device?.ip, device?.fw && `Firmware ${device.fw}`].filter(Boolean).join(' · ')}</span><button type="button" className="signout" onClick={signOut}><LogOut size={14} aria-hidden="true" /><span>{TEXT.logout}</span></button></div></nav>
+    })}{tab === 'SETTINGS' && <div className="side-sub" role="list">{SETTINGS_ROUTES.map(r => <button key={r.slug} role="listitem" className={'side-sub-item' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{r.label}</button>)}</div>}<div className="side-nav-foot"><button type="button" className="signout" onClick={signOut}><LogOut size={14} aria-hidden="true" /><span>{TEXT.logout}</span></button></div></nav>
     <nav className="tabs" data-tab={tab} aria-label="Sections"><div className="tabs-track" style={{
         transform: navLayer === 0 ? 'translateX(0%)' : 'translateX(-50%)'
       }}><div className="tabs-layer tabs-main">{TABS.map(item => {
@@ -779,5 +779,5 @@ function ControlPanel({
   if (tab === 'WAKE') return <WakeTab ctx={ctx} />;
   if (tab === 'PRESENCE') return <PresenceTab ctx={ctx} onGoDevice={() => ctx.go('SETTINGS', 'device-info')} />;
   if (tab === 'AUDIO') return <AudioTab ctx={ctx} />;
-  return <DiagnosticsTab ctx={ctx} subRoute={sub || 'device-info'} onSubRouteChange={s => ctx.go('SETTINGS', s)} />;
+  return <DiagnosticsTab ctx={ctx} subRoute={sub || 'device-info'} />;
 }

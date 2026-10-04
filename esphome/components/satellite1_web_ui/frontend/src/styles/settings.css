@@ -11,9 +11,7 @@
 .dx-card-toggle { min-height: 0; padding: 0; margin: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .dx-card-toggle:focus-visible { outline: 2px solid var(--orb-ink); outline-offset: 4px; border-radius: 4px; }
 
-/* A link-styled button inside a fact; the global 44px touch floor would stretch the fact. */
-.dx-inline { min-height: 0; padding: 0; border: 0; background: none; color: var(--orb-ink); font: inherit; text-align: left; cursor: pointer; align-self: flex-start; }
-.dx-inline:hover { text-decoration: underline; }
+/* A link inside a fact; the global 44px touch floor would stretch the fact. */
 .dx-fact-sub > a { min-height: 0; align-self: flex-start; }
 
 /* The page section is the scroll container, so a revealed card only needs breathing room. */
@@ -29,6 +27,37 @@
 }
 .dx-reveal { outline: 2px solid transparent; outline-offset: 2px; animation: dxReveal 2.5s ease-in-out; }
 .dx-upd-row.dx-reveal { outline-offset: -2px; border-radius: 12px; }
+
+/* The offered release's notes (lib/notes.js): a reading column, so prose sizes and spacing rather
+   than the cards' dense 12-13px. Links are inline text here, out of reach of the 44px touch floor. */
+.dx-notes { padding: 16px 16px 18px; border-top: 1px solid var(--line); font-size: 14px; line-height: 1.65; color: var(--text); overflow-wrap: anywhere; }
+.dx-notes > :first-child { margin-top: 0; }
+.dx-notes h3 { margin: 24px 0 8px; font-size: 15px; font-weight: 700; letter-spacing: -.01em; line-height: 1.3; }
+.dx-notes h4 { margin: 18px 0 6px; font-size: 14px; font-weight: 700; }
+.dx-notes h5 { margin: 16px 0 4px; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.dx-notes p { margin: 0 0 12px; }
+.dx-notes ul, .dx-notes ol { margin: 0 0 12px; padding-left: 22px; list-style: disc; }
+.dx-notes ol { list-style: decimal; }
+.dx-notes li ul { list-style: circle; }
+.dx-notes li { margin: 5px 0; padding-left: 2px; }
+.dx-notes li > ul, .dx-notes li > ol { margin: 4px 0 0; }
+.dx-notes li::marker { color: var(--orb-ink); }
+.dx-notes ol > li::marker { font-weight: 600; font-variant-numeric: tabular-nums; }
+.dx-notes strong { font-weight: 650; }
+.dx-notes a { min-height: 0; color: var(--orb-ink); text-decoration: none; }
+.dx-notes a:hover { text-decoration: underline; }
+.dx-notes a.ref { color: var(--muted); font-variant-numeric: tabular-nums; }
+.dx-notes a.ref:hover { color: var(--orb-ink); }
+.dx-notes code { padding: 1px 5px; border-radius: 5px; background: var(--fill-hover); font-family: 'SF Mono','Fira Code',monospace; font-size: .86em; }
+.dx-notes a code { padding: 0; background: none; }
+.dx-notes pre { margin: 0 0 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--fill-hover); font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+.dx-notes pre code { padding: 0; background: none; font-size: inherit; }
+.dx-notes blockquote { margin: 0 0 12px; padding: 2px 0 2px 12px; border-left: 3px solid var(--orb-a35); color: var(--muted); }
+.dx-notes hr { margin: 20px 0; border: 0; border-top: 1px solid var(--line); }
+.dx-notes img { display: block; max-width: 100%; height: auto; margin: 4px 0 12px; border-radius: 10px; }
+.dx-notes table { display: block; overflow-x: auto; margin: 0 0 12px; border-collapse: collapse; font-size: 13px; }
+.dx-notes th, .dx-notes td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+.dx-notes .dx-notes-src { display: inline-block; margin-top: 6px; font-size: 12px; }
 
 /* The log line a toast pointed at. The panel is the offset origin the reveal centres it by. */
 .dx-log { position: relative; }

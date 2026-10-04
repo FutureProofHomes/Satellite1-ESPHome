@@ -8,6 +8,7 @@ import test from "node:test";
 import { TEXT } from "../src/copy.js";
 import {
   ampMode,
+  builtWith,
   crashWhen,
   filterLog,
   gainDbv,
@@ -19,11 +20,14 @@ import {
   logParts,
   mb,
   passwordProblem,
+  releaseApi,
+  releaseEsphome,
   stamp,
   uptime,
   usbFact,
   xmosBuiltin,
   xmosChoices,
+  xmosFact,
   xmosLabel,
   xmosProgress,
   xmosStatus,
@@ -45,6 +49,25 @@ test("the USB-C contract is reworded voltage first, and anything else shows raw"
   assert.deepEqual(usbFact("5V default"), { value: "5V default" });
   assert.equal(usbFact(""), null);
   assert.equal(usbFact(undefined), null);
+});
+
+test("a firmware's ESPHome version comes from its release notes' Build Info line", () => {
+  assert.equal(builtWith("2026.9.1"), " (built with ESPHome 2026.9.1)");
+  assert.equal(builtWith(undefined), "");
+  assert.equal(
+    releaseApi("https://github.com/FutureProofHomes/Satellite1-ESPHome/releases/tag/v0.2.1/"),
+    "https://api.github.com/repos/FutureProofHomes/Satellite1-ESPHome/releases/tags/v0.2.1",
+  );
+  assert.equal(
+    releaseApi("https://github.com/FutureProofHomes/Satellite1-ESPHome/releases/tag/v0.2.1-beta.0"),
+    "https://api.github.com/repos/FutureProofHomes/Satellite1-ESPHome/releases/tags/v0.2.1-beta.0",
+  );
+  assert.equal(releaseApi("https://github.com/FutureProofHomes/Satellite1-ESPHome/releases"), null);
+  assert.equal(releaseApi(undefined), null);
+  const body = "## Build Info\r\n- ESPHome Version: 2026.7.3\r\n- Commit: `9a58961`\r\n\r\n## Summary\r\n\r\nv0.2.1 updates Satellite1 to ESPHome 2026.7.3.";
+  assert.equal(releaseEsphome(body), "2026.7.3");
+  assert.equal(releaseEsphome("## Summary\n\nv0.2.1 updates Satellite1 to ESPHome 2026.7.3."), null);
+  assert.equal(releaseEsphome(null), null);
 });
 
 test("the amplifier's mode: measuring and off outrank the stale mode number", () => {
@@ -160,6 +183,18 @@ test("the XMOS picker selects what the chip runs, not what the select last held"
   assert.equal(xmosChoices(XF_OPTIONS, undefined).value, "\u2014");
   assert.equal(xmosLabel(XF_OPTIONS, XF_OPTIONS[0]), "the built-in firmware (v1.1.0-alpha.0)");
   assert.equal(xmosLabel(XF_OPTIONS, "v1.1.0-dev.109"), "v1.1.0-dev.109");
+});
+
+test("the XMOS Firmware sensor is a version to link to, or a state coloured by what it means", () => {
+  assert.deepEqual(xmosFact("v1.1.0-alpha"), { value: "v1.1.0-alpha", version: true });
+  assert.deepEqual(xmosFact("v1.1.0-dev.110"), { value: "v1.1.0-dev.110", version: true });
+  assert.deepEqual(xmosFact("XMOS not responding"), { value: "XMOS not responding", tone: "err" });
+  assert.deepEqual(xmosFact("Flashing failed"), { value: "Flashing failed", tone: "err" });
+  assert.deepEqual(xmosFact("Flashing... (45%)"), { value: "Flashing... (45%)", tone: "warn" });
+  assert.deepEqual(xmosFact("Flashing Mode"), { value: "Flashing Mode", tone: "warn" });
+  // status_string()'s default, and the moment before /events delivers the value.
+  assert.deepEqual(xmosFact(""), { value: "\u2014", tone: undefined });
+  assert.deepEqual(xmosFact(undefined), { value: "\u2014", tone: undefined });
 });
 
 test("the XMOS install status sensor reads as a stage", () => {

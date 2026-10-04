@@ -38,6 +38,31 @@ export function usbFact(raw) {
   return { value: `${volts}V @ ${amps}A~`, sub: `${Number.isInteger(watts) ? watts : watts.toFixed(1)} watts` };
 }
 
+/** What follows a Sat1 firmware version: " (built with ESPHome 2026.9.1)", or nothing when unknown. */
+export const builtWith = (v) => (v ? ` (built with ESPHome ${v})` : "");
+
+/** The GitHub API address of the release an update entity's release_url names, or null. */
+export function releaseApi(url) {
+  const m = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/releases\/tag\/([^/?#]+)/.exec(url || "");
+  return m ? `https://api.github.com/repos/${m[1]}/${m[2]}/releases/tags/${m[3]}` : null;
+}
+
+/** The "- ESPHome Version: 2026.9.1" line build_release.yaml writes into every release's notes. */
+export const releaseEsphome = (body) => /^\s*-\s*ESPHome Version:\s*(\S+)/m.exec(body || "")?.[1] ?? null;
+
+/**
+ * The XMOS Firmware sensor as Device Info's fact. Satellite1::status_string() shares the sensor with
+ * the flasher's callbacks in satellite1.base.yaml, so it holds a state as often as a version: only a
+ * version is a release to link to, a flash in progress is amber, and the two states that leave the
+ * device without audio are red.
+ */
+export function xmosFact(text) {
+  const v = String(text ?? "").trim();
+  if (xmosVersionKey(v)) return { value: v, version: true };
+  if (v === "XMOS not responding" || v === "Flashing failed") return { value: v, tone: "err" };
+  return { value: v || "\u2014", tone: v.startsWith("Flashing") ? "warn" : undefined };
+}
+
 /**
  * GET /api/sat1/amp's power mode, worded. `pending` first: during the ~100 ms activation window the
  * reported mode is still the bootstrap's, and "measuring" is the truth. Then `active`, because line

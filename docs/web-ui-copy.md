@@ -127,10 +127,11 @@ looking at a third of them was the more expensive problem.
 | `speaker_channel` | Speaker amplifier, Channel | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
 | `launch` | Launch card title | Scan the code with a phone, or paste the link into a Home Assistant dashboard button, and that browser lands here already signed in - no password, no button press. The code carries the device's current network address, so any phone on your network can scan it; the link carries the device's permanent name, the right form to paste somewhere that keeps it. Anyone who has either can sign in with it, so treat them like the password. Sign out everywhere revokes them and every session, then issues a new one. |
 | `ha_ingress` | Home Assistant card title | Puts your Satellite1s in Home Assistant's sidebar, proxied through Home Assistant itself - so it works wherever Home Assistant does, on your local network or over a public https address. hass_ingress is a third-party integration, not part of this firmware. The YAML covers every Satellite1 Home Assistant knows about: this device is the one visible "Satellite1 Fleet" entry, the rest sit hidden behind it, and the device switcher reaches them all from inside the panel. Anyone who can open the panel reaches the devices' sign-in pages through it; the YAML limits the panel to admin users - remove the require_admin line to show it to everyone. |
-| `xmos` | XMOS firmware, and the XMOS Recovery card title | The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's. |
+| `xmos` | XMOS Firmware on Device Info and Recovery, and the XMOS Recovery card title | The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's. |
 | `xmos_flash` | Reflash XMOS vX.X.X | Rewrites the audio chip's firmware from the image embedded in this build. The device is deaf and mute until it finishes, which takes about a minute. Do not cut power. |
 | `xmos_install` | Install firmware | Developer builds only. Lists the audio chip firmware published on the Satellite1-XMOS GitHub releases, beside the built-in copy this firmware carries. Picking one installs it - the device itself doesn't restart - and it stays installed across restarts until you pick Built-in again. |
 | `xmos_refresh` | Firmware list | Checks the Satellite1-XMOS GitHub releases for new firmware now, pre-releases included, instead of waiting for the device's own hourly check. New versions appear in the list above. |
+| `radar_module` | Radar LD2410 / LD2450 on Device Info (the module's firmware beneath), drawn only once a module is detected | The mmWave presence sensor fitted to this Satellite1, found automatically at startup. It runs its own firmware from the module's maker. Its live view and settings are on the Presence page. |
 | `radar_recovery` | LD2410 / LD2450 Recovery card title | The radar module's own recovery actions. Restart just power-cycles the module. Factory reset erases the settings stored on the module itself - detection range, gate thresholds, zones, everything tuned on the Presence page - and does not touch this device's settings. |
 | `maintenance` | ESP32 Recovery card title | Ways to restart or reset this device. None of them are part of everyday use. Restart is always safe - your settings survive it. Factory reset is the only row here that erases anything. |
 | `safe_mode` | Safe mode | Restarts with everything but Wi-Fi and the updater switched off. Use it when the device is crash-looping too fast to accept an update. |
@@ -913,9 +914,14 @@ edit:
 - The confirm-modal proceed verbs: `Install <version>`, `Restart XMOS`, `Reflash now`, `Restart`,
   `Restart into safe mode`, `Erase everything`. They live at the call sites so they can carry the
   version number. `Erase it` went with the XMOS erase row.
-- `Update available`, `Install <version>` and `Release notes` in the firmware update panel, plus `Up to
-  date` under the Sat1 firmware version. The panel appears only when there is an update; the version is on
-  the button rather than described beside one, because pressing it is the whole point of the panel.
+- `Installing…`, `Install <version>` and `View on GitHub` in the firmware update panel, `Up to date` in
+  its place when nothing is offered, and `(built with ESPHome <version>)` after a firmware version. The
+  Updates page describes only the offered firmware (owner calls, October 2026): its version, the ESPHome
+  version it was built with, the button, and the release's notes, read from GitHub and drawn in the card
+  (all but the CI-written Build Info section). There is no `Update available` line: the version and the
+  button already say so. `Release notes`, a plain link, stands in when the notes cannot be read. The
+  running firmware is Device Info's, with `Up to date` under it, or `Installing…`; an offered update is
+  the Updates page's alone, so Device Info says nothing while one is waiting (owner call, October 2026).
 - `Local Speaker`, `No Area Assigned`, `whole area` and the `n/m` counts in the two trees. All four are
   structure rather than explanation - the first two are row labels and the last two are state readouts.
 - `Play assistant audio on selected players` and `Lower the volume on selected players upon wake word
