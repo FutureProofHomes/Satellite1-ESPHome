@@ -13,6 +13,7 @@ from esphome.components import (
     button,
     esp32,
     event,
+    logger,
     media_player,
     number,
     select,
@@ -53,7 +54,7 @@ from esphome.components.sendspin import (
 )
 from esphome.components.voice_assistant import VoiceAssistant
 from esphome.components.web_server_base import CONF_WEB_SERVER_BASE_ID, WebServerBase
-from esphome.const import CONF_ID, Framework
+from esphome.const import CONF_ID, CONF_LEVEL, CONF_SIZE, Framework
 from esphome.core import CORE, CoroPriority, HexInt, coroutine_with_priority
 import esphome.final_validate as fv
 
@@ -107,6 +108,46 @@ CONF_ON_MA_SEEK = "on_ma_seek"
 CONF_ON_SELECTION_CHANGE = "on_selection_change"
 CONF_SOUNDS = "sounds"
 CONF_FSD_SELECTS = "fsd_selects"
+CONF_LOG_HISTORY = "log_history"
+CONF_ALERTS_SIZE = "alerts_size"
+
+# esphome/core/log.h values. The ring takes a line at or below its level, so CONFIG (4) - the
+# boot-time configuration dumps - rides along from DEBUG up and stays out at INFO.
+_LOG_HISTORY_LEVELS = {
+    "WARN": 2,
+    "INFO": 3,
+    "DEBUG": 5,
+    "VERBOSE": 6,
+    "VERY_VERBOSE": 7,
+}
+
+# Sizes are bytes of PSRAM; neither ring touches internal RAM. How far back the main ring reaches
+# depends on how chatty the device is at the chosen level; the alert ring keeps a few hundred
+# warnings and errors for long after the main ring has turned over.
+_LOG_HISTORY_SCHEMA = cv.Schema(
+    {
+        cv.Optional(CONF_SIZE, default=262144): cv.All(
+            cv.validate_bytes, cv.int_range(min=16384, max=2097152)
+        ),
+        cv.Optional(CONF_ALERTS_SIZE, default=32768): cv.All(
+            cv.validate_bytes, cv.int_range(min=4096, max=262144)
+        ),
+        cv.Optional(CONF_LEVEL, default="DEBUG"): cv.one_of(
+            *_LOG_HISTORY_LEVELS, upper=True
+        ),
+    }
+)
+
+
+def _log_history(value):
+    # On unless switched off: `log_history: false`, or a block to change the sizes or level.
+    if value is None:
+        value = {}
+    if not isinstance(value, dict):
+        if not cv.boolean(value):
+            return False
+        value = {}
+    return _LOG_HISTORY_SCHEMA(value)
 
 satellite1_web_ui_ns = cg.esphome_ns.namespace("satellite1_web_ui")
 Satellite1WebUI = satellite1_web_ui_ns.class_("Satellite1WebUI", cg.Component)
@@ -291,6 +332,9 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_SOUNDS, default={}): cv.Schema(
                 {cv.string_strict: cv.use_id(audio.AudioFile)}
             ),
+            # The device's recent log, kept in PSRAM and served at GET /api/sat1/log, so the
+            # Logs card opens on what happened before anyone was watching instead of on nothing.
+            cv.Optional(CONF_LOG_HISTORY, default={}): _log_history,
         }
     ).extend(cv.COMPONENT_SCHEMA),
     cv.only_with_framework(Framework.ESP_IDF),
@@ -452,6 +496,20 @@ async def to_code(config):
 
     if CONF_CRASH_REPORT_ID in config:
         cg.add(var.set_crash_report(await cg.get_variable(config[CONF_CRASH_REPORT_ID])))
+
+    # Begun here rather than in setup() so the rings catch every component's setup logging: this
+    # statement runs ahead of App.setup(), and after the logger's own pre_setup, which its higher
+    # codegen priority places earlier in main().
+    if history := config[CONF_LOG_HISTORY]:
+        logger.request_log_listener()
+        cg.add_define("USE_SAT1_LOG_HISTORY", True)
+        cg.add(
+            var.begin_log_history(
+                history[CONF_SIZE],
+                history[CONF_ALERTS_SIZE],
+                _LOG_HISTORY_LEVELS[history[CONF_LEVEL]],
+            )
+        )
 
     if CONF_MEDIA_PLAYER_ID in config:
         cg.add(

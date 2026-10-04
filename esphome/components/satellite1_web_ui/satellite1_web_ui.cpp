@@ -414,7 +414,26 @@ void Satellite1WebUI::set_ha_payload(const std::string &json, int rung) {
 void Satellite1WebUI::dump_config() {
   ESP_LOGCONFIG(TAG, "Satellite1 Web UI:\n"
                      "  Serving / and /ui/ from PROGMEM");
+#ifdef USE_SAT1_LOG_HISTORY
+  static const char *const LEVELS[] = {"NONE", "ERROR", "WARN", "INFO", "CONFIG", "DEBUG", "VERBOSE", "VERY_VERBOSE"};
+  const LogHistory &lh = this->handler_.log_history();
+  if (lh.active()) {
+    ESP_LOGCONFIG(TAG, "  Log history: %u KB up to %s, %u KB of warnings and errors (PSRAM)",
+                  static_cast<unsigned>(lh.size() / 1024), lh.level() < 8 ? LEVELS[lh.level()] : "?",
+                  static_cast<unsigned>(lh.alert_size() / 1024));
+  } else {
+    ESP_LOGCONFIG(TAG, "  Log history: off (no PSRAM for it)");
+  }
+#endif
 }
+
+#ifdef USE_SAT1_LOG_HISTORY
+void Satellite1WebUI::begin_log_history(size_t size, size_t alert_size, uint8_t level) {
+  if (!this->handler_.log_history().begin(size, alert_size, level))
+    ESP_LOGW(TAG, "Log history off: could not allocate %u + %u bytes of PSRAM", static_cast<unsigned>(size),
+             static_cast<unsigned>(alert_size));
+}
+#endif
 
 }  // namespace satellite1_web_ui
 }  // namespace esphome

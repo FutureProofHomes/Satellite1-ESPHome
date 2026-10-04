@@ -242,6 +242,11 @@ class Satellite1WebUI : public Component {
   void set_crash_report(crash_report::CrashReport *cr) { this->handler_.set_crash_report(cr); }
 #endif
 
+#ifdef USE_SAT1_LOG_HISTORY
+  /// From generated code, before any component's setup, so the history begins at boot.
+  void begin_log_history(size_t size, size_t alert_size, uint8_t level);
+#endif
+
 #ifdef USE_MEDIA_PLAYER
   void set_media_player(media_player::MediaPlayer *mp) { this->handler_.set_media_player(mp); }
   void set_sendspin_media_player(media_player::MediaPlayer *mp) { this->handler_.set_sendspin_media_player(mp); }

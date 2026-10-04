@@ -1,6 +1,7 @@
 #include "web_ui_handler.h"
 
 #include <algorithm>
+#include <cinttypes>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -313,6 +314,11 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
   if (url == "/api/sat1/crash")
     return Route::CRASH;
 #endif
+#ifdef USE_SAT1_LOG_HISTORY
+  // Behind the session gate like the crash log: it is everything the device has said lately.
+  if (url == "/api/sat1/log")
+    return Route::LOG;
+#endif
 
   return Route::NONE;
 }
@@ -485,6 +491,11 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
       break;
     case Route::CRASH_ERASE:
       this->handle_crash_erase_(request);
+      break;
+#endif
+#ifdef USE_SAT1_LOG_HISTORY
+    case Route::LOG:
+      this->handle_log_(request);
       break;
 #endif
     case Route::NONE:
@@ -2827,6 +2838,105 @@ void WebUIHandler::handle_crash_erase_(AsyncWebServerRequest *request) {
 }
 
 #endif  // USE_SAT1_CRASH_REPORT
+
+#ifdef USE_SAT1_LOG_HISTORY
+
+/// The device's recent log, text/plain. The first line says where the answer stands -
+///   #sat1-log boot=<hex> now=<millis> end=<position>
+/// and every line after it is one record, "<millis> <line>", the line's own newlines sent as \x1f.
+/// Asked with the boot and end of an earlier answer, it sends only the main ring's records since.
+/// Otherwise it sends the warnings and errors the main ring has already dropped, then the main
+/// ring, oldest first. Chunked from the rings through one PSRAM block, like the crash dump.
+void WebUIHandler::handle_log_(AsyncWebServerRequest *request) {
+  LogHistory &lh = this->log_history_;
+  if (!lh.active()) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  const LogHistory::Bounds b = lh.bounds();
+
+  // An earlier answer's boot and end. A boot that does not match is a reboot since, and a stale
+  // or malformed position is answered in full rather than refused - the app replaces its copy.
+  bool since = false;
+  uint64_t from = b.main_tail;
+  auto *boot_param = request->getParam("boot");
+  auto *from_param = request->getParam("from");
+  if (boot_param != nullptr && from_param != nullptr) {
+    const std::string &boot_text = boot_param->value();
+    const std::string &from_text = from_param->value();
+    char *end = nullptr;
+    const unsigned long boot = strtoul(boot_text.c_str(), &end, 16);
+    const bool same_boot = end != boot_text.c_str() && *end == '\0' && boot == lh.boot_id();
+    const unsigned long long pos = strtoull(from_text.c_str(), &end, 10);
+    if (same_boot && end != from_text.c_str() && *end == '\0' && pos <= b.main_head) {
+      since = true;
+      from = pos;
+    }
+  }
+
+  RAMAllocator<char> alloc(RAMAllocator<char>::ALLOC_EXTERNAL);
+  constexpr size_t CHUNK = 4096;
+  static_assert(CHUNK >= 2 * LH_READ_WINDOW, "the scratch holds the header and a read window");
+  char *buf = alloc.allocate(CHUNK);
+  if (buf == nullptr) {
+    this->send_low_memory_(request);
+    return;
+  }
+
+  httpd_resp_set_type(*request, "text/plain");
+  httpd_resp_set_hdr(*request, "Cache-Control", "no-store");
+  // By hand on this raw-httpd path - see send_low_memory_.
+  httpd_resp_set_hdr(*request, "Access-Control-Allow-Origin", "*");
+
+  size_t len = static_cast<size_t>(snprintf(buf, CHUNK, "#sat1-log boot=%08" PRIx32 " now=%" PRIu32 " end=%" PRIu64 "\n",
+                                            lh.boot_id(), millis(), b.main_head));
+  bool ok = true;
+  auto room = [&]() {
+    if (CHUNK - len >= LH_READ_WINDOW)
+      return;
+    ok = httpd_resp_send_chunk(*request, buf, static_cast<ssize_t>(len)) == ESP_OK;
+    len = 0;
+  };
+
+  if (!since && b.main_head != b.main_tail) {
+    uint64_t pos = b.alert_tail;
+    bool older = true;
+    while (ok && older) {
+      room();
+      const size_t n = ok ? lh.read(LogHistory::Ring::ALERT, pos, b.alert_head, buf + len, CHUNK - len) : 0;
+      if (n == 0)
+        break;
+      // The alert ring is in time order, so the first record the main ring still holds ends it.
+      const char *const got = buf + len;
+      size_t keep = 0;
+      while (keep < n) {
+        const uint32_t ms = strtoul(got + keep, nullptr, 10);
+        if (static_cast<int32_t>(ms - b.main_oldest_ms) >= 0) {
+          older = false;
+          break;
+        }
+        keep = static_cast<size_t>(static_cast<const char *>(memchr(got + keep, '\n', n - keep)) - got) + 1;
+      }
+      len += keep;
+    }
+  }
+
+  uint64_t pos = from;
+  while (ok) {
+    room();
+    const size_t n = ok ? lh.read(LogHistory::Ring::MAIN, pos, b.main_head, buf + len, CHUNK - len) : 0;
+    if (n == 0)
+      break;
+    len += n;
+  }
+  if (ok && len > 0)
+    ok = httpd_resp_send_chunk(*request, buf, static_cast<ssize_t>(len)) == ESP_OK;
+  if (ok)
+    httpd_resp_send_chunk(*request, nullptr, 0);
+  alloc.deallocate(buf, CHUNK);
+}
+
+#endif  // USE_SAT1_LOG_HISTORY
 
 #ifdef USE_VOICE_ASSISTANT
 

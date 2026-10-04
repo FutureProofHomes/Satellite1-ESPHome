@@ -50,6 +50,7 @@
 
 #include "esphome/components/web_server_base/web_server_base.h"
 
+#include "log_history.h"
 #include "selection.h"
 
 namespace esphome {
@@ -535,6 +536,12 @@ class WebUIHandler : public AsyncWebHandler {
   void set_crash_report(crash_report::CrashReport *cr) { this->crash_report_ = cr; }
 #endif
 
+#ifdef USE_SAT1_LOG_HISTORY
+  /// The rings GET /api/sat1/log serves. Begun from generated code, ahead of every component's
+  /// setup, so the history starts with the boot rather than with this component's turn.
+  LogHistory &log_history() { return this->log_history_; }
+#endif
+
 #ifdef USE_SAT1_WEB_UI_AMP
   /// Set from generated code, before the listener accepts anything. The speaker amplifier is the
   /// third thing web_server cannot cover (after media players and wake words): an audio_dac is not
@@ -631,6 +638,9 @@ class WebUIHandler : public AsyncWebHandler {
     CRASH_LOG,
     CRASH_DUMP,
     CRASH_ERASE,
+#endif
+#ifdef USE_SAT1_LOG_HISTORY
+    LOG,  // GET /api/sat1/log (boot, from - only what is newer than a previous answer)
 #endif
   };
 
@@ -730,6 +740,10 @@ class WebUIHandler : public AsyncWebHandler {
   /// - the extension never mattered; see the handler's comment.
   void handle_crash_dump_(AsyncWebServerRequest *request);
   void handle_crash_erase_(AsyncWebServerRequest *request);
+#endif
+#ifdef USE_SAT1_LOG_HISTORY
+  /// The log history as text/plain, chunked from the PSRAM rings through one PSRAM scratch block.
+  void handle_log_(AsyncWebServerRequest *request);
 #endif
 #ifdef USE_MEDIA_PLAYER
   void handle_media_(AsyncWebServerRequest *request);
@@ -945,6 +959,10 @@ class WebUIHandler : public AsyncWebHandler {
 
 #ifdef USE_SAT1_CRASH_REPORT
   crash_report::CrashReport *crash_report_{nullptr};
+#endif
+
+#ifdef USE_SAT1_LOG_HISTORY
+  LogHistory log_history_;
 #endif
 
 #ifdef USE_SAT1_WEB_UI_AMP
