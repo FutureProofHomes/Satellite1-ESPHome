@@ -1214,6 +1214,9 @@ export function useEvents() {
     let graceTimer = null;
     // When the stream last proved itself alive, for the staleness test on foreground below.
     let lastSeen = 0;
+    // A line that arrives without a "[W][tag]" header belongs to the line before it, and takes its
+    // level so the level chips keep or hide the two together.
+    let lastLvl = "?";
 
     /* iOS kills the SSE socket the moment Safari is backgrounded, and that is routine, not failure.
        So the banner runs on a grace timer: a disconnect only shows after ~4 seconds of being down
@@ -1240,7 +1243,8 @@ export function useEvents() {
       lastSeen = Date.now();
       const text = e.data.replace(ANSI, "");
       const m = LEVEL.exec(text);
-      const lvl = m ? m[1] : "?";
+      const lvl = m ? m[1] : lastLvl;
+      lastLvl = lvl;
       // `at` is the browser's clock at arrival, because the line itself carries no wall time - the
       // device's logger stamps uptime, not time of day, and the /events payload is just the text.
       // Arrival is honest enough: the stream is live-only, so a line is read within milliseconds of
@@ -1250,8 +1254,10 @@ export function useEvents() {
       // The alert channel, deliberately ahead of the pause check below: pausing the Logs card to
       // read something must hold the ring, not silence error toasts app-wide. And deliberately
       // quiet while anyone is reading the log (the same watch count that gates the render): a
-      // toast announcing the log to the person looking at it is noise.
-      if ((lvl === "E" || lvl === "C" || lvl === "W") && logWatchRef.current === 0) {
+      // toast announcing the log to the person looking at it is noise. Only a line's own header
+      // counts, and C is not a severity: it is CONFIG, the dump_config tables printed at boot and
+      // replayed whenever a log client subscribes.
+      if (m && (lvl === "E" || lvl === "W") && logWatchRef.current === 0) {
         const tag = LOG_TAG.exec(text)?.[1] || "";
         for (const fn of logAlertListeners) fn({ lvl, tag, text, at });
       }

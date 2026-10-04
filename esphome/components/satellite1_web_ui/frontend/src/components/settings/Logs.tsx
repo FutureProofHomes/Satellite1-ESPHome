@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { CONFIRM, HINTS, TEXT } from '../../copy.js';
 import { apiUrl, post, request, requestJson } from '../../lib/device.js';
 import type { Ctx } from '../../ctx';
-import { crashWhen, filterLog, LOG_LEVELS, logExport, logFileName, logParts, stamp, uptime } from '../../lib/settings.js';
-import { Caret, DxCard, DxConfirm, DxRow, DxSelect, saveBlob } from './dx';
+import { ALL_CHIPS, chipCounts, crashWhen, filterLog, LOG_CHIPS, logExport, logFileName, logParts, stamp, uptime } from '../../lib/settings.js';
+import { Caret, DxCard, DxConfirm, DxRow, saveBlob } from './dx';
 
 type LogLine = {
   lvl: string;
@@ -12,7 +12,7 @@ type LogLine = {
 };
 export type LogIntent = {
   card: 'log';
-  level?: string;
+  levels?: string[];
   line?: {
     at: number;
     text: string;
@@ -23,7 +23,7 @@ export type LogIntent = {
    the chatter you filter out, and colouring it would leave nothing dim to compare against. */
 const LVL_CLASS: Record<string, string> = {
   E: 'dx-err',
-  C: 'dx-err',
+  C: 'dx-cfg',
   W: 'dx-warn',
   I: 'dx-ok',
   D: 'dx-dbg',
@@ -49,7 +49,7 @@ const partsOf = (l: LogLine) => {
  * The device's own log, live from /events. Registered as the log's reader while mounted, which
  * both lets new lines re-render it and silences the warning toasts for the person already reading;
  * the ring fills either way, which is what shows the recent past on arrival. A toast's intent seeds
- * the level, so a warning's tap lands on the warnings rather than the debug firehose that buried
+ * the lit chips, so a warning's tap lands on the warnings rather than the debug firehose that buried
  * them, and names a line to scroll to and flash.
  */
 export function LogsCard({
@@ -68,24 +68,26 @@ export function LogsCard({
   } = ctx;
   const [paused, setPaused] = useState(false);
   useEffect(() => logWatch(), []);
-  const [level, setLevel] = useState(intent?.level || 'D');
+  const [chips, setChips] = useState<string[]>(intent?.levels || ALL_CHIPS);
   const [hl, setHl] = useState(intent?.line || null);
   // An intent arriving while the card already stands: a write-failed toast, or a notification
   // history row carrying a line. Log toasts cannot, being silenced while this card watches.
   useEffect(() => {
-    if (intent?.level) setLevel(intent.level);
+    if (intent?.levels) setChips(intent.levels);
     if (intent?.line) setHl(intent.line);
   }, [intent]);
   const [filter, setFilter] = useState('');
   const box = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
-  const lines: LogLine[] = filterLog(log, level, filter);
+  const lines: LogLine[] = filterLog(log, chips, filter);
+  const counts = chipCounts(log, filter);
+  const toggleChip = (c: string) => setChips(on => on.includes(c) ? on.filter(x => x !== c) : [...on, c]);
 
   // Follows the newest line only while the view is already at the bottom: reading anything on a
   // chatty device is impossible if every line yanks the view away.
   useEffect(() => {
     if (!paused && atBottom.current && box.current) box.current.scrollTop = box.current.scrollHeight;
-  }, [logSeq, paused, filter, level]);
+  }, [logSeq, paused, filter, chips]);
   useEffect(() => () => {
     pausedRef.current = false;
   }, [pausedRef]);
@@ -116,7 +118,14 @@ export function LogsCard({
   return <DxCard title="Device Logs" collapsible defaultOpen={true} forceOpen={!!intent} hint={HINTS.log} id="card-log">
       <div className="dx-log-bar">
         <input className="dx-log-search" type="search" placeholder="Filter…" aria-label="Filter logs" value={filter} onChange={e => setFilter(e.currentTarget.value)} />
-        <DxSelect value={level} options={LOG_LEVELS as [string, string][]} label="Log level" onChange={setLevel} />
+        <div className="dx-log-chips" role="group" aria-label="Log levels">
+          {LOG_CHIPS.filter(([c]) => c !== 'V' || counts.V).map(([c, label]) => {
+          const on = chips.includes(c);
+          return <button key={c} className={`dx-log-chip${on ? ' on' : ''}`} data-l={c} aria-pressed={on} onClick={() => toggleChip(c)}>
+                {label}<span className="dx-log-chip-n">{counts[c] || 0}</span>
+              </button>;
+        })}
+        </div>
       </div>
       <div className="dx-log" ref={box} onScroll={e => {
       const el = e.currentTarget;
@@ -124,7 +133,7 @@ export function LogsCard({
       // bottom, and the panel would stop following.
       atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
     }}>
-        {lines.length === 0 && <p className="dx-muted dx-sm">{log.length === 0 ? 'Waiting for the device to say something.' : 'No lines match. Every line is filtered out.'}</p>}
+        {lines.length === 0 && <p className="dx-muted dx-sm">{log.length === 0 ? 'Waiting for the device to say something.' : chips.length === 0 ? 'Every level is off. Turn one on to see its lines.' : 'No lines match. Every line is filtered out.'}</p>}
         {lines.map((l, i) => {
         const p = partsOf(l);
         return <div key={i} className={`dx-log-line ${LVL_CLASS[l.lvl] || ''}${hl && l.at === hl.at && l.text === hl.text ? ' hl' : ''}`}>

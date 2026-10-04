@@ -179,26 +179,57 @@ export function xmosProgress(status, pending) {
 /* The log                                                             */
 /* ------------------------------------------------------------------ */
 
-/** The level menu: [floor, label], most to least. */
-export const LOG_LEVELS = [
-  ["VV", "Everything"],
-  ["D", "Debug"],
-  ["I", "Info"],
-  ["W", "Warning"],
+/**
+ * The level chips: [chip, label], most severe first. Each chip is one level, not a floor, so what
+ * is lit is exactly what shows: a floor read "Debug" as "Debug and everything above it", and picking
+ * Debug still showed warnings. Verbose is only drawn when such lines exist; a stock build is
+ * compiled at DEBUG and never produces one.
+ */
+export const LOG_CHIPS = [
   ["E", "Errors"],
+  ["W", "Warnings"],
+  ["I", "Info"],
+  ["D", "Debug"],
+  ["V", "Verbose"],
 ];
 
-const ORDER = ["VV", "V", "D", "I", "W", "E"];
+export const ALL_CHIPS = LOG_CHIPS.map(([c]) => c);
 
-/** Whether a line at `lvl` passes the `floor`. Config lines and unparsed ones always do. */
-export function levelShows(floor, lvl) {
-  return lvl === "C" || lvl === "?" || ORDER.indexOf(lvl) >= ORDER.indexOf(floor);
+/**
+ * The chip a line's level lights with. ESPHome's C is CONFIG - the dump_config tables, between
+ * Info and Debug in severity - so it reads as Info; both verbose levels are one chip; a line whose
+ * header never parsed has nothing better than Info to be.
+ */
+export function chipOf(lvl) {
+  if (lvl === "C" || lvl === "?") return "I";
+  if (lvl === "VV") return "V";
+  return lvl;
 }
 
-/** The ring's lines at or above `floor` whose text contains `needle`, case-insensitively. */
-export function filterLog(log, floor, needle) {
+const matches = (needle) => {
   const n = String(needle || "").trim().toLowerCase();
-  return log.filter((l) => levelShows(floor, l.lvl) && (!n || l.text.toLowerCase().includes(n)));
+  return (l) => !n || l.text.toLowerCase().includes(n);
+};
+
+/** The ring's lines whose chip is lit and whose text contains `needle`, case-insensitively. */
+export function filterLog(log, chips, needle) {
+  const hit = matches(needle);
+  return log.filter((l) => chips.includes(chipOf(l.lvl)) && hit(l));
+}
+
+/**
+ * Lines per chip among those the text filter leaves, lit or not, so an unlit chip still says what
+ * turning it on would add.
+ */
+export function chipCounts(log, needle) {
+  const hit = matches(needle);
+  const n = {};
+  for (const l of log) {
+    if (!hit(l)) continue;
+    const c = chipOf(l.lvl);
+    n[c] = (n[c] || 0) + 1;
+  }
+  return n;
 }
 
 const HEAD = /^\[(?:VV|V|D|I|W|E|C)\]\[([^\]:]+)(?::\d+)?\]:?\s?/;

@@ -1132,7 +1132,6 @@ section.now.now-compact .timer {
 .dx-pwc-actions { display: flex; gap: 8px; }
 .dx-yaml { font-family: 'SF Mono','Fira Code',monospace; font-size: 12px; line-height: 1.6; background: rgba(0,0,0,.25); border-radius: 10px; padding: 12px 14px; margin: 0 16px 10px; overflow-x: auto; color: var(--orb-ink); border: 1px solid rgba(255,255,255,.06); white-space: pre; }
 [data-theme='light'] .dx-yaml { background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.07); }
-.dx-log-bar .dx-sel { min-width: 120px; }
 .dx-log { font-family: 'SF Mono','Fira Code',monospace; font-size: 12px; line-height: 1.7; max-height: min(60vh, 560px); overflow-y: auto; padding: 10px 16px; scrollbar-width: none; }
 .dx-log::-webkit-scrollbar { display: none; }
 .dx-log-line { display: flex; gap: 8px; align-items: baseline; }

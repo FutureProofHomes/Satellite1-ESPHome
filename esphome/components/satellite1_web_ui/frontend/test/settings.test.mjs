@@ -7,14 +7,16 @@ import test from "node:test";
 
 import { TEXT } from "../src/copy.js";
 import {
+  ALL_CHIPS,
   ampMode,
   builtWith,
+  chipCounts,
+  chipOf,
   crashWhen,
   filterLog,
   gainDbv,
   ingressYaml,
   kb,
-  levelShows,
   logExport,
   logFileName,
   logParts,
@@ -82,27 +84,48 @@ test("the amplifier's mode: measuring and off outrank the stale mode number", ()
   assert.equal(gainDbv(20), "21.0 dBV");
 });
 
-test("log levels filter from the floor up, and config or unparsed lines always show", () => {
-  assert.equal(levelShows("D", "D"), true);
-  assert.equal(levelShows("D", "V"), false);
-  assert.equal(levelShows("VV", "VV"), true);
-  assert.equal(levelShows("W", "I"), false);
-  assert.equal(levelShows("W", "E"), true);
-  assert.equal(levelShows("E", "C"), true);
-  assert.equal(levelShows("E", "?"), true);
+test("each level chip shows its own level and nothing above or below it", () => {
+  assert.deepEqual(ALL_CHIPS, ["E", "W", "I", "D", "V"]);
+  assert.equal(chipOf("E"), "E");
+  assert.equal(chipOf("C"), "I");
+  assert.equal(chipOf("?"), "I");
+  assert.equal(chipOf("VV"), "V");
   const log = [
     { lvl: "D", text: "[D][sensor:094]: 'Temperature': Sending state", at: 1 },
     { lvl: "W", text: "[W][wifi:123]: Rate limit hit", at: 2 },
     { lvl: "V", text: "[V][api:200]: Connected", at: 3 },
+    { lvl: "E", text: "[E][i2s_audio:301]: Write failed", at: 4 },
+    { lvl: "C", text: "[C][wifi:500]: WiFi:", at: 5 },
+    { lvl: "VV", text: "[VV][api.service:42]: frame", at: 6 },
   ];
   assert.deepEqual(
-    filterLog(log, "D", "").map((l) => l.at),
-    [1, 2],
+    filterLog(log, ["D"], "").map((l) => l.at),
+    [1],
   );
   assert.deepEqual(
-    filterLog(log, "VV", " WIFI ").map((l) => l.at),
-    [2],
+    filterLog(log, ["E", "W"], "").map((l) => l.at),
+    [2, 4],
   );
+  assert.deepEqual(
+    filterLog(log, ["I", "V"], "").map((l) => l.at),
+    [3, 5, 6],
+  );
+  assert.deepEqual(filterLog(log, [], ""), []);
+  assert.deepEqual(
+    filterLog(log, ALL_CHIPS, " WIFI ").map((l) => l.at),
+    [2, 5],
+  );
+});
+
+test("chip counts follow the text filter but not the lit chips", () => {
+  const log = [
+    { lvl: "W", text: "[W][wifi:123]: Rate limit hit", at: 1 },
+    { lvl: "W", text: "[W][api:77]: Client gone", at: 2 },
+    { lvl: "C", text: "[C][wifi:500]: WiFi:", at: 3 },
+    { lvl: "D", text: "[D][wifi:200]: Scanning", at: 4 },
+  ];
+  assert.deepEqual(chipCounts(log, ""), { W: 2, I: 1, D: 1 });
+  assert.deepEqual(chipCounts(log, "wifi"), { W: 1, I: 1, D: 1 });
 });
 
 test("a log line splits into its component tag and message", () => {

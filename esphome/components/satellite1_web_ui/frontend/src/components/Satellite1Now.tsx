@@ -199,7 +199,7 @@ function useToastSources({
       // The line rides by the same {at, text} identity the log ring holds (src/lib/device.js stamps
       // both from one clock), so the reveal lands on the exact line - and a coalescing burst adopts
       // the newest line as it counts up.
-      intent: { card: 'log', level: err ? 'E' : 'W', line: { at, text } }
+      intent: { card: 'log', levels: [err ? 'E' : 'W'], line: { at, text } }
     });
   }), []);
   // The nudge, on the rising edge only: once on entering a blocked app (arriving through the gate's

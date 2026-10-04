@@ -68,6 +68,28 @@
   .dx-reveal, .dx-log-line.hl { animation: none; outline: 2px solid var(--orb-ctl); }
 }
 
+/* CONFIG, magenta as in ESPHome's console: the dump_config tables, not a severity. */
+.dx-cfg { color: #e879f9; }
+[data-theme='light'] .dx-cfg { color: #a21caf; }
+
+/* The level chips, one per level. Lit is a filled dot on a tinted pill, unlit an empty ring on a bare
+   one, so on and off never rest on colour alone. The search shares the row and pushes the chips onto
+   their own line where both do not fit. */
+.dx-log-bar { flex-wrap: wrap; }
+.dx-log-bar .dx-log-search { flex: 1 1 200px; }
+.dx-log-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dx-log-chip { --c: var(--muted); display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 999px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: background .12s, color .12s, border-color .12s; }
+.dx-log-chip::before { content: ''; flex: none; width: 8px; height: 8px; box-sizing: border-box; border: 1.5px solid var(--c); border-radius: 50%; }
+.dx-log-chip.on { border-color: color-mix(in srgb, var(--c) 55%, transparent); background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--text); }
+.dx-log-chip.on::before { background: var(--c); }
+.dx-log-chip-n { font-weight: 500; font-variant-numeric: tabular-nums; opacity: .7; }
+.dx-log-chip[data-l='E'] { --c: #f87171; }
+.dx-log-chip[data-l='W'] { --c: #fbbf24; }
+.dx-log-chip[data-l='I'] { --c: #4ade80; }
+[data-theme='light'] .dx-log-chip[data-l='E'] { --c: #dc2626; }
+[data-theme='light'] .dx-log-chip[data-l='W'] { --c: #b45309; }
+[data-theme='light'] .dx-log-chip[data-l='I'] { --c: #16a34a; }
+
 /* A phone's message column beside the stamp, level and tag would be a dozen characters wide, so
    there the message takes its own full-width line under them. */
 @media (max-width: 639px) {
