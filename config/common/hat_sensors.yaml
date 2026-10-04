@@ -1,3 +1,12 @@
+logger:
+  logs:
+    # ERROR, not WARN: ESPHome's ltr_als_ps driver warns about ordinary readings (a dark room, mostly
+    # infrared light, a sample the chip asks to be discarded) on every step of its auto-ranging - up
+    # to a dozen lines a minute. This also hides its rare real-fault warnings; a chip that stops
+    # responding is still logged as an error by ESPHome core ("... was marked as failed").
+    # Back to WARN once the driver fix ships in the pinned ESPHome release.
+    ltr_als_ps: ERROR
+
 sensor:
   - platform: aht10
     id: "aht20_temp_hum_sensor"
