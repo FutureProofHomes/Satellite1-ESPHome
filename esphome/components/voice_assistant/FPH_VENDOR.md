@@ -1,7 +1,7 @@
 # Vendored voice_assistant — FutureProofHomes
 
 This directory is a **byte-identical copy of upstream ESPHome's `voice_assistant` component**,
-pinned to the exact version in `requirements.txt` (currently **2026.8.1**), **except for one
+pinned to the exact version in `requirements.txt` (currently **2026.9.1**), **except for one
 addition**, marked with `// FPH:`.
 
 ## The one diff

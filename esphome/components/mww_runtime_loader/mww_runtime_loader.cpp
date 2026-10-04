@@ -761,7 +761,7 @@ void MwwRuntimeLoader::log_callback_(void *self, uint8_t level, const char *tag,
 
 void MwwRuntimeLoader::on_mww_log_(const char *message) {
   // The two lines this parses are pinned by requirements.txt's exact ESPHome version - they live at
-  // micro_wake_word.cpp:488-495 in 2026.8.1. An ESPHome bump must re-check both format strings; if
+  // micro_wake_word.cpp:488-495 in 2026.9.1. An ESPHome bump must re-check both format strings; if
   // they drift, the tuner records nothing and the panel reports scores unavailable rather than
   // guessing. Both lines are logged from the component's loop(), so this runs on the main loop for
   // every message it can match.
