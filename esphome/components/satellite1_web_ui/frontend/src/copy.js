@@ -360,7 +360,8 @@ export const TEXT = {
   login_locked: "Too many tries. Wait %s seconds and try again.",
   login_unreachable: "Couldn't reach the device. Check the connection and try again.",
   // Where the password lives, for the person standing in front of this form for the first time.
-  login_pw_hint: 'See "Web UI Password" on this device\'s page in Home Assistant.',
+  // One line on a 375px phone: keep it within about 340px at 12px.
+  login_pw_hint: 'See this device\'s "Web UI Password" in Home Assistant.',
   // The side nav's sign-out: this browser only, unlike Diagnostics' sign-out-everywhere.
   logout: "Sign out",
 

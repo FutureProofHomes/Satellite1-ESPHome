@@ -37,6 +37,10 @@ html[data-short], html[data-short] body { background: var(--surface); }
 .header-toast-pill { min-height: 44px; padding: 3px 3px 3px 12px; }
 .header-toast-pill .toast-x { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }
 
+/* The sign-in screen's appearance toggle has no header to clear the status bar for it, so it takes
+   the insets itself: 20px from the corner, but never under the status bar or a landscape notch. */
+.auth-theme { top: max(20px, var(--sat)); right: max(20px, env(safe-area-inset-right)); }
+
 /* The nav grows to 60px from 640px (app.css) and every page's height subtracts --tabs-h, so the
    variable has to grow with it or each page's last 8px sits under the nav. Above 1024px the nav is
    gone and nothing subtracts it. */
@@ -86,6 +90,16 @@ html[data-short], html[data-short] body { background: var(--surface); }
 .voice-mode.warn { color: #ffc45e; }
 .voice-hint { font-size: 12px; line-height: 1.5; color: var(--muted); margin: 0 auto 8px; max-width: 320px; }
 .challenge b.done { border-color: var(--orb-ctl); color: var(--orb-ink); opacity: .6; }
+
+/* The password form's Sign in. app.css gives .secondary the password field's own fill, so it read as
+   a second, disabled field in dark and all but vanished into the light page. Outlined in the orb's
+   ink, which orbTokens keeps AA on the page in both themes for any orb colour, it reads as a button
+   while staying a step below the filled VoiceTap one. */
+.auth-form .secondary { background: transparent; border: 1.5px solid var(--orb-ink); color: var(--orb-ink); min-height: 48px; font-size: 15px; font-weight: 600; }
+/* Where the password lives, on one line: not .voice-hint's 320px cap, and reaching 16px into the
+   screen's side padding, which centred text needs no alignment with, so the sentence fits a 375px
+   phone. Two balanced lines only on a screen narrower still. */
+.auth-stack > .voice-hint { max-width: none; margin: 14px -16px 8px; text-align: center; text-wrap: balance; }
 
 /* The Home Assistant gate. The card centres with margin rather than flex alignment so a tall
    walk-through on a short screen scrolls instead of losing its top. */
