@@ -2995,9 +2995,30 @@ void WebUIHandler::handle_voice_(AsyncWebServerRequest *request) {
   begin_chunked_json(*request);
   ChunkWriter w{*request};
 
+  // The newest pipeline error, whatever the phase: the page decides when to show it, from the age.
+  // Copied before the phase is read, because on_error records it before entering the error phase -
+  // so a new error is never paired with the phase from before it, which the page would read as a
+  // run that had already moved on, and dismiss.
+  std::string error;
+  uint32_t error_count;
+  uint32_t error_age;
+  {
+    LockGuard guard{this->voice_error_lock_};
+    error = this->voice_error_;
+    error_count = this->voice_error_count_;
+    error_age = millis() - this->voice_error_ms_;
+  }
+
   const int phase = this->voice_phase_fn_ ? this->voice_phase_fn_() : 0;
   w.printf(R"({"phase":%d,"running":%s,)", phase,
                  this->va_ != nullptr && this->va_->is_running() ? "true" : "false");
+
+  if (error_count != 0) {
+    w.printf(R"("error":{"n":%u,"age":%u,"message":)", static_cast<unsigned int>(error_count),
+             static_cast<unsigned int>(error_age));
+    write_json_string(w, error);
+    w.print("},");
+  }
 
   w.print(R"("timers":[)");
   if (this->va_ != nullptr) {

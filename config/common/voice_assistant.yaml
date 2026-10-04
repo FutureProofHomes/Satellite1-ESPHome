@@ -265,6 +265,9 @@ voice_assistant:
             - lambda: return !id(init_in_progress);
             - lambda: return code != "duplicate_wake_up_detected";
         then:
+          # Ahead of the phase on purpose: a poll that reads the error phase must find this error's
+          # message under it, not the previous one's.
+          - lambda: id(web_ui_app)->note_voice_error(message);
           - lambda: id(voice_assistant_phase) = ${voice_assist_error_phase_id};
           - script.execute: control_leds
     - script.execute: release_tts_playback_level

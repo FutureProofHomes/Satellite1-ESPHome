@@ -5,16 +5,18 @@
 main.app > .tab-content-enter > section.now.now-compact{padding-bottom:0 !important}
 section.now.now-compact>.now-right{padding-bottom:2px !important}
 
-/* ===== Home: the orb's tips ===== */
+/* ===== Home: the orb's tips and errors ===== */
 /* A tip's last line sits on the label's and a second rises into the orb's transparent lower margin,
    which the resting sphere stops well short of, so tips take no height from the windows below. The
-   label stays under it, unseen but still the live region. */
+   label stays under it, unseen but still the live region, and held to one line so a long label
+   cannot add the height back. A pipeline error's message takes the same slot, in red. */
 .orb-meta,.orb-say{align-self:stretch}
 .orb-say{position:relative;display:flex;justify-content:center}
-.orb-label.tipped{opacity:0}
+.orb-label.tipped{opacity:0;white-space:nowrap;overflow:hidden;max-width:100%}
 .orb-tips{position:absolute;bottom:0;left:0;right:0;max-width:340px;margin:0 auto;display:grid;pointer-events:none}
 .orb-tips>span{grid-area:1/1;align-self:end;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;text-align:center;text-wrap:balance;font-size:13px;line-height:1.35;color:var(--muted)}
 @media (min-width:640px){.orb-tips>span{font-size:14px}}
+.orb-tips.orb-err>span{color:var(--danger);font-weight:500}
 .orb-tips>.in{animation:tipIn .45s ease both}
 .orb-tips>.out{animation:tipOut .45s ease both}
 @keyframes tipIn{from{opacity:0;transform:translateY(4px)}}

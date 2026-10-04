@@ -10,6 +10,9 @@ import {
   agentName,
   clock,
   DEFAULT_AGENT,
+  ERROR_HOLD_MS,
+  errorHoldUntil,
+  errorSeen,
   fitBytes,
   pipelineAgent,
   readAgentMap,
@@ -60,6 +63,41 @@ test("muted mics wear the paused idle look, except when the stream is gone", () 
   assert.deepEqual(orbView(4, false, true), { state: "disabled", label: "Offline", muted: false });
   assert.deepEqual(orbView(5, true, false), { state: "speaking", label: "Speaking\u2026", muted: false });
   assert.deepEqual(orbView(10, true, false), { state: "connecting", label: "Not ready", muted: false });
+});
+
+const ERR = { n: 3, age: 400, message: "  No text recognized " };
+
+test("the error phase shows the pipeline's message, or Error without one", () => {
+  assert.deepEqual(orbView(11, true, false, ERR), { state: "error", label: "No text recognized", muted: false });
+  assert.deepEqual(orbView(11, true, false, { ...ERR, message: " " }), { state: "error", label: "Error", muted: false });
+  assert.deepEqual(orbView(11, true, false), { state: "error", label: "Error", muted: false });
+});
+
+test("a held error keeps an idle orb red with its message, and nothing else", () => {
+  assert.deepEqual(orbView(1, true, false, ERR, true), { state: "error", label: "No text recognized", muted: false });
+  assert.deepEqual(orbView(1, true, false, ERR, false), { state: "idle", label: "Ready", muted: false });
+  assert.deepEqual(orbView(1, true, false, null, true), { state: "idle", label: "Ready", muted: false });
+  for (const [phase, state] of [[2, "listening"], [4, "thinking"], [5, "speaking"], [10, "connecting"]]) {
+    assert.equal(orbView(phase, true, false, ERR, true).state, state);
+  }
+  assert.deepEqual(orbView(1, true, true, ERR, true), { state: "idle", label: "Mic muted", muted: true });
+  assert.deepEqual(orbView(1, false, false, ERR, true), { state: "disabled", label: "Offline", muted: false });
+});
+
+test("an error is held for ERROR_HOLD_MS from when the page finds it, unless dismissed or stale", () => {
+  const now = 100_000;
+  const seen = errorSeen(ERR, now);
+  assert.deepEqual(seen, { n: 3, until: now + ERROR_HOLD_MS });
+  assert.equal(errorHoldUntil(seen, null, now), now + ERROR_HOLD_MS);
+  assert.equal(errorHoldUntil(seen, null, now + ERROR_HOLD_MS), 0);
+  assert.equal(errorHoldUntil(seen, 3, now), 0);
+  assert.equal(errorHoldUntil(seen, 2, now), now + ERROR_HOLD_MS);
+  // Found late by the idle poll: still the full hold. Found after the hold would have ended: none.
+  assert.equal(errorHoldUntil(errorSeen({ n: 4, age: 5000, message: "x" }, now), null, now), now + ERROR_HOLD_MS);
+  assert.equal(errorHoldUntil(errorSeen({ n: 4, age: ERROR_HOLD_MS + 1, message: "x" }, now), null, now), 0);
+  assert.equal(errorSeen(undefined, now), null);
+  assert.equal(errorSeen({ n: 5, message: "x" }, now), null);
+  assert.equal(errorHoldUntil(null, null, now), 0);
 });
 
 const HOME = { word: "Okay Nabu", room: "Living Room", voice: true, tap: true, mute: true };

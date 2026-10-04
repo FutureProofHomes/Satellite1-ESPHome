@@ -32,6 +32,13 @@ export const ORB_LABEL = {
   disabled: "Offline",
 };
 
+/**
+ * How long the page keeps a pipeline error on the orb, from when it first sees it. The device's
+ * error phase lasts about a second and the voice poll runs at five when idle, so going by the phase
+ * alone the message flashed or never showed (owner, October 2026).
+ */
+export const ERROR_HOLD_MS = 6000;
+
 export function orbState(phase, connected) {
   if (!connected) return "disabled";
   return PHASE_ORB[phase] || "idle";
@@ -40,11 +47,31 @@ export function orbState(phase, connected) {
 /**
  * What the orb draws: its state, the label under it, and whether it wears the muted look. A lost
  * event stream wins over mute, because the mute state it would show is as stale as everything else.
+ * `error` is the device's newest pipeline error, whose message replaces the bare "Error" - in the
+ * error phase always, since the device records it before entering the phase, and on an idle device
+ * while the page is `holding` it (useErrorHold).
  */
-export function orbView(phase, connected, muted) {
-  const state = orbState(phase, connected);
+export function orbView(phase, connected, muted, error = null, holding = false) {
+  let state = orbState(phase, connected);
   if (muted && state !== "disabled") return { state: "idle", label: "Mic muted", muted: true };
-  return { state, label: ORB_LABEL[state], muted: false };
+  if (holding && error && state === "idle") state = "error";
+  const message = state === "error" ? String(error?.message || "").trim() : "";
+  return { state, label: message || ORB_LABEL[state], muted: false };
+}
+
+/**
+ * The hold for GET /api/sat1/voice's `error` ({n, age, message}), taken the first time the page sees
+ * that error: ERROR_HOLD_MS from then, so one the idle poll finds seconds late is still up long
+ * enough to read. One already older than the hold when found - a page opened after it - gets none.
+ */
+export function errorSeen(error, now) {
+  if (!error || !Number.isFinite(error.age)) return null;
+  return { n: error.n, until: error.age <= ERROR_HOLD_MS ? now + ERROR_HOLD_MS : 0 };
+}
+
+/** Until when the page holds the error `seen` saw, or 0 - none, past the hold, or dismissed (`gone` is its count). */
+export function errorHoldUntil(seen, gone, now) {
+  return seen && seen.n !== gone && seen.until > now ? seen.until : 0;
 }
 
 /** "the Living Room", but "Bob's Office" and "The Den" as they are. */

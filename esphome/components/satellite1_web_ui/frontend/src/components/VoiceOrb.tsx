@@ -3,7 +3,7 @@ import { HINTS, TEXT } from '../copy.js';
 import { entity, pathFor, post } from '../lib/device.js';
 import type { Ctx, Orb } from '../ctx';
 import { Mic, MicOff } from '../icons';
-import { hexToRgb, hsvToRgb, isOn, orbView, pctTo255, rgbHue, ringPct } from '../lib/orb.js';
+import { errorHoldUntil, errorSeen, hexToRgb, hsvToRgb, isOn, ORB_LABEL, orbState, orbView, pctTo255, rgbHue, ringPct } from '../lib/orb.js';
 import { tipDone } from '../lib/tips.js';
 import { Drawer, Presence } from './Drawer';
 const PARTICLE_COUNT = 720;
@@ -414,16 +414,51 @@ function useTip(tips: string[], resting: boolean) {
   return { tip, leaving: tip ? leaving : null };
 }
 
+/** GET /api/sat1/voice's newest pipeline error (web_ui_handler.cpp handle_voice_): its count, ms ago, and text. */
+export type VoiceError = {
+  n: number;
+  age: number;
+  message: string;
+};
+const RUNNING: OrbState[] = ['listening', 'thinking', 'speaking'];
+
+/**
+ * Whether the page is holding the device's newest error on the orb, ERROR_HOLD_MS from when the
+ * page first saw it (src/lib/orb.js). The hold ends for good - that error never comes back - when it
+ * runs out, when the device starts another run, or on `drop`: the orb's tap, which starts one before
+ * the poll can report it. `live` is the device's own state, not the held one.
+ */
+function useErrorHold(error: VoiceError | undefined, live: OrbState) {
+  const seen = useRef<{ n: number; until: number } | null>(null);
+  if (error && seen.current?.n !== error.n) seen.current = errorSeen(error, Date.now());
+  const [gone, setGone] = useState<number | null>(null);
+  const [, bump] = useState(0);
+  const running = RUNNING.includes(live);
+  useEffect(() => {
+    if (running && error) setGone(error.n);
+  }, [running, error?.n]);
+  const until = errorHoldUntil(seen.current, gone, Date.now());
+  useEffect(() => {
+    if (!until) return;
+    const id = setTimeout(() => bump(k => k + 1), until - Date.now());
+    return () => clearTimeout(id);
+  }, [until]);
+  return { holding: until > 0 && !running, drop: () => error && setGone(error.n) };
+}
+
 /**
  * The assistant's orb: its state follows the phase the Home tab polls, its colours are the shell's
  * persisted `orb`, and the picker writes the LED ring and keeps it lit while open. `onOrbColor`
  * fires only on a person's pick, so mounting never overwrites the saved choice. At rest, `tips`
  * (orbTips) take the label's place; the label stays in the accessibility tree, so a screen reader
- * hears the state change and not every tip.
+ * hears the state change and not every tip. A pipeline error's message (`error`) takes the same
+ * place, in red, so a two-line message grows up into the orb's margin rather than pushing the
+ * buttons below it down.
  */
 export function VoiceOrb({
   ctx,
   phase,
+  error,
   orb,
   onOrbColor,
   onTalk,
@@ -431,6 +466,7 @@ export function VoiceOrb({
 }: {
   ctx: Ctx;
   phase: number | undefined;
+  error?: VoiceError;
   orb: Orb;
   onOrbColor: (from: string, to: string) => void;
   onTalk?: () => void;
@@ -448,13 +484,17 @@ export function VoiceOrb({
   }, []);
   const mute = entity(ctx, 'mute_mics');
   const muted = isOn(mute);
-  const view = orbView(phase, ctx.connected, muted);
+  const live = orbState(phase, ctx.connected) as OrbState;
+  const hold = useErrorHold(error, live);
+  const view = orbView(phase, ctx.connected, muted, error, hold.holding);
+  const err = view.state === 'error' && view.label !== ORB_LABEL.error ? view.label : '';
   // The sphere is the action button's press-to-talk (common/web_ui_assist.yaml), on firmware that
   // has it - `onTalk` is the Home tab's, which knows whose pipeline the open tab is. Not while muted,
   // and not while Home Assistant is gone ("Not ready") or the page has lost the device - the device
-  // would refuse, and a tap that does nothing reads as a broken orb.
-  const talk = !!onTalk && !view.muted && TAPPABLE.includes(view.state);
-  const running = view.state !== 'idle';
+  // would refuse, and a tap that does nothing reads as a broken orb. Going by the device's own
+  // state, so an error the page is still holding on an idle device can be answered with a retry.
+  const talk = !!onTalk && !muted && TAPPABLE.includes(live);
+  const running = live !== 'idle';
   const shown = useTip(tips, !view.muted && view.state === 'idle');
   const ring = entity(ctx, 'ring');
   const hasRing = !!ring;
@@ -488,11 +528,15 @@ export function VoiceOrb({
       {talk && <button className="orb-tap" style={{
         width: Math.round(orbSize * ORB_TAP),
         height: Math.round(orbSize * ORB_TAP)
-      }} aria-label={running ? TEXT.orb_stop : TEXT.orb_talk} title={running ? TEXT.orb_stop : TEXT.orb_talk} onClick={onTalk} />}
+      }} aria-label={running ? TEXT.orb_stop : TEXT.orb_talk} title={running ? TEXT.orb_stop : TEXT.orb_talk} onClick={() => {
+          hold.drop();
+          onTalk?.();
+        }} />}
     </div>
     <div className="orb-meta">
       <div className="orb-say">
-        <span className={'orb-label' + (shown.tip ? ' tipped' : '') + (view.muted ? ' muted-on' : '')} aria-live="polite">{view.label}</span>
+        <span className={'orb-label' + (shown.tip || err ? ' tipped' : '') + (view.muted ? ' muted-on' : '')} aria-live="polite">{view.label}</span>
+        {err && <span className="orb-tips orb-err" aria-hidden="true"><span key={err} className="in">{err}</span></span>}
         {shown.tip && <span className="orb-tips">{shown.leaving && <span key={'out' + shown.leaving} className="out" aria-hidden="true">{shown.leaving}</span>}<span key={shown.tip} className="in">{shown.tip}</span></span>}
       </div>
       <div className="orb-tools">

@@ -89,7 +89,7 @@ only the handful of things `web_server` has no concept of get custom endpoints.
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/sat1/state` | Device facts and the entity-name table |
-| `GET /api/sat1/voice` | Assistant phase, timers, transcript ring |
+| `GET /api/sat1/voice` | Assistant phase, timers, transcript ring, and the newest pipeline error (message, count, age), which the orb shows in place of "Error" |
 | `GET /api/sat1/amp` | The speaker amplifier's power gain mode and digital volume level |
 | `GET /api/sat1/ha` | The cached Home Assistant area and player tree |
 | `GET`/`POST /api/sat1/sel` | The routing and ducking selection |

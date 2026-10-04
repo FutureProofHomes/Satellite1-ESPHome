@@ -189,6 +189,9 @@ class Satellite1WebUI : public Component {
 
   /// Called by assist_start_by_hand in common/web_ui_assist.yaml. See WebUIHandler::note_manual_start.
   void note_manual_start(const std::string &word) { this->handler_.note_manual_start(word); }
+
+  /// Called from the on_error lambda in common/voice_assistant.yaml. See WebUIHandler::note_voice_error.
+  void note_voice_error(const std::string &message) { this->handler_.note_voice_error(message); }
 #endif
 
 #ifdef USE_MICRO_WAKE_WORD

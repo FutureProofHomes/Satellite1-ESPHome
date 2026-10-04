@@ -894,7 +894,7 @@ export function HomeTab({
   }, done);
   return <section className="now now-compact"><div className="now-left" style={{
       width: '100%'
-    }}><SensorPills ctx={ctx} /><VoiceOrb ctx={ctx} phase={voice?.phase} orb={orb} onOrbColor={onOrbColor} onTalk={talk} tips={tips} /></div><div className="now-right"><Pager view={at} onView={i => {
+    }}><SensorPills ctx={ctx} /><VoiceOrb ctx={ctx} phase={voice?.phase} error={voice?.error} orb={orb} onOrbColor={onOrbColor} onTalk={talk} tips={tips} /></div><div className="now-right"><Pager view={at} onView={i => {
         tipDone('swipe');
         setView(i);
       }} labels={labels} cue={unseen} cards={cards} /><Timers timers={voice?.timers || []} /></div>{ww.drawers}</section>;

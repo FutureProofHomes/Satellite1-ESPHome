@@ -314,6 +314,18 @@ class WebUIHandler : public AsyncWebHandler {
     this->manual_start_ = true;
     this->manual_word_ = word;
   }
+
+  /// The pipeline error the orb shows in place of a bare "Error", from the on_error trigger. Kept
+  /// with a count and the time it came in because the error phase lasts about a second and the page
+  /// polls at five when idle: it holds the message for a few seconds whenever it finds it, the age
+  /// is how it skips one already stale, and the count is how it tells a new error from the one it
+  /// already showed. Main loop only, read from the httpd task, so both sides take the lock.
+  void note_voice_error(const std::string &message) {
+    LockGuard guard{this->voice_error_lock_};
+    this->voice_error_ = message;
+    this->voice_error_ms_ = millis();
+    this->voice_error_count_++;
+  }
 #endif
 
   /// Reserves the PSRAM buffer the next payload is written into, or nullptr if it could not grow.
@@ -977,6 +989,10 @@ class WebUIHandler : public AsyncWebHandler {
   uint32_t manual_start_ms_{0};
   bool manual_start_{false};
   std::string manual_word_;
+  std::string voice_error_;
+  uint32_t voice_error_ms_{0};
+  uint32_t voice_error_count_{0};
+  Mutex voice_error_lock_;
 #endif
 
 #ifdef USE_MEDIA_PLAYER
