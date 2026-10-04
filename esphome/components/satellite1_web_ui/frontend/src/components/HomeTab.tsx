@@ -665,7 +665,8 @@ function Composer({
         setDraft(next);
         onEngage(true);
       }} />
-      <button type="submit" className="composer-send" disabled={!draft.trim() || busy || !!blocked || !agent} aria-label={TEXT.ask_send}><ArrowUp size={16} strokeWidth={2.6} /></button>
+      {/* Focus stays in the field, so a tap on send leaves the keyboard - and the chat-only layout - up. */}
+      <button type="submit" className="composer-send" disabled={!draft.trim() || busy || !!blocked || !agent} aria-label={TEXT.ask_send} onMouseDown={e => e.preventDefault()}><ArrowUp size={16} strokeWidth={2.6} /></button>
     </form>
     {(blocked || failed) && <div className="composer-note" role="status">{blocked || failed}</div>}
   </div>;

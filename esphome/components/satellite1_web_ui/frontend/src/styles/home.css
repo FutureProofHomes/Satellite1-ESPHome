@@ -162,6 +162,17 @@ section.now.now-compact>.now-right{padding-bottom:2px !important}
 .agent-panel .dw-top{align-items:flex-start}
 .agent-panel .dw-top h2{line-height:1.25}
 
+/* ===== Home: chat only while the keyboard is up ===== */
+/* The strip above the keyboard (shell.css pins the app to it) is too short for the readings and the
+   orb over a conversation worth reading, so the windows take all of it, as an iMessage thread does
+   (owner's choice, October 2026): no header, chips, orb, page dots or timers, and the section
+   clears the status bar now the header is not there to. The windows still swipe. */
+@media (max-width:1023px){
+html[data-kb] .app:has(section.now-compact)>header,html[data-kb] section.now.now-compact>.now-left,html[data-kb] section.now.now-compact .tt-dots,html[data-kb] section.now.now-compact .timer-list{display:none !important}
+html[data-kb] section.now.now-compact{display:flex !important;flex-direction:column !important;height:var(--vvh) !important;max-height:var(--vvh) !important;padding:var(--sat) 0 0 !important}
+html[data-kb] section.now.now-compact>.now-right{width:100% !important;margin:0 !important;padding:6px 16px 8px !important}
+}
+
 /* ===== Home: timers (read-only) ===== */
 .timer-pill{min-height:44px;padding-right:14px}
 .timer-pill-label small{color:var(--muted);font-size:12px}

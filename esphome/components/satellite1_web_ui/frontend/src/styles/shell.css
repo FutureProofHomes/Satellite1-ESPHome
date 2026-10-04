@@ -42,6 +42,18 @@ html[data-short], html[data-short] body { background: var(--surface); }
    gone and nothing subtracts it. */
 @media (min-width: 640px) and (max-width: 1023px) { .app { --tabs-h: 60px; } }
 
+/* The on-screen keyboard (lib/keyboard.js sets data-kb). The phone pans the page up under it rather
+   than resizing it, which carried the fixed nav and media bar up between the field and the keys
+   (owner's screenshot, October 2026), so both go while it is up and nothing makes room for them.
+   Home is also pinned to the strip the keyboard leaves - --vvt is how far the phone has panned the
+   page, --vvh how tall the strip is - so its message field sits on the keyboard; home.css lays the
+   page out in it. */
+@media (max-width: 1023px) {
+  html[data-kb] .app { --tabs-h: 0px; --mbar-h: 0px; --sab: 0px; }
+  html[data-kb] .app > .tabs, html[data-kb] .mbar { display: none !important; }
+  html[data-kb] .app:has(section.now-compact) { position: fixed !important; top: var(--vvt, 0px); left: 0; right: 0; height: var(--vvh, 100dvh) !important; }
+}
+
 /* The appearance menu (bits.tsx ThemeMenu), portaled and placed under its button. */
 .theme-menu { position: fixed; z-index: 500; min-width: 210px; padding: 6px; background: var(--pop); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-pop); animation: menuIn .16s cubic-bezier(.2,.8,.2,1); transform-origin: top right; }
 @keyframes menuIn { from { opacity: 0; transform: scale(.96) translateY(-4px); } }

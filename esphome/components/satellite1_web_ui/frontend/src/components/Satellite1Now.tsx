@@ -3,6 +3,7 @@ import { TEXT } from '../copy.js';
 import { logout, peerLogin, primeOtherOrigin, probePeer, putPanelHandoff } from '../lib/auth.js';
 import { deviceIdentity, entity, haBlocked, onLogAlert, onWriteError, peerOrigin, proxied, useDeviceState, useEvents, useHaData, useSelection } from '../lib/device.js';
 import { tipDone } from '../lib/tips.js';
+import { watchKeyboard } from '../lib/keyboard.js';
 import { archiveAllNotifs, archiveNotif, listNotifs, notifCount, setNotifDevice, subscribeNotifs } from '../lib/notif.js';
 import { setSparkDevice, sparkRecord } from '../lib/sparkhist.js';
 import { dismissToast, subscribeToasts, tapToast, toast, toastIntent } from '../lib/toast.js';
@@ -299,14 +300,16 @@ export function Satellite1Now({
   const appRef = useRef<HTMLElement>(null);
   const headerRef = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
+    // Home hides the header while the keyboard is up (home.css), and a zero then would outlive it.
     const measure = () => {
       const hh = headerRef.current?.offsetHeight ?? 72;
-      appRef.current?.style.setProperty('--header-h', hh + 'px');
+      if (hh) appRef.current?.style.setProperty('--header-h', hh + 'px');
     };
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
   }, []);
+  useEffect(() => watchKeyboard(appRef.current), []);
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
   const shownRoute = useRef(route);
   useEffect(() => {
