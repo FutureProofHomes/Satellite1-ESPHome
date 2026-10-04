@@ -660,6 +660,45 @@ poisoning (`CONFIG_HEAP_CORRUPTION_DETECTION`) if dumps point at heap corruption
 capture floor on a single unit. `CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK` is already on for
 everyone — a hardware watchpoint, zero RAM, it turns silent stack overflows into precise panics.
 
+## Log history
+
+Built October 2026 (plan file `logs_card_fixes_ccfc2019`), because the Logs card used to show only
+what the device said while a page was open on it. Someone who noticed a problem and then opened the
+card found nothing from before they looked. Now the device keeps its recent log, and the card opens
+on it.
+
+**On the device.** `satellite1_web_ui` keeps two rings in PSRAM (`log_history.h`). The main ring,
+256KB, takes every line up to DEBUG. The alert ring, 32KB, takes warnings and errors a second time,
+so they are still there long after a busy stretch has turned the main ring over. Both are filled by
+a logger listener, which ESPHome only ever calls on the main loop task, and both are allocated from
+generated code before `App.setup()`, so the history starts with the boot. Neither touches internal
+RAM, and neither survives a reboot: the crash report's RTC ring covers the seconds before a crash.
+The cost is about 288KB of PSRAM. It is on for every build; `log_history: false` on
+`satellite1_web_ui` turns it off, and a block changes `size`, `alerts_size` or `level`:
+
+```yaml
+satellite1_web_ui:
+  log_history:
+    size: 512kB
+    level: VERBOSE
+```
+
+**The endpoint.** `GET /api/sat1/log` answers `text/plain` behind the session gate, chunked from the
+rings through one 4KB PSRAM buffer. The first line is
+`#sat1-log boot=<hex> now=<millis> end=<position>`; every line after it is one record,
+`<millis> <line>`, with the line's own newlines sent as `\x1f`. A full answer is the warnings and
+errors the main ring has already dropped, then the whole main ring, oldest first. Asked with
+`?boot=<boot>&from=<end>` from an earlier answer, it sends only the main ring's records since. A
+different boot id means the device has restarted, and the app starts over. The endpoint answers 404
+when log history is off or PSRAM could not hold it.
+
+**In the app.** The Logs card reads the history when it opens, when the event stream reopens while
+the card is showing, and on Resume. The stream's log events carry the device's `millis()` as their
+SSE id, so history and stream lines line up on uptime. A line held by both is kept once, as the
+stream's copy, and an uptime that steps backwards marks a reboot: the new boot's lines follow the old
+one's instead of being sorted in among them. The browser ring holds 5000 lines. The panel draws the
+newest 1500, with a Show earlier button above them, and the footer says how far back the lines go.
+
 ## Rebuilding and conventions
 
 All user-facing strings live in `frontend/src/copy.js` and are mirrored into

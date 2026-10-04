@@ -283,7 +283,7 @@ export const HINTS = {
 
   beta: "Offers pre-release firmware to the updater. Useful for testing a fix; not what you want on a device you rely on.",
 
-  log: "The device's own log, live. This is the first place to look when something misbehaves, and the most useful thing to attach to a support request.",
+  log: "The device's own log: what it said recently, then live as it happens. This is the first place to look when something misbehaves, and the most useful thing to attach to a support request.",
 
   // The notification drawer's ⓘ. The badge arithmetic is the one thing the surface cannot say for
   // itself, so it leads; the 24-hour window and the swipe are the two behaviours people ask about.

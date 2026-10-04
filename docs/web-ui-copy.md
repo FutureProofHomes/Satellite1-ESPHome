@@ -137,7 +137,7 @@ looking at a third of them was the more expensive problem.
 | `safe_mode` | Safe mode | Restarts with everything but Wi-Fi and the updater switched off. Use it when the device is crash-looping too fast to accept an update. |
 | `factory_reset` | Factory reset | Erases every setting stored on the ESP32, including the Wi-Fi credentials, and restarts. You will have to set the device up again from scratch. The audio chip's firmware is not touched. |
 | `beta` | Beta updates | Offers pre-release firmware to the updater. Useful for testing a fix; not what you want on a device you rely on. |
-| `log` | Logs card title | The device's own log, live. This is the first place to look when something misbehaves, and the most useful thing to attach to a support request. |
+| `log` | Logs card title | The device's own log: what it said recently, then live as it happens. This is the first place to look when something misbehaves, and the most useful thing to attach to a support request. |
 | `crash` | Crash Reports card title | What the device remembers about its own crashes: when each one happened, which task died and where, the last log lines before it went down, and a downloadable crash dump for the deepest look. Attach the dump and the log to a support request, or erase them once the cause is found. A crash that cuts power entirely leaves less detail than one the device rebooted itself from. |
 | `crash_log` | Pre-crash log row | The last log lines the device wrote before it went down, recovered across the reboot. The most recent crash only - a newer crash replaces it. |
 | `crash_dump` | Crash dump row | A complete snapshot of what every task was doing at the moment of the most recent crash, analyzed offline against this exact firmware build. It may contain fragments of anything the device held in memory, so share it like a log, not like a screenshot. |
@@ -471,7 +471,7 @@ a warning or error line arriving on the event stream, with `%s` the component ta
 while the Logs card is on screen; `crash_toast_*` fire when the crash count moves mid-session (the
 device rebooted from a crash while the page watched - history stays the Crash Reports card's story);
 `update_toast_*` carry firmware news once per session, the version in the title via `%s`. Tapping a
-toast acts - navigation with a reveal (the Logs card forced open at the right level filter, the Crash
+toast acts - navigation with a reveal (the Logs card forced open with only that level's chip lit, the Crash
 or Firmware card scrolled into view) or the fix drawer for the blocked nudge; the ✕ (`dismiss`)
 dismisses without acting.
 
@@ -649,12 +649,19 @@ so controlling a peer remotely shows the same row.
 origin - the Clipboard API needs a secure context, this app is served over plain HTTP, so it ran on a
 deprecated `execCommand` fallback - and the owner cut it in favour of **Export** (briefly "Dump"),
 which downloads the same thing copy produced: the lines on screen, filters and all, each line stamped
-with its arrival time. Export Logs sits in the card header beside the level menu. The stream toggle
-lives at the card's foot, to the right of the line count; it shows the state it is in - **Live**,
-accent-blue, while lines flow; **Paused** once they are held - rather than the action it offers. The
-level filter is a drawn menu rather than a native select (Safari's native popup ignores option
-styling): the funnel icon sits inside the control, and the current level and every option wear the
-same colours as the lines they admit.
+with its arrival time. The stream toggle lives at the card's foot, to the right of the line count; it
+shows the state it is in - **Following**, accent-blue, while lines flow; **Resume** once they are
+held - rather than the action it offers.
+
+The level filter is a row of chips (October 2026), replacing a level menu that worked as a floor:
+choosing Debug showed Debug and everything more severe, so a customer who picked Debug still saw
+warnings and read it as broken. Each chip - **Errors**, **Warnings**, **Info**, **Debug**, and
+**Verbose** only when such lines exist - shows exactly its own level, any mix can be lit, and each
+wears a count of its lines that matches the text filter. CONFIG lines (the dump_config tables) count
+as Info. Lines wrap rather than ending in an ellipsis. The footer line count ends "since HH:MM:SS",
+the oldest line held, now that the card opens on the device's recent history rather than on nothing
+(see Log history in [web-ui.md](web-ui.md)). With every chip off the panel says "Every level is off.
+Turn one on to see its lines."
 The Show/Hide invert and the Clear button are gone too - the search fields' own ✕ clears them, and
 Clear's real job (emptying the log buffer) is a page reload now.
 
