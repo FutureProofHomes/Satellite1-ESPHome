@@ -68,6 +68,15 @@
   .dx-reveal, .dx-log-line.hl { animation: none; outline: 2px solid var(--orb-ctl); }
 }
 
+/* A phone's message column beside the stamp, level and tag would be a dozen characters wide, so
+   there the message takes its own full-width line under them. */
+@media (max-width: 639px) {
+  .dx-log-line { flex-wrap: wrap; row-gap: 0; }
+  .dx-log-line + .dx-log-line { margin-top: 4px; }
+  .dx-log-tag { min-width: 0; }
+  .dx-log-txt { flex-basis: 100%; }
+}
+
 /* Phones scan black on white; a themed or tinted code fails on half of them. */
 .dx-qr, [data-theme='light'] .dx-qr { width: 148px; height: 148px; padding: 0; background: #fff; fill: #000; border-radius: 10px; }
 .dx-launch-side .dx-flush { padding: 0; }

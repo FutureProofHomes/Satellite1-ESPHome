@@ -131,7 +131,7 @@ export function LogsCard({
               <span className="dx-log-ts">{stamp(l.at)}</span>
               <span className="dx-log-lvl">{l.lvl === '?' ? '' : l.lvl}</span>
               <span className="dx-log-tag">{p.tag}</span>
-              <span className="dx-log-txt" title={p.msg}>{p.msg}</span>
+              <span className="dx-log-txt">{p.msg}</span>
             </div>;
       })}
       </div>
