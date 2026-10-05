@@ -203,6 +203,14 @@ satellite1:
           state: !lambda 'return id(satellite1_id).status_string();'
       - delay: 1s
       - script.execute: control_leds
+      # The XMOS firmware picker hands its pin to xflash from its own setup(), and a unit without a
+      # radar reaches that only after the radar's 3s detection wait, well after the XMOS answers.
+      # Deciding before setup finishes reads "not pinned" and flashes the built-in image over the
+      # picked one.
+      - wait_until:
+          condition:
+            lambda: return App.is_setup_complete();
+          timeout: 20s
       - if:
           condition:
             - lambda: return ${xmos_auto_flash_on_boot};
