@@ -2280,8 +2280,56 @@ void WebUIHandler::handle_ma_set_(AsyncWebServerRequest *request) {
 
   MaCmd kind = MaCmd::NONE;
   std::string arg;
+  std::string arg2;
+  // A speaker named in a parameter: the shape of an MA player and present in a payload this device
+  // rendered, the same two guards `e` gets below.
+  const auto known_player = [this](const std::string &value) {
+    return ma_entity_ok_(value, "media_player.") && (this->ha_payload_names_(value) || this->ma_payload_names_(value));
+  };
 
-  if (strcmp(cmd, "like") == 0) {
+  if (strcmp(cmd, "takeover") == 0 || strcmp(cmd, "move") == 0) {
+    // `e` is this device's group leader, `s` the speaker whose queue moves to it. Take over's `m`
+    // lists every speaker of theirs to join afterwards, each checked on its own.
+    auto *source = request->getParam("s");
+    if (!ma_entity_ok_(entity, "media_player.") || source == nullptr || !known_player(source->value())) {
+      request->send(400, "application/json", "{\"ok\":0}");
+      return;
+    }
+    arg = source->value();
+    if (strcmp(cmd, "takeover") == 0) {
+      auto *members = request->getParam("m");
+      if (members == nullptr || members->value().empty() || members->value().size() > 600) {
+        request->send(400, "application/json", "{\"ok\":0}");
+        return;
+      }
+      const std::string &list = members->value();
+      size_t start = 0;
+      while (start <= list.size()) {
+        const size_t comma = list.find(',', start);
+        const size_t end = comma == std::string::npos ? list.size() : comma;
+        if (!known_player(list.substr(start, end - start))) {
+          request->send(400, "application/json", "{\"ok\":0}");
+          return;
+        }
+        if (comma == std::string::npos)
+          break;
+        start = comma + 1;
+      }
+      kind = MaCmd::TAKEOVER;
+      arg2 = list;
+    } else {
+      kind = MaCmd::MOVE;
+    }
+  } else if (strcmp(cmd, "transport") == 0) {
+    auto *c = request->getParam("c");
+    if (!ma_entity_ok_(entity, "media_player.") || c == nullptr ||
+        (c->value() != "play_pause" && c->value() != "next" && c->value() != "previous")) {
+      request->send(400, "application/json", "{\"ok\":0}");
+      return;
+    }
+    kind = MaCmd::TRANSPORT;
+    arg = c->value();
+  } else if (strcmp(cmd, "like") == 0) {
     // The favorite is a button entity the MA integration creates beside the player - pressing it is
     // how "like this track" works, and the only way: there is no action that takes a media item.
     if (!ma_entity_ok_(entity, "button.")) {
@@ -2361,8 +2409,10 @@ void WebUIHandler::handle_ma_set_(AsyncWebServerRequest *request) {
     bool queued = false;
     for (auto &pending : this->ma_queue_) {
       if (pending.kind == static_cast<uint8_t>(kind) && pending.entity == entity) {
-        // Last write wins per kind and entity: a member-volume drag or a scrub ends as one call.
+        // Last write wins per kind and entity: a member-volume drag or a scrub ends as one call,
+        // and a burst of Next taps on another speaker as one skip.
         pending.arg = arg;
+        pending.arg2 = arg2;
         queued = true;
         break;
       }
@@ -2373,7 +2423,7 @@ void WebUIHandler::handle_ma_set_(AsyncWebServerRequest *request) {
         request->send(409, "application/json", "{\"ok\":0}");
         return;
       }
-      this->ma_queue_.push_back({static_cast<uint8_t>(kind), entity, arg});
+      this->ma_queue_.push_back({static_cast<uint8_t>(kind), entity, arg, arg2});
     }
 
     this->ma_pending_.store(true, std::memory_order_release);

@@ -244,9 +244,29 @@ const isMe = (p, mac) =>
   normMac(p?.player_id) === normMac(mac) || normMac(p?.device_info?.mac_address) === normMac(mac);
 
 /**
+ * One command result, gathered: listings that run long (a playlist's tracks, a podcast's episodes)
+ * arrive in 500-item messages marked `partial: true` before a final unmarked one, and taking the
+ * first message as the answer would cut a long playlist at 500. `parts` holds the chunks so far by
+ * message id. Returns null while more is coming, else `{result}` with every chunk joined.
+ */
+export function gatherResult(parts, msg) {
+  const id = msg.message_id;
+  if (msg.partial) {
+    parts.set(id, [...(parts.get(id) || []), ...(Array.isArray(msg.result) ? msg.result : [])]);
+    return null;
+  }
+  const prev = parts.get(id);
+  parts.delete(id);
+  return { result: prev && Array.isArray(msg.result) ? [...prev, ...msg.result] : msg.result };
+}
+
+/**
  * One live connection, for as long as `cfg` names a server and the caller stays mounted.
  *
- * Returns `{status, me, players, queue, cmd}`. `status` walks off -> connecting -> on, with "error"
+ * Returns `{status, me, players, queue, cmd, skew}`. `skew` is how far this browser's clock runs
+ * ahead of the server's, in seconds, for other players' playheads (rowClock in src/lib/media.js):
+ * players stamp elapsed_time with the server's epoch, and the smallest gap seen between a stamp
+ * and its arrival is the best estimate of the two clocks' difference. `status` walks off -> connecting -> on, with "error"
  * for a socket that could not be opened or a token the server refused - the settings panel's whole
  * vocabulary. `players` is every player the server knows, keyed by id and updated live from
  * player_updated events; `me` is this device's, found by MAC; `queue` is its active queue, with
@@ -260,6 +280,7 @@ export function useMaSocket(mac, cfg) {
   const [status, setStatus] = useState("off");
   const [players, setPlayers] = useState(null);
   const [queue, setQueue] = useState(null);
+  const [skew, setSkew] = useState(0);
   const io = useRef(null);
 
   const url = cfg ? maWsUrl(cfg.url) : "";
@@ -281,7 +302,18 @@ export function useMaSocket(mac, cfg) {
     // Pending commands by message id; results resolve them, teardown drops them.
     let nextId = 1;
     const pending = new Map();
+    const parts = new Map();
     let myId = "";
+    let minGap = Infinity;
+    const stamp = (p) => {
+      const at = p?.elapsed_time_last_updated;
+      if (!at) return;
+      const gap = Date.now() / 1000 - at;
+      if (gap < minGap) {
+        minGap = gap;
+        setSkew(gap);
+      }
+    };
 
     const send = (command, args) => {
       const message_id = String(nextId++);
@@ -304,12 +336,20 @@ export function useMaSocket(mac, cfg) {
     };
 
     const onEvent = (msg) => {
-      if (msg.event === "player_updated" && msg.data?.player_id) {
+      if ((msg.event === "player_updated" || msg.event === "player_added") && msg.data?.player_id) {
         const p = msg.data;
+        stamp(p);
         setPlayers((prev) => ({ ...prev, [p.player_id]: p }));
         // Our own player changing source or group is what moves the active queue; asking again is
         // one message to a server on the same LAN, and cheaper than modelling MA's redirects here.
         if (p.player_id === myId) refreshQueue();
+      } else if (msg.event === "player_removed" && msg.object_id) {
+        setPlayers((prev) => {
+          if (!prev?.[msg.object_id]) return prev;
+          const next = { ...prev };
+          delete next[msg.object_id];
+          return next;
+        });
       } else if (msg.event === "queue_updated" || msg.event === "queue_items_updated") {
         // elapsed_time_last_updated re-anchored to this browser's clock, here and below: the
         // server stamps its own epoch, and extrapolating across two clocks makes the scrubber
@@ -354,7 +394,10 @@ export function useMaSocket(mac, cfg) {
             const all = await send("players/all");
             if (!live) return;
             const map = {};
-            for (const p of all || []) map[p.player_id] = p;
+            for (const p of all || []) {
+              map[p.player_id] = p;
+              stamp(p);
+            }
             myId = Object.keys(map).find((id) => isMe(map[id], mac)) || "";
             setPlayers(map);
             setStatus("on");
@@ -370,10 +413,18 @@ export function useMaSocket(mac, cfg) {
         }
 
         if (msg.message_id != null && pending.has(msg.message_id)) {
+          if (msg.error_code != null) {
+            parts.delete(msg.message_id);
+            const p = pending.get(msg.message_id);
+            pending.delete(msg.message_id);
+            p.reject(new Error(msg.details || String(msg.error_code)));
+            return;
+          }
+          const done = gatherResult(parts, msg);
+          if (!done) return;
           const p = pending.get(msg.message_id);
           pending.delete(msg.message_id);
-          if (msg.error_code != null) p.reject(new Error(msg.details || String(msg.error_code)));
-          else p.resolve(msg.result);
+          p.resolve(done.result);
           return;
         }
 
@@ -383,6 +434,7 @@ export function useMaSocket(mac, cfg) {
       ws.onclose = () => {
         for (const p of pending.values()) p.reject(new Error("closed"));
         pending.clear();
+        parts.clear();
         if (!live || denied) return;
         setStatus((s) => (s === "on" ? "connecting" : "error"));
         // 2s doubling to 30s: fast enough that a restarted MA comes back before anyone reaches for
@@ -407,6 +459,7 @@ export function useMaSocket(mac, cfg) {
     status,
     players,
     queue,
+    skew,
     me: players ? Object.values(players).find((p) => isMe(p, mac)) || null : null,
     cmd: (command, args) => (io.current ? io.current.send(command, args) : Promise.reject(new Error("off"))),
   };

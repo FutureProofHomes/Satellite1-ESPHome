@@ -49,6 +49,45 @@
 .search-status .search-spin { width: 22px; height: 22px; border-width: 2.5px; border-color: var(--line); border-top-color: var(--orb-ctl); margin: 8px auto 10px; }
 .search-empty .mapanel { width: 100%; text-align: left; }
 
+/* The clear and forget buttons are 28px circles; the app-wide 44px minimum stretched them oval. */
+.search-x, .search-rec-x { min-height: 28px; }
+
+/* A result row: the main area (art and text) opens or expands, then the round play button, then
+   the chevron on rows that open - or its empty space, in results, so the play buttons line up. */
+.search-line { display: flex; align-items: center; gap: 4px; padding-right: 6px; }
+.search-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 10px; background: none; text-align: left; color: var(--text); min-height: 0; }
+.search-play { flex: none; width: 36px; height: 36px; min-height: 36px; border-radius: 50%; background: var(--surface2); color: var(--text); display: grid; place-items: center; padding: 0; }
+.search-play .mi { width: 13px; height: 13px; }
+.search-play .search-spin { width: 13px; height: 13px; }
+.search-hit.on .search-play { background: var(--line); }
+.search-chev { flex: none; width: 22px; height: 36px; min-height: 36px; display: grid; place-items: center; background: none; color: var(--muted); padding: 0; }
+.search-chev .mi { width: 14px; height: 14px; }
+.search-chev.gap { visibility: hidden; }
+.search-hit.on .search-acts { padding-left: 58px; }
+.search-hit.ep.on .search-acts { padding-left: 8px; }
+.search-num { flex: none; width: 40px; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
+.search-dur { flex: none; font-size: 12px; color: var(--muted); padding-left: 6px; font-variant-numeric: tabular-nums; }
+.search-left { color: var(--orb-ink); }
+.search-s .mi { display: inline-block; width: 11px; height: 11px; vertical-align: -1px; margin-right: 2px; }
+
+/* An opened item: Back and its name where the field was, then its header. */
+.search-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 16px 6px 8px; border-bottom: 1px solid var(--line); }
+.search-back { display: flex; align-items: center; gap: 2px; min-width: 0; background: none; color: var(--orb-ink); font-size: 14px; padding: 0 6px; }
+.search-back span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.search-back .mi { flex: none; width: 16px; height: 16px; }
+.search-nav-t { min-width: 0; font-size: 14px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.search-hero { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 20px 16px 4px; }
+.search-hero-art { position: relative; display: grid; place-items: center; width: 128px; height: 128px; border-radius: 14px; overflow: hidden; background: var(--surface2); box-shadow: 0 14px 34px #0008; }
+.search-hero-art.round { border-radius: 50%; }
+.search-hero-art .mi { width: 36px; height: 36px; opacity: .35; }
+.search-hero-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.search-hero h3 { margin: 16px 0 4px; font-size: 20px; font-weight: 700; letter-spacing: -.02em; }
+.search-hero .dim { font-size: 13px; }
+.search-hero .search-acts { justify-content: center; padding: 14px 0 6px; }
+
+/* The bar's search, left of the speaker button. */
+.mbtn.msearch { flex: none; }
+
 @media (prefers-reduced-motion: reduce) {
   /* Still "working" without the spin: a full dim circle. */
   .mbtn.busy::after,
@@ -67,6 +106,76 @@
 .dw-panel.search-drawer > .dw-grab { margin: 0; }
 .dw-panel.search-drawer.tall { height: min(85dvh, calc(100dvh - var(--sat) - 16px)); }
 @media (min-width: 1024px) { .dw-panel.search-drawer.tall { height: min(720px, calc(100dvh - 64px)); } }
+
+/* The bar's cards: this device's, then one per other speaker playing, on the native scroll's snap
+   (components/Pager.tsx). The bar keeps its place and border; each card carries its own padding and
+   its own art's wash, so the colour travels with the card under the finger. */
+.mroot > .mbar { padding: 0; background: var(--surface); cursor: default; }
+.mc-pager { position: relative; }
+.mc-track { display: flex; align-items: stretch; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: none; outline: none; }
+.mc-track::-webkit-scrollbar { display: none; }
+.mc-page { flex: 0 0 100%; min-width: 0; display: flex; scroll-snap-align: start; scroll-snap-stop: always; }
+.mc-card { flex: 1; min-width: 0; display: flex; transform: scale(calc(1 - var(--k, 0) * .04)); opacity: calc(1 - var(--k, 0) * .4); }
+@media (prefers-reduced-motion: reduce) { .mc-card { transform: none; } }
+.mcard { position: relative; isolation: isolate; flex: 1; min-width: 0; cursor: pointer; padding: 6px 16px calc(6px + var(--sab)); }
+/* The wash fades out at both edges as its card leaves the front (--k), so mid-swipe the two cards'
+   colours melt into the bar between them instead of meeting at a hard seam (owner's request,
+   October 2026). On a layer of its own, so the fade never touches the card's text and buttons; at
+   rest the front card's --k is 0 and its wash runs edge to edge. */
+.mcard::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; --f: calc(var(--k, 0) * 72px); background: linear-gradient(90deg, var(--tint) 0%, color-mix(in srgb, var(--tint) 55%, transparent) 55%, color-mix(in srgb, var(--tint) 30%, transparent) 100%); -webkit-mask-image: linear-gradient(90deg, transparent, #000 var(--f), #000 calc(100% - var(--f)), transparent); mask-image: linear-gradient(90deg, transparent, #000 var(--f), #000 calc(100% - var(--f)), transparent); }
+/* A speaker whose volume cannot be set keeps the slider's row, empty, so every card is the bar's
+   one height and a swipe never moves the page. */
+.mbar-vol.blank { visibility: hidden; }
+.mwho { color: var(--orb-ink); font-weight: 600; }
+.mwho svg { display: inline-block; vertical-align: -2px; margin-right: 3px; }
+/* Page dots on the bar's top edge, the Home tab's pill in miniature. The buttons are no bigger than
+   the dots, so they do not take taps meant for the title under them. */
+.mc-dots { position: absolute; top: 1px; left: 50%; transform: translateX(-50%); z-index: 2; display: flex; }
+.mc-dot { display: grid; place-items: center; width: 12px; height: 9px; min-height: 0; padding: 0; background: transparent; }
+.mc-dot::before { content: ""; display: block; width: calc(5px + 9px * var(--d, 0)); height: 5px; border-radius: 3px; background: var(--text); opacity: calc(.3 + .6 * var(--d, 0)); }
+/* The one-time "there is more": the strip slides 36px left and springs back. */
+@keyframes mcNudge { 0%, 100% { transform: none; } 30%, 55% { transform: translateX(-36px); } }
+.mc-track.nudge > .mc-page { animation: mcNudge 1.2s cubic-bezier(.3, .7, .4, 1) 1; }
+@media (prefers-reduced-motion: reduce) { .mc-track.nudge > .mc-page { animation: none; } }
+
+/* "Playing elsewhere": another speaker's music, with the ways to share or take it. */
+.melse { margin-top: 18px; }
+.melse-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 13px; }
+.melse-art { flex: none; width: 40px; height: 40px; }
+.melse-art img { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; display: block; }
+.melse-art .mart-ph { width: 40px; height: 40px; border-radius: 8px; }
+.melse-meta { flex: 1; min-width: 0; }
+.melse-meta b, .melse-meta small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.melse-meta b { font-weight: 600; }
+.melse-meta b i, .rs-who i { font-style: normal; color: var(--muted); font-weight: 500; }
+.melse-meta small { font-size: 12px; color: var(--muted); }
+.melse-meta small.melse-why { font-size: 11px; white-space: normal; margin-top: 2px; }
+.melse-acts { display: flex; gap: 6px; flex: none; }
+.melse-btn { position: relative; display: inline-grid; place-items: center; min-height: 32px !important; height: 32px; padding: 0 12px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--fill-hover); color: var(--text); text-decoration: none; white-space: nowrap; }
+.melse-btn.go { background: var(--orb-fill); color: #fff; }
+.melse-btn:disabled { opacity: .45; cursor: default; }
+.melse-btn.busy { opacity: 1; color: transparent; }
+.melse-btn.busy::after { content: ""; position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -9px 0 0 -9px; border: 2px solid transparent; border-top-color: #fff; border-radius: 50%; animation: mspin .9s linear infinite; }
+.melse-btn.busy:not(.go)::after { border-top-color: var(--text); }
+.mnote.warn { color: var(--text); background: var(--fill-hover); border-radius: 12px; padding: 10px 12px; margin: 0 0 12px; }
+/* Take over and Move here's question, in place of the row's buttons (mockup 16). */
+.melse-ask { margin: 0 0 8px 50px; padding: 10px 12px; border-radius: 12px; background: var(--fill-hover); display: flex; flex-direction: column; gap: 10px; }
+.melse-ask p { margin: 0; }
+.melse-ask b { display: block; font-size: 13px; font-weight: 600; color: var(--text); }
+.melse-ask small { display: block; font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
+.melse-ask .melse-acts { justify-content: flex-end; }
+.melse-ask .melse-btn:not(.go) { background: var(--line); }
+
+/* Another speaker's drawer: its names over the art, and its actions as full-width pills. */
+.rs-who { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--orb-ink); margin: 0 0 12px; text-transform: uppercase; }
+.rs-acts { display: flex; gap: 8px; margin-top: 16px; }
+.rs-acts > .melse-acts { flex: 2; gap: 8px; }
+.rs-acts .melse-btn { flex: 1; height: 44px; min-height: 44px !important; font-size: 14px; }
+.msheet .melse-ask { margin: 12px 0 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .melse-btn.busy::after { animation: none; border-color: var(--text); opacity: .4; }
+}
 
 .mspk-ico, .mbar-vol-ico { position: relative; display: inline-flex; color: var(--text); }
 .mspk-badge { position: absolute; top: -3px; right: -4px; min-width: 8px; height: 8px; border-radius: 999px; background: var(--orb-fill); color: #fff; font-size: 9px; font-weight: 700; font-style: normal; line-height: 12px; text-align: center; }

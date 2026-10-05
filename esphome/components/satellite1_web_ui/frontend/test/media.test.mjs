@@ -5,19 +5,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { gatherResult } from "../src/lib/ma.js";
 import {
   addRecent,
+  albumSections,
+  albumSub,
   artThumb,
+  barCards,
+  canOpen,
+  canSync,
+  elsewhereRows,
+  episodeSub,
   fmtTime,
   groupLabel,
   groupRows,
+  groupSteps,
+  hasOwnMusic,
+  heroSub,
   holdEnds,
+  leaderOf,
   mediaView,
   nextRepeat,
+  openArgs,
+  openedOrder,
   pct,
   prune,
   queueClock,
   relayPausedOf,
+  rowClock,
   searchArgs,
   searchGroups,
   settleGroup,
@@ -180,6 +195,324 @@ test("the socket's rows come from this player's group, and only available player
     ["me", "Satellite", 30],
   ]);
   assert.deepEqual(grouped.addables.map((a) => a[0]), ["b"]);
+});
+
+// Dev3 leads a sync group with Dev12 in it; a Sonos plays alone; a group player plays through two
+// speakers of its own; the rest are idle or not speakers at all.
+const house = () => ({
+  dev3: {
+    player_id: "dev3",
+    name: "Dev3",
+    available: true,
+    volume_level: 55,
+    playback_state: "playing",
+    group_members: ["dev3", "dev12"],
+    can_group_with: ["sendspin", "sonos"],
+    provider: "sendspin",
+  },
+  dev12: { player_id: "dev12", name: "Dev12", available: true, volume_level: 40, synced_to: "dev3", group_members: [], provider: "sendspin" },
+  sonos: {
+    player_id: "sonos",
+    name: "Living Room",
+    available: true,
+    volume_level: 30,
+    playback_state: "playing",
+    provider: "sonos",
+    current_media: { title: "Harvest Moon", artist: "Neil Young", image_url: "http://x/a.jpg", duration: 300, queue_item_id: "q1" },
+    elapsed_time: 12,
+    elapsed_time_last_updated: 1000,
+    device_info: { mac_address: "AA:BB:CC:00:11:22" },
+  },
+  down: {
+    player_id: "down",
+    name: "Downstairs",
+    type: "group",
+    available: true,
+    group_volume: 60,
+    playback_state: "paused",
+    group_members: ["kit", "den"],
+    current_media: { title: "Dreams", queue_item_id: "q2" },
+  },
+  kit: { player_id: "kit", name: "Kitchen", available: true, playback_state: "paused", active_group: "down", provider: "sonos" },
+  den: { player_id: "den", name: "Den", available: true, playback_state: "paused", active_group: "down", provider: "sonos" },
+  air: { player_id: "air", name: "Living Room (AirPlay)", type: "protocol", available: true, playback_state: "playing" },
+  bed: { player_id: "bed", name: "Bedroom", available: true, provider: "sonos" },
+  spot: { player_id: "spot", name: "Spotify Box", available: true, playback_state: "playing", provider: "other", current_media: { title: "Native" } },
+});
+
+test("a member's group is its leader's: the same rows and badge, and joins aim at the leader", () => {
+  const players = house();
+  assert.equal(leaderOf(players.dev12, players).player_id, "dev3");
+  assert.equal(leaderOf(players.dev3, players).player_id, "dev3");
+  assert.equal(leaderOf(players.kit, players).player_id, "down");
+  assert.equal(leaderOf(null, players), null);
+  const fromMember = groupRows({ wsOn: true, me: players.dev12, players, pending: {} });
+  const fromLeader = groupRows({ wsOn: true, me: players.dev3, players, pending: {} });
+  assert.equal(fromMember.leader, "dev3");
+  assert.deepEqual(fromMember.members, fromLeader.members);
+  assert.deepEqual(fromMember.members.map((m) => m[0]), ["dev12", "dev3"]);
+  // Not the leader (already in), not the playing Sonos or Spotify box, not the group player or
+  // its members, not a protocol twin; and only what the leader's can_group_with names.
+  assert.deepEqual(fromMember.addables.map((a) => a[0]), ["bed"]);
+  const others = elsewhereRows({ wsOn: true, me: players.dev12, players });
+  const paused = { ...players, bed: { ...players.bed, playback_state: "paused" } };
+  const pausedOthers = elsewhereRows({ wsOn: true, me: players.dev12, players: paused });
+  assert.deepEqual(groupRows({ wsOn: true, me: players.dev12, players: paused, pending: {}, others: pausedOthers }).addables, []);
+  assert.deepEqual(groupRows({ wsOn: true, me: players.dev12, players, pending: {}, others }).addables.map((a) => a[0]), ["bed"]);
+  const narrow = { ...players, dev3: { ...players.dev3, can_group_with: ["nobody"] } };
+  assert.deepEqual(groupRows({ wsOn: true, me: players.dev12, players: narrow, pending: {} }).addables, []);
+});
+
+test("the relay's leader is its `l`, else the first member; other speakers' groups are not addable", () => {
+  const live = {
+    l: "media_player.dev3",
+    g: [
+      ["media_player.dev3", "Dev3", 55],
+      ["media_player.dev12", "Dev12", 40],
+    ],
+  };
+  const cands = [
+    ["media_player.bed", "Bedroom"],
+    ["media_player.sonos", "Living Room"],
+    ["media_player.sub", "Sub"],
+  ];
+  const others = [{ id: "media_player.sonos", members: [["media_player.sub", "media_player.sub", 50]] }];
+  const r = groupRows({ wsOn: false, live, cands, pending: {}, others });
+  assert.equal(r.leader, "media_player.dev3");
+  assert.deepEqual(r.addables.map((a) => a[0]), ["media_player.bed"]);
+  assert.equal(groupRows({ wsOn: false, live: { g: live.g }, pending: {} }).leader, "media_player.dev3");
+  assert.equal(groupRows({ wsOn: false, live: null, pending: {} }).leader, "");
+});
+
+test("sync is known when either side names the other, refused only when both lists say no", () => {
+  const a = { player_id: "a", provider: "p1", can_group_with: ["b"] };
+  const b = { player_id: "b", provider: "p2", can_group_with: [] };
+  const c = { player_id: "c", provider: "p3", can_group_with: ["x"] };
+  const d = { player_id: "d", provider: "p1", can_group_with: ["y"] };
+  assert.equal(canSync(a, b), true);
+  assert.equal(canSync(b, a), true);
+  assert.equal(canSync(a, c), false);
+  assert.equal(canSync(b, c), null);
+  assert.equal(canSync(c, { ...d, can_group_with: ["p3"] }), true);
+});
+
+test("playing elsewhere lists one row per other group, never this one or a member of another", () => {
+  const players = house();
+  const rows = elsewhereRows({ wsOn: true, me: players.dev12, players });
+  assert.deepEqual(rows.map((r) => r.id), ["down", "sonos", "spot"]);
+  const [down, sonos, spot] = rows;
+  assert.equal(down.group, true);
+  assert.equal(down.state, "paused");
+  assert.equal(down.volume, 60);
+  assert.deepEqual(down.members.map((m) => m[0]), ["kit", "den"]);
+  assert.equal(sonos.title, "Harvest Moon");
+  assert.equal(sonos.transferable, true);
+  assert.equal(sonos.sync, true);
+  assert.equal(sonos.mac, "aabbcc001122");
+  assert.deepEqual(sonos.clock, { pos: 12, at: 1000, dur: 300 });
+  assert.equal(spot.transferable, false);
+  assert.equal(spot.sync, null);
+  // An idle speaker shows only while kept (a card paused during this visit).
+  const kept = elsewhereRows({ wsOn: true, me: players.dev12, players, keep: new Set(["bed"]) });
+  assert.ok(kept.some((r) => r.id === "bed" && r.state === "idle"));
+  assert.deepEqual(elsewhereRows({ wsOn: true, me: null, players }), []);
+});
+
+test("the relay's rows map from `o`, members unnamed, volume control from the feature bits", () => {
+  const live = {
+    o: [
+      ["media_player.down", "Downstairs", [["media_player.kit", 20], ["media_player.den", 25]], "Dreams", "", "https://i/a.jpg", "paused", 60, 4, 1, 1],
+      ["media_player.spot", "Spotify Box", [], "Native", "", "", "playing", -1, 0, 0, 0],
+    ],
+  };
+  const [down, spot] = elsewhereRows({ wsOn: false, live });
+  assert.deepEqual(down.members, [
+    ["media_player.kit", "media_player.kit", 20],
+    ["media_player.den", "media_player.den", 25],
+  ]);
+  assert.equal(down.group, true);
+  assert.equal(down.vctl, true);
+  assert.equal(down.transferable, true);
+  assert.equal(down.sync, null);
+  assert.equal(spot.vctl, false);
+  assert.equal(spot.transferable, false);
+  assert.deepEqual(elsewhereRows({ wsOn: false, live: {} }), []);
+});
+
+test("bar cards keep first-seen order and outlive a pause, but not a stop or a join here", () => {
+  const row = (id, state, title = "") => ({ id, state, name: id, title });
+  const rows = [row("a", "playing"), row("b", "paused"), row("c", "playing"), row("e", "idle"), row("f", "idle", "Dreams")];
+  const order = ["c", "b", "a", "d", "e", "f"];
+  const all = new Set(order);
+  // A paused speaker keeps its card only once seen playing this visit.
+  assert.deepEqual(barCards({ rows, seen: new Set(["c", "a"]), order }).map((r) => r.id), ["c", "a"]);
+  // Stopped (idle, nothing loaded) has no card; idle with a track loaded is a Sendspin pause.
+  const cards = barCards({ rows, seen: all, order });
+  assert.deepEqual(cards.map((r) => [r.id, r.state]), [["c", "playing"], ["b", "paused"], ["a", "playing"], ["f", "paused"]]);
+  // A speaker paused from its card here keeps it, rebuilt from its last row once the relay drops it.
+  const last = { d: row("d", "playing", "Song"), e: row("e", "playing") };
+  const held = new Map([["d", 0], ["e", 0]]);
+  assert.deepEqual(barCards({ rows, seen: all, order, last, held }).map((r) => [r.id, r.state]), [
+    ["c", "playing"],
+    ["b", "paused"],
+    ["a", "playing"],
+    ["d", "paused"],
+    ["e", "paused"],
+    ["f", "paused"],
+  ]);
+  assert.deepEqual(barCards({ rows, seen: all, order, last }).map((r) => r.id), ["c", "b", "a", "f"]);
+  assert.deepEqual(barCards({ rows, seen: all, order, last, held, gone: new Set(["d", "c"]) }).map((r) => r.id), ["b", "a", "e", "f"]);
+});
+
+test("another speaker's group reads from its side: a group player is only its members", () => {
+  const players = house();
+  const down = groupRows({ wsOn: true, me: players.down, players, pending: {} });
+  assert.equal(down.leader, "down");
+  assert.deepEqual(down.members.map((m) => m[0]), ["den", "kit"]);
+  const sonos = groupRows({ wsOn: true, me: players.sonos, players, pending: {}, others: [{ id: "dev3", state: "playing", members: [["dev12"]] }] });
+  assert.deepEqual(sonos.members.map((m) => m[0]), ["sonos"]);
+  assert.deepEqual(sonos.addables.map((a) => a[0]), ["bed"]);
+});
+
+test("an edit to another group settles on that group's rows", () => {
+  const groups = { sonos: [["sonos", "Sonos", 30], ["bed", "Bedroom", 20]] };
+  const pending = {
+    bed: { kind: "join", at: 0, lead: "sonos" },
+    kit: { kind: "join", at: 0, lead: "sonos" },
+    den: { kind: "unjoin", at: 0, lead: "gone" },
+  };
+  assert.deepEqual(Object.keys(settleGroup(pending, [["bed", "Bedroom", 20]], 1000, groups)), ["kit"]);
+  assert.deepEqual(Object.keys(settleGroup({ bed: { kind: "join", at: 0 } }, [], 1000, groups)), ["bed"]);
+});
+
+test("this group has music to lose when it plays, or holds a paused item", () => {
+  assert.equal(hasOwnMusic({ wsOn: true, queue: { state: "playing" } }), true);
+  assert.equal(hasOwnMusic({ wsOn: true, queue: { state: "idle", current_item: { name: "x" } } }), true);
+  assert.equal(hasOwnMusic({ wsOn: true, queue: { state: "idle", current_item: null } }), false);
+  assert.equal(hasOwnMusic({ wsOn: true, queue: null }), false);
+  assert.equal(hasOwnMusic({ wsOn: false, live: { st: "playing" } }), true);
+  assert.equal(hasOwnMusic({ wsOn: false, live: { st: "idle", ti: "Dreams" } }), true);
+  assert.equal(hasOwnMusic({ wsOn: false, live: { st: "idle", ti: "" } }), false);
+  assert.equal(hasOwnMusic({ wsOn: false, live: { st: "off", ti: "Dreams" } }), false);
+});
+
+test("the relay's group volume moves every member by the same step, clamped", () => {
+  const rows = [
+    ["a", "A", 20],
+    ["b", "B", 90],
+    ["c", "C", -1],
+  ];
+  assert.deepEqual(groupSteps(rows, 75), [
+    ["a", 40],
+    ["b", 100],
+  ]);
+  assert.deepEqual(groupSteps(rows, 0), [
+    ["a", 0],
+    ["b", 35],
+  ]);
+  assert.deepEqual(groupSteps([["c", "C", -1]], 50), []);
+});
+
+test("another speaker's playhead runs from the server's stamp, corrected for clock skew", () => {
+  const row = { state: "playing", clock: { pos: 10, at: 100, dur: 200 } };
+  assert.deepEqual(rowClock(row, 105_000), { dur: 200_000, pos: 15_000 });
+  assert.deepEqual(rowClock(row, 107_000, 2), { dur: 200_000, pos: 15_000 });
+  assert.deepEqual(rowClock({ ...row, state: "paused" }, 900_000), { dur: 200_000, pos: 10_000 });
+  assert.deepEqual(rowClock(row, 900_000), { dur: 200_000, pos: 200_000 });
+  assert.equal(rowClock({ state: "playing", clock: null }, 0), null);
+});
+
+test("artists, albums, playlists and podcasts open; each asks its own listing", () => {
+  for (const t of ["artist", "album", "playlist", "podcast"]) assert.equal(canOpen({ media_type: t }), true);
+  for (const t of ["track", "radio", "audiobook"]) assert.equal(canOpen({ media_type: t }), false);
+  const item = (media_type) => ({ media_type, item_id: "7", provider: "spotify" });
+  assert.deepEqual(openArgs(item("artist")), ["music/artists/artist_albums", { item_id: "7", provider_instance_id_or_domain: "spotify" }]);
+  assert.deepEqual(openArgs(item("album")), [
+    "music/albums/album_tracks",
+    { item_id: "7", provider_instance_id_or_domain: "spotify", in_library_only: false },
+  ]);
+  assert.equal(openArgs(item("playlist"))[0], "music/playlists/playlist_tracks");
+  assert.equal(openArgs(item("podcast"))[0], "music/podcasts/podcast_episodes");
+  assert.equal(openArgs(item("track")), null);
+});
+
+test("an artist's albums split into albums and singles, newest first", () => {
+  const albums = [
+    { name: "Rumours", year: 1977, album_type: "album" },
+    { name: "Tusk", year: 1979, album_type: "album" },
+    { name: "Dreams", year: 1977, album_type: "single" },
+    { name: "Live", album_type: "compilation" },
+    { name: "EP One", year: 1980, album_type: "ep" },
+  ];
+  const s = albumSections(albums);
+  assert.deepEqual(s.map(([k]) => k), ["albums", "singles"]);
+  assert.deepEqual(s[0][1].map((a) => a.name), ["Tusk", "Rumours", "Live"]);
+  assert.deepEqual(s[1][1].map((a) => a.name), ["EP One", "Dreams"]);
+  assert.deepEqual(albumSections([{ name: "Only", year: 1 }]).map(([k]) => k), ["albums"]);
+  assert.deepEqual(albumSections(null), []);
+  assert.equal(albumSub({ year: 1977 }, { album: "Album" }), "1977");
+  assert.equal(albumSub({}, { album: "Album" }), "Album");
+});
+
+test("opened lists keep their natural order", () => {
+  const tracks = [
+    { name: "b2", disc_number: 2, track_number: 1 },
+    { name: "a3", disc_number: 1, track_number: 3 },
+    { name: "a1", disc_number: 1, track_number: 1 },
+  ];
+  assert.deepEqual(openedOrder("album", tracks).map((t) => t.name), ["a1", "a3", "b2"]);
+  assert.equal(tracks[0].name, "b2");
+  const eps = [
+    { name: "old", position: 1 },
+    { name: "new", position: 3 },
+    { name: "undated", position: 0 },
+    { name: "dated", position: 0, metadata: { release_date: "2026-09-01" } },
+  ];
+  assert.deepEqual(openedOrder("podcast", eps).map((e) => e.name), ["new", "old", "dated", "undated"]);
+  assert.deepEqual(openedOrder("playlist", tracks).map((t) => t.name), ["b2", "a3", "a1"]);
+  assert.deepEqual(openedOrder("album", null), []);
+});
+
+test("an opened item's header line names its kind, makers, year and count", () => {
+  const t = {
+    search_kind: { artist: "Artist", album: "Album", playlist: "Playlist", podcast: "Podcast", track: "Track" },
+    search_album_1: "1 album",
+    search_albums_n: "%s albums",
+    search_song_1: "1 song",
+    search_songs_n: "%s songs",
+    search_episode_1: "1 episode",
+    search_episodes_n: "%s episodes",
+  };
+  assert.equal(heroSub({ media_type: "artist" }, 12, t), "Artist \u00b7 12 albums");
+  assert.equal(heroSub({ media_type: "album", artists: [{ name: "Fleetwood Mac" }], year: 1977 }, 11, t), "Fleetwood Mac \u00b7 1977 \u00b7 11 songs");
+  assert.equal(heroSub({ media_type: "album" }, null, t), "Album");
+  assert.equal(heroSub({ media_type: "playlist", owner: "Me" }, 1, t), "Playlist \u00b7 Me \u00b7 1 song");
+  assert.equal(heroSub({ media_type: "podcast", publisher: "NPR" }, 2, t), "Podcast \u00b7 NPR \u00b7 2 episodes");
+  assert.equal(heroSub({ media_type: "track" }, 3, t), "Track");
+});
+
+test("an episode's row says when, how long, and how far through", () => {
+  const now = Date.parse("2026-10-05T12:00:00Z");
+  const fresh = episodeSub({ duration: 1800, metadata: { release_date: "2026-10-02T12:00:00Z" } }, now);
+  assert.equal(fresh.mins, 30);
+  assert.equal(fresh.left, 0);
+  assert.equal(fresh.played, false);
+  assert.ok(fresh.date && !/2026/.test(fresh.date));
+  assert.ok(/2025/.test(episodeSub({ metadata: { release_date: "2025-06-01T12:00:00Z" } }, now).date));
+  assert.equal(episodeSub({ duration: 1800, resume_position_ms: 600_000 }, now).left, 20);
+  const done = episodeSub({ duration: 1800, resume_position_ms: 600_000, fully_played: true }, now);
+  assert.equal(done.played, true);
+  assert.equal(done.left, 0);
+  assert.deepEqual(episodeSub({}, now), { date: "", mins: 0, left: 0, played: false });
+});
+
+test("a long listing's partial chunks gather into one result", () => {
+  const parts = new Map();
+  assert.equal(gatherResult(parts, { message_id: 4, partial: true, result: [1, 2] }), null);
+  assert.equal(gatherResult(parts, { message_id: 4, partial: true, result: [3] }), null);
+  assert.deepEqual(gatherResult(parts, { message_id: 4, result: [4] }), { result: [1, 2, 3, 4] });
+  assert.equal(parts.size, 0);
+  assert.deepEqual(gatherResult(parts, { message_id: 5, result: { ok: 1 } }), { result: { ok: 1 } });
 });
 
 test("group edits settle on membership, or at the deadline", () => {

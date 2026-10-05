@@ -330,6 +330,11 @@ class Satellite1WebUI : public Component {
   Trigger<std::string> *get_ma_unjoin_trigger() { return &this->ma_unjoin_trigger_; }
   Trigger<std::string, float> *get_ma_volume_trigger() { return &this->ma_volume_trigger_; }
   Trigger<std::string, float> *get_ma_seek_trigger() { return &this->ma_seek_trigger_; }
+  /// Another speaker's music to this group: (this group's leader, their speaker, their speakers to
+  /// join afterwards comma-separated, whether to join them) - Take over joins, Move here does not.
+  Trigger<std::string, std::string, std::string, bool> *get_ma_transfer_trigger() { return &this->ma_transfer_trigger_; }
+  /// Another speaker's transport: (its entity, "play_pause" | "next" | "previous").
+  Trigger<std::string, std::string> *get_ma_transport_trigger() { return &this->ma_transport_trigger_; }
 
   /// The Music Assistant payload's staging trio, called from the sync script's lambdas in
   /// common/web_ui_media.yaml - the HA trio's shape, same PSRAM discipline. Paged because the
@@ -395,6 +400,8 @@ class Satellite1WebUI : public Component {
   Trigger<std::string> ma_unjoin_trigger_;
   Trigger<std::string, float> ma_volume_trigger_;
   Trigger<std::string, float> ma_seek_trigger_;
+  Trigger<std::string, std::string, std::string, bool> ma_transfer_trigger_;
+  Trigger<std::string, std::string> ma_transport_trigger_;
   Trigger<> selection_change_trigger_;
   std::atomic<bool> selection_changed_{false};
 

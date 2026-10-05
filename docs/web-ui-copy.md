@@ -551,6 +551,25 @@ the notch archives it directly, so it never reaches the badge. `HINTS.notif` car
 | `media_group_loading` | Asking Music Assistant… |
 | `media_no_tiers` | Grouping and seeking need Home Assistant with Music Assistant - or connect this page to your Music Assistant server from the expanded media view. |
 | `media_group_volume` | Group volume |
+| `media_volume` | Volume |
+| `media_elsewhere` | Playing elsewhere |
+| `media_join` | Join |
+| `media_takeover` | Take over |
+| `media_move_here` | Move here |
+| `media_cant_sync` | Can’t play in sync with this speaker |
+| `media_moved_alone` | %s can’t play in sync with %s, so the music moved here on its own. |
+| `media_join_failed` | Couldn’t group with %s. It may not be able to play in sync with this speaker. |
+| `media_move_failed` | Couldn’t move the music from %s. Try again in a moment. |
+| `media_this_speaker` | This speaker |
+| `media_replace_q` | Replace what’s playing here? |
+| `media_replace_takeover` | %s and the rest of your queue here are replaced by what %s is playing. |
+| `media_replace_takeover_any` | Your queue here is replaced by what %s is playing. |
+| `media_replace_move` | %s and the rest of your queue here are replaced, and %s stops. |
+| `media_replace_move_any` | Your queue here is replaced, and %s stops. |
+| `media_cards_label` | Speakers playing |
+| `media_open_remote` | Open controls for *(followed by the speaker's name)* |
+| `media_open_peer` | Open %s |
+| `media_playing` / `media_paused` / `media_stopped` | Playing / Paused / Stopped |
 | `ma_title` | Music Assistant |
 | `ma_url_ph` | http://music-assistant.local:8095 |
 | `ma_token_ph` | Long-lived token |
@@ -563,7 +582,9 @@ the notch archives it directly, so it never reaches the badge. `HINTS.notif` car
 | `ma_scan_none` | No Music Assistant server found. It may be on another network or a non-standard port - enter its address above. |
 | `ma_scan_https` | Scanning needs this page on its local http address; enter the server's address above instead. |
 
-The search drawer (Plan 20), behind the top bar's magnifying glass. It rides the direct Music
+The search drawer (Plan 20), behind the top bar's magnifying glass and, since October 2026, the
+media bar's and the players panel's. Artists, albums, playlists and podcasts open into views of
+their own, each with a Back to where it was opened from. It rides the direct Music
 Assistant connection only, so its empty states carry the honest work: what search needs, and where
 to set it up. `search_kind` is the singular on each row's sub-line ("Track · Oliver Tree"), one
 entry per media type; the plural forms below serve both the filter pills and the section heads.
@@ -592,6 +613,16 @@ entry per media type; the plural forms below serve both the filter pills and the
 | `search_need_ma_b` | Connect this browser to your Music Assistant server to search and play music. The address and token are set once and remembered here. |
 | `search_setup_btn` | Set up connection |
 | `search_connecting` | Connecting to Music Assistant… |
+| `search_play_from_here` | Play from here |
+| `search_open_item` | Open |
+| `search_back` | Search |
+| `search_play` | Play |
+| `search_play_latest` | Play latest |
+| `search_singles` | Singles & EPs |
+| `search_album_1` / `search_albums_n` | 1 album / %s albums |
+| `search_song_1` / `search_songs_n` | 1 song / %s songs |
+| `search_episode_1` / `search_episodes_n` | 1 episode / %s episodes |
+| `search_minutes` / `search_min_left` / `search_played` | %s min / %s min left / Played |
 | `zi_first` | Tap the map to place the first corner. |
 | `zi_more` | Keep tapping. A zone needs at least 3 corners. |
 | `zi_adjust` | Drag a corner to reshape. Drag the middle to move the shape. Tap a corner to select it. |

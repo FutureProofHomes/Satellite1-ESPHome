@@ -28,7 +28,7 @@ section.now.now-compact>.now-right{padding-bottom:2px !important}
    and snap. The strip runs 16px past .now-right's content into its padding, so whichever window is
    in front lines up with everything above it and the other one peeks in from the edge. The
    trailing spacer is the end padding, which Safari leaves out of a scroller's width. */
-.tt-pager{--tt-bleed:16px;--tt-gap:6px;flex:1;min-height:0;display:flex;flex-direction:column}
+.tt-pager{--tt-bleed:16px;--tt-gap:6px;position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
 .tt-track{flex:1;min-height:0;display:flex;align-items:stretch;gap:var(--tt-gap);overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;scrollbar-width:none;margin:0 calc(-1 * var(--tt-bleed));padding:0 0 0 var(--tt-bleed);scroll-padding:0 var(--tt-bleed);outline:none}
 .tt-track::-webkit-scrollbar{display:none}
 .tt-track::after{content:'';flex:0 0 calc(var(--tt-bleed) - var(--tt-gap))}
@@ -51,7 +51,7 @@ section.now.now-compact>.now-right{padding-bottom:2px !important}
 
 /* The title bar, frosted over the conversation that scrolls up under it. */
 .tt-head{position:absolute;top:0;left:0;right:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:8px;height:38px;padding:0 4px 0 2px;background:color-mix(in srgb,var(--surface) 76%,transparent);-webkit-backdrop-filter:blur(18px) saturate(1.6);backdrop-filter:blur(18px) saturate(1.6);border-bottom:1px solid var(--line)}
-.tt-word{display:inline-flex;align-items:center;gap:4px;min-width:0;align-self:stretch;min-height:0;padding:0 10px;border-radius:10px;background:transparent;color:var(--text);font-size:13px;font-weight:500;transition:background .18s}
+.tt-word{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:calc(50% - 32px);align-self:stretch;min-height:0;padding:0 10px;border-radius:10px;background:transparent;color:var(--text);font-size:13px;font-weight:500;transition:background .18s}
 .tt-word span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tt-word svg{flex:none;color:var(--muted)}
 .tt-word:not(:disabled):active{background:var(--surface2)}
@@ -74,14 +74,19 @@ section.now.now-compact>.now-right{padding-bottom:2px !important}
 .transcript .tt-vacant p{margin:0;max-width:34ch;padding:0;font-size:13px;line-height:1.45;color:var(--muted);background:transparent}
 .tt-vacant button{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 18px;border-radius:22px;font-size:14px;font-weight:600}
 
-/* The page dots, iOS's: the front window's stretches into a pill, and --p (0 to 1, from the scroll)
-   moves the stretch from one to the other as the strip moves. A dot whose window has something new
-   glows in the accent until it is looked at. */
-.tt-dots{flex:none;display:flex;justify-content:center;height:16px;margin-top:2px}
+/* The page dots, iOS's: the front window's stretches into a pill, and --d (each dot's nearness to
+   the front, 0 to 1, from the scroll) moves the stretch from one to the other as the strip moves. A
+   dot whose window has something new glows in the accent until it is looked at. They sit centred
+   in the title bar (owner's request, October 2026: under the window they stacked on the media
+   bar's own dots), between the wake word and the tuning capsule. Centred on the pager holds for
+   both windows: the one in front spans the pager's width, so its title bar's centre is the pager's. */
+.tt-dots{position:absolute;top:11px;left:50%;transform:translateX(-50%);z-index:3;display:flex;justify-content:center;height:16px}
+/* The 18px the dots took under the window when they lived there, kept as the gap above the media
+   bar (owner's request, October 2026), and given back to the conversation with the keyboard up. */
+.tt-pager:has(>.tt-dots){padding-bottom:18px}
+html[data-kb] section.now.now-compact .tt-pager{padding-bottom:0}
 .tt-dot{display:grid;place-items:center;width:26px;height:16px;min-height:0;padding:0;background:transparent}
-.tt-dot::before{content:'';display:block;width:6px;height:6px;border-radius:3px;background:var(--text);opacity:.22}
-.tt-dot:nth-child(1)::before{width:calc(6px + 12px * (1 - var(--p,0)));opacity:calc(.22 + .58 * (1 - var(--p,0)))}
-.tt-dot:nth-child(2)::before{width:calc(6px + 12px * var(--p,0));opacity:calc(.22 + .58 * var(--p,0))}
+.tt-dot::before{content:'';display:block;width:calc(6px + 12px * var(--d,0));height:6px;border-radius:3px;background:var(--text);opacity:calc(.22 + .58 * var(--d,0))}
 .tt-dot.new::before{background:var(--orb-ctl);opacity:1;animation:ttGlow 1.8s ease-in-out infinite}
 @keyframes ttGlow{50%{box-shadow:0 0 0 4px var(--orb-a20,rgba(37,99,235,.2))}}
 @media (prefers-reduced-motion:reduce){.tt-dot.new::before{animation:none}}

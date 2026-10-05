@@ -105,6 +105,8 @@ CONF_ON_MA_JOIN = "on_ma_join"
 CONF_ON_MA_UNJOIN = "on_ma_unjoin"
 CONF_ON_MA_VOLUME = "on_ma_volume"
 CONF_ON_MA_SEEK = "on_ma_seek"
+CONF_ON_MA_TRANSFER = "on_ma_transfer"
+CONF_ON_MA_TRANSPORT = "on_ma_transport"
 CONF_ON_SELECTION_CHANGE = "on_selection_change"
 CONF_SOUNDS = "sounds"
 CONF_FSD_SELECTS = "fsd_selects"
@@ -322,6 +324,8 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_ON_MA_UNJOIN): automation.validate_automation(single=True),
             cv.Optional(CONF_ON_MA_VOLUME): automation.validate_automation(single=True),
             cv.Optional(CONF_ON_MA_SEEK): automation.validate_automation(single=True),
+            cv.Optional(CONF_ON_MA_TRANSFER): automation.validate_automation(single=True),
+            cv.Optional(CONF_ON_MA_TRANSPORT): automation.validate_automation(single=True),
             cv.Optional(CONF_ON_SELECTION_CHANGE): automation.validate_automation(single=True),
             # Sounds served at GET /api/sat1/sounds/<name>, session-gate exempt, for the routing
             # feature's third-party targets: a Sonos playing the mirrored timer ring cannot read
@@ -602,6 +606,25 @@ async def to_code(config):
             var.get_ma_seek_trigger(),
             [(cg.std_string, "entity"), (cg.float_, "position")],
             config[CONF_ON_MA_SEEK],
+        )
+
+    if CONF_ON_MA_TRANSFER in config:
+        await automation.build_automation(
+            var.get_ma_transfer_trigger(),
+            [
+                (cg.std_string, "entity"),
+                (cg.std_string, "source"),
+                (cg.std_string, "members"),
+                (cg.bool_, "join"),
+            ],
+            config[CONF_ON_MA_TRANSFER],
+        )
+
+    if CONF_ON_MA_TRANSPORT in config:
+        await automation.build_automation(
+            var.get_ma_transport_trigger(),
+            [(cg.std_string, "entity"), (cg.std_string, "cmd")],
+            config[CONF_ON_MA_TRANSPORT],
         )
 
     if not _DIST.is_file():

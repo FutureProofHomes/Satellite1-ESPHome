@@ -727,6 +727,44 @@ export const TEXT = {
   // The players panel's whole-group slider, shown only while two or more speakers are grouped -
   // named so it cannot be mistaken for any one speaker's row below it.
   media_group_volume: "Group volume",
+  // Another speaker's own volume, in its drawer, when it plays alone.
+  media_volume: "Volume",
+
+  /* "Playing elsewhere" (October 2026): the players panel's list of other speakers Music Assistant
+     is playing, and what this speaker can do about each. Join moves only this speaker into their
+     group; Take over brings their music to this whole group and their speakers with it; Move here,
+     for a speaker that cannot play in sync, brings the music and leaves that speaker stopped. */
+  media_elsewhere: "Playing elsewhere",
+  media_join: "Join",
+  media_takeover: "Take over",
+  media_move_here: "Move here",
+  // Under a row that offers only Move here: why Join and Take over are missing.
+  media_cant_sync: "Can\u2019t play in sync with this speaker",
+  // The panel notes left by an edit that never confirmed, instead of a ring that spins and
+  // vanishes. %s is the other speaker; in media_moved_alone the second is this one (Take over moved
+  // the music, but their speakers never joined).
+  media_moved_alone: "%s can\u2019t play in sync with %s, so the music moved here on its own.",
+  media_join_failed: "Couldn\u2019t group with %s. It may not be able to play in sync with this speaker.",
+  media_move_failed: "Couldn\u2019t move the music from %s. Try again in a moment.",
+  // media_moved_alone's fallback name for this speaker, and its page dot's label on the bar.
+  media_this_speaker: "This speaker",
+  // Take over and Move here ask first when this speaker has music of its own, since its queue is
+  // replaced with no undo. The first %s is this speaker's track, the second the other speaker; the
+  // _any forms are for a queue with no title to name.
+  media_replace_q: "Replace what\u2019s playing here?",
+  media_replace_takeover: "%s and the rest of your queue here are replaced by what %s is playing.",
+  media_replace_takeover_any: "Your queue here is replaced by what %s is playing.",
+  media_replace_move: "%s and the rest of your queue here are replaced, and %s stops.",
+  media_replace_move_any: "Your queue here is replaced, and %s stops.",
+
+  /* The bar's cards for other speakers, and their drawers. */
+  media_cards_label: "Speakers playing",
+  media_open_remote: "Open controls for",
+  // A Satellite1's drawer: its own page, reached the way the device switcher reaches it.
+  media_open_peer: "Open %s",
+  media_playing: "Playing",
+  media_paused: "Paused",
+  media_stopped: "Stopped",
 
   /* The Music Assistant connection panel. */
   ma_title: "Music Assistant",
@@ -778,12 +816,35 @@ export const TEXT = {
     podcast: "Podcast",
     audiobook: "Audiobook",
   },
-  // The tapped row's three verbs. "replaces queue" under Play now states the one consequence a
-  // person cannot see coming; the other two say where in the queue the pick lands by name.
+  // The row verbs. The round play button is Play now; "replaces queue" rides its label and tooltip,
+  // the one consequence a person cannot see coming. A row that does not open shows the other two
+  // when tapped, which say where in the queue the pick lands by name.
   search_play_now: "Play now",
   search_play_now_sub: "replaces queue",
   search_play_next: "Play next",
   search_add: "Add to queue",
+  // A song's play button inside an album or playlist: that album or playlist, from this song.
+  search_play_from_here: "Play from here",
+  // An opened artist, album, playlist or podcast (October 2026): the chevron's label, Back (to
+  // the results, or to the artist an album was opened from), the whole-item Play, and the header's
+  // count of what it holds.
+  search_open_item: "Open",
+  search_back: "Search",
+  search_play: "Play",
+  search_singles: "Singles & EPs",
+  search_album_1: "1 album",
+  search_albums_n: "%s albums",
+  search_song_1: "1 song",
+  search_songs_n: "%s songs",
+  search_episode_1: "1 episode",
+  search_episodes_n: "%s episodes",
+  // A podcast plays its newest episode; Play next and Add to queue are left off its header, since
+  // for a podcast they would queue every episode.
+  search_play_latest: "Play latest",
+  // An episode's line: its length, then how far through it Music Assistant says it is.
+  search_minutes: "%s min",
+  search_min_left: "%s min left",
+  search_played: "Played",
   // The transient confirmation on a row whose command the server accepted, per verb.
   search_playing: "Playing",
   search_queued: "Queued",

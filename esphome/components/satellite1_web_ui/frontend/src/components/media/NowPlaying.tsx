@@ -27,7 +27,7 @@ export function Art({
  * The scrubber, read-only until something can seek: the device's own protocol has no seek, so a
  * drag lands on the Music Assistant socket or as a relayed media_seek.
  */
-function Seek({
+export function Seek({
   pos,
   dur,
   canSeek,

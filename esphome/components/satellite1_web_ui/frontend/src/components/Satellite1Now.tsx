@@ -387,6 +387,17 @@ export function Satellite1Now({
     sub,
     go
   };
+  // "Open Dev3 Satellite1" in another speaker's media drawer: the roster row for a Music Assistant
+  // player, by MAC where the socket knows it and by name through the relay, linked exactly as the
+  // device switcher links it.
+  const peerFor = (rowMac: string, rowName: string) => {
+    const hex = (s: unknown) => String(s || '').toLowerCase().replace(/[^0-9a-f]/g, '');
+    const roster: any[][] = ctx.ha?.d?.dev || [];
+    const d = roster.find(r => /satellite1/i.test(r?.[0] || '') && (rowMac ? hex(r[3]) === hex(rowMac) : r[1] === rowName));
+    if (!d || hex(d[3]) === hex(device?.mac)) return null;
+    const props = peerLink(d, { remote, localMac, mac: String(device?.mac || '').toLowerCase(), hash: routeHash(tab, sub ?? undefined), deviceName: String(device?.name || ''), onRemote, onLocal });
+    return props ? { name: String(d[1] || ''), props } : null;
+  };
 
   // The sensor sparklines accrue on every tab, not only while Home is open. Values are the
   // entities' native units (°C - the °F flip is display-only). The change effects catch a moved
@@ -489,7 +500,7 @@ export function Satellite1Now({
         })}</div><div className="tabs-layer tabs-sub"><button className="tabs-back" aria-label="Back to main menu" onClick={() => {
             lastSub.current = 'device-info';
             go('NOW');
-          }}><ChevronLeft size={20} strokeWidth={2} aria-hidden="true" /></button><div className="tabs-sub-scroll">{SETTINGS_ROUTES.map(r => <button key={r.slug} className={'tabs-sub-pill' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{r.label}</button>)}</div></div></div></nav><MediaBar ctx={ctx} />
+          }}><ChevronLeft size={20} strokeWidth={2} aria-hidden="true" /></button><div className="tabs-sub-scroll">{SETTINGS_ROUTES.map(r => <button key={r.slug} className={'tabs-sub-pill' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{r.label}</button>)}</div></div></div></nav><MediaBar ctx={ctx} peerFor={peerFor} />
     <Presence>{sheet === 'device' && <Drawer label={TEXT.switcher_label} onClose={() => setSheet(null)}><DeviceSheet ctx={ctx} label={label} area={area} remote={remote} localMac={localMac} onRemote={onRemote} onLocal={onLocal} onSignOut={signOut} /></Drawer>}</Presence>
     <Presence>{sheet === 'notice' && <Drawer label={TEXT.notif_title} onClose={() => setSheet(null)}><Notice onAct={t => {
           setSheet(null);
@@ -510,6 +521,152 @@ const radarText = (r: unknown, present: unknown) => {
   const m = radarModel(r);
   return m && `${m} · ${present === 1 || present === true ? 'present' : 'no presence'}`;
 };
+
+/** What a roster row's link needs from the app around it. */
+type PeerEnv = {
+  remote: Remote;
+  localMac: string | null;
+  mac: string;
+  hash: string;
+  deviceName: string;
+  onRemote: (target: { base: string; key: string }, mac: string | null) => void;
+  onLocal: () => void;
+};
+export type PeerLinkProps = { href: string; target?: string; rel?: string; onClick?: (e: React.MouseEvent) => void };
+
+/** While remote, the device serving this page is just another roster row (the mac filter excludes
+ *  the controlled device, not the serving one). Going home is a state reset on a session this
+ *  browser already holds - no cross-sign-in, no probe, nothing that can fail. */
+const homeRow = (d: any[], env: PeerEnv) => !!env.remote && !!env.localMac && (d?.[3] || '').toLowerCase() === env.localMac;
+
+/**
+ * The link to a roster row's device - the device switcher's rows, and "Open" in another speaker's
+ * media drawer, so both reach a peer the same way - or null for a row with no address.
+ */
+function peerLink(d: any[], env: PeerEnv): PeerLinkProps | null {
+  const { remote, mac, hash, onRemote, onLocal } = env;
+  // The open page rides along, so moving to another device keeps it. The hash never reaches either
+  // server, so this works against old firmware too - it just falls off to whatever that serves at /.
+  const peerHref = (base: string) => `${String(base).replace(/\/+$/, '')}/${hash}`;
+
+  // The seamless jump: sign in to the peer before leaving so its page opens as the app rather than
+  // as its sign-in screen. The peer's password rides the roster (the Web UI Password sensor every
+  // device already publishes to Home Assistant, via web_ui_ha.yaml) and the sign-in is the same
+  // challenge-response the password form uses. Anything that declines - older peer firmware, a
+  // missing password, mDNS trouble - falls back to plain navigation and the peer's own sign-in. The
+  // href stays real underneath, so middle-click and open-in-new-tab keep working (they skip the
+  // sign-in and land on the fallback).
+  const jump = async (e: React.MouseEvent, url: string, pw: string | undefined) => {
+    if (!pw || e.button !== 0 || e.metaKey || e.ctrlKey) return;
+    e.preventDefault();
+    const origin = String(url).replace(/\/+$/, '');
+    const peer = await peerLogin(origin, pw);
+    if (!peer) {
+      location.href = peerHref(url);
+      return;
+    }
+    // The single-origin switch, tried first: one gated read with the fresh key says whether the
+    // peer accepts remote control and speaks this app's API contract (see probePeer). A yes means
+    // the app retargets and remounts with no navigation, so the iOS home-screen app never meets
+    // Safari's in-app sheet. The base is the roster's IP origin rather than the .local upgrade below:
+    // this target lives in memory for the session, so DHCP stability buys nothing, and skipping mDNS
+    // removes the one way the switch could land on a browser error page. The mac rides along only on
+    // the way out of the local device, so the sheet can offer the way back (isHome).
+    if (await probePeer(origin, peer.key)) {
+      onRemote({ base: origin, key: peer.key }, remote ? null : mac);
+      return;
+    }
+    // Older peer firmware: plain navigation, landing through ?key= so the peer sets its cookie
+    // first-party, where third-party cookie blocking cannot eat it. When the login body carries the
+    // peer's hostname and this page is itself on .local - proof this browser resolves mDNS - it goes
+    // straight to the peer's .local origin, skipping the IP-then-redirect double load; peers run the
+    // same firmware, so this page's port is the peer's. The name is regex-checked before it becomes
+    // a URL because it arrives in a CORS-readable body. Known accepted risk: this proves our mDNS
+    // works, not the peer's - a peer with mdns: disabled lands on a browser error page. The fleet
+    // ships mDNS on, and the failure is recoverable: back, or middle-click the real href.
+    const base = location.hostname.endsWith('.local') && peer.name && /^[a-z0-9-]+$/i.test(peer.name) ? `http://${peer.name}.local${location.port ? `:${location.port}` : ''}` : origin;
+    location.href = `${base}/?key=${peer.key}${hash}`;
+  };
+  // peerOrigin, not d[5] raw: a .local configuration_url is swapped for the row's live IP when the
+  // roster carries one, so the jump works where mDNS does not (see src/lib/device.js).
+  const url = peerOrigin(d);
+  if (homeRow(d, env)) return {
+    href: `${location.origin}${location.pathname}${hash}`,
+    onClick: e => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey) return;
+      e.preventDefault();
+      onLocal();
+    }
+  };
+  // Behind the ingress proxy a peer's plain-http origin is out of reach: navigating this (possibly
+  // https) HA panel there in place is blocked as mixed content, and so are the cross-origin
+  // sign-in fetches the jump rides. But the peer's own ingress panel shares this page's origin, so
+  // target="_top" navigates there natively inside HA, companion app included (a first build's
+  // target="_blank" IP link tossed iOS users out to Safari - owner's report, September 2026). The
+  // entry path is "/" plus the panel's YAML key, which is the peer's mDNS hostname under the same
+  // slug rule the HA Side Panel card's generated YAML uses (panelSlug in src/lib/auth.js). The
+  // hostname comes from the raw configuration_url, not peerOrigin(), which swaps in the IP. A row
+  // with no usable hostname falls back to a new-tab link: a top-level http navigation is allowed
+  // where an embedded one is not, and a possibly-dead panel link would be strictly worse.
+  if (url && proxied) {
+    let peerSlug = '';
+    try {
+      const h = new URL(String(d?.[5] || '')).hostname.replace(/\.local$/i, '');
+      if (h && !/^\d+\.\d+\.\d+\.\d+$/.test(h) && !h.includes(':')) peerSlug = h.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    } catch {
+      /* no configuration_url on this row; the mac derivation below */
+    }
+    if (!peerSlug) {
+      // The rung that fires on most installs: HA's ESPHome integration writes configuration_url
+      // with the IP it connects on, and an IP names no panel. But the fleet's hostnames are
+      // <base>-<last six hex of mac> (name_add_mac_suffix), so the peer's is this device's base
+      // plus the peer's suffix. The endsWith check is the honesty test: a device renamed away
+      // from the convention proves the base unknowable, and the new-tab fallback beats a guessed
+      // link to a panel that does not exist.
+      const ownName = env.deviceName.toLowerCase();
+      const ownSuffix = mac.replace(/[^a-z0-9]/g, '').slice(-6);
+      const peerSuffix = String(d?.[3] || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(-6);
+      if (ownSuffix.length === 6 && peerSuffix.length === 6 && ownName.endsWith(ownSuffix)) peerSlug = (ownName.slice(0, -6) + peerSuffix).replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    }
+    if (peerSlug) {
+      // Two panel layouts exist and the link must serve both. Flat: every device is its own
+      // sidebar entry at /<slug>. Nested: one visible entry and the rest hidden behind
+      // hass_ingress's parent: option at /<parent>/<slug> - the layout that keeps the sidebar to
+      // a single "Satellite1 Fleet" item. HA answers a hard 404 for unregistered routes and the
+      // panel page is same-origin, so one HEAD probe of the flat path decides: 404 means nested,
+      // and the parent is wherever the top window stands (on a child page the first segment is
+      // still the parent). The href stays the flat form for middle-click.
+      const goPanel = async (e: React.MouseEvent) => {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey) return;
+        e.preventDefault();
+        let target = `/${peerSlug}`;
+        try {
+          const r = await fetch(target, { method: 'HEAD', cache: 'no-store', signal: AbortSignal.timeout(3000) });
+          if (r.status === 404) {
+            const seg = window.top!.location.pathname.split('/')[1] || '';
+            if (seg && seg !== peerSlug) target = `/${seg}/${peerSlug}`;
+          }
+        } catch {
+          /* an unanswerable probe changes nothing: the flat link is the best guess standing */
+        }
+        // The proxied twin of the seamless sign-in: the peer cannot be signed in from here, so its
+        // password is left in shared HA-origin localStorage under its slug for the peer's own app
+        // to claim on boot (see putPanelHandoff, and the boot in src/App.tsx). No handoff, no
+        // harm: the peer's own sign-in screen takes over.
+        const pw = d?.[7];
+        if (pw) putPanelHandoff(peerSlug, pw);
+        try {
+          window.top!.location.href = target;
+        } catch {
+          location.href = target;
+        }
+      };
+      return { href: `/${peerSlug}`, target: '_top', onClick: goPanel };
+    }
+    return { href: peerHref(url), target: '_blank', rel: 'noopener' };
+  }
+  return url ? { href: peerHref(url), onClick: e => jump(e, url, d[7]) } : null;
+}
 
 /**
  * The device switcher: this device on top, then every other Satellite1 the Home Assistant payload
@@ -605,135 +762,18 @@ function DeviceSheet({
   const presLive = states?.['binary_sensor/Room Presence'] || states?.['binary_sensor/Presence'];
   const myPres = presLive ? presLive.value === true || presLive.state === 'ON' : mineRow?.[10];
   const myLit = !!radarModel(myRadar) && (myPres === 1 || myPres === true);
-  // The open page rides along, so moving to another device keeps it. The hash never reaches either
-  // server, so this works against old firmware too - it just falls off to whatever that serves at /.
-  const peerHref = (base: string) => `${String(base).replace(/\/+$/, '')}/${hash}`;
-
-  // The seamless jump: sign in to the peer before leaving so its page opens as the app rather than
-  // as its sign-in screen. The peer's password rides the roster (the Web UI Password sensor every
-  // device already publishes to Home Assistant, via web_ui_ha.yaml) and the sign-in is the same
-  // challenge-response the password form uses. Anything that declines - older peer firmware, a
-  // missing password, mDNS trouble - falls back to plain navigation and the peer's own sign-in. The
-  // href stays real underneath, so middle-click and open-in-new-tab keep working (they skip the
-  // sign-in and land on the fallback).
-  const jump = async (e: React.MouseEvent, url: string, pw: string | undefined) => {
-    if (!pw || e.button !== 0 || e.metaKey || e.ctrlKey) return;
-    e.preventDefault();
-    const origin = String(url).replace(/\/+$/, '');
-    const peer = await peerLogin(origin, pw);
-    if (!peer) {
-      location.href = peerHref(url);
-      return;
-    }
-    // The single-origin switch, tried first: one gated read with the fresh key says whether the
-    // peer accepts remote control and speaks this app's API contract (see probePeer). A yes means
-    // the app retargets and remounts with no navigation, so the iOS home-screen app never meets
-    // Safari's in-app sheet. The base is the roster's IP origin rather than the .local upgrade below:
-    // this target lives in memory for the session, so DHCP stability buys nothing, and skipping mDNS
-    // removes the one way the switch could land on a browser error page. The mac rides along only on
-    // the way out of the local device, so the sheet can offer the way back (isHome).
-    if (await probePeer(origin, peer.key)) {
-      onRemote({ base: origin, key: peer.key }, remote ? null : mac);
-      return;
-    }
-    // Older peer firmware: plain navigation, landing through ?key= so the peer sets its cookie
-    // first-party, where third-party cookie blocking cannot eat it. When the login body carries the
-    // peer's hostname and this page is itself on .local - proof this browser resolves mDNS - it goes
-    // straight to the peer's .local origin, skipping the IP-then-redirect double load; peers run the
-    // same firmware, so this page's port is the peer's. The name is regex-checked before it becomes
-    // a URL because it arrives in a CORS-readable body. Known accepted risk: this proves our mDNS
-    // works, not the peer's - a peer with mdns: disabled lands on a browser error page. The fleet
-    // ships mDNS on, and the failure is recoverable: back, or middle-click the real href.
-    const base = location.hostname.endsWith('.local') && peer.name && /^[a-z0-9-]+$/i.test(peer.name) ? `http://${peer.name}.local${location.port ? `:${location.port}` : ''}` : origin;
-    location.href = `${base}/?key=${peer.key}${hash}`;
-  };
-  // While remote, the device serving this page is just another roster row (the mac filter excludes
-  // the controlled device, not the serving one). Going home is a state reset on a session this
-  // browser already holds - no cross-sign-in, no probe, nothing that can fail.
-  const isHome = (d: any[]) => !!remote && !!localMac && (d?.[3] || '').toLowerCase() === localMac;
+  const link = { remote, localMac, mac, hash, deviceName: String(device?.name || ''), onRemote, onLocal };
+  const isHome = (d: any[]) => homeRow(d, link);
   // Room first: it is what a person scans for, and the address is the fallback when two devices
   // share a room (owner's call).
   const meta = (d: any[], url: string) => isHome(d) ? TEXT.switcher_home : !isUp(d) ? 'Offline' : [d[2], hostOf(url), netName(d[8]), radarText(d[9], d[10])].filter(Boolean).join(' · ');
   const peerRow = (d: any[]) => {
-    // peerOrigin, not d[5] raw: a .local configuration_url is swapped for the row's live IP when the
-    // roster carries one, so the jump works where mDNS does not (see src/lib/device.js).
     const url = peerOrigin(d);
     const up = isUp(d);
     const cls = up ? '' : 'offline';
     const body = <><span className="dot" title={up ? TEXT.peer_up : TEXT.peer_down} /><span><b>{d[1]}</b><small>{meta(d, url)}</small></span><ChevronRight size={18} className="peer-go" aria-hidden="true" /></>;
-    if (isHome(d)) return <a key={d[3]} className={cls} href={`${location.origin}${location.pathname}${hash}`} onClick={e => {
-      if (e.button !== 0 || e.metaKey || e.ctrlKey) return;
-      e.preventDefault();
-      onLocal();
-    }}>{body}</a>;
-    // Behind the ingress proxy a peer's plain-http origin is out of reach: navigating this (possibly
-    // https) HA panel there in place is blocked as mixed content, and so are the cross-origin
-    // sign-in fetches the jump rides. But the peer's own ingress panel shares this page's origin, so
-    // target="_top" navigates there natively inside HA, companion app included (a first build's
-    // target="_blank" IP link tossed iOS users out to Safari - owner's report, September 2026). The
-    // entry path is "/" plus the panel's YAML key, which is the peer's mDNS hostname under the same
-    // slug rule the HA Side Panel card's generated YAML uses (panelSlug in src/lib/auth.js). The
-    // hostname comes from the raw configuration_url, not peerOrigin(), which swaps in the IP. A row
-    // with no usable hostname falls back to a new-tab link: a top-level http navigation is allowed
-    // where an embedded one is not, and a possibly-dead panel link would be strictly worse.
-    if (url && proxied) {
-      let peerSlug = '';
-      try {
-        const h = new URL(String(d?.[5] || '')).hostname.replace(/\.local$/i, '');
-        if (h && !/^\d+\.\d+\.\d+\.\d+$/.test(h) && !h.includes(':')) peerSlug = h.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-      } catch {
-        /* no configuration_url on this row; the mac derivation below */
-      }
-      if (!peerSlug) {
-        // The rung that fires on most installs: HA's ESPHome integration writes configuration_url
-        // with the IP it connects on, and an IP names no panel. But the fleet's hostnames are
-        // <base>-<last six hex of mac> (name_add_mac_suffix), so the peer's is this device's base
-        // plus the peer's suffix. The endsWith check is the honesty test: a device renamed away
-        // from the convention proves the base unknowable, and the new-tab fallback beats a guessed
-        // link to a panel that does not exist.
-        const ownName = String(device?.name || '').toLowerCase();
-        const ownSuffix = mac.replace(/[^a-z0-9]/g, '').slice(-6);
-        const peerSuffix = String(d?.[3] || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(-6);
-        if (ownSuffix.length === 6 && peerSuffix.length === 6 && ownName.endsWith(ownSuffix)) peerSlug = (ownName.slice(0, -6) + peerSuffix).replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-      }
-      if (peerSlug) {
-        // Two panel layouts exist and the link must serve both. Flat: every device is its own
-        // sidebar entry at /<slug>. Nested: one visible entry and the rest hidden behind
-        // hass_ingress's parent: option at /<parent>/<slug> - the layout that keeps the sidebar to
-        // a single "Satellite1 Fleet" item. HA answers a hard 404 for unregistered routes and the
-        // panel page is same-origin, so one HEAD probe of the flat path decides: 404 means nested,
-        // and the parent is wherever the top window stands (on a child page the first segment is
-        // still the parent). The href stays the flat form for middle-click.
-        const goPanel = async (e: React.MouseEvent) => {
-          if (e.button !== 0 || e.metaKey || e.ctrlKey) return;
-          e.preventDefault();
-          let target = `/${peerSlug}`;
-          try {
-            const r = await fetch(target, { method: 'HEAD', cache: 'no-store', signal: AbortSignal.timeout(3000) });
-            if (r.status === 404) {
-              const seg = window.top!.location.pathname.split('/')[1] || '';
-              if (seg && seg !== peerSlug) target = `/${seg}/${peerSlug}`;
-            }
-          } catch {
-            /* an unanswerable probe changes nothing: the flat link is the best guess standing */
-          }
-          // The proxied twin of the seamless sign-in: the peer cannot be signed in from here, so its
-          // password is left in shared HA-origin localStorage under its slug for the peer's own app
-          // to claim on boot (see putPanelHandoff, and the boot in src/App.tsx). No handoff, no
-          // harm: the peer's own sign-in screen takes over.
-          const pw = d?.[7];
-          if (pw) putPanelHandoff(peerSlug, pw);
-          try {
-            window.top!.location.href = target;
-          } catch {
-            location.href = target;
-          }
-        };
-        return <a key={d[3]} className={cls} href={`/${peerSlug}`} target="_top" onClick={goPanel}>{body}</a>;
-      }
-      return <a key={d[3]} className={cls} href={peerHref(url)} target="_blank" rel="noopener">{body}</a>;
-    }
-    return url ? <a key={d[3]} className={cls} href={peerHref(url)} onClick={e => jump(e, url, d[7])}>{body}</a> : <a key={d[3]} className={cls + ' nolink'}>{body}</a>;
+    const props = peerLink(d, link);
+    return props ? <a key={d[3]} className={cls} {...props}>{body}</a> : <a key={d[3]} className={cls + ' nolink'}>{body}</a>;
   };
   const ownMeta = [area, device?.ip].filter(Boolean).join(' · ');
   const ownRadar = radarModel(myRadar);

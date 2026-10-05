@@ -113,22 +113,29 @@ static constexpr size_t WU_SELECT_QUEUE = 4;
 
 /// One queued Music Assistant command, waiting for the main loop to fire the trigger that turns it
 /// into a Home Assistant action call - the same deferral as SelectWrite, for the same reason. `arg`
-/// is the command's second value where it has one: the entity being joined, a volume, a position.
+/// is the command's second value where it has one: the entity being joined, a volume, a position,
+/// the speaker whose music is taken, a transport verb. `arg2` is Take over's third: the speakers
+/// that join afterwards, comma-separated.
 struct MaWrite {
   uint8_t kind;
   std::string entity;
   std::string arg;
+  std::string arg2;
 };
 
 /// The relayed commands POST /api/sat1/ma/<cmd> accepts - exactly the footer's set. Everything the
 /// device can do itself (transport, its own volume, shuffle, repeat) stays on /api/sat1/media; these
 /// are only what must round-trip through Home Assistant: the favorite button, group membership,
-/// another member's volume, and seek, which the Sendspin hub offers no send for.
-enum class MaCmd : uint8_t { NONE = 0, LIKE, JOIN, UNJOIN, VOL, SEEK };
+/// another member's volume, seek, which the Sendspin hub offers no send for, and what the
+/// players panel and the bar's cards do to other speakers - taking their music (TAKEOVER with
+/// their speakers joining, MOVE without) and their transport.
+enum class MaCmd : uint8_t { NONE = 0, LIKE, JOIN, UNJOIN, VOL, SEEK, TAKEOVER, MOVE, TRANSPORT };
 
-/// Bound on the queue. Commands are taps, not drags - volume writes coalesce by entity below - so
-/// six outstanding means a browser is misbehaving, and refusal tells it so.
-static constexpr size_t WU_MA_QUEUE = 6;
+/// Bound on the queue. Commands are taps, not drags - volume writes coalesce by entity below - but
+/// another group's volume through the relay is one write per member (Home Assistant has no group
+/// volume), so a five-speaker group's slider and a Take over in flight already make seven. Twelve
+/// outstanding means a browser is misbehaving, and refusal tells it so.
+static constexpr size_t WU_MA_QUEUE = 12;
 
 /// One typed message from the Home page, waiting for the main loop to send it to Home Assistant
 /// (common/web_ui_assist.yaml): the text, the conversation agent it goes to, and the wake word whose

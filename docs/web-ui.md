@@ -514,6 +514,51 @@ server address and token live in `localStorage` and nowhere else — this tier c
 bytes, and while the socket is up the tier-1 polling stops entirely. The connection panel is folded
 shut at the bottom of the sheet; the footer is complete without it.
 
+**Groups are the leader's (October 2026).** A device that is a member of someone else's group sees
+that group, badge and all: the socket reads the group off the player it follows (`active_group`,
+else `synced_to`) and the relay off the first entry of `group_members` (the payload's `l`), and
+every add is aimed at that leader. Before this, a member read its own empty `group_members` and
+showed a group of one, and an add aimed at it split the group instead of growing it. A member that
+leads others and then joins somebody else first hands its group on (Music Assistant gives the
+leadership to a remaining member), so a join never breaks up the people listening with it.
+
+**Playing elsewhere.** The players panel lists the other speakers and groups Music Assistant is
+playing or has paused - the socket from its player list, the relay from the media payload's `o`
+rows (one per active queue, at most 8 rows and 2400 bytes, so a busy house can never push the
+group's own rows past the page loop). Each row offers what that speaker can do with this group:
+**Join** moves only this device into their music; **Take over** brings their music here and pulls
+all of their speakers into this group; **Move here** is what speakers that cannot play in sync get
+instead - their music moves here and they stop. Take over and Move here ask first ("Replace what's
+playing here?") only when this group has music of its own to lose; Join never asks. A native
+source with no Music Assistant queue (Spotify Connect on a Sonos, say) has nothing to share or
+take, so it is left out of the panel and shows only as a card on the bar, below. Both
+tiers carry all three: the socket as `player_queues/transfer` plus `players/cmd/set_members`, the
+relay as `music_assistant.transfer_queue` and a `media_player.join` that waits on the transfer's
+answer (`on_ma_transfer` in `common/web_ui_media.yaml`). Every action settles on what the next
+payload shows and leaves a note in the panel if the deadline passes first.
+
+**The bar's cards.** Each other speaker playing becomes a card the bar swipes to, with page dots and
+a one-time nudge the first time there are two. A card carries its own artwork tint, volume and the
+same three buttons as this device's card: search that plays on that speaker, that speaker's own
+players panel (its members, volumes, removes and adds, aimed at its leader), and Play/Pause.
+Tapping it opens a drawer with Previous and Next, the scrubber (socket only: the relay has no
+playhead for other speakers), the Join/Take over/Move here row and, for another Satellite1, a link
+that opens its own web app. A card stays while its speaker plays or is paused - paused including
+"idle with a track loaded", which is how Music Assistant reports a paused Satellite1 - and goes
+when its music stops or it joins this group, the bar sliding back to the card before it if it was
+in front. The relay lists no idle speakers, so there a Satellite1 keeps its card only when it was
+paused from that card. Card commands ride `players/cmd/*` on the socket and `on_ma_transport` /
+per-member volume writes on the relay, where a group's volume moves every member by the same step
+because Home Assistant has no group volume. The relay's view of other speakers refreshes on its fast cycle - about six seconds - while
+the panel or a remote card is up, and every 45 seconds otherwise.
+
+**Search.** A magnifier on the bar and one in the players panel open the search drawer. Artists,
+albums, playlists and podcasts open into views of their own - an artist's albums and singles, an
+album's numbered tracks, a playlist's songs, a podcast's episodes with dates, lengths and resume
+points - and every level can still play or queue the whole item. Long listings arrive in Music
+Assistant's 500-item partial messages and are gathered before rendering (`gatherResult` in
+`ma.js`). Search is socket-only: the relay has no route to Music Assistant's library.
+
 ## Add to home screen
 
 The app ships a web manifest, three PNG icons (192, 512 and a 180px apple-touch-icon) and the iOS

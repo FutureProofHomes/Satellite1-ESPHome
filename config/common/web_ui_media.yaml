@@ -1,7 +1,8 @@
 # The media footer's Home Assistant half: the live view of this device's Music Assistant player
-# that the Sendspin connection cannot provide - who is grouped with it and at what volume - plus the
-# relay for the commands only Home Assistant can carry (favorite, join, unjoin, a member's volume,
-# seek). The web server half is the MA routes in satellite1_web_ui's web_ui_handler; this file is the
+# that the Sendspin connection cannot provide - who is grouped with it and at what volume, and what
+# the other speakers in the house are playing - plus the relay for the commands only Home Assistant
+# can carry (favorite, join, unjoin, a member's volume, seek, taking another speaker's music, and
+# another speaker's transport). The web server half is the MA routes in satellite1_web_ui's web_ui_handler; this file is the
 # Jinja and the action calls, split from common/web_ui_ha.yaml because that file is the big
 # once-per-connect payload and this one syncs on demand while the footer's expanded view is open.
 #
@@ -54,6 +55,23 @@ substitutions:
   # current item, which Home Assistant mirrors as the entity's media_title for every playback
   # scenario - so "idle with a title" is the footer's paused signal, the same one MA's UI uses,
   # and "idle without one" is a stream that is truly over.
+  #
+  # `l` is the group's leader, the first of group_members - the entity every join targets, since a
+  # join aimed at a member splits its group (October 2026). A member inherits its leader's list, so
+  # every device in a group renders the same `g`.
+  #
+  # `o` is the rest of the house: the other Music Assistant speakers playing or paused, one row each
+  # as [entity, name, [[member, volume], ...], title, artist, art, state, volume,
+  # supported_features, has a queue, is a group player], for the players panel's "Playing
+  # elsewhere" and the bar's cards. One row per active queue: every member of a playing group player
+  # reports that group's queue and shows as playing, so the group players go first (the first pass)
+  # and their members collapse into them, and a row sharing this group's queue is this group. A
+  # sync member is left to its leader's row. Bounded so the payload can never outgrow the page loop,
+  # which discards everything - this group's own rows included - past its last page: at most 8 rows
+  # and 2400 bytes of them, 8 members each, names and titles cut to 60 characters, and art only when
+  # it is an absolute URL of 200 or fewer (Home Assistant's own proxy path is useless to a browser
+  # without its token). Worst-case rows take a page each, so the byte cap is what keeps them to
+  # four pages; a typical row is a fifth of that.
   web_ui_media_jinja: >-
     {% set my = mac | lower | replace(':', '') %}
     {% set sn = namespace(n='') %}
@@ -89,18 +107,62 @@ substitutions:
     {% set f.e = f.e or f.byname %}
     {% set P = namespace(l=[]) %}
     {% if f.e %}
+      {% set my_g = state_attr(f.e, 'group_members') or [f.e] %}
+      {% set my_q = state_attr(f.e, 'active_queue') or '' %}
       {% set P.l = ['{"e":' ~ (f.e | to_json)
                     ~ ',"st":' ~ (states(f.e) | to_json)
                     ~ ',"ti":' ~ ((state_attr(f.e, 'media_title') or '') | to_json)
                     ~ ',"sh":' ~ (1 if state_attr(f.e, 'shuffle') else 0)
                     ~ ',"rp":' ~ ((state_attr(f.e, 'repeat') or 'off') | to_json)
+                    ~ ',"l":' ~ (my_g[0] | to_json)
                     ~ ',"g":['] %}
-      {% for m in state_attr(f.e, 'group_members') or [f.e] %}
+      {% for m in my_g %}
         {% set v = state_attr(m, 'volume_level') %}
         {% set P.l = P.l + [([m,
                               state_attr(m, 'friendly_name') or m,
                               ((v * 100) | round | int) if v is not none else -1] | to_json)
                             ~ ('' if loop.last else ',')] %}
+      {% endfor %}
+      {% set O = namespace(l=[], n=0, q=([my_q] if my_q else [])) %}
+      {% set mas = integration_entities('music_assistant') | select('match', 'media_player\.') | list %}
+      {% for want in [1, 0] %}
+        {% for e in mas %}
+          {% set grp = state_attr(e, 'mass_player_type') == 'group' %}
+          {% set gm = state_attr(e, 'group_members') or [] %}
+          {% set aq = state_attr(e, 'active_queue') or '' %}
+          {% if (O.l | count) < 8 and (1 if grp else 0) == want and e not in my_g
+                and states(e) in ['playing', 'paused']
+                and (grp or not gm or gm[0] == e)
+                and not (aq and aq in O.q) %}
+            {% set v = state_attr(e, 'volume_level') %}
+            {% set pic = state_attr(e, 'entity_picture') or '' %}
+            {% set M = namespace(l=[]) %}
+            {% for m in (gm if grp else gm[1:])[:8] %}
+              {% set mv = state_attr(m, 'volume_level') %}
+              {% set M.l = M.l + [[m, ((mv * 100) | round | int) if mv is not none else -1]] %}
+            {% endfor %}
+            {% set row = [e,
+                          (state_attr(e, 'friendly_name') or e)[:60],
+                          M.l,
+                          (state_attr(e, 'media_title') or '')[:60],
+                          (state_attr(e, 'media_artist') or '')[:60],
+                          pic if pic[:4] == 'http' and (pic | length) <= 200 else '',
+                          states(e),
+                          ((v * 100) | round | int) if v is not none else -1,
+                          state_attr(e, 'supported_features') or 0,
+                          1 if aq else 0,
+                          1 if grp else 0] | to_json %}
+            {% if O.n + (row | length) <= 2400 %}
+              {% set O.l = O.l + [row] %}
+              {% set O.n = O.n + (row | length) %}
+              {% if aq %}{% set O.q = O.q + [aq] %}{% endif %}
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+      {% endfor %}
+      {% set P.l = P.l + ['],"o":['] %}
+      {% for r in O.l %}
+        {% set P.l = P.l + [r ~ ('' if loop.last else ',')] %}
       {% endfor %}
       {% set P.l = P.l + [']}'] %}
     {% else %}
@@ -321,9 +383,10 @@ script:
 # the numbers, and the component fires one of these per loop iteration, so none of them re-enters.
 #
 # No capture_response anywhere here, so the device never learns whether the call was accepted -
-# which is why join, unjoin, volume and seek all schedule the resync above, and the app believes
-# what comes back rather than what it asked for. The favorite press schedules none: nothing in the
-# payload changes when a track is favorited, so there is nothing to read back.
+# which is why join, unjoin, volume, seek, transfer and transport all schedule the resync above, and
+# the app believes what comes back rather than what it asked for. The one exception is the
+# transfer's success status, which Take over's join waits on. The favorite press schedules none:
+# nothing in the payload changes when a track is favorited, so there is nothing to read back.
 #
 # entity_id through data_template with variables, as on_ha_select does: `{{ ent }}` renders a
 # variable rather than interpolating text into a template.
@@ -383,4 +446,52 @@ satellite1_web_ui:
         variables:
           ent: !lambda 'return entity;'
           pos: !lambda 'return position;'
+    - script.execute: web_ui_media_resync_soon
+
+  on_ma_transfer:
+    # Take over and Move here: another speaker's queue - track, position and all - moves to this
+    # group's leader and starts; Take over then joins their speakers (`members`, every one of them:
+    # Music Assistant breaks up a group whose leader joins another). The join waits for the
+    # transfer's answer, because joining first would pull their speakers into a group with nothing
+    # to play. on_success runs with this trigger's own arguments, so it knows whom to name, and the
+    # comma list renders to the list media_player.join wants. The one place here that asks for an
+    # answer - the members sync this rides already requires action replies, so it always has one.
+    - homeassistant.action:
+        action: music_assistant.transfer_queue
+        data_template:
+          entity_id: "{{ ent }}"
+          source_player: "{{ src }}"
+          auto_play: "{{ true }}"
+        variables:
+          ent: !lambda 'return entity;'
+          src: !lambda 'return source;'
+        on_success:
+          - if:
+              condition:
+                lambda: 'return join;'
+              then:
+                - homeassistant.action:
+                    action: media_player.join
+                    data_template:
+                      entity_id: "{{ ent }}"
+                      group_members: "{{ mem.split(',') }}"
+                    variables:
+                      ent: !lambda 'return entity;'
+                      mem: !lambda 'return members;'
+          - script.execute: web_ui_media_resync_soon
+        on_error:
+          - lambda: 'ESP_LOGW("web_ui", "Music Assistant transfer from %s failed: %s", source.c_str(), error.c_str());'
+          - script.execute: web_ui_media_resync_soon
+
+  on_ma_transport:
+    # Another speaker's Next, Previous or Play/Pause, from its card on the bar or its drawer.
+    - homeassistant.action:
+        action: !lambda |-
+          return cmd == "next" ? "media_player.media_next_track"
+               : cmd == "previous" ? "media_player.media_previous_track"
+               : "media_player.media_play_pause";
+        data_template:
+          entity_id: "{{ ent }}"
+        variables:
+          ent: !lambda 'return entity;'
     - script.execute: web_ui_media_resync_soon

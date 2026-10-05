@@ -254,6 +254,13 @@ void Satellite1WebUI::loop() {
       case MaCmd::SEEK:
         this->ma_seek_trigger_.trigger(ma.entity, static_cast<float>(strtoul(ma.arg.c_str(), nullptr, 10)));
         break;
+      case MaCmd::TAKEOVER:
+      case MaCmd::MOVE:
+        this->ma_transfer_trigger_.trigger(ma.entity, ma.arg, ma.arg2, ma.kind == static_cast<uint8_t>(MaCmd::TAKEOVER));
+        break;
+      case MaCmd::TRANSPORT:
+        this->ma_transport_trigger_.trigger(ma.entity, ma.arg);
+        break;
       case MaCmd::NONE:
         break;
     }

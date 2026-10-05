@@ -926,11 +926,12 @@ export function useMaData(enabled) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
+  // The parameters ride a form body, not the query: the device's httpd caps a URI at 512 bytes, and
+  // a Take over naming every speaker of a big group passes that.
   const maCmd = (cmd, params = {}) => {
-    const q = new URLSearchParams();
-    for (const [k, v] of Object.entries(params)) if (v != null) q.set(k, v);
-    const qs = q.toString();
-    return post(`/api/sat1/ma/${cmd}${qs ? `?${qs}` : ""}`);
+    const body = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v != null) body.set(k, v);
+    return request(`/api/sat1/ma/${cmd}`, { method: "POST", body });
   };
 
   return { ma, maCmd, maRead: read, maAsk: ask };

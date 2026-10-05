@@ -25,6 +25,12 @@ export const PENDING_MAX_MS = 5000;
  *  on healthy edits. The socket tier confirms in well under a second; twelve is only how long a
  *  failure takes to unwind. */
 export const GROUP_PENDING_MAX_MS = 12000;
+/** Take over and Move here, which are two steps on the relay (the queue moves, then the speakers
+ *  join) and so get a little longer than a join before they are called failed. */
+export const TAKEOVER_PENDING_MAX_MS = 15000;
+/** Another speaker's Next or Play/Pause, confirmed by its row changing. Longer than the bar's own
+ *  five seconds because the relay confirms on its ~6s cycle rather than the device's 1s poll. */
+export const REMOTE_PENDING_MAX_MS = 10000;
 /** How stale (s) the relay payload may grow while its "paused" claim still holds the card up,
  *  counted as its `age` when Home Assistant rendered it plus how long this browser has held it
  *  (`at`), because the two go stale independently. Two minutes spans the bar's 45s recheck
@@ -119,43 +125,265 @@ export const REPEAT_MODE = ["off", "one", "all"];
 
 const byName = (a, b) => String(a[1]).localeCompare(String(b[1]));
 
+/** Music Assistant's player types that are not speakers anyone would join or take music from: a
+ *  speaker's hidden per-protocol twin (a Sonos's AirPlay side, which would list the Sonos twice),
+ *  and the screens, visualizers, lights and capture-only inputs MA also models as players. Excluded
+ *  rather than the speaker types included, so a server older than the field lists everything. */
+const NOT_SPEAKERS = new Set(["protocol", "display", "visualizer", "light", "source"]);
+
+/** A socket player's state. `playback_state` since MA 2.5; `state` is its alias for older clients. */
+export const playerState = (p) => p?.playback_state || p?.state || "";
+
+const isSpeaker = (p) =>
+  !!p && p.available !== false && p.enabled !== false && !p.hide_in_ui && !p.private && !NOT_SPEAKERS.has(p.type);
+
+/**
+ * The player whose group `me` plays in: the group player it is a member of, the sync leader it
+ * follows, or itself. Every group view and every join is built from this, because a member's own
+ * group_members is empty - read from the member, the group was a group of one (owner's report,
+ * October 2026: Dev3 leading showed a badge "2" while its member Dev12 showed none), and an add
+ * aimed at the member split the group instead of growing it.
+ */
+export function leaderOf(me, players) {
+  if (!me) return null;
+  const by = (id) => (id && id !== me.player_id ? players?.[id] : null);
+  return by(me.active_group) || by(me.synced_to) || me;
+}
+
+/** Whether `a`'s can_group_with names `b`, by player id or by the provider instance MA uses for
+ *  "every player of this provider". Null when `a` gives no list to judge by. */
+function namesIn(a, b) {
+  const list = a?.can_group_with;
+  if (!Array.isArray(list) || list.length === 0) return null;
+  return list.includes(b.player_id) || (!!b.provider && list.includes(b.provider));
+}
+
+/**
+ * Whether two socket players can play in sync: true when either side's list names the other,
+ * false only when both give a list and neither does, null (unknown) otherwise. Either direction
+ * counts because Music Assistant leaves a playing leader out of everyone else's list; unknown
+ * offers Join and Take over and lets the attempt decide, as the relay always does.
+ */
+export function canSync(a, b) {
+  const x = namesIn(a, b);
+  const y = namesIn(b, a);
+  if (x || y) return true;
+  return x === false && y === false ? false : null;
+}
+
 /**
  * The group as rows, from whichever tier answers: the socket's players (`me` is this device's) or
  * the relay's `live.g`. `raw` is every member as reported; `members` hides the ones a pending unjoin
- * already took out, sorted by name; `addables` are the speakers that could join - the socket's
- * available players, or the relay's candidates `cands` from the Home Assistant payload.
+ * already took out, sorted by name; `addables` are the speakers that could join - on the socket the
+ * leader's can_group_with (every available speaker on a server without it), on the relay the
+ * candidates `cands` from the Home Assistant payload. `leader` is the id every join targets.
  * Rows are [id, name, volume 0-100 or -1]; addables [id, name]. The ids are MA player ids on the
  * socket and Home Assistant entity ids through the relay, which is fine because every command goes
  * to the tier that produced its row. Both lists sort by name (owner's request, September 2026): the
  * socket reports members in join order and the relay in payload order, and neither order means
  * anything to someone scanning the list for a room.
+ *
+ * A speaker that is playing, or is in another group, is not an addable: one tap there used to stop
+ * someone else's music without a word. Neither is anything `others` (elsewhereRows) lists, members
+ * included - a paused speaker is someone's music too, and it has its own row under Playing
+ * elsewhere - which is also what keeps the relay's stateless candidates honest. A row kept only for
+ * its bar card (idle now) blocks nothing.
  */
-export function groupRows({ wsOn, me, players, live, cands, pending }) {
-  const ids = wsOn ? (me.group_members?.length ? me.group_members : [me.player_id]) : [];
-  const raw = wsOn
-    ? ids.map((id) => {
-        const p = players[id];
-        return [id, p?.name || id, p?.volume_level ?? -1];
-      })
-    : live?.g || [];
+export function groupRows({ wsOn, me, players, live, cands, pending, others }) {
+  const busy = new Set();
+  for (const r of others || []) {
+    if (r.state === "idle") continue;
+    busy.add(r.id);
+    for (const m of r.members) busy.add(m[0]);
+  }
+  if (wsOn) {
+    const lead = leaderOf(me, players);
+    const ids = lead.group_members?.length ? [...lead.group_members] : [lead.player_id];
+    // A group player is its members, never one of them (another speaker's panel opens on one).
+    if (!ids.includes(me.player_id) && me.type !== "group") ids.push(me.player_id);
+    const raw = ids.map((id) => {
+      const p = players[id];
+      return [id, p?.name || id, p?.volume_level ?? -1];
+    });
+    const members = raw.filter(([id]) => pending[id]?.kind !== "unjoin").sort(byName);
+    const cg = Array.isArray(lead.can_group_with) && lead.can_group_with.length ? lead.can_group_with : null;
+    const addables = Object.values(players)
+      .filter(
+        (p) =>
+          isSpeaker(p) &&
+          p.available &&
+          p.type !== "group" &&
+          p.player_id !== me.player_id &&
+          p.player_id !== lead.player_id &&
+          !ids.includes(p.player_id) &&
+          !p.synced_to &&
+          !(p.active_group && p.active_group !== p.player_id) &&
+          !busy.has(p.player_id) &&
+          playerState(p) !== "playing" &&
+          (!cg || cg.includes(p.player_id) || (!!p.provider && cg.includes(p.provider))),
+      )
+      .map((p) => [p.player_id, p.name])
+      .sort(byName);
+    return { raw, members, addables, leader: lead.player_id };
+  }
+  const raw = live?.g || [];
   const members = raw.filter(([id]) => pending[id]?.kind !== "unjoin").sort(byName);
-  const addables = (
-    wsOn
-      ? Object.values(players)
-          .filter((p) => p.available && p.player_id !== me.player_id && !ids.includes(p.player_id))
-          .map((p) => [p.player_id, p.name])
-      : (cands || []).filter(([id]) => !members.some((m) => m[0] === id))
-  ).sort(byName);
-  return { raw, members, addables };
+  const addables = (cands || []).filter(([id]) => !members.some((m) => m[0] === id) && !busy.has(id)).sort(byName);
+  return { raw, members, addables, leader: live?.l || raw[0]?.[0] || "" };
+}
+
+const normId = (s) => String(s || "").toLowerCase().replace(/[:-]/g, "");
+
+/**
+ * The other speakers and groups Music Assistant is playing, one row per group, from whichever tier
+ * answers. Each is `{id, name, members, group, title, artist, art, state, volume, vctl,
+ * transferable, queue, sync, mac, clock}`: `id` is what commands target (the group's leader or the
+ * group player), `members` the rest of its group as rows, `vctl` whether its volume can be set at
+ * all, `transferable` whether it plays from a Music Assistant queue (Take over and Move here need
+ * one; Spotify Connect and other native sources have none), `queue` the queue to take, `sync` the
+ * canSync verdict against this group's leader (always null through the relay, which cannot know),
+ * `mac` the device's MAC where the socket knows it, and `clock` the socket's playhead.
+ *
+ * A row is a leader or an ungrouped speaker that is playing or paused, outside this device's
+ * group. A member of a group player is left to the group player's row. `keep` lists ids to include
+ * even while idle - the bar's cards for speakers paused during this visit, which a Sendspin
+ * player reports as idle, never paused.
+ */
+export function elsewhereRows({ wsOn, me, players, live, keep }) {
+  if (wsOn) {
+    if (!me || !players) return [];
+    const lead = leaderOf(me, players);
+    const mine = new Set([me.player_id, lead.player_id, ...(lead.group_members || [])]);
+    const out = [];
+    for (const p of Object.values(players)) {
+      if (mine.has(p.player_id) || !isSpeaker(p)) continue;
+      const st = playerState(p);
+      if (st !== "playing" && st !== "paused" && !keep?.has(p.player_id)) continue;
+      if (p.synced_to && players[p.synced_to]) continue;
+      if (p.active_group && p.active_group !== p.player_id && players[p.active_group]) continue;
+      const cm = p.current_media || null;
+      const group = p.type === "group";
+      const memberIds = (p.group_members || []).filter((id) => id !== p.player_id);
+      const vol = group || memberIds.length ? (p.group_volume ?? p.volume_level) : p.volume_level;
+      out.push({
+        id: p.player_id,
+        name: p.name || p.player_id,
+        members: memberIds.map((id) => [id, players[id]?.name || id, players[id]?.volume_level ?? -1]),
+        group,
+        title: cm?.title || "",
+        artist: cm?.artist || "",
+        art: cm?.image_url || "",
+        state: st || "idle",
+        volume: vol ?? -1,
+        vctl: vol != null && (group || !p.volume_control || p.volume_control !== "none"),
+        transferable: !!cm?.queue_item_id,
+        queue: p.active_source || p.player_id,
+        sync: canSync(lead, p),
+        mac: normId(p.device_info?.mac_address),
+        clock:
+          p.elapsed_time != null && cm?.duration
+            ? { pos: p.elapsed_time, at: p.elapsed_time_last_updated || 0, dur: cm.duration }
+            : null,
+      });
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }
+  // The relay's `o`: [entity, name, [[member, volume], ...], title, artist, art, state, volume,
+  // supported_features, has a queue, is a group player] - web_ui_media.yaml has the selection.
+  // Members carry no names (payload size); their entity id stands in, and only their count shows.
+  return (live?.o || []).map((r) => ({
+    id: r[0],
+    name: r[1] || r[0],
+    members: (r[2] || []).map(([m, v]) => [m, m, v]),
+    group: r[10] === 1,
+    title: r[3] || "",
+    artist: r[4] || "",
+    art: r[5] || "",
+    state: r[6] || "playing",
+    volume: r[7] ?? -1,
+    // VOLUME_SET is Home Assistant's media player feature bit 4.
+    vctl: ((r[8] || 0) & 4) !== 0 && (r[7] ?? -1) >= 0,
+    transferable: r[9] === 1,
+    queue: r[0],
+    sync: null,
+    mac: "",
+    clock: null,
+  }));
+}
+
+/**
+ * The bar's cards after this device's own: one per other speaker playing now, and one per speaker
+ * seen playing during this page visit (`seen`) that is paused now. A speaker whose music stopped
+ * has no card (owner's request, October 2026: a "Stopped" card read as clutter). `order` is
+ * first-seen order and holds, so cards do not reorder as speakers come and go; `gone` are the ones
+ * that joined this device's group, which makes them part of its own card.
+ *
+ * Paused is the reported state, or "idle with a title": Music Assistant pauses a Sendspin player by
+ * stopping it, so a paused Satellite1 reports idle with its track still loaded - the signal MA's own
+ * bar goes by, and this device's own card too (wsPausedOf). The relay lists no idle speakers at all,
+ * so `held` covers the case that matters there: a speaker paused from its own card, here, keeps it,
+ * rebuilt from `last` (its last row) once its row is gone. Kept cards say "paused" whatever the tier
+ * reported, so the card offers Play.
+ */
+export function barCards({ rows, seen, order, last, gone, held }) {
+  const by = new Map(rows.map((r) => [r.id, r]));
+  const out = [];
+  for (const id of order) {
+    if (gone?.has(id)) continue;
+    const r = by.get(id);
+    if (r?.state === "playing") out.push(r);
+    else if (r && seen.has(id) && (r.state === "paused" || held?.has(id) || (r.state === "idle" && !!r.title)))
+      out.push(r.state === "paused" ? r : { ...r, state: "paused" });
+    else if (!r && held?.has(id) && last?.[id]) out.push({ ...last[id], state: "paused" });
+  }
+  return out;
+}
+
+/**
+ * Whether this device's group has music of its own that Take over or Move here would replace: on
+ * the socket, a queue holding a current item (playing, paused, or a Sendspin pause, which reads as
+ * idle); on the relay, playing, or not playing with a title (the payload's paused signal, as in
+ * relayPausedOf). Those two ask first; with nothing to lose they act on one tap.
+ */
+export function hasOwnMusic({ wsOn, queue, live }) {
+  if (wsOn) return queue?.state === "playing" || queue?.current_item != null;
+  const st = live?.st;
+  return st === "playing" || (!!live?.ti && (st === "paused" || st === "idle"));
+}
+
+/**
+ * The relay's group-volume step. Home Assistant has no group volume command, so the whole group
+ * moves by the step between its current average and `v`: each member's volume plus that step,
+ * clamped to 0-100, as [id, volume] writes. Members without a volume are left alone.
+ */
+export function groupSteps(rows, v) {
+  const known = rows.filter((r) => r[2] >= 0);
+  if (!known.length) return [];
+  const avg = known.reduce((n, r) => n + r[2], 0) / known.length;
+  const step = v - avg;
+  return known.map((r) => [r[0], Math.max(0, Math.min(100, Math.round(r[2] + step)))]);
+}
+
+/** Another speaker's playhead in ms, from the socket's elapsed_time at elapsed_time_last_updated,
+ *  `skew` being how far this browser's clock runs ahead of the server's (seconds). */
+export function rowClock(row, now, skew = 0) {
+  const c = row?.clock;
+  if (!c) return null;
+  const dur = c.dur * 1000;
+  const run = row.state === "playing" ? now - (c.at + skew) * 1000 : 0;
+  return { dur, pos: Math.max(0, Math.min(dur, c.pos * 1000 + Math.max(0, run))) };
 }
 
 /** Pending group edits that the fresh rows have not confirmed yet: a join until its id appears, an
  *  unjoin until it is gone, either until the deadline. Settling on membership rather than on any
  *  fresh payload matters: a poll that landed before the unjoin would otherwise briefly resurrect the
- *  removed row. */
-export function settleGroup(pending, raw, now) {
-  const has = (id) => raw.some((m) => m[0] === id);
-  return prune(pending, ([id, e]) => (e.kind === "join" ? !has(id) : has(id)) && now - e.at < GROUP_PENDING_MAX_MS);
+ *  removed row. An edit to another speaker's group carries that group's leader as `lead`, and
+ *  settles on `groups[lead]`, its rows. */
+export function settleGroup(pending, raw, now, groups = {}) {
+  return prune(pending, ([id, e]) => {
+    const has = (e.lead ? groups[e.lead] || [] : raw).some((m) => m[0] === id);
+    return (e.kind === "join" ? !has : has) && now - e.at < GROUP_PENDING_MAX_MS;
+  });
 }
 
 /** "Kitchen +2": the first member and how many more, or `fallback` with no group to name. */
@@ -299,16 +527,17 @@ export function findImage(item) {
 /** The thumbnail as a loadable URL against MA's HTTP origin `base`: a data URI as-is, a proxy id
  *  (schema >= 31) through /imageproxy/<id>, a remotely-accessible http(s) path as-is, anything else
  *  through the legacy /imageproxy with MA's double encoding. 80px is the proxy's smallest size,
- *  exactly the 40px row at 2x. No CORS concern: these are plain <img> loads, never canvas readbacks. */
-export function artThumb(item, base) {
+ *  exactly the 40px row at 2x; an opened item's header asks for more. No CORS concern: these are
+ *  plain <img> loads, never canvas readbacks. */
+export function artThumb(item, base, size = 80) {
   const img = findImage(item);
   if (!img?.path) return "";
   if (img.path.startsWith("data:image")) return img.path;
-  if (img.proxy_id) return base ? `${base}/imageproxy/${img.proxy_id}?size=80` : "";
+  if (img.proxy_id) return base ? `${base}/imageproxy/${img.proxy_id}?size=${size}` : "";
   if (img.remotely_accessible && /^https?:/i.test(img.path)) return img.path;
   if (!base) return "";
   const enc = encodeURIComponent(encodeURIComponent(img.path));
-  return `${base}/imageproxy?path=${enc}&provider=${encodeURIComponent(img.provider || "")}&size=80`;
+  return `${base}/imageproxy?path=${enc}&provider=${encodeURIComponent(img.provider || "")}&size=${size}`;
 }
 
 /** A row's sub-line: the kind by name (`kinds` maps media_type to a label), then its makers -
@@ -322,6 +551,94 @@ export function subOf(item, kinds) {
     "";
   const kind = kinds[item.media_type] || "";
   return names ? `${kind} \u00b7 ${names}` : kind;
+}
+
+/** The kinds of result that open into a view of their own: an artist to its albums, an album or a
+ *  playlist to its songs, a podcast to its episodes. Everything else plays or queues in place. */
+const OPENS = new Set(["artist", "album", "playlist", "podcast"]);
+export const canOpen = (item) => OPENS.has(item?.media_type);
+
+/** How to list what an opened item holds, against Music Assistant's commands (verified against the
+ *  server's controllers, October 2026). An album asks beyond the library so a provider album lists
+ *  every track, not only the ones saved. */
+export function openArgs(item) {
+  const args = { item_id: item.item_id, provider_instance_id_or_domain: item.provider };
+  switch (item.media_type) {
+    case "artist":
+      return ["music/artists/artist_albums", args];
+    case "album":
+      return ["music/albums/album_tracks", { ...args, in_library_only: false }];
+    case "playlist":
+      return ["music/playlists/playlist_tracks", args];
+    case "podcast":
+      return ["music/podcasts/podcast_episodes", args];
+    default:
+      return null;
+  }
+}
+
+const SINGLES = new Set(["single", "ep"]);
+const newestFirst = (a, b) => (b.year || 0) - (a.year || 0) || String(a.name).localeCompare(String(b.name));
+
+/** An artist's albums as [key, albums] sections, newest first in each: "albums" (compilations and
+ *  anything untyped included) and "singles" (singles and EPs), each only when it has any. */
+export function albumSections(albums) {
+  const main = (albums || []).filter((a) => !SINGLES.has(a.album_type)).sort(newestFirst);
+  const singles = (albums || []).filter((a) => SINGLES.has(a.album_type)).sort(newestFirst);
+  return [
+    ["albums", main],
+    ["singles", singles],
+  ].filter(([, list]) => list.length > 0);
+}
+
+/** An album's line inside its artist's view, where the artist goes without saying: the year, or
+ *  the kind when there is none. */
+export const albumSub = (album, kinds) => (album.year ? String(album.year) : kinds.album || "");
+
+/** An opened item's list in its natural order: an album by disc and track, a podcast newest
+ *  episode first (by position, else by release date), a playlist as its owner ordered it. */
+export function openedOrder(kind, items) {
+  const list = Array.isArray(items) ? [...items] : [];
+  if (kind === "album") list.sort((a, b) => (a.disc_number || 0) - (b.disc_number || 0) || (a.track_number || 0) - (b.track_number || 0));
+  if (kind === "podcast") {
+    const date = (e) => Date.parse(e.metadata?.release_date || "") || 0;
+    list.sort((a, b) => (b.position || 0) - (a.position || 0) || date(b) - date(a));
+  }
+  return list;
+}
+
+/** "Fleetwood Mac · 1977 · 11 songs": an opened item's header line from its kind, makers, year and
+ *  how many it holds (`n`, null while loading). `t` is the copy: search_kind and the count forms. */
+export function heroSub(item, n, t) {
+  const count = (one, many) => (n == null ? "" : n === 1 ? one : many.replace("%s", String(n)));
+  const artists = item.artists?.length ? item.artists.map((a) => a.name).join(" | ") : "";
+  const parts = {
+    artist: [t.search_kind.artist, count(t.search_album_1, t.search_albums_n)],
+    album: [artists || t.search_kind.album, item.year ? String(item.year) : "", count(t.search_song_1, t.search_songs_n)],
+    playlist: [t.search_kind.playlist, item.owner || "", count(t.search_song_1, t.search_songs_n)],
+    podcast: [t.search_kind.podcast, item.publisher || "", count(t.search_episode_1, t.search_episodes_n)],
+  }[item.media_type] || [t.search_kind[item.media_type] || ""];
+  return parts.filter(Boolean).join(" \u00b7 ");
+}
+
+/**
+ * A podcast episode's facts for its row: the release date ("Oct 2", with the year when it is not
+ * this one), its length in whole minutes, and how far through it is - `left` minutes when Music
+ * Assistant holds a resume point, `played` once finished. Empty fields are 0 or "".
+ */
+export function episodeSub(ep, now = Date.now()) {
+  const d = ep?.metadata?.release_date ? new Date(ep.metadata.release_date) : null;
+  const ok = d && !Number.isNaN(d.getTime());
+  const opts = { month: "short", day: "numeric" };
+  if (ok && d.getFullYear() !== new Date(now).getFullYear()) opts.year = "numeric";
+  const date = ok ? d.toLocaleDateString(undefined, opts) : "";
+  const mins = ep?.duration > 0 ? Math.max(1, Math.round(ep.duration / 60)) : 0;
+  const played = ep?.fully_played === true;
+  const left =
+    !played && ep?.resume_position_ms > 0 && ep?.duration > 0
+      ? Math.max(1, Math.ceil((ep.duration * 1000 - ep.resume_position_ms) / 60000))
+      : 0;
+  return { date, mins, left, played };
 }
 
 /** The recent-searches list with `query` on top, deduped without regard to case. */

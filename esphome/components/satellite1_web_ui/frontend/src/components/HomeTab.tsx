@@ -13,6 +13,7 @@ import { Switch } from './controls';
 import { useHeld, VoiceOrb } from './VoiceOrb';
 import { useWakeWords } from './WakeTab';
 import { Drawer, Presence } from './Drawer';
+import { Pager } from './Pager';
 type WakeWords = ReturnType<typeof useWakeWords>;
 type Sensor = {
   id: string;
@@ -392,119 +393,6 @@ function WakeHead({
       quick: tuned
     })}><span className="tt-cap"><Activity size={11} strokeWidth={2.4} aria-hidden="true" />{tuned ? TEXT.tt_tuned_short : TEXT.tt_tune_short}</span></button>}
   </header>;
-}
-
-/**
- * The wake word slots' windows side by side in a strip the person swipes through, on the native
- * scroll's own momentum and snap (owner's design, October 2026: two windows rather than two tabs).
- * The window off to the side recedes - smaller, dimmer - in step with the finger, and peeks in at
- * the edge so there is plainly something there; the page dots under the strip stretch into a pill
- * as it moves. Tapping the peeking window or a dot, or tabbing into it, brings it forward, and so
- * does `view` changing from outside, on the browser's smooth scroll. The scroll drives the look
- * through CSS variables set straight on the elements, so a swipe never re-renders the page, and
- * `view` follows only once the strip comes to rest. `cue` lights a dot: something new was said in
- * that window while the person was writing in the other.
- */
-function Pager({
-  view,
-  onView,
-  labels,
-  cue,
-  cards
-}: {
-  view: number;
-  onView: (i: number) => void;
-  labels: string[];
-  cue: number | null;
-  cards: React.ReactNode[];
-}) {
-  const root = useRef<HTMLDivElement>(null);
-  const track = useRef<HTMLDivElement>(null);
-  const viewRef = useRef(view);
-  viewRef.current = view;
-  const onViewRef = useRef(onView);
-  onViewRef.current = onView;
-  // A finger on the strip: nothing from outside moves it, and where it lands is decided on release.
-  const held = useRef(false);
-  const rest = useRef(0);
-  const placed = useRef(false);
-  const n = cards.length;
-  const span = () => {
-    const el = track.current;
-    return el ? el.scrollWidth - el.clientWidth : 0;
-  };
-  const progress = () => {
-    const el = track.current;
-    const max = span();
-    return el && max > 0 ? el.scrollLeft / max * (n - 1) : 0;
-  };
-  const paint = () => {
-    const el = track.current;
-    if (!el) return;
-    const at = progress();
-    root.current?.style.setProperty('--p', at.toFixed(4));
-    Array.from(el.children).forEach((page, i) => {
-      const card = page.firstElementChild as HTMLElement | null;
-      if (!card) return;
-      card.style.setProperty('--k', Math.min(1, Math.abs(at - i)).toFixed(4));
-      card.style.transformOrigin = i < at ? '100% 50%' : '0% 50%';
-    });
-  };
-  const land = () => {
-    const i = Math.round(progress());
-    if (!held.current && i !== viewRef.current) onViewRef.current(i);
-  };
-  useLayoutEffect(() => {
-    const el = track.current;
-    if (!el || held.current) return;
-    const left = n > 1 ? view / (n - 1) * span() : 0;
-    if (Math.abs(el.scrollLeft - left) >= 2) {
-      const still = !placed.current || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      el.scrollTo({
-        left,
-        behavior: still ? 'auto' : 'smooth'
-      });
-    }
-    placed.current = true;
-    paint();
-  }, [view, n]);
-  useEffect(() => {
-    const el = track.current;
-    if (!el) return;
-    // A new width (a phone turned, the window resized) keeps the open window where it was.
-    const ro = new ResizeObserver(() => {
-      if (!held.current) el.scrollLeft = n > 1 ? viewRef.current / (n - 1) * span() : 0;
-      paint();
-    });
-    ro.observe(el);
-    el.addEventListener('scrollend', land);
-    return () => {
-      ro.disconnect();
-      el.removeEventListener('scrollend', land);
-      clearTimeout(rest.current);
-    };
-  }, [n]);
-  const release = () => {
-    held.current = false;
-    clearTimeout(rest.current);
-    rest.current = window.setTimeout(land, 140);
-  };
-  return <div ref={root} className="tt-pager">
-    <div ref={track} className="tt-track" role="region" aria-roledescription="carousel" aria-label={TEXT.tt_label} onScroll={() => {
-      requestAnimationFrame(paint);
-      clearTimeout(rest.current);
-      rest.current = window.setTimeout(land, 140);
-    }} onTouchStart={() => {
-      held.current = true;
-    }} onTouchEnd={release} onTouchCancel={release} onKeyDown={e => {
-      if ((e.target as HTMLElement).closest('input, select, textarea')) return;
-      const to = e.key === 'ArrowRight' ? view + 1 : e.key === 'ArrowLeft' ? view - 1 : -1;
-      if (to < 0 || to >= n) return;
-      e.preventDefault();
-      onView(to);
-    }}>{cards.map((card, i) => <div key={i} className="tt-page"><article className={'transcript tt-card' + (i === view ? ' on' : '')} role="group" aria-roledescription="slide" aria-label={labels[i]} aria-current={i === view || undefined} onClick={() => i !== viewRef.current && onView(i)} onFocusCapture={() => i !== viewRef.current && onView(i)}>{card}</article></div>)}</div>
-    {n > 1 && <div className="tt-dots">{labels.map((label, i) => <button key={i} type="button" className={'tt-dot' + (i === view ? ' on' : '') + (i === cue ? ' new' : '')} aria-label={label} aria-current={i === view || undefined} onClick={() => onView(i)} />)}</div>}
-  </div>;
 }
 
 /**
@@ -898,7 +786,7 @@ export function HomeTab({
     }}><SensorPills ctx={ctx} /><VoiceOrb ctx={ctx} phase={voice?.phase} error={voice?.error} orb={orb} onOrbColor={onOrbColor} onTalk={talk} tips={tips} /></div><div className="now-right"><Pager view={at} onView={i => {
         tipDone('swipe');
         setView(i);
-      }} labels={labels} cue={unseen} cards={cards} /><Timers timers={voice?.timers || []} /></div>{ww.drawers}</section>;
+      }} labels={labels} cue={unseen} cards={cards} prefix="tt" label={TEXT.tt_label} cardClass="transcript" article /><Timers timers={voice?.timers || []} /></div>{ww.drawers}</section>;
 }
 
 /** The Home page's standing read of the wake word slots: words and tuning change rarely, and a
