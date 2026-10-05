@@ -42,8 +42,6 @@ jobs:
     with:
       files: |
         config/satellite1.yaml
-        config/satellite1.ld2410.yaml
-        config/satellite1.ld2450.yaml
       esphome-version: ${{ needs.resolve-esphome-version.outputs.esphome-version }}
       release-summary: develop-branch
       release-url:
