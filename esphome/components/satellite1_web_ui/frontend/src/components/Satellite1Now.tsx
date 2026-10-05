@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { TEXT } from '../copy.js';
 import { logout, peerLogin, primeOtherOrigin, probePeer, putPanelHandoff } from '../lib/auth.js';
 import { deviceIdentity, entity, haBlocked, onLogAlert, onWriteError, peerOrigin, proxied, useDeviceState, useEvents, useHaData, useSelection } from '../lib/device.js';
+import { hasDevTools } from '../lib/devtools.js';
+import { micActive, subscribe as subscribeMic } from '../lib/micmon.js';
 import { tipDone } from '../lib/tips.js';
 import { watchKeyboard } from '../lib/keyboard.js';
 import { archiveAllNotifs, archiveNotif, listNotifs, notifCount, setNotifDevice, subscribeNotifs } from '../lib/notif.js';
@@ -348,6 +350,12 @@ export function Satellite1Now({
   // the Home Assistant dot, worth one request every ten seconds so it starts telling the truth again
   // on its own after the connection comes back.
   const { device, deviceError } = useDeviceState(tab === 'SETTINGS' ? 2000 : 10000);
+  // Developer is a dev-build page; the dot says the mic monitor is still listening or recording
+  // after the person has walked off to another page.
+  const settingsRoutes = SETTINGS_ROUTES.filter(r => r.slug !== 'developer' || hasDevTools(device));
+  const [micOn, setMicOn] = useState(micActive());
+  useEffect(() => subscribeMic(() => setMicOn(micActive())), []);
+  const subLabel = (r: { slug: string; label: string }) => (r.slug === 'developer' && micOn ? <>{r.label}<span className="dev-dot" aria-hidden="true" /></> : r.label);
   const events = useEvents();
   const ha = useHaData();
   const selection = useSelection();
@@ -491,7 +499,7 @@ export function Satellite1Now({
     <nav className="side-nav" aria-label="Sections">{TABS.map(item => {
       const I = TAB_ICON[item];
       return <button key={item} className={tab === item ? 'selected' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => go(item, item === 'SETTINGS' ? lastSub.current : undefined)}><I size={18} strokeWidth={1.9} aria-hidden="true" /><span>{TAB_LABEL[item]}</span></button>;
-    })}{tab === 'SETTINGS' && <div className="side-sub" role="list">{SETTINGS_ROUTES.map(r => <button key={r.slug} role="listitem" className={'side-sub-item' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{r.label}</button>)}</div>}<div className="side-nav-foot"><button type="button" className="signout" onClick={signOut}><LogOut size={14} aria-hidden="true" /><span>{TEXT.logout}</span></button></div></nav>
+    })}{tab === 'SETTINGS' && <div className="side-sub" role="list">{settingsRoutes.map(r => <button key={r.slug} role="listitem" className={'side-sub-item' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{subLabel(r)}</button>)}</div>}<div className="side-nav-foot"><button type="button" className="signout" onClick={signOut}><LogOut size={14} aria-hidden="true" /><span>{TEXT.logout}</span></button></div></nav>
     <nav className="tabs" data-tab={tab} aria-label="Sections"><div className="tabs-track" style={{
         transform: navLayer === 0 ? 'translateX(0%)' : 'translateX(-50%)'
       }}><div className="tabs-layer tabs-main">{TABS.map(item => {
@@ -500,7 +508,7 @@ export function Satellite1Now({
         })}</div><div className="tabs-layer tabs-sub"><button className="tabs-back" aria-label="Back to main menu" onClick={() => {
             lastSub.current = 'device-info';
             go('NOW');
-          }}><ChevronLeft size={20} strokeWidth={2} aria-hidden="true" /></button><div className="tabs-sub-scroll">{SETTINGS_ROUTES.map(r => <button key={r.slug} className={'tabs-sub-pill' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{r.label}</button>)}</div></div></div></nav><MediaBar ctx={ctx} peerFor={peerFor} />
+          }}><ChevronLeft size={20} strokeWidth={2} aria-hidden="true" /></button><div className="tabs-sub-scroll">{settingsRoutes.map(r => <button key={r.slug} className={'tabs-sub-pill' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{subLabel(r)}</button>)}</div></div></div></nav><MediaBar ctx={ctx} peerFor={peerFor} />
     <Presence>{sheet === 'device' && <Drawer label={TEXT.switcher_label} onClose={() => setSheet(null)}><DeviceSheet ctx={ctx} label={label} area={area} remote={remote} localMac={localMac} onRemote={onRemote} onLocal={onLocal} onSignOut={signOut} /></Drawer>}</Presence>
     <Presence>{sheet === 'notice' && <Drawer label={TEXT.notif_title} onClose={() => setSheet(null)}><Notice onAct={t => {
           setSheet(null);

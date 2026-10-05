@@ -18,9 +18,9 @@ import type { Ctx } from '../ctx';
  * The two switches Home Assistant shows for this, "Route TTS To All Area Players" and "Duck All Area
  * Players", are projections of the selection rather than separate settings: ticking this device's
  * own area in a tree turns the matching switch on, and unticking any single player in it turns the
- * switch off (docs/web-ui.md, "The routing and ducking selection"). The speaker amplifier's own
- * settings live on Diagnostics rather than here (owner call, September 2026), with the USB-C power
- * reading that decides the amp's gain mode.
+ * switch off (docs/web-ui.md, "The routing and ducking selection"). The speaker's channel is the one
+ * amplifier setting a customer gets, so it lives here; the TAS2780's analog gain and live readings
+ * are developer tools on Settings > Developer (owner call, October 2026).
  */
 
 /** [entity id, name, caps, available] - the /api/sat1/ha row. */
@@ -398,6 +398,25 @@ function AreaDucking({
         </div>}
     </div>;
 }
+
+/** Which side of a stereo source the built-in speaker plays. Needs no Home Assistant, so it shows
+ *  even when the selection cards above cannot. */
+function SpeakerChannel({
+  ctx
+}: {
+  ctx: Ctx;
+}) {
+  const chan = entity(ctx, 'speaker_channel');
+  return <div className="au-card">
+      <div className="au-card-head"><span className="au-card-title">Speaker</span></div>
+      <div className="au-row au-row-last">
+        <div className="au-row-label"><span>Channel</span><HintBtn text={HINTS.speaker_channel} /></div>
+        <AuSelect value={chan?.value ?? ''} options={chan?.option || []} label="Speaker channel" onChange={v => send(ctx, 'speaker_channel', 'set', {
+        option: v
+      })} />
+      </div>
+    </div>;
+}
 export function AudioTab({
   ctx
 }: {
@@ -419,9 +438,13 @@ export function AudioTab({
   return <section className="control au-tab au-route">
       <span className="eyebrow">AUDIO · ROUTING</span>
       <h1><span>Sound, </span><em>directed.</em></h1>
-      {!ctx.device ? <p className="au-missing">The device is not available on this firmware build.</p> : sel ? <div className="au-route-cards">
-          <RemoteRouting ctx={ctx} sel={sel} problem={problem} payload={payload} />
-          <AreaDucking ctx={ctx} sel={sel} problem={problem} payload={payload} />
-        </div> : <p className="au-missing">{ctx.selError ? 'The saved selection' : 'Settings'} is not available on this firmware build.</p>}
+      {!ctx.device ? <p className="au-missing">The device is not available on this firmware build.</p> : <>
+          {!sel && <p className="au-missing">{ctx.selError ? 'The saved selection' : 'Settings'} is not available on this firmware build.</p>}
+          <div className="au-route-cards">
+            {sel && <RemoteRouting ctx={ctx} sel={sel} problem={problem} payload={payload} />}
+            {sel && <AreaDucking ctx={ctx} sel={sel} problem={problem} payload={payload} />}
+            {has(ctx, 'speaker_channel') && <SpeakerChannel ctx={ctx} />}
+          </div>
+        </>}
     </section>;
 }

@@ -15,17 +15,23 @@ test("each tab parses from its own hash", () => {
   assert.deepEqual(parseRoute("#/settings/logs"), { tab: "SETTINGS", sub: "logs" });
 });
 
-test("the URL names for two settings pages differ from the design's slugs", () => {
+test("the device page's URL name differs from the design's slug", () => {
   assert.deepEqual(parseRoute("#/settings/device"), { tab: "SETTINGS", sub: "device-info" });
-  assert.deepEqual(parseRoute("#/settings/amp"), { tab: "SETTINGS", sub: "audio" });
   assert.equal(routeHash("SETTINGS", "device-info"), "#/settings/device");
-  assert.equal(routeHash("SETTINGS", "audio"), "#/settings/amp");
+});
+
+test("the developer page has its own hash", () => {
+  assert.deepEqual(parseRoute("#/settings/developer"), { tab: "SETTINGS", sub: "developer" });
+  assert.equal(routeHash("SETTINGS", "developer"), "#/settings/developer");
 });
 
 test("pre-redesign hashes land on their successors", () => {
   assert.deepEqual(parseRoute("#/controls"), { tab: "NOW", sub: null });
   assert.deepEqual(parseRoute("#/config"), { tab: "AUDIO", sub: null });
   assert.deepEqual(parseRoute("#/diagnostics"), { tab: "SETTINGS", sub: "device-info" });
+  // The amplifier card moved to Developer; a release build then sends this on to Device Info.
+  assert.deepEqual(parseRoute("#/settings/amp"), { tab: "SETTINGS", sub: "developer" });
+  assert.equal(routeHash("SETTINGS", "audio"), "#/settings/device");
 });
 
 test("unknown, empty and decorated hashes fall back sensibly", () => {
@@ -44,7 +50,7 @@ test("every route survives a round trip", () => {
     const { tab, sub } = parseRoute(h);
     assert.equal(routeHash(tab, sub), h);
   }
-  for (const p of ["device", "updates", "security", "logs", "integrations", "recovery", "amp", "community"]) {
+  for (const p of ["device", "updates", "security", "logs", "integrations", "recovery", "developer", "community"]) {
     const h = `#/settings/${p}`;
     const { tab, sub } = parseRoute(h);
     assert.equal(routeHash(tab, sub), h);

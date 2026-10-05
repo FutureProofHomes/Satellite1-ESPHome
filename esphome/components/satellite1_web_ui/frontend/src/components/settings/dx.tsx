@@ -267,7 +267,8 @@ export function saveBlob(blob: Blob, name: string) {
   a.href = url;
   a.download = name;
   a.click();
-  URL.revokeObjectURL(url);
+  // Some browsers read a large blob after click() returns; revoking at once can save an empty file.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 /** "Copied" for two seconds after a successful copy. */

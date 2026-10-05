@@ -32,7 +32,7 @@ const isLine = (l: LogLine, r: LineRef) => l.text === r.text && (r.ms != null &&
 
 /* ESPHome's own console palette, so nobody learns a second scheme. Verbose alone stays grey: it is
    the chatter you filter out, and colouring it would leave nothing dim to compare against. */
-const LVL_CLASS: Record<string, string> = {
+export const LVL_CLASS: Record<string, string> = {
   E: 'dx-err',
   C: 'dx-cfg',
   W: 'dx-warn',

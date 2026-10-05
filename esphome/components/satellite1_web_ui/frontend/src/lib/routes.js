@@ -6,8 +6,8 @@
  * reaches the server, so a bookmark survives a firmware update - which is why the old names keep
  * resolving (docs/web-ui.md, "What it is").
  *
- * The URL names are not the design's ids on purpose: the design calls Home "NOW" and the
- * amplifier page "audio", and #/settings/audio beside #/audio would read as the same page.
+ * The URL names are not the design's ids on purpose: the design calls Home "NOW", and the names
+ * the URL shows are the ones a person would type.
  */
 
 /** URL name -> design tab id, in nav order. */
@@ -27,14 +27,17 @@ const SUBS = [
   ["logs", "logs"],
   ["integrations", "integrations"],
   ["recovery", "recovery"],
-  ["amp", "audio"],
+  // Developer builds only (config/satellite1.dev.yaml). Shell code hides it elsewhere, and on a
+  // release build Settings sends it to Device Info.
+  ["developer", "developer"],
   ["community", "community"],
 ];
 
-/** Hashes the previous UI used: #/controls and #/config from before the September 2026 rename, and
- *  #/diagnostics, whose cards became the Settings pages. Bookmarks outlive firmware updates by
- *  design, so they must keep landing somewhere better than the default. */
-const LEGACY = { controls: "home", config: "audio", diagnostics: "settings/device" };
+/** Hashes the previous UI used: #/controls and #/config from before the September 2026 rename,
+ *  #/diagnostics, whose cards became the Settings pages, and #/settings/amp, whose amplifier card
+ *  moved to Developer in October 2026. Bookmarks outlive firmware updates by design, so they must
+ *  keep landing somewhere better than the default. */
+const LEGACY = { controls: "home", config: "audio", diagnostics: "settings/device", "settings/amp": "settings/developer" };
 
 /**
  * `#/settings/logs?x=1` -> { tab: "SETTINGS", sub: "logs" }. Anything unknown is Home; a settings
@@ -49,7 +52,7 @@ export function parseRoute(hash) {
   return { tab, sub: (SUBS.find(([n]) => n === page) || SUBS[0])[1] };
 }
 
-/** The inverse: { tab: "SETTINGS", sub: "audio" } -> "#/settings/amp". */
+/** The inverse: { tab: "SETTINGS", sub: "device-info" } -> "#/settings/device". */
 export function routeHash(tab, sub) {
   const name = (TABS.find(([, t]) => t === tab) || TABS[0])[0];
   if (name !== "settings") return `#/${name}`;

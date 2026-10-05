@@ -180,11 +180,12 @@ export const HINTS = {
   finished_speaking:
     "How long the assistant waits after you stop talking before it answers. Aggressive answers fastest; Relaxed tolerates longer mid-sentence pauses. Each wake word has its own setting. Home Assistant keeps only one, so just before the assistant listens, the device copies the wake word's choice onto it - which is why Finished speaking detection on Home Assistant's device page changes as different wake words are used. A change made there only lasts until a wake word sets it again. The action button uses the Primary wake word's setting.",
 
+  /* Audio > Speaker, Channel: the one amplifier setting a customer gets. */
   speaker_channel:
     "Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want.",
 
-  /* The Speaker amplifier card's title. Sets the frame the four row hints below rely on: one chip,
-     three levels that multiply together, and only one of them is yours to set here. */
+  /* The TAS2780 card's title (Settings > Developer). Sets the frame the three row hints below rely
+     on: one chip, three levels that multiply together, and only one of them is settable here. */
   speaker_amp:
     "The chip that drives the built-in speaker. What you hear is three levels multiplied together: the power gain mode the amplifier picks from your USB-C supply, the digital volume the firmware computes from your sliders, and the analog gain set below.",
 
@@ -193,7 +194,7 @@ export const HINTS = {
      surprising thing: the row exists so "why is my speaker quieter than the video's" has an answer
      a customer can act on (a better USB-C brick). */
   amp_mode:
-    "Picked automatically from the measured power supply - it is a reading, not a setting. High gain: a 9 V or higher USB-PD supply is connected and the speaker can reach full loudness. Low gain: the device is on a plain 5 V supply, so maximum loudness is reduced. Off: the amplifier is shut down, normally because line out is selected. A supply that negotiates 9 V or more (the USB-C Power Supply row in the Device card above) is what unlocks High gain.",
+    "Picked automatically from the measured power supply - it is a reading, not a setting. High gain: a 9 V or higher USB-PD supply is connected and the speaker can reach full loudness. Low gain: the device is on a plain 5 V supply, so maximum loudness is reduced. Off: the amplifier is shut down, normally because line out is selected. A supply that negotiates 9 V or more (the USB-C Power Supply row on Device Info) is what unlocks High gain.",
 
   /* The Digital volume row. Read-only on purpose, and the hint says where the writable levers are
      so nobody hunts for a handle on this row. */
@@ -240,7 +241,7 @@ export const HINTS = {
      customer can act on, and it is why the row exists at all. The ~ gets a sentence because the
      current is the one number here that is a promise rather than a measurement. */
   usb_power:
-    "What the USB-C power supply agreed to deliver. Chargers that speak USB Power Delivery negotiate a voltage and the most current they will supply at it - the ~ marks that ceiling: the device draws only what it needs, usually far less. 5 V is a plain supply that negotiated nothing. 9 V or more is what lets the speaker amplifier run at High gain - the Speaker amplifier card just below.",
+    "What the USB-C power supply agreed to deliver. Chargers that speak USB Power Delivery negotiate a voltage and the most current they will supply at it - the ~ marks that ceiling: the device draws only what it needs, usually far less. 5 V is a plain supply that negotiated nothing. 9 V or more is what lets the speaker amplifier run at High gain, for full loudness.",
 
   xmos: "The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's.",
 
@@ -253,6 +254,19 @@ export const HINTS = {
     "Developer builds only. Lists the audio chip firmware published on the Satellite1-XMOS GitHub releases, beside the built-in copy this firmware carries. Picking one installs it - the device itself doesn't restart - and it stays installed across restarts until you pick Built-in again.",
   xmos_refresh:
     "Checks the Satellite1-XMOS GitHub releases for new firmware now, pre-releases included, instead of waiting for the device's own hourly check. New versions appear in the list above.",
+
+  /* Settings > Developer, only on config/satellite1.dev.yaml builds. Written for the team, so they
+     name the firmware's own parts; what a reader needs is what each view is measured from. */
+  mic_monitor:
+    "What the microphones hear, live: Speech-to-text is exactly what the voice assistant receives, Wake word is the same audio after the wake word engine's gain. Both are drawn; Play picks which one you hear. Muting the device sends silence. Recordings stay in this browser until you download them, one mono WAV per channel, with markers for wake words, assistant phases, XMOS restarts and dropped audio. Two pages can listen to one device at a time.",
+  mic_scores:
+    "Each wake word model's score, sampled every quarter second: the loudest it got in that window. A line crosses the dashed cutoff when it fires; the cutoff is drawn only for a word that has been tuned.",
+  multilog:
+    "Reads the recent log from each device you tick and merges them by time. Each device's clock is pinned to this browser's when it answers, so lines from two devices line up to within half that device's round trip, which the download's header lists. Other devices are signed in to with the password Home Assistant holds for them.",
+  sysmon:
+    "Memory sampled every ten seconds for the last twelve hours, kept on the device so the history is there before you open this page. The shaded bands mark when the assistant was running, when the XMOS was not ready and when the mic monitor was streaming.",
+  sysmon_tasks:
+    "Every FreeRTOS task, sorted by the least stack it has ever had free. Under 512 bytes is a crash waiting for the wrong code path.",
 
   // xmos_erase was here. The row it explained is gone from the app: the full erase is a recovery
   // tool - it restarts the device, erases the audio chip's entire flash and reinstalls the embedded
@@ -1075,7 +1089,7 @@ export const TEXT = {
   crash_erase_row: "Crash history",
   crash_erase: "Erase history",
 
-  /* Recovery: the developer XMOS firmware picker. The dropdown's options are the device's own
+  /* Settings > Developer: the XMOS firmware picker. The dropdown's options are the device's own
      ("Built-in (v1.1.0-alpha.0)", then each version). The stage lines replace the dropdown while an
      install runs, above one progress bar; %s is the version, or xf_builtin_long. The install's
      result is the device's own sentence ("Installed v1.1.0-dev.110", "Failed: ..."), shown as sent. */
@@ -1095,6 +1109,73 @@ export const TEXT = {
   xf_checked_new: "Found new XMOS firmware on GitHub",
   xf_checked_none: "No new XMOS firmware on GitHub",
   xf_check_not_started: "The device didn't start the check. Try again in a moment.",
+
+  /* Settings > Developer: the mic monitor. The status line is one of mm_st_* (the stream), then
+     whichever of the three device flags are set. %s in mm_full is the length. */
+  mm_title: "Microphones",
+  mm_listen: "Listen",
+  mm_stop: "Stop",
+  mm_play_row: "Play",
+  mm_ch_stt: "Speech-to-text",
+  mm_ch_ww: "Wake word",
+  mm_ch_off: "Off",
+  mm_st_off: "Not listening",
+  mm_st_connecting: "Connecting\u2026",
+  mm_st_streaming: "Streaming",
+  mm_st_reconnecting: "Connection lost. Reconnecting\u2026",
+  mm_st_busy: "Two pages are already listening to this device. Close one and try again.",
+  mm_st_low_memory: "The device is low on memory right now. Try again in a moment.",
+  mm_st_unsupported: "This firmware has no mic monitor.",
+  mm_st_signed_out: "Your session ended. Reload the page to sign in again.",
+  mm_muted: "Muted: the device is sending silence",
+  mm_idle: "Microphones idle",
+  mm_xmos: "XMOS restarting",
+  mm_clip: "Clipping",
+  mm_scores: "Wake word scores",
+  mm_slot_primary: "Primary",
+  mm_slot_secondary: "Secondary",
+  mm_slot_stop: "Stop word",
+  mm_record: "Record",
+  mm_record_stop: "Stop recording",
+  mm_recordings: "Recordings",
+  mm_dl_speech: "Speech-to-text",
+  mm_dl_ww: "Wake word",
+  mm_dl_both: "Both (.zip)",
+  mm_delete: "Delete",
+  mm_markers: "Markers",
+  mm_full: "Stopped at the %s limit",
+  mm_recording_note: "Recordings live in this browser tab until you download them.",
+
+  /* Settings > Developer: logs from several devices. ml_dev_* are the per-device verdicts after a
+     Collect; %n is a line count. */
+  ml_title: "Logs From Several Devices",
+  ml_this: "this device",
+  ml_offline: "offline",
+  ml_collect: "Collect",
+  ml_collecting: "Collecting\u2026",
+  ml_download: "Download",
+  ml_pick: "Tick at least one device.",
+  ml_no_roster: "Home Assistant isn't connected, so only this device can be listed.",
+  ml_dev_ok: "%n lines, round trip %r ms",
+  ml_shown: "Showing the newest %n lines. Download has them all.",
+
+  /* Settings > Developer: the system monitor. */
+  sm_title: "System Monitor",
+  sm_internal: "Internal RAM",
+  sm_psram: "PSRAM",
+  sm_free: "Free",
+  sm_block: "Largest block",
+  sm_min: "Lowest since boot",
+  sm_band_va: "Assistant",
+  sm_band_xmos: "XMOS not ready",
+  sm_band_mic: "Mic monitor",
+  sm_waiting: "Waiting for the first sample\u2026",
+  sm_tasks: "Tasks",
+  sm_task_name: "Task",
+  sm_task_prio: "Priority",
+  sm_task_stack: "Stack free",
+  sm_task_state: "State",
+  sm_no_tasks: "This firmware has no task table.",
 
   /* The community links row at the very bottom of Diagnostics, under ESP32 Recovery: the
      organisation's documentation, GitHub, YouTube and Discord. One word each - the glyph beside it
