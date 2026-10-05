@@ -15,6 +15,7 @@ from esphome.components import (
     event,
     logger,
     media_player,
+    microphone,
     number,
     select,
     sensor,
@@ -41,7 +42,7 @@ except ImportError:
     CrashReport = None
 
 # Optional again: without the TAS2780 in the build, GET /api/sat1/amp does not exist and the
-# Diagnostics route's Speaker amplifier card renders without its live readings. The class lives in
+# Developer page's TAS2780 card renders without its live readings. The class lives in
 # the platform module (audio_dac.py) because tas2780 is an audio_dac platform, not a component.
 try:
     from esphome.components.tas2780.audio_dac import tas2780 as TAS2780
@@ -112,6 +113,12 @@ CONF_SOUNDS = "sounds"
 CONF_FSD_SELECTS = "fsd_selects"
 CONF_LOG_HISTORY = "log_history"
 CONF_ALERTS_SIZE = "alerts_size"
+CONF_MIC_MONITOR = "mic_monitor"
+CONF_MICROPHONE = "microphone"
+CONF_WAKE_WORD_GAIN = "wake_word_gain"
+CONF_XMOS_READY = "xmos_ready"
+CONF_MAX_LISTENERS = "max_listeners"
+CONF_SYSMON = "sysmon"
 
 # esphome/core/log.h values. The ring takes a line at or below its level, so CONFIG (4) - the
 # boot-time configuration dumps - rides along from DEBUG up and stays out at INFO.
@@ -150,6 +157,21 @@ def _log_history(value):
             return False
         value = {}
     return _LOG_HISTORY_SCHEMA(value)
+
+
+# Developer tooling (config/satellite1.dev.yaml only). The mic monitor streams both microphone
+# channels to Settings > Developer. `wake_word_gain` must match micro_wake_word's gain_factor so
+# the wake word channel is what the model hears; `xmos_ready` lets the stream say the audio is
+# missing because the XMOS is flashing or booting. Each listener is one of esp_http_server's seven
+# sockets for as long as it listens, hence the small cap.
+_MIC_MONITOR_SCHEMA = cv.Schema(
+    {
+        cv.Required(CONF_MICROPHONE): cv.use_id(microphone.Microphone),
+        cv.Optional(CONF_WAKE_WORD_GAIN, default=1): cv.int_range(min=1, max=64),
+        cv.Optional(CONF_XMOS_READY): cv.returning_lambda,
+        cv.Optional(CONF_MAX_LISTENERS, default=2): cv.int_range(min=1, max=3),
+    }
+)
 
 satellite1_web_ui_ns = cg.esphome_ns.namespace("satellite1_web_ui")
 Satellite1WebUI = satellite1_web_ui_ns.class_("Satellite1WebUI", cg.Component)
@@ -273,7 +295,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_SENDSPIN_MEDIA_PLAYER_ID): cv.use_id(media_player.MediaPlayer),
             # The speaker amplifier, for GET /api/sat1/amp: an audio_dac is not an entity, so its
             # power mode and digital volume level ride neither /events nor the entity REST API,
-            # and the endpoint is the only way the app's Speaker amplifier card sees them.
+            # and the endpoint is the only way the app's TAS2780 card sees them.
             # Optional so a build without the TAS2780 still compiles; the route then answers 404
             # and the card's live readings never render.
             **(
@@ -339,6 +361,11 @@ CONFIG_SCHEMA = cv.All(
             # The device's recent log, kept in PSRAM and served at GET /api/sat1/log, so the
             # Logs card opens on what happened before anyone was watching instead of on nothing.
             cv.Optional(CONF_LOG_HISTORY, default={}): _log_history,
+            # Developer tooling: absent from every release config, and with it the routes, the
+            # state keys and the Settings > Developer cards that read them.
+            cv.Optional(CONF_MIC_MONITOR): _MIC_MONITOR_SCHEMA,
+            # Twelve hours of heap samples and a FreeRTOS task table, at GET /api/sat1/sysmon.
+            cv.Optional(CONF_SYSMON): cv.Schema({}),
         }
     ).extend(cv.COMPONENT_SCHEMA),
     cv.only_with_framework(Framework.ESP_IDF),
@@ -539,6 +566,25 @@ async def to_code(config):
         # not exist, so the handler must not include it.
         cg.add_define("USE_SAT1_WEB_UI_AMP", True)
         cg.add(var.set_speaker_amp(await cg.get_variable(config[CONF_SPEAKER_AMP_ID])))
+
+    if mic := config.get(CONF_MIC_MONITOR):
+        cg.add_define("USE_SAT1_MIC_MONITOR", True)
+        cg.add(
+            var.set_mic_monitor_microphone(await cg.get_variable(mic[CONF_MICROPHONE]))
+        )
+        cg.add(var.set_mic_monitor_wake_word_gain(mic[CONF_WAKE_WORD_GAIN]))
+        cg.add(var.set_mic_monitor_max_listeners(mic[CONF_MAX_LISTENERS]))
+        if CONF_XMOS_READY in mic:
+            ready = await cg.process_lambda(
+                mic[CONF_XMOS_READY], [], return_type=cg.bool_
+            )
+            cg.add(var.set_mic_monitor_xmos_ready(ready))
+
+    if CONF_SYSMON in config:
+        cg.add_define("USE_SAT1_SYSMON", True)
+        # uxTaskGetSystemState, for the task table. Without it the endpoint still serves the
+        # memory history and answers "tasks":null.
+        esp32.add_idf_sdkconfig_option("CONFIG_FREERTOS_USE_TRACE_FACILITY", True)
 
     if CONF_ON_SELECTION_CHANGE in config:
         await automation.build_automation(

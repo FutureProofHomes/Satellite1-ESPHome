@@ -302,6 +302,17 @@ class MwwRuntimeLoader : public Component {
   /// confidence the gate exists to hide). Main loop only, like its caller.
   uint8_t take_detection_score();
 
+  /// The track the parked firing came from (0..WL_SLOTS-1, WL_STOP for the stop word), or -1.
+  /// Read before take_detection_score(), which clears it.
+  int8_t detection_track() const { return this->last_det_track_.load(std::memory_order_relaxed); }
+
+  /// The latest 250 ms register sample for a track (slots, then the stop word at WL_STOP), or the
+  /// firing's own score right after a detection drained it; 0 for an empty slot. For the developer
+  /// mic monitor's score lane. Any task (an atomic byte).
+  uint8_t recent_score(uint8_t track) const {
+    return track <= WL_STOP ? this->recent_[track].load(std::memory_order_relaxed) : 0;
+  }
+
   /// Whether this build can score attempts at all: the log-listener hook is compiled in and the
   /// detection lines exist (DEBUG compiled into the logger). False means the tuner UI should say
   /// "this build cannot score attempts" rather than show an empty meter.
@@ -563,6 +574,8 @@ class MwwRuntimeLoader : public Component {
   /// class should trust that forever.
   std::atomic<uint8_t> last_det_score_{0};
   std::atomic<int8_t> last_det_track_{-1};
+  /// See recent_score().
+  std::atomic<uint8_t> recent_[WL_SLOTS + 1]{};
 
   Mutex near_lock_;
   std::vector<NearRec> near_;

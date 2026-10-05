@@ -51,6 +51,19 @@ void Satellite1WebUI::setup() {
   this->handler_.set_mute_hold_available(this->mute_switch_ != nullptr);
 #endif
 
+#ifdef USE_SAT1_MIC_MONITOR
+#ifdef USE_SWITCH
+  this->handler_.mic_monitor().set_muted_fn(
+      [this]() { return this->mute_switch_ != nullptr && this->mute_switch_->state; });
+#endif
+  this->handler_.mic_monitor().setup();
+#endif
+
+#ifdef USE_SAT1_SYSMON
+  if (this->handler_.sysmon().begin())
+    this->handler_.sysmon().set_flags_fn([this]() { return this->handler_.sysmon_flags(); });
+#endif
+
 #ifdef USE_SAT1_WEB_UI_SENDSPIN
   if (this->sendspin_hub_ != nullptr) {
     // Every callback below fires on the main loop (the hub's own thread-context comments say so),
@@ -284,6 +297,13 @@ void Satellite1WebUI::loop() {
   if (this->sendspin_hub_ != nullptr)
     this->handler_.media_set_pos(this->sendspin_hub_->get_track_progress_ms());
 #endif
+
+#ifdef USE_SAT1_MIC_MONITOR
+  this->handler_.mic_monitor_loop();
+#endif
+#ifdef USE_SAT1_SYSMON
+  this->handler_.sysmon().loop();
+#endif
 }
 
 char *Satellite1WebUI::stage_ha_payload(size_t capacity) { return this->handler_.stage_ha_payload(capacity); }
@@ -431,6 +451,13 @@ void Satellite1WebUI::dump_config() {
   } else {
     ESP_LOGCONFIG(TAG, "  Log history: off (no PSRAM for it)");
   }
+#endif
+#ifdef USE_SAT1_MIC_MONITOR
+  ESP_LOGCONFIG(TAG, "  Mic monitor: up to %u listeners at /api/sat1/mic (developer build)",
+                static_cast<unsigned>(this->handler_.mic_monitor().max_listeners()));
+#endif
+#ifdef USE_SAT1_SYSMON
+  ESP_LOGCONFIG(TAG, "  System monitor: %s", this->handler_.sysmon().active() ? "12 h in PSRAM" : "off (no PSRAM)");
 #endif
 }
 

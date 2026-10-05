@@ -28,6 +28,11 @@
 #include <esp_partition.h>
 #endif
 
+#ifdef USE_SAT1_SYSMON
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#endif
+
 #ifdef USE_SAT1_WEB_UI_SENDSPIN
 #include <esp_http_client.h>
 #endif
@@ -319,6 +324,15 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
   if (url == "/api/sat1/log")
     return Route::LOG;
 #endif
+#ifdef USE_SAT1_MIC_MONITOR
+  // Behind the session gate: it is the room, live.
+  if (url == "/api/sat1/mic")
+    return Route::MIC;
+#endif
+#ifdef USE_SAT1_SYSMON
+  if (url == "/api/sat1/sysmon")
+    return Route::SYSMON;
+#endif
 
   return Route::NONE;
 }
@@ -496,6 +510,16 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
 #ifdef USE_SAT1_LOG_HISTORY
     case Route::LOG:
       this->handle_log_(request);
+      break;
+#endif
+#ifdef USE_SAT1_MIC_MONITOR
+    case Route::MIC:
+      this->mic_monitor_.handle_request(request);
+      break;
+#endif
+#ifdef USE_SAT1_SYSMON
+    case Route::SYSMON:
+      this->handle_sysmon_(request);
       break;
 #endif
     case Route::NONE:
@@ -842,9 +866,15 @@ void WebUIHandler::push_wake_detection(const std::string &word) {
   // same on_wake_word_detected automation (see take_detection_score for the contract). Collected
   // before the lock: it is the loader's own atomic, not ring state.
   uint8_t score = 0;
+  [[maybe_unused]] int8_t track = -1;
 #ifdef USE_SAT1_MWW_LOADER
-  if (this->wake_loader_ != nullptr)
+  if (this->wake_loader_ != nullptr) {
+    track = this->wake_loader_->detection_track();
     score = this->wake_loader_->take_detection_score();
+  }
+#endif
+#ifdef USE_SAT1_MIC_MONITOR
+  this->mic_monitor_.note_wake(track < 0 ? 0xFF : static_cast<uint8_t>(track));
 #endif
   LockGuard guard{this->detection_lock_};
   this->detection_seq_++;
@@ -2701,7 +2731,7 @@ void WebUIHandler::handle_sound_(AsyncWebServerRequest *request) {
 
 #ifdef USE_SAT1_WEB_UI_AMP
 
-/// The speaker amplifier's live state, for the Diagnostics route's Speaker amplifier card.
+/// The speaker amplifier's live state, for the TAS2780 card on Settings > Developer.
 ///
 /// Shape: {"mode":2,"active":1,"pending":0,"dvc":74,"muted":0}
 ///
@@ -2988,6 +3018,126 @@ void WebUIHandler::handle_log_(AsyncWebServerRequest *request) {
 
 #endif  // USE_SAT1_LOG_HISTORY
 
+#ifdef USE_SAT1_MIC_MONITOR
+void WebUIHandler::mic_monitor_loop() {
+  uint8_t phase = 0;
+#ifdef USE_VOICE_ASSISTANT
+  if (this->voice_phase_fn_)
+    phase = static_cast<uint8_t>(std::clamp(this->voice_phase_fn_(), 0, 255));
+#endif
+  uint8_t scores[3] = {0, 0, 0};
+#ifdef USE_SAT1_MWW_LOADER
+  if (this->wake_loader_ != nullptr) {
+    scores[0] = this->wake_loader_->recent_score(0);
+    scores[1] = this->wake_loader_->recent_score(1);
+    scores[2] = this->wake_loader_->recent_score(mww_runtime_loader::WL_STOP);
+  }
+#endif
+  this->mic_monitor_.loop(phase, scores);
+}
+#endif  // USE_SAT1_MIC_MONITOR
+
+#ifdef USE_SAT1_SYSMON
+uint8_t WebUIHandler::sysmon_flags() {
+  uint8_t flags = 0;
+#ifdef USE_VOICE_ASSISTANT
+  if (this->va_ != nullptr && this->va_->is_running())
+    flags |= SM_FLAG_ASSISTANT;
+#endif
+#ifdef USE_SAT1_MIC_MONITOR
+  if (this->mic_monitor_.xmos_not_ready())
+    flags |= SM_FLAG_XMOS_NOT_READY;
+  if (this->mic_monitor_.streaming())
+    flags |= SM_FLAG_MIC_STREAM;
+#endif
+  return flags;
+}
+
+/// Shape:
+///   {"boot":"<hex>","iv":10,"up":<s>,"first":<pos>,"next":<pos>,"end":<pos>,
+///    "s":[[t,int_free,int_block,int_min,psram_free,flags],...],
+///    "tasks":[["name",priority,stack_free_bytes,state],...]}
+///
+/// `since` is an earlier answer's `next` (with the same `boot`); a position the ring has passed, or
+/// one from another boot, starts again at the oldest sample. At most 720 samples (two hours) per
+/// answer: `next < end` means ask again. `tasks` only with tasks=1, and only on a build with the
+/// FreeRTOS trace facility; otherwise it is null.
+void WebUIHandler::handle_sysmon_(AsyncWebServerRequest *request) {
+  if (!this->sysmon_.active()) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  uint32_t pos = 0;
+  auto *boot_param = request->getParam("boot");
+  auto *since_param = request->getParam("since");
+  if (boot_param != nullptr && since_param != nullptr &&
+      strtoul(boot_param->value().c_str(), nullptr, 16) == this->sysmon_.boot_id())
+    pos = strtoul(since_param->value().c_str(), nullptr, 10);
+  auto *tasks_param = request->getParam("tasks");
+  const bool want_tasks = tasks_param != nullptr && tasks_param->value() == "1";
+
+  constexpr size_t BATCH = 16;
+  constexpr size_t MAX_SAMPLES = 720;
+  SysSample batch[BATCH];
+  uint32_t end = 0;
+  size_t n = this->sysmon_.read(pos, batch, BATCH, end);
+  const uint32_t first = pos - static_cast<uint32_t>(n);
+
+  begin_chunked_json(*request);
+  ChunkWriter w{*request};
+  w.printf(R"({"boot":"%08x","iv":%u,"up":%u,"first":%u,"s":[)", static_cast<unsigned>(this->sysmon_.boot_id()),
+           static_cast<unsigned>(SM_INTERVAL_MS / 1000), static_cast<unsigned>(millis_64() / 1000),
+           static_cast<unsigned>(first));
+  size_t total = 0;
+  bool comma = false;
+  while (n > 0) {
+    for (size_t i = 0; i < n; i++) {
+      const SysSample &s = batch[i];
+      w.printf("%s[%u,%u,%u,%u,%u,%u]", comma ? "," : "", static_cast<unsigned>(s.t), static_cast<unsigned>(s.int_free),
+               static_cast<unsigned>(s.int_block), static_cast<unsigned>(s.int_min),
+               static_cast<unsigned>(s.psram_free), static_cast<unsigned>(s.flags));
+      comma = true;
+    }
+    total += n;
+    if (total >= MAX_SAMPLES)
+      break;
+    n = this->sysmon_.read(pos, batch, std::min(BATCH, MAX_SAMPLES - total), end);
+  }
+  w.printf(R"(],"next":%u,"end":%u,"tasks":)", static_cast<unsigned>(pos), static_cast<unsigned>(end));
+
+#if configUSE_TRACE_FACILITY
+  TaskStatus_t *tasks = nullptr;
+  UBaseType_t count = 0;
+  RAMAllocator<TaskStatus_t> alloc(RAMAllocator<TaskStatus_t>::ALLOC_EXTERNAL);
+  const UBaseType_t cap = want_tasks ? uxTaskGetNumberOfTasks() + 4 : 0;
+  if (cap > 0) {
+    tasks = alloc.allocate(cap);
+    if (tasks != nullptr)
+      count = uxTaskGetSystemState(tasks, cap, nullptr);
+  }
+  if (tasks == nullptr) {
+    w.print("null}");
+  } else {
+    w.print("[");
+    for (UBaseType_t i = 0; i < count; i++) {
+      const TaskStatus_t &t = tasks[i];
+      w.print(i == 0 ? "[" : ",[");
+      write_json_string(w, std::string(t.pcTaskName != nullptr ? t.pcTaskName : "?"));
+      // ESP-IDF's StackType_t is a byte, so the high-water mark is already in bytes.
+      w.printf(",%u,%u,%d]", static_cast<unsigned>(t.uxCurrentPriority),
+               static_cast<unsigned>(t.usStackHighWaterMark * sizeof(StackType_t)), static_cast<int>(t.eCurrentState));
+    }
+    w.print("]}");
+    alloc.deallocate(tasks, cap);
+  }
+#else
+  (void) want_tasks;
+  w.print("null}");
+#endif
+  w.finish();
+}
+#endif  // USE_SAT1_SYSMON
+
 #ifdef USE_VOICE_ASSISTANT
 
 void WebUIHandler::push_utterance(const std::string &text, bool heard) {
@@ -3208,6 +3358,16 @@ void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
   // about boot.
   const uint32_t loop_ms = this->max_loop_ms_ == nullptr ? 0 : this->max_loop_ms_->exchange(0);
   w.printf(R"("loop_ms":%u,)", static_cast<unsigned int>(loop_ms));
+
+  // Developer builds only. Settings > Developer shows each tool only when its key is here, so a
+  // release build's page simply has nothing to show.
+#ifdef USE_SAT1_MIC_MONITOR
+  w.printf(R"("mic":{"max":%u},)", static_cast<unsigned>(this->mic_monitor_.max_listeners()));
+#endif
+#ifdef USE_SAT1_SYSMON
+  if (this->sysmon_.active())
+    w.print(R"("sysmon":1,)");
+#endif
 
   // The key -> "<domain>/<name>" table. Names are read here rather than cached at setup because a
   // few entities are named from runtime state, and because nothing about this is hot: Diagnostics

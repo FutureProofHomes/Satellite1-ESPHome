@@ -261,6 +261,16 @@ class Satellite1WebUI : public Component {
   void set_speaker_amp(tas2780::TAS2780 *amp) { this->handler_.set_speaker_amp(amp); }
 #endif
 
+#ifdef USE_SAT1_MIC_MONITOR
+  /// Developer builds: the mic monitor behind GET /api/sat1/mic. From generated code.
+  void set_mic_monitor_microphone(microphone::Microphone *mic) { this->handler_.mic_monitor().set_microphone(mic); }
+  void set_mic_monitor_wake_word_gain(uint8_t gain) { this->handler_.mic_monitor().set_wake_word_gain(gain); }
+  void set_mic_monitor_max_listeners(uint8_t n) { this->handler_.mic_monitor().set_max_listeners(n); }
+  void set_mic_monitor_xmos_ready(std::function<bool()> fn) {
+    this->handler_.mic_monitor().set_xmos_ready_fn(std::move(fn));
+  }
+#endif
+
 #ifdef USE_SAT1_WEB_UI_SENDSPIN
   /// The hub itself, beyond the media_player entity above, for what the entity model cannot say:
   /// track metadata with an artwork URL, controller state with shuffle/repeat and the server's

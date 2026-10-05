@@ -847,6 +847,9 @@ void MwwRuntimeLoader::notify_detection(const std::string &word) {
     // firing history stays real firings at real thresholds only.
     const bool in_session = this->tune_slot_.load(std::memory_order_relaxed) == static_cast<int8_t>(t);
     const uint8_t fired = model->take_high_water();
+    // The drain would otherwise leave the score lane's next sample without the firing's peak.
+    if (fired != 0)
+      this->recent_[t].store(fired, std::memory_order_relaxed);
     if (fired != 0 && !in_session) {
       // Parked only - the persisted 24h ring is fed by take_detection_score(), which the web UI
       // calls from INSIDE the sign-in gate. A firing the gate consumes as a sign-in symbol is
@@ -894,6 +897,7 @@ void MwwRuntimeLoader::sample_high_water_() {
 
   const int8_t tuning = this->tune_slot_.load(std::memory_order_relaxed);
   for (uint8_t t = 0; t <= WL_SLOTS; t++) {
+    this->recent_[t].store(0, std::memory_order_relaxed);
     micro_wake_word::WakeWordModel *model = nullptr;
     const std::string *word = nullptr;
     if (t < WL_SLOTS) {
@@ -912,6 +916,7 @@ void MwwRuntimeLoader::sample_high_water_() {
     // NOTE: a zero sample still runs the probation bookkeeping below - a pending sample must be
     // able to commit (or be voided) during the quiet that follows it.
     const uint8_t sample = model->take_high_water();
+    this->recent_[t].store(sample, std::memory_order_relaxed);
 
     // A live session on this track: never room *pressure* (the floored cutoff would poison the
     // 24h buckets), but the sample is measurement either way. Within 1.5s of an event it is the

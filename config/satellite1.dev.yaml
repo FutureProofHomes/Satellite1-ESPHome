@@ -12,6 +12,11 @@
 #     (*.factory.bin with a matching *.factory.md5) and flashes the chosen one without rebooting
 #     the ESP32. Its entities are internal, so Home Assistant only sees its two API actions.
 #   - The TAS2780 amplifier card: power mode, digital volume, analog gain and line-out state.
+#   - The mic monitor: both microphone channels live in the browser (listen to one, see both),
+#     with the wake word score lane, recordable as two mono WAVs.
+#   - The system monitor: twelve hours of heap history and the FreeRTOS task table. It turns on
+#     CONFIG_FREERTOS_USE_TRACE_FACILITY, the one sdkconfig difference from a release build.
+#   - Multi-device logs: needs nothing here; the page reads each device's existing log history.
 packages:
   base_image: !include satellite1.yaml
   # Shared with common/xmos_same_boot_flash.yaml, which is why it is the one include left here.
@@ -46,6 +51,16 @@ satellite1_web_ui:
     text_sensors:
       xmos_fw_list: xmos_fw_list
       xmos_fw_status: xmos_fw_status
+  # GET /api/sat1/mic: the assistant channel as voice_assistant hears it and the wake word channel
+  # as micro_wake_word hears it. Zeros while muted. Nothing is recorded on the device; recording
+  # happens in the browser.
+  mic_monitor:
+    microphone: sat1_mics
+    # micro_wake_word's gain_factor in common/voice_assistant.yaml. Keep the two equal.
+    wake_word_gain: 6
+    xmos_ready: !lambda return id(xmos_audio_ready);
+  # GET /api/sat1/sysmon
+  sysmon: {}
 
 # --- XMOS firmware picker -------------------------------------------------------------------------
 

@@ -51,7 +51,9 @@
 #include "esphome/components/web_server_base/web_server_base.h"
 
 #include "log_history.h"
+#include "mic_monitor.h"
 #include "selection.h"
+#include "sysmon.h"
 
 namespace esphome {
 namespace satellite1_web_ui {
@@ -561,11 +563,26 @@ class WebUIHandler : public AsyncWebHandler {
   LogHistory &log_history() { return this->log_history_; }
 #endif
 
+#ifdef USE_SAT1_MIC_MONITOR
+  /// Developer builds: GET /api/sat1/mic. Configured from generated code, set up and pumped by the
+  /// component.
+  MicMonitor &mic_monitor() { return this->mic_monitor_; }
+  /// Main loop: one pump pass, stamped with the assistant's phase and the wake word score lane.
+  void mic_monitor_loop();
+#endif
+
+#ifdef USE_SAT1_SYSMON
+  /// Developer builds: GET /api/sat1/sysmon. Begun and sampled by the component.
+  SysMon &sysmon() { return this->sysmon_; }
+  /// What the device was doing at a sample: assistant running, XMOS not ready, mic streaming.
+  uint8_t sysmon_flags();
+#endif
+
 #ifdef USE_SAT1_WEB_UI_AMP
   /// Set from generated code, before the listener accepts anything. The speaker amplifier is the
   /// third thing web_server cannot cover (after media players and wake words): an audio_dac is not
   /// an entity, so its power mode and digital volume level ride neither /events nor the entity
-  /// REST API, and GET /api/sat1/amp is the only way the app's Speaker amplifier card sees them.
+  /// REST API, and GET /api/sat1/amp is the only way the app's TAS2780 card sees them.
   void set_speaker_amp(tas2780::TAS2780 *amp) { this->speaker_amp_ = amp; }
 #endif
 
@@ -661,6 +678,12 @@ class WebUIHandler : public AsyncWebHandler {
 #ifdef USE_SAT1_LOG_HISTORY
     LOG,  // GET /api/sat1/log (boot, from - only what is newer than a previous answer)
 #endif
+#ifdef USE_SAT1_MIC_MONITOR
+    MIC,  // GET /api/sat1/mic (a stream that never ends; see MicMonitor)
+#endif
+#ifdef USE_SAT1_SYSMON
+    SYSMON,  // GET /api/sat1/sysmon (since, tasks)
+#endif
   };
 
   static Route match_route_(AsyncWebServerRequest *request);
@@ -746,7 +769,7 @@ class WebUIHandler : public AsyncWebHandler {
 #endif
 #ifdef USE_SAT1_WEB_UI_AMP
   /// GET /api/sat1/amp: the TAS2780's power mode, activity and digital volume level, for the
-  /// Diagnostics route's Speaker amplifier card. Session-gated like every /api/sat1 read.
+  /// TAS2780 card on Settings > Developer. Session-gated like every /api/sat1 read.
   void handle_amp_(AsyncWebServerRequest *request);
 #endif
 #ifdef USE_SAT1_CRASH_REPORT
@@ -763,6 +786,10 @@ class WebUIHandler : public AsyncWebHandler {
 #ifdef USE_SAT1_LOG_HISTORY
   /// The log history as text/plain, chunked from the PSRAM rings through one PSRAM scratch block.
   void handle_log_(AsyncWebServerRequest *request);
+#endif
+#ifdef USE_SAT1_SYSMON
+  /// The memory history newer than `since`, at most two hours per answer, plus the task table.
+  void handle_sysmon_(AsyncWebServerRequest *request);
 #endif
 #ifdef USE_MEDIA_PLAYER
   void handle_media_(AsyncWebServerRequest *request);
@@ -982,6 +1009,14 @@ class WebUIHandler : public AsyncWebHandler {
 
 #ifdef USE_SAT1_LOG_HISTORY
   LogHistory log_history_;
+#endif
+
+#ifdef USE_SAT1_MIC_MONITOR
+  MicMonitor mic_monitor_;
+#endif
+
+#ifdef USE_SAT1_SYSMON
+  SysMon sysmon_;
 #endif
 
 #ifdef USE_SAT1_WEB_UI_AMP
