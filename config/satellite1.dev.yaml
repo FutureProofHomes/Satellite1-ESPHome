@@ -1,10 +1,21 @@
-# Developer build: satellite1.yaml plus the XMOS firmware picker and the audio race harness.
+# Developer build: satellite1.yaml plus the tooling the team uses to work on the device.
 #   esphome run config/satellite1.dev.yaml
+#
+# The rule: every tool this file adds has its UI on the web app's Settings > Developer page, and
+# only there. Its YAML is written inline here rather than in common/, so nothing developer-only
+# sits beside the customer configuration looking like something it is not. Release builds
+# (satellite1.yaml, the radar variants, the dashboard import) compile none of it, and the page
+# does not appear on them.
+#
+# What it adds:
+#   - The XMOS firmware picker: lists XMOS images published as GitHub release assets
+#     (*.factory.bin with a matching *.factory.md5) and flashes the chosen one without rebooting
+#     the ESP32. Its entities are internal, so Home Assistant only sees its two API actions.
+#   - The TAS2780 amplifier card: power mode, digital volume, analog gain and line-out state.
 packages:
   base_image: !include satellite1.yaml
-  xmos_catalog: !include common/xmos_firmware_catalog.yaml
-  xmos_catalog_web_ui: !include common/web_ui_xmos_catalog.yaml
-  audio_race_test: !include common/audio_race_test.yaml
+  # Shared with common/xmos_same_boot_flash.yaml, which is why it is the one include left here.
+  xmos_audio_shutdown: !include common/xmos_audio_shutdown.yaml
 
 external_components:
   - source:
@@ -12,3 +23,185 @@ external_components:
       path: ../esphome/components
     components:
       - xmos_firmware_catalog
+
+satellite1_web_ui:
+  # GET /api/sat1/amp. An audio_dac is not an entity, so the TAS2780's power mode (High gain from a
+  # USB-PD supply, Low gain from 5 V) and its digital volume level ride neither /events nor the
+  # entity REST API; the endpoint is the only window the app has onto them.
+  speaker_amp_id: speaker_dac
+  entities:
+    numbers:
+      # The analog gain knob is an entity (amp_gain_level in common/speaker.yaml) because it is a
+      # setting to persist rather than a reading to poll. The index (0-20) travels; the app renders
+      # it as dBV.
+      amp_gain: amp_gain_level
+    binary_sensors:
+      line_out: line_out_sensor
+    # The picker draws only when all of these keys are in the entity table.
+    selects:
+      xmos_fw_choice: xmos_fw_choice
+    buttons:
+      xmos_fw_install: xmos_fw_install
+      xmos_fw_refresh: xmos_fw_refresh
+    text_sensors:
+      xmos_fw_list: xmos_fw_list
+      xmos_fw_status: xmos_fw_status
+
+# --- XMOS firmware picker -------------------------------------------------------------------------
+
+xmos_firmware_catalog:
+  id: xmos_catalog
+  flasher_id: xflash
+  builtin_version: ${xmos_fw_version}
+  sources:
+    - github: FutureProofHomes/Satellite1-XMOS
+    # Private repositories need a fine-grained token with read-only "Contents" access:
+    # - github: FutureProofHomes/Satellite1-XMOS-Private
+    #   private: true
+    #   token: !secret xmos_github_token
+  # internal: the web app reaches these through web_server's include_internal. With the select
+  # internal, a changed firmware list needs nothing from Home Assistant, so there is no
+  # on_choices_changed hook here.
+  firmware:
+    id: xmos_fw_choice
+    name: "XMOS Firmware Choice"
+    internal: true
+  refresh:
+    id: xmos_fw_refresh
+    name: "Refresh XMOS Firmware List"
+    internal: true
+  install:
+    id: xmos_fw_install
+    name: "Install Selected XMOS Firmware"
+    internal: true
+  catalog:
+    id: xmos_fw_list
+    name: "Available XMOS Firmware"
+    internal: true
+  status:
+    id: xmos_fw_status
+    name: "XMOS Firmware Install Status"
+    internal: true
+  on_install_request:
+    - script.execute: xmos_catalog_install
+
+globals:
+  - id: xmos_catalog_resume_media
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+script:
+  # Audio stops before the download so the download has the most free memory and nothing is
+  # playing when the XMOS restarts.
+  - id: xmos_catalog_install
+    mode: single
+    then:
+      - lambda: |-
+          id(xmos_catalog_resume_media) =
+              id(external_media_player).state == media_player::MEDIA_PLAYER_STATE_PLAYING;
+      - script.execute: prepare_xmos_direct_flash
+      - script.wait: prepare_xmos_direct_flash
+      - if:
+          condition:
+            lambda: return id(xmos_audio_shutdown_complete);
+          then:
+            - lambda: id(xmos_catalog).begin_install();
+          else:
+            - lambda: id(xmos_catalog).abort_install("audio did not stop");
+      - wait_until:
+          condition:
+            lambda: return !id(xmos_catalog).busy();
+          timeout: 300s
+      - script.execute: xmos_catalog_restore_audio
+      - script.wait: xmos_catalog_restore_audio
+      # Music Assistant resumes its queue on play. Media started by URL can't be resumed:
+      # stopping it cleared its playlist.
+      - if:
+          condition:
+            lambda: return id(xmos_catalog_resume_media);
+          then:
+            # The built-in image counts as installed before the XMOS has restarted.
+            - wait_until:
+                condition:
+                  lambda: return id(xmos_audio_ready);
+                timeout: 30s
+            - if:
+                condition:
+                  lambda: return id(xmos_audio_ready);
+                then:
+                  # Lets refresh_audio_output activate the DAC first.
+                  - delay: 1s
+                  - media_player.play: external_media_player
+
+  # on_xmos_connected restores audio once a flashed XMOS boots; this covers attempts that
+  # ended without restarting the XMOS.
+  - id: xmos_catalog_restore_audio
+    mode: restart
+    then:
+      - delay: 3s
+      - if:
+          condition:
+            lambda: |-
+              return !id(xmos_audio_ready) && !id(xmos_catalog).busy() &&
+                     id(satellite1_id).is_xmos_connected();
+          then:
+            - lambda: id(xmos_audio_ready) = true;
+            - script.execute: refresh_audio_output
+            - script.execute: start_micro_wake_word
+            - logger.log: "Restored audio after an XMOS firmware install attempt"
+
+# WiFi and Ethernet builds both use this file, and only WiFi builds have BLE (for Improv), so
+# these conditions are lambdas rather than ble.enabled, which won't compile without it.
+esphome:
+  on_boot:
+    - priority: -100
+      then:
+        # The picker uses about 2 KB more internal RAM than satellite1.yaml, so when playback
+        # resumes while BLE is still enabled after boot, the speaker task can fail to start. The
+        # speaker then refuses to start again until its error is cleared.
+        - wait_until:
+            condition:
+              lambda: |-
+                #ifdef USE_ESP32_BLE
+                if (esp32_ble::global_ble != nullptr && esp32_ble::global_ble->is_active())
+                  return false;
+                #endif
+                return network::is_connected();
+        - delay: 1s
+        - if:
+            condition:
+              lambda: return id(i2s_audio_speaker).status_has_error();
+            then:
+              - lambda: id(i2s_audio_speaker).status_clear_error();
+              - logger.log: "Cleared the speaker error left by low memory during boot"
+        # Leaves the firmware update check in satellite1.yaml its own turn at the network.
+        - delay: 10s
+        - lambda: id(xmos_catalog).request_auto_refresh();
+
+interval:
+  - interval: 1h
+    then:
+      - if:
+          condition:
+            lambda: |-
+              #ifdef USE_ESP32_BLE
+              if (esp32_ble::global_ble != nullptr && esp32_ble::global_ble->is_active())
+                return false;
+              #endif
+              return true;
+          then:
+            - lambda: id(xmos_catalog).request_auto_refresh();
+
+api:
+  actions:
+    # xmos_version: "builtin" or a version listed by the picker's firmware list.
+    # Not "version": action variables can't share a name with an integration.
+    - action: install_xmos_firmware
+      variables:
+        xmos_version: string
+      then:
+        - lambda: id(xmos_catalog).request_install(xmos_version);
+    - action: refresh_xmos_firmware_list
+      then:
+        - lambda: id(xmos_catalog).request_refresh();

@@ -134,7 +134,8 @@ script:
       # A priority sound must not stop the announcement first: the play below already replaces it,
       # and a media_player.stop followed by a play skips the new sound (ESPHome 2026.9 queues a
       # playlist advance behind it) and, landing in a chime's first few milliseconds, can wedge the
-      # announcement speaker until reboot. config/common/audio_race_test.yaml reproduces both.
+      # announcement speaker until reboot. The harness that reproduced both is in git history:
+      # git show 797a60c:config/common/audio_race_test.yaml
       - lambda: |-
           if ( (id(external_media_player).state != media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING ) || priority) {
             id(external_media_player)

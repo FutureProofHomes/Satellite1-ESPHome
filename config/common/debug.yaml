@@ -1,3 +1,8 @@
+# Optional device health for Home Assistant: heap, PSRAM, loop time and reset reason sensors
+# published every 5 s, plus the maintenance buttons (safe mode, XMOS reset, flash and erase).
+# Include it from satellite1.base.yaml's optional list when you want those in Home Assistant. It
+# is not the developer tooling - that lives in config/satellite1.dev.yaml and shows on the web
+# app's Settings > Developer page.
 debug:
   update_interval: 5s
 

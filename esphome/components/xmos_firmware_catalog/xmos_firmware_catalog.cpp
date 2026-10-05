@@ -983,6 +983,9 @@ void XmosFirmwareCatalog::announce_choices_changed_() {
     this->choices_changed_callback_.call();
     return;
   }
+  // Home Assistant never sees an internal select, so it has no stale options to re-read.
+  if (this->select_ == nullptr || this->select_->is_internal())
+    return;
 #ifdef USE_API
   if (api::global_api_server == nullptr)
     return;

@@ -39,7 +39,7 @@ packages:
           ext_comp_repo_url: *repo_url
           ext_comp_repo_ref: *repo_ref
 
-      ## OPTIONALLY, uncomment if want extra memory, wifi and xmos control of the device.
+      ## OPTIONALLY, uncomment for heap, loop time and reset reason entities in Home Assistant.
       # - config/common/debug.yaml
       # yamllint enable rule:comments-indentation
 

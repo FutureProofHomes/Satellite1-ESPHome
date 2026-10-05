@@ -1,5 +1,6 @@
 # Stops every audio path so the XMOS can be flashed without rebooting the ESP32.
-# Included by xmos_same_boot_flash.yaml and xmos_firmware_catalog.yaml; include only one of those.
+# Included by xmos_same_boot_flash.yaml and config/satellite1.dev.yaml (the XMOS firmware picker);
+# include only one of those.
 script:
   - id: prepare_xmos_direct_flash
     mode: single

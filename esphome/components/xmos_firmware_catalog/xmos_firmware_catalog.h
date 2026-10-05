@@ -111,7 +111,8 @@ class XmosFirmwareCatalog : public Component {
   }
   // Fired when a refresh changes the firmware choices. Home Assistant reads select options only when
   // it connects, so the automation should ask it to reload this device's config entry. Without one,
-  // the API connection is dropped so Home Assistant reconnects and reads them again.
+  // the API connection is dropped so Home Assistant reconnects and reads them again - unless the
+  // select is internal, which Home Assistant never sees, so nothing happens.
   template<typename F> void add_on_choices_changed_callback(F &&callback) {
     this->choices_changed_callback_.add(std::forward<F>(callback));
     this->has_choices_automation_ = true;

@@ -142,7 +142,6 @@ packages:
 
   ## OPTIONAL COMPONENTS
   # debug: !include common/debug.yaml
-  # developer: !include common/developer.yaml
 
 fusb302b:
   id: pd_fusb302b
