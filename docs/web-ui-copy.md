@@ -119,18 +119,18 @@ looking at a third of them was the more expensive problem.
 | `loop` | Longest loop | The longest single pass through the main loop since the last reading. Tens of milliseconds is normal; sustained hundreds means something is blocking, and audio will stutter first. |
 | `esp_temp` | ESP32 Temp | The ESP32 chip's own temperature, not the room's. It reads well above ambient inside the sealed case, so warm is normal; sustained readings above 80 °C / 176 °F are worth investigating. The room's temperature is on the home page. |
 | `reset` | Last restart | Why the device last restarted. 'USB peripheral' means it was flashed. 'Power glitch' or 'Brownout' points at the power supply rather than at the firmware. |
-| `usb_power` | USB-C Power Supply | What the USB-C power supply agreed to deliver. Chargers that speak USB Power Delivery negotiate a voltage and the most current they will supply at it - the ~ marks that ceiling: the device draws only what it needs, usually far less. 5 V is a plain supply that negotiated nothing. 9 V or more is what lets the speaker amplifier run at High gain - the Speaker amplifier card just below. |
-| `speaker_amp` | Speaker amplifier card title | The chip that drives the built-in speaker. What you hear is three levels multiplied together: the power gain mode the amplifier picks from your USB-C supply, the digital volume the firmware computes from your sliders, and the analog gain set below. |
-| `amp_mode` | Speaker amplifier, Power gain mode | Picked automatically from the measured power supply - it is a reading, not a setting. High gain: a 9 V or higher USB-PD supply is connected and the speaker can reach full loudness. Low gain: the device is on a plain 5 V supply, so maximum loudness is reduced. Off: the amplifier is shut down, normally because line out is selected. A supply that negotiates 9 V or more (the USB-C Power Supply row in the Device card above) is what unlocks High gain. |
-| `amp_dvc` | Speaker amplifier, Digital volume | How far open the amplifier's digital volume control is right now - the level the firmware computes from the volume buttons, Voice Volume Override and ducking. Shown so you can see what the amplifier is actually being fed; it is managed automatically and has no handle here. To change it, use the volume controls. |
-| `amp_gain` | Speaker amplifier, Analog gain | The amplifier's output-level ceiling, applied on top of the digital volume. The notch on the track is the factory default, 15 dBV - the right everyday setting, and the slider snaps to it. Higher values make everything louder but can add distortion, and on a 5 V supply the chip's built-in limiter will duck the sound to protect the power rail. Lower it if the speaker distorts at high volume. |
-| `speaker_channel` | Speaker amplifier, Channel | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
+| `usb_power` | USB-C Power Supply | What the USB-C power supply agreed to deliver. Chargers that speak USB Power Delivery negotiate a voltage and the most current they will supply at it - the ~ marks that ceiling: the device draws only what it needs, usually far less. 5 V is a plain supply that negotiated nothing. 9 V or more is what lets the speaker amplifier run at High gain, for full loudness. |
+| `speaker_amp` | TAS2780 card title (Developer) | The chip that drives the built-in speaker. What you hear is three levels multiplied together: the power gain mode the amplifier picks from your USB-C supply, the digital volume the firmware computes from your sliders, and the analog gain set below. |
+| `amp_mode` | TAS2780, Power gain mode (Developer) | Picked automatically from the measured power supply - it is a reading, not a setting. High gain: a 9 V or higher USB-PD supply is connected and the speaker can reach full loudness. Low gain: the device is on a plain 5 V supply, so maximum loudness is reduced. Off: the amplifier is shut down, normally because line out is selected. A supply that negotiates 9 V or more (the USB-C Power Supply row on Device Info) is what unlocks High gain. |
+| `amp_dvc` | TAS2780, Digital volume (Developer) | How far open the amplifier's digital volume control is right now - the level the firmware computes from the volume buttons, Voice Volume Override and ducking. Shown so you can see what the amplifier is actually being fed; it is managed automatically and has no handle here. To change it, use the volume controls. |
+| `amp_gain` | TAS2780, Analog gain (Developer) | The amplifier's output-level ceiling, applied on top of the digital volume. The notch on the track is the factory default, 15 dBV - the right everyday setting, and the slider snaps to it. Higher values make everything louder but can add distortion, and on a 5 V supply the chip's built-in limiter will duck the sound to protect the power rail. Lower it if the speaker distorts at high volume. |
+| `speaker_channel` | Audio, Speaker card, Channel | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
 | `launch` | Launch card title | Scan the code with a phone, or paste the link into a Home Assistant dashboard button, and that browser lands here already signed in - no password, no button press. The code carries the device's current network address, so any phone on your network can scan it; the link carries the device's permanent name, the right form to paste somewhere that keeps it. Anyone who has either can sign in with it, so treat them like the password. Sign out everywhere revokes them and every session, then issues a new one. |
 | `ha_ingress` | Home Assistant card title | Puts your Satellite1s in Home Assistant's sidebar, proxied through Home Assistant itself - so it works wherever Home Assistant does, on your local network or over a public https address. hass_ingress is a third-party integration, not part of this firmware. The YAML covers every Satellite1 Home Assistant knows about: this device is the one visible "Satellite1 Fleet" entry, the rest sit hidden behind it, and the device switcher reaches them all from inside the panel. Anyone who can open the panel reaches the devices' sign-in pages through it; the YAML limits the panel to admin users - remove the require_admin line to show it to everyone. |
-| `xmos` | XMOS Firmware on Device Info and Recovery, and the XMOS Recovery card title | The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's. |
+| `xmos` | XMOS Firmware on Device Info, Recovery and Developer, and the XMOS Recovery and XMOS Firmware card titles | The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's. |
 | `xmos_flash` | Reflash XMOS vX.X.X | Rewrites the audio chip's firmware from the image embedded in this build. The device is deaf and mute until it finishes, which takes about a minute. Do not cut power. |
-| `xmos_install` | Install firmware | Developer builds only. Lists the audio chip firmware published on the Satellite1-XMOS GitHub releases, beside the built-in copy this firmware carries. Picking one installs it - the device itself doesn't restart - and it stays installed across restarts until you pick Built-in again. |
-| `xmos_refresh` | Firmware list | Checks the Satellite1-XMOS GitHub releases for new firmware now, pre-releases included, instead of waiting for the device's own hourly check. New versions appear in the list above. |
+| `xmos_install` | Install firmware (Developer) | Developer builds only. Lists the audio chip firmware published on the Satellite1-XMOS GitHub releases, beside the built-in copy this firmware carries. Picking one installs it - the device itself doesn't restart - and it stays installed across restarts until you pick Built-in again. |
+| `xmos_refresh` | Firmware list (Developer) | Checks the Satellite1-XMOS GitHub releases for new firmware now, pre-releases included, instead of waiting for the device's own hourly check. New versions appear in the list above. |
 | `radar_module` | Radar LD2410 / LD2450 on Device Info (the module's firmware beneath), drawn only once a module is detected | The mmWave presence sensor fitted to this Satellite1, found automatically at startup. It runs its own firmware from the module's maker. Its live view and settings are on the Presence page. |
 | `radar_recovery` | LD2410 / LD2450 Recovery card title | The radar module's own recovery actions. Restart just power-cycles the module. Factory reset erases the settings stored on the module itself - detection range, gate thresholds, zones, everything tuned on the Presence page - and does not touch this device's settings. |
 | `maintenance` | ESP32 Recovery card title | Ways to restart or reset this device. None of them are part of everyday use. Restart is always safe - your settings survive it. Factory reset is the only row here that erases anything. |
@@ -184,10 +184,11 @@ at all rather than merely not showing it; the ESPHome button still exists for a 
 returns `v1.2.3` when the chip is talking and `XMOS not responding` or `Flashing Mode` when it is not, so
 the label falls back to a bare "Reflash XMOS" rather than printing a status where a version should be.
 
-The `xf_row` "Install firmware" and `xf_refresh_row` "Firmware list" rows ship in every build of the
-app but are drawn only on developer firmware, built from `config/satellite1.dev.yaml`: they read the
-`xmos_firmware_catalog` entities, and only `config/common/web_ui_xmos_catalog.yaml` maps them into
-the entity table, so on any other firmware they are absent and the rows never appear. The dropdown's
+The `xf_row` "Install firmware" and `xf_refresh_row` "Firmware list" rows sit in the **XMOS
+Firmware** card on Settings > Developer. They ship in every build of the app but are drawn only on
+developer firmware: they read the `xmos_firmware_catalog` entities, and only
+`config/satellite1.dev.yaml` maps them into the entity table, so on any other firmware they are
+absent and the rows never appear. The dropdown's
 options are the device's own — "Built-in (v1.1.0-alpha.0)" first, then every published version —
 with the one the chip is running selected. Picking a different one is the install: there is no
 separate button, the pick opens `CONFIRM.xmos_install` directly (proceed button `xf_yes` "Yes,
@@ -221,6 +222,59 @@ card's.
 The Buttons card is no longer on this route. It moved to the foot of the home page: it answers "does this button
 work", which is a question about the object in your hand rather than about its internals, and it sits beside
 the volume and mute it duplicates in hardware.
+
+### Developer
+
+Settings > Developer exists only on firmware built from `config/satellite1.dev.yaml`; the nav hides
+it everywhere else. These strings are written for the team rather than for customers, so they can
+name the parts (FreeRTOS, stack, round trip) a customer hint would not.
+
+| Key | Where | Text |
+| --- | --- | --- |
+| `mic_monitor` | Microphones card title | What the microphones hear, live: Speech-to-text is exactly what the voice assistant receives, Wake word is the same audio after the wake word engine's gain. Both are drawn; Play picks which one you hear. Muting the device sends silence. Recordings stay in this browser until you download them, one mono WAV per channel, with markers for wake words, assistant phases, XMOS restarts and dropped audio. Two pages can listen to one device at a time. |
+| `mic_scores` | Under the Microphones card's score lane | Each wake word model's score, sampled every quarter second: the loudest it got in that window. A line crosses the dashed cutoff when it fires; the cutoff is drawn only for a word that has been tuned. |
+| `multilog` | Logs From Several Devices card title | Reads the recent log from each device you tick and merges them by time. Each device's clock is pinned to this browser's when it answers, so lines from two devices line up to within half that device's round trip, which the download's header lists. Other devices are signed in to with the password Home Assistant holds for them. |
+| `sysmon` | System Monitor card title | Memory sampled every ten seconds for the last twelve hours, kept on the device so the history is there before you open this page. The shaded bands mark when the assistant was running, when the XMOS was not ready and when the mic monitor was streaming. |
+| `sysmon_tasks` | System Monitor, beside Tasks | Every FreeRTOS task, sorted by the least stack it has ever had free. Under 512 bytes is a crash waiting for the wrong code path. |
+
+The cards, top to bottom: **XMOS Firmware** (the picker described under Diagnostics above), then
+**Microphones**, so a firmware swap and what it does to the audio are on one screen, then **TAS2780
+Amplifier Control** (moved here from the old Audio settings page, without its Channel row, which
+went to the Audio tab's Speaker card), **Logs From Several Devices** and **System Monitor**.
+
+**Microphones.** `mm_title` "Microphones"; the button is `mm_listen` "Listen" / `mm_stop` "Stop";
+the `mm_play_row` "Play" row picks `mm_ch_stt` "Speech-to-text", `mm_ch_ww` "Wake word" or
+`mm_ch_off` "Off". The status line is the stream's state — `mm_st_off` "Not listening",
+`mm_st_connecting` "Connecting…", `mm_st_streaming` "Streaming", `mm_st_reconnecting` "Connection
+lost. Reconnecting…", and the four that stop it: `mm_st_busy` "Two pages are already listening to
+this device. Close one and try again.", `mm_st_low_memory` "The device is low on memory right now.
+Try again in a moment.", `mm_st_unsupported` "This firmware has no mic monitor.",
+`mm_st_signed_out` "Your session ended. Reload the page to sign in again." — then whichever device
+flags are set: `mm_muted` "Muted: the device is sending silence", `mm_xmos` "XMOS restarting" or
+`mm_idle` "Microphones idle". A meter that hit full scale shows `mm_clip` "Clipping". The score lane
+is `mm_scores` "Wake word scores" with `mm_slot_primary` "Primary", `mm_slot_secondary` "Secondary"
+and `mm_slot_stop` "Stop word". Recording: `mm_record` "Record" / `mm_record_stop` "Stop recording";
+the list is headed `mm_recordings` "Recordings" with `mm_recording_note` "Recordings live in this
+browser tab until you download them."; each take offers `mm_dl_speech` "Speech-to-text",
+`mm_dl_ww` "Wake word", `mm_dl_both` "Both (.zip)" and `mm_delete` "Delete", a `mm_markers`
+"Markers" disclosure, and `mm_full` "Stopped at the %s limit" when it reached fifteen minutes.
+
+**Logs From Several Devices.** `ml_title` "Logs From Several Devices"; beside a device's name
+`ml_this` "this device" or `ml_offline` "offline"; `ml_no_roster` "Home Assistant isn't connected,
+so only this device can be listed."; the buttons `ml_collect` "Collect" (`ml_collecting`
+"Collecting…") and `ml_download` "Download"; `ml_pick` "Tick at least one device." with nothing
+ticked. After a collect each device gets `ml_dev_ok` "%n lines, round trip %r ms" or its reason
+(offline, can't sign in, no log history on older firmware, timed out, unreachable — these come from
+`src/lib/multilog.js`, not `copy.js`), and a long merge says `ml_shown` "Showing the newest %n lines.
+Download has them all."
+
+**System Monitor.** `sm_title` "System Monitor"; the facts `sm_internal` "Internal RAM" and
+`sm_psram` "PSRAM" with `sm_free` "Free", `sm_block` "Largest block" and `sm_min` "Lowest since
+boot"; the band legend `sm_band_va` "Assistant", `sm_band_xmos` "XMOS not ready" and `sm_band_mic`
+"Mic monitor"; `sm_waiting` "Waiting for the first sample…" before the first answer. The task table
+is `sm_tasks` "Tasks" with columns `sm_task_name` "Task", `sm_task_prio` "Priority",
+`sm_task_stack` "Stack free" and `sm_task_state` "State", or `sm_no_tasks` "This firmware has no
+task table."
 
 ### Wake Words
 
@@ -979,7 +1033,7 @@ edit:
   not "follow device", because area_ducking.yaml is explicit that zero is literal there: ducked players
   are set to 0% for the length of the interaction. All are readouts of a value rather than descriptions
   of a control.
-- The Speaker amplifier card's own readouts: the Analog gain slider speaks dBV, with the factory
+- The TAS2780 card's own readouts (Settings > Developer): the Analog gain slider speaks dBV, with the factory
   default (15 dBV) marked as a notch on the track that the drag snaps to rather than named in the
   readout — "where was it before I touched it" never needs support, and the hint spells the number
   out. Digital volume reads `Muted` instead of a misleading `0%` while the DVC mute is engaged, and

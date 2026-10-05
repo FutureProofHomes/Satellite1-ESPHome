@@ -87,6 +87,24 @@ jobs:
           yaml-file: dashboard-smoke/satellite1.dashboard.yaml
           version: ${{ needs.resolve-esphome-version.outputs.esphome-version }}
 
+  # Compile only: nobody installs a dev build from CI, but its tools have no release build to
+  # catch them breaking, so this is the only thing that does.
+  build-dev-firmware:
+    name: Build developer firmware
+    needs:
+      - resolve-esphome-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4.2.2
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Build config/satellite1.dev.yaml
+        uses: esphome/build-action@v7.0.0
+        with:
+          yaml-file: config/satellite1.dev.yaml
+          version: ${{ needs.resolve-esphome-version.outputs.esphome-version }}
 
   create_artifact_matrix:
     name: Create artifact matrix

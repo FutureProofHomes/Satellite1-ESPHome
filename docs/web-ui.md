@@ -62,13 +62,15 @@ Five tabs, all on the hash, in this nav order:
 | `#/wake-word` | Which wake words the device answers to, each with its sensitivity tuner, voice pipeline and Finished Speaking Detection; the wake chime and the stop word |
 | `#/presence` | Live radar plot with zones, or gate energies, and the radar's own settings |
 | `#/audio` | The local speaker and voice volume; TTS routing and area ducking as trees over your Home Assistant areas, with the remote speakers' volume, mic guard, timer ring and wake chime |
-| `#/settings/<page>` | `device` (facts and buttons), `updates`, `security` (auth token, password), `logs` (live logs, crash reports), `integrations` (Home Assistant side panel), `recovery` (ESP32, XMOS and radar maintenance), `amp` (the TAS2780 amplifier), `community` |
+| `#/settings/<page>` | `device` (facts and buttons), `updates`, `security` (auth token, password), `logs` (live logs, crash reports), `integrations` (Home Assistant side panel), `recovery` (ESP32, XMOS and radar maintenance), `developer` (developer builds only: the XMOS firmware picker, the mic monitor, the TAS2780 amplifier, logs from several devices, the system monitor), `community` |
 
 When the device has a media player, the media bar rides along the bottom of every tab.
 
 `#/home` and `#/audio` were `#/controls` and `#/config` until the September 2026 rename pass, and the
 Settings pages were the cards of `#/diagnostics`; those hashes still resolve (to Home, Audio and
-`#/settings/device`) so bookmarks keep working. An unknown hash lands on Home.
+`#/settings/device`) so bookmarks keep working. `#/settings/amp`, the TAS2780 page until October
+2026, resolves to `#/settings/developer`, and on a build without developer tools that page sends you
+on to `#/settings/device`. An unknown hash lands on Home.
 
 Routing is on the hash rather than on the path because ESPHome's HTTP server has a single wildcard
 handler per method and no notion of client-side routes. A path-based router would 404 on reload for
@@ -90,7 +92,9 @@ only the handful of things `web_server` has no concept of get custom endpoints.
 |---|---|
 | `GET /api/sat1/state` | Device facts and the entity-name table |
 | `GET /api/sat1/voice` | Assistant phase, timers, transcript ring, and the newest pipeline error (message, count, age), which the orb shows in place of "Error" |
-| `GET /api/sat1/amp` | The speaker amplifier's power gain mode and digital volume level |
+| `GET /api/sat1/amp` | The speaker amplifier's power gain mode and digital volume level (developer builds) |
+| `GET /api/sat1/mic` | The mic monitor's live stream of both channels (developer builds; see Developer tools) |
+| `GET /api/sat1/sysmon` | Twelve hours of memory samples and the FreeRTOS task table (developer builds) |
 | `GET /api/sat1/ha` | The cached Home Assistant area and player tree |
 | `GET`/`POST /api/sat1/sel` | The routing and ducking selection |
 | `GET /api/sat1/login/nonce`, `POST /api/sat1/login` | Challenge-response sign-in; also accepts a `key` |
@@ -749,6 +753,89 @@ SSE id, so history and stream lines line up on uptime. A line held by both is ke
 stream's copy, and an uptime that steps backwards marks a reboot: the new boot's lines follow the old
 one's instead of being sorted in among them. The browser ring holds 5000 lines. The panel draws the
 newest 1500, with a Show earlier button above them, and the footer says how far back the lines go.
+
+## Developer tools
+
+Built October 2026 (plan file `developer_tools_page_8cdd6f32`) so the team can hear what the
+microphones hear while switching XMOS firmware, and share recordings of it.
+
+**The rule.** Everything here is for firmware built from `config/satellite1.dev.yaml`, and all of
+its YAML lives inline in that file: the XMOS firmware catalog and picker entities, the amplifier's
+`speaker_amp_id` and `amp_gain`/`line_out` keys, `mic_monitor:` and `sysmon:` under
+`satellite1_web_ui`. A release build compiles none of it — `USE_SAT1_MIC_MONITOR`,
+`USE_SAT1_SYSMON` and `USE_SAT1_WEB_UI_AMP` are absent from its `defines.h` — and the app hides
+Settings > Developer unless the state payload shows one of the tools (`src/lib/devtools.js`). The
+speaker's Channel select is the one amplifier control customers keep; it is on the Audio tab.
+CI's `build-dev-firmware` job compiles the dev config on every push so it cannot rot unseen.
+
+**Mic monitor, device side** (`mic_monitor.h/.cpp`). A passive tap: it registers a data callback on
+`sat1_mics` and never starts or stops the microphone, so it hears exactly what the running pipeline
+hears and costs nothing when the microphone is off (the flags then say idle). Each 16 kHz stereo
+int32 frame becomes two int16 samples. Channel 0 is `q31 >> 16`, what `voice_assistant` receives.
+Channel 1 is `MicrophoneSource`'s conversion for `micro_wake_word`: `clamp((q31 >> 6) * gain, Q25)`
+then `>> 10`, with `wake_word_gain` set to the wake word's `gain_factor` (6). When the mute switch
+is on, both channels are written as zeros and flagged, so a recording never holds audio the person
+asked the device not to hear. Samples go into a 32,768-frame ring (128 KB, about two seconds) in
+PSRAM, allocated on the first listen and kept until reboot; the callback does nothing while nobody
+listens.
+
+`GET /api/sat1/mic` is one chunked `application/octet-stream` response that never ends. After the
+headers the handler takes the socket over the way `web_server`'s event stream does
+(`httpd_sess_set_send_override` plus a session context), then the main loop pumps every listener
+with non-blocking sends from an 8 KB PSRAM buffer: a 20-byte header (magic, sample index, frame
+count, frames dropped, flags, assistant phase, wake sequence and slot, the three wake word scores;
+the layout is in `src/lib/micframes.js`) and up to 2000 frames. A frame count of 0 is a keepalive,
+sent every 250 ms when there is nothing new. A reader that falls half a ring behind skips ahead and
+the skipped frames are counted as dropped; one that accepts nothing for five seconds is closed. A
+listener is freed only once httpd has called its free callback, because `httpd_sess_trigger_close`
+is asynchronous. The handler answers 409 past `max_listeners` (default 2, at most 3) and 503 when
+internal RAM is under 32 KB.
+
+Sockets: each listener holds one of `esp_http_server`'s seven for as long as it listens. A stream
+sends but never makes a new request, so under socket pressure the LRU purge closes it before
+anything else; the page reconnects with backoff (1, 2, 4, 8, then every 10 seconds).
+
+**Mic monitor, browser side** (`src/lib/micmon.js`). One stream per page, kept running while the
+person visits other pages (the Developer nav item shows a dot). Both channels are drawn as ten
+seconds of peak and RMS envelope with meters in dBFS; the Play select picks which one goes to the
+speakers. The page is served over plain HTTP, which is not a secure context, so AudioWorklet is
+unavailable: playback schedules `AudioBufferSource` nodes of 800 samples with a 200 ms jitter
+buffer, resampled when the browser refuses a 16 kHz buffer. A body that delivers nothing for three
+seconds is aborted and reconnected.
+
+Recording keeps both channels in the tab as Int16Array chunks, up to fifteen minutes (about 29 MB a
+channel). Missing audio becomes silence of the right length plus a marker, so the file's timeline is
+the room's: a sample-index jump (dropped frames), a reconnect (timed on the browser's clock), and
+a stretch of idle microphone such as an XMOS install (also the browser's clock, since the device's
+index stands still). Header changes add markers too: wake detections with their slot, assistant
+phases, the XMOS going away and back, the mute, and the XMOS version changing. Each channel downloads
+as a mono 16-bit WAV with the markers as `cue `/`labl` chunks and the device, firmware and XMOS
+version in `LIST/INFO`; "Both" is a store-only zip of the two (no compression: WAV barely
+compresses, and deflate in JS on a phone is slow).
+
+**Score lane.** `MwwRuntimeLoader` already samples each wake word track's highest probability every
+250 ms (`sample_high_water_`). `recent_score()` exposes the latest window per track, and a detection
+writes the firing score into it, because `notify_detection` drains the high-water mark. The lane
+draws the dashed cutoff only for a tuned word: the wake word payload carries no model default.
+
+**Logs from several devices** (`src/lib/multilog.js`). A snapshot, not a tail: Collect reads
+`/api/sat1/log` once from each ticked device — this one directly, the others signed in with the
+password Home Assistant holds — and merges by wall clock. Each device's uptime stamps are pinned to
+the browser's clock at the midpoint of that request, so the error bar is half its round trip; the
+download's header lists every device's round trip so nobody reads more precision into it than it
+has.
+
+**System monitor** (`sysmon.h/.cpp`). Every ten seconds the device records internal free, largest
+internal block, the internal low-water mark, PSRAM free and three flags (assistant running, XMOS not
+ready, mic monitor streaming) into 4320 slots: twelve hours, about 100 KB of PSRAM, allocated at
+boot so the history exists before anyone opens the page. `GET /api/sat1/sysmon?boot=&since=` pages
+through it 720 samples at a time; `tasks=1` adds every FreeRTOS task's priority, state and stack
+high-water mark. The task table needs `CONFIG_FREERTOS_USE_TRACE_FACILITY`, which the component's
+codegen sets whenever `sysmon:` is present, so it is not repeated in `dev.yaml`.
+
+**Costs.** By construction: 128 KB of PSRAM for the mic ring once someone has listened, 8 KB of
+PSRAM per listener, about 100 KB of PSRAM for the system monitor, and no internal RAM beyond the
+objects themselves. A WiFi dev build compiles to 44.4% static RAM and 3,895,135 bytes of flash.
 
 ## Rebuilding and conventions
 
