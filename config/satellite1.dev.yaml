@@ -1,9 +1,10 @@
-# Developer build: satellite1.yaml plus the XMOS firmware picker.
+# Developer build: satellite1.yaml plus the XMOS firmware picker and the audio race harness.
 #   esphome run config/satellite1.dev.yaml
 packages:
   base_image: !include satellite1.yaml
   xmos_catalog: !include common/xmos_firmware_catalog.yaml
   xmos_catalog_web_ui: !include common/web_ui_xmos_catalog.yaml
+  audio_race_test: !include common/audio_race_test.yaml
 
 external_components:
   - source:

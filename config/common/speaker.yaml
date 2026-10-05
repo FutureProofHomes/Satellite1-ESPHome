@@ -48,7 +48,11 @@ speaker:
     num_channels: 2
     source_speakers:
       - id: announcement_mixing_input
-        timeout: never
+        # Finite, so an input left running with nothing feeding it (a media_player.stop landing in
+        # an announcement's first few milliseconds can do that in ESPHome 2026.9) stops itself
+        # instead of blocking every later announcement until reboot. Long enough to ride out a
+        # streamed reply stalling between sentences.
+        timeout: 5s
       - id: media_mixing_input
         timeout: never
         buffer_duration: 100ms
