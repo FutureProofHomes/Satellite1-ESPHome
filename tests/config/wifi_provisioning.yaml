@@ -1,0 +1,14 @@
+# Local provisioning dashboard equivalent. Provisioning must precede the base.
+packages:
+  provisioning: !include ../../config/common/wifi_provisioning.yaml
+  base: !include ../../config/satellite1.base.yaml
+  dashboard_build: !include ../../config/common/dashboard_build.yaml
+
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+
+external_components:
+  - source:
+      type: local
+      path: ../../esphome/components
+    components: [fusb302b, i2s_audio, memory_flasher, satellite1, satellite1_radar, tas2780, wifi_provisioning]
