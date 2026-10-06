@@ -155,7 +155,7 @@ class Satellite1 : public Component,
   void xmos_hardware_reset();
 
  protected:
-  bool is_xmos_boot_settling_();
+  bool is_xmos_boot_settling_(uint32_t now);
   bool dfu_get_fw_version_();
   bool dfu_get_flash_serial_();
   bool dfu_get_image_status_();

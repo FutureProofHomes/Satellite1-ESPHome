@@ -21,6 +21,12 @@ class TestSatellite : public Satellite1 {
   TestSatellite() { this->set_xmos_rst_pin(&this->pin); }
   GPIOPin pin;
   uint32_t deadline() const { return this->xmos_boot_ready_timestamp_; }
+  uint32_t last_attempt() const { return this->last_attempt_timestamp_; }
+  void set_refresh_timestamp(uint32_t timestamp) {
+    this->state = SAT_XMOS_CONNECTED_STATE;
+    this->status_refresh_attempted_ = true;
+    this->status_refresh_timestamp_ = timestamp;
+  }
   void expect_pending(bool expected) const {
 #ifdef HAS_SETTLE_PENDING
     CHECK(this->xmos_boot_settle_pending_ == expected);
@@ -154,6 +160,45 @@ int main(int argc, char **argv) {
     CHECK(host::spi_calls == before);
     sat.expect_pending(false);
     sat.loop_allowed(true);
+  } else if (test == "loop_clock" || test == "transfer_clock") {
+    host::now = 100;
+    sat.release();
+    host::loop_start_time = 4099;
+    host::now = 4100;
+    if (test == "loop_clock") {
+      sat.loop_allowed(false);
+      sat.expect_pending(true);
+      host::loop_start_time = 4100;
+      sat.loop_allowed(true);
+    } else {
+      sat.transfer_allowed(true);
+    }
+    sat.expect_pending(false);
+  } else if (test == "retry_clock") {
+    host::loop_start_time = 1000;
+    host::now = 2000;
+    sat.loop();
+    CHECK(host::spi_calls == 0);
+    host::loop_start_time = 1001;
+    sat.loop();
+    CHECK(host::spi_calls == 1);
+    CHECK(sat.last_attempt() == 1001);
+    host::loop_start_time = 2001;
+    host::now = 3000;
+    sat.loop();
+    CHECK(host::spi_calls == 1);
+    host::loop_start_time = 2002;
+    sat.loop();
+    CHECK(host::spi_calls == 2);
+  } else if (test == "refresh_clock") {
+    sat.set_refresh_timestamp(100);
+    host::loop_start_time = 119;
+    host::now = 125;
+    sat.loop();
+    CHECK(host::spi_calls == 0);
+    host::loop_start_time = 120;
+    sat.loop();
+    CHECK(host::spi_calls == 1);
   } else {
     CHECK(false);
   }

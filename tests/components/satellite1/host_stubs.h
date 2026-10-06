@@ -6,12 +6,14 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace host {
 inline uint32_t now = 0;
+inline std::optional<uint32_t> loop_start_time;
 inline unsigned spi_calls = 0;
 }  // namespace host
 
@@ -23,6 +25,11 @@ inline void vTaskDelay(unsigned) {}
 #define ESP_LOGD(...) ((void) 0)
 
 namespace esphome {
+class Application {
+ public:
+  uint32_t get_loop_component_start_time() const { return host::loop_start_time.value_or(host::now); }
+};
+inline Application App;
 inline uint32_t millis() { return host::now; }
 inline void delay(uint32_t ms) { host::now += ms; }
 namespace setup_priority {

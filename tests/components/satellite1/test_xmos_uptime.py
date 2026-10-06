@@ -43,6 +43,7 @@ class XmosUptimeTest(unittest.TestCase):
         for name in (
             "esp_rom_gpio.h",
             "esphome/core/log.h",
+            "esphome/core/application.h",
             "esphome/core/component.h",
             "esphome/core/gpio.h",
             "esphome/components/spi/spi.h",
@@ -110,6 +111,18 @@ class XmosUptimeTest(unittest.TestCase):
 
     def test_boot_recovery_loop_guard(self) -> None:
         self.run_case("recovery")
+
+    def test_loop_settle_uses_loop_start_time(self) -> None:
+        self.run_case("loop_clock")
+
+    def test_transfer_uses_current_time(self) -> None:
+        self.run_case("transfer_clock")
+
+    def test_retry_uses_loop_start_time(self) -> None:
+        self.run_case("retry_clock")
+
+    def test_status_refresh_uses_loop_start_time(self) -> None:
+        self.run_case("refresh_clock")
 
 
 if __name__ == "__main__":
