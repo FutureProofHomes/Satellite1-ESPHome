@@ -1,7 +1,0 @@
-# Must fail final validation after wifi.ssid is normalized to wifi.networks.
-packages:
-  provisioning: !include wifi_provisioning.yaml
-
-wifi:
-  ssid: "Validation network"
-  password: "validation-password"

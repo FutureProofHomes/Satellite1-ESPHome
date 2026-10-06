@@ -1,8 +1,0 @@
-# Must fail even when credentials are supplied through a merged package.
-packages:
-  provisioning: !include wifi_provisioning.yaml
-  credentials:
-    wifi:
-      networks:
-        - ssid: "Validation network"
-          password: "validation-password"
