@@ -5,12 +5,13 @@
 #include "esphome/core/component.h"
 #include "esphome/core/optional.h"
 #include "esphome/core/automation.h"
+#include "esphome/core/log.h"
 
 #include "ltr_definitions.h"
 
 namespace esphome::ltr_als_ps {
 
-enum LtrDataAvail : uint8_t { LTR_NO_DATA, LTR_BAD_DATA, LTR_DATA_OK };
+enum LtrDataAvail : uint8_t { LTR_NO_DATA, LTR_BAD_DATA, LTR_STALE_GAIN, LTR_IO_ERROR, LTR_DATA_OK };
 
 enum LtrType : uint8_t {
   LTR_TYPE_UNKNOWN = 0,
@@ -110,12 +111,16 @@ class LTRAlsPsComponent : public PollingComponent, public i2c::I2CDevice {
   bool check_part_number_();
 
   void configure_reset_();
-  void configure_als_();
-  void configure_integration_time_(IntegrationTime time);
-  void configure_gain_(AlsGain gain);
+  bool configure_als_();
+  bool configure_integration_time_(IntegrationTime time);
+  bool configure_gain_(AlsGain gain);
+  uint32_t effective_als_period_ms_(IntegrationTime time) const;
+  void start_als_wait_(bool settling);
+  void als_warning_(const LogString *message);
   LtrDataAvail is_als_data_ready_(AlsReadings &data);
-  void read_sensor_data_(AlsReadings &data);
+  bool read_sensor_data_(AlsReadings &data);
   bool are_adjustments_required_(AlsReadings &data);
+  bool decrease_sensitivity_(AlsReadings &data);
   void apply_lux_calculation_(AlsReadings &data);
   void publish_data_part_1_(AlsReadings &data);
   void publish_data_part_2_(AlsReadings &data);
@@ -138,7 +143,12 @@ class LTRAlsPsComponent : public PollingComponent, public i2c::I2CDevice {
   uint16_t ps_cooldown_time_s_{5};
   uint16_t ps_threshold_high_{0xffff};
   uint16_t ps_threshold_low_{0x0000};
-  uint8_t read_data_tries_{0};
+  uint32_t als_wait_started_ms_{0};
+  uint32_t als_wait_timeout_ms_{0};
+  bool als_configuration_valid_{true};
+  bool als_warning_active_{false};
+  const LogString *als_warning_message_{nullptr};
+  bool als_latch_release_pending_{false};
   PsGain ps_gain_{PsGain::PS_GAIN_16};
 
   //

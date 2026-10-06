@@ -2,6 +2,8 @@
 #include "esphome/core/application.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
+#include <algorithm>
+#include <cmath>
 #include <limits>
 
 using esphome::i2c::ErrorCode;
@@ -11,6 +13,10 @@ namespace esphome::ltr_als_ps {
 static const char *const TAG = "ltr_als_ps";
 
 static const uint8_t MAX_TRIES = 5;
+static const AlsGain GAINS[GAINS_COUNT] = {GAIN_1, GAIN_2, GAIN_4, GAIN_8, GAIN_48, GAIN_96};
+static const IntegrationTime INT_TIMES[TIMES_COUNT] = {
+    INTEGRATION_TIME_50MS,  INTEGRATION_TIME_100MS, INTEGRATION_TIME_150MS, INTEGRATION_TIME_200MS,
+    INTEGRATION_TIME_250MS, INTEGRATION_TIME_300MS, INTEGRATION_TIME_350MS, INTEGRATION_TIME_400MS};
 
 template<typename T, size_t size> T get_next(const T (&array)[size], const T val) {
   size_t i = 0;
@@ -120,15 +126,19 @@ void LTRAlsPsComponent::update() {
   if (this->is_ready() && this->state_ == State::IDLE) {
     ESP_LOGV(TAG, "Initiating new data collection");
 
-    this->state_ = this->automatic_mode_enabled_ ? State::COLLECTING_DATA_AUTO : State::WAITING_FOR_DATA;
-
     this->als_readings_.ch0 = 0;
     this->als_readings_.ch1 = 0;
     this->als_readings_.gain = this->gain_;
     this->als_readings_.integration_time = this->integration_time_;
     this->als_readings_.lux = 0;
     this->als_readings_.number_of_adjustments = 0;
-
+    if (!this->is_als_()) {
+      this->state_ = State::READY_TO_PUBLISH;
+    } else if (!this->als_configuration_valid_) {
+      this->state_ = State::COLLECTING_DATA_AUTO;
+    } else {
+      this->start_als_wait_(false);
+    }
   } else {
     ESP_LOGV(TAG, "Component not ready yet");
   }
@@ -143,17 +153,31 @@ void LTRAlsPsComponent::loop() {
       if (err != i2c::ERROR_OK) {
         ESP_LOGV(TAG, "i2c connection failed");
         this->mark_failed();
+        return;
       }
       this->configure_reset_();
       if (this->is_als_()) {
-        this->configure_als_();
-        this->configure_integration_time_(this->integration_time_);
+        if (!this->configure_als_()) {
+          ESP_LOGE(TAG, "Failed to activate ALS with configured gain");
+          this->mark_failed();
+          return;
+        }
+        if (!this->configure_integration_time_(this->integration_time_)) {
+          ESP_LOGE(TAG, "Failed to configure ALS measurement timing");
+          this->mark_failed();
+          return;
+        }
       }
       if (this->is_ps_()) {
         this->configure_ps_();
       }
 
       this->state_ = State::IDLE;
+      if (this->is_als_()) {
+        this->als_readings_.gain = this->gain_;
+        this->als_readings_.integration_time = this->integration_time_;
+        this->start_als_wait_(true);
+      }
       break;
 
     case State::IDLE:
@@ -162,38 +186,83 @@ void LTRAlsPsComponent::loop() {
       }
       break;
 
-    case State::WAITING_FOR_DATA:
-      if (this->is_als_data_ready_(this->als_readings_) == LtrDataAvail::LTR_DATA_OK) {
-        this->read_data_tries_ = 0;
+    case State::WAITING_FOR_DATA: {
+      LtrDataAvail availability = this->is_als_data_ready_(this->als_readings_);
+      if (availability == LtrDataAvail::LTR_DATA_OK) {
         ESP_LOGV(TAG, "Reading sensor data having gain = %.0fx, time = %d ms", get_gain_coeff(this->als_readings_.gain),
                  get_itime_ms(this->als_readings_.integration_time));
-        this->read_sensor_data_(this->als_readings_);
-        this->state_ = State::DATA_COLLECTED;
-        this->apply_lux_calculation_(this->als_readings_);
-      } else if (this->read_data_tries_ >= MAX_TRIES) {
-        ESP_LOGW(TAG, "Can't get data after several tries.");
-        this->read_data_tries_ = 0;
-        this->status_set_warning();
+        if (this->read_sensor_data_(this->als_readings_)) {
+          this->state_ = State::DATA_COLLECTED;
+          break;
+        }
+        availability = LtrDataAvail::LTR_IO_ERROR;
+      }
+      const uint32_t elapsed = millis() - this->als_wait_started_ms_;
+      if (elapsed >= this->als_wait_timeout_ms_) {
+        // Invalid readings can prevent count-based ranging after a bright transition at high sensitivity.
+        if (availability == LtrDataAvail::LTR_BAD_DATA && this->automatic_mode_enabled_ &&
+            this->als_readings_.number_of_adjustments < 16 && this->decrease_sensitivity_(this->als_readings_)) {
+          ESP_LOGD(TAG, "Invalid ALS data at readiness deadline; reducing automatic sensitivity");
+          this->state_ = State::COLLECTING_DATA_AUTO;
+          break;
+        }
+        switch (availability) {
+          case LtrDataAvail::LTR_BAD_DATA:
+            this->als_warning_(LOG_STR("Timed out waiting for valid ALS data"));
+            break;
+          case LtrDataAvail::LTR_STALE_GAIN:
+            this->als_warning_(LOG_STR("Timed out waiting for ALS data with requested gain"));
+            break;
+          case LtrDataAvail::LTR_IO_ERROR:
+            this->als_warning_(LOG_STR("Timed out communicating with ALS sensor"));
+            break;
+          default:
+            this->als_warning_(LOG_STR("Timed out waiting for new ALS data"));
+            break;
+        }
         this->state_ = State::IDLE;
-        return;
       } else {
-        this->read_data_tries_++;
+        this->state_ = State::ADJUSTMENT_IN_PROGRESS;
+        const uint32_t wait = std::min(this->effective_als_period_ms_(this->als_readings_.integration_time),
+                                       this->als_wait_timeout_ms_ - elapsed);
+        this->set_timeout("als_ready", wait, [this]() { this->state_ = State::WAITING_FOR_DATA; });
       }
       break;
+    }
 
     case State::COLLECTING_DATA_AUTO:
     case State::DATA_COLLECTED:
-      // first measurement in auto mode (COLLECTING_DATA_AUTO state) require device reconfiguration
+      // Reconfigure only changed settings; keep the settled range between updates.
       if (this->state_ == State::COLLECTING_DATA_AUTO || this->are_adjustments_required_(this->als_readings_)) {
-        this->state_ = State::ADJUSTMENT_IN_PROGRESS;
+        if (this->als_readings_.number_of_adjustments > 16) {
+          this->als_warning_(LOG_STR("Too many ALS sensitivity adjustments; abandoning update"));
+          this->state_ = State::IDLE;
+          break;
+        }
         ESP_LOGD(TAG, "Reconfiguring sensitivity: gain = %.0fx, time = %d ms", get_gain_coeff(this->als_readings_.gain),
                  get_itime_ms(this->als_readings_.integration_time));
-        this->configure_integration_time_(this->als_readings_.integration_time);
-        this->configure_gain_(this->als_readings_.gain);
-        // if sensitivity adjustment needed - need to wait for first data samples after setting new parameters
-        this->set_timeout(2 * get_meas_time_ms(this->repeat_rate_),
-                          [this]() { this->state_ = State::WAITING_FOR_DATA; });
+        const bool force = !this->als_configuration_valid_;
+        this->als_configuration_valid_ = false;
+        if (force || this->integration_time_ != this->als_readings_.integration_time) {
+          if (!this->configure_integration_time_(this->als_readings_.integration_time)) {
+            this->als_warning_(LOG_STR("Failed to configure ALS integration time"));
+            this->state_ = State::IDLE;
+            break;
+          }
+          this->integration_time_ = this->als_readings_.integration_time;
+        }
+        if (force || this->gain_ != this->als_readings_.gain) {
+          if (!this->configure_gain_(this->als_readings_.gain)) {
+            this->als_warning_(LOG_STR("Failed to configure ALS gain"));
+            this->state_ = State::IDLE;
+            break;
+          }
+          this->gain_ = this->als_readings_.gain;
+        }
+        this->als_configuration_valid_ = true;
+        this->start_als_wait_(true);
       } else {
+        this->apply_lux_calculation_(this->als_readings_);
         this->state_ = State::READY_TO_PUBLISH;
       }
       break;
@@ -209,12 +278,44 @@ void LTRAlsPsComponent::loop() {
 
     case State::KEEP_PUBLISHING:
       this->publish_data_part_2_(this->als_readings_);
-      this->status_clear_warning();
+      if (this->als_warning_active_ && !std::isnan(this->als_readings_.lux)) {
+        this->status_clear_warning();
+        this->als_warning_active_ = false;
+        this->als_warning_message_ = nullptr;
+      }
       this->state_ = State::IDLE;
       break;
 
     default:
       break;
+  }
+}
+
+uint32_t LTRAlsPsComponent::effective_als_period_ms_(IntegrationTime time) const {
+  return std::max(get_meas_time_ms(this->repeat_rate_), get_itime_ms(time));
+}
+
+void LTRAlsPsComponent::start_als_wait_(bool settling) {
+  const uint32_t period = this->effective_als_period_ms_(this->als_readings_.integration_time);
+  this->als_wait_started_ms_ = millis();
+  // Allow two conversion periods for readiness, plus two to flush the old configuration when settling.
+  this->als_wait_timeout_ms_ = (settling ? 4 : 2) * period + 50;
+  if (settling) {
+    this->state_ = State::ADJUSTMENT_IN_PROGRESS;
+    this->set_timeout("als_ready", 2 * period + 20, [this]() { this->state_ = State::WAITING_FOR_DATA; });
+  } else {
+    this->state_ = State::WAITING_FOR_DATA;
+  }
+}
+
+void LTRAlsPsComponent::als_warning_(const LogString *message) {
+  if (this->als_warning_message_ != message) {
+    ESP_LOGW(TAG, "%s", LOG_STR_ARG(message));
+    this->als_warning_message_ = message;
+  }
+  if (!this->als_warning_active_) {
+    this->status_set_warning(message);
+    this->als_warning_active_ = true;
   }
 }
 
@@ -290,28 +391,7 @@ void LTRAlsPsComponent::configure_reset_() {
   }
 }
 
-void LTRAlsPsComponent::configure_als_() {
-  AlsControlRegister als_ctrl{0};
-
-  als_ctrl.sw_reset = false;
-  als_ctrl.active_mode = true;
-  als_ctrl.gain = this->gain_;
-
-  ESP_LOGV(TAG, "Setting active mode and gain reg 0x%02X", als_ctrl.raw);
-  this->reg((uint8_t) CommandRegisters::ALS_CONTR) = als_ctrl.raw;
-  delay(5);
-
-  uint8_t tries = MAX_TRIES;
-  do {
-    ESP_LOGV(TAG, "Waiting for device to become active");
-    delay(2);
-    als_ctrl.raw = this->reg((uint8_t) CommandRegisters::ALS_CONTR).get();
-  } while (!als_ctrl.active_mode && tries--);  // while active mode is not set - keep waiting
-
-  if (!als_ctrl.active_mode) {
-    ESP_LOGW(TAG, "Failed to activate device");
-  }
-}
+bool LTRAlsPsComponent::configure_als_() { return this->configure_gain_(this->gain_); }
 
 void LTRAlsPsComponent::configure_ps_() {
   PsMeasurementRateRegister ps_meas{0};
@@ -342,113 +422,121 @@ uint16_t LTRAlsPsComponent::read_ps_data_() {
   return val;
 }
 
-void LTRAlsPsComponent::configure_gain_(AlsGain gain) {
+bool LTRAlsPsComponent::configure_gain_(AlsGain gain) {
   AlsControlRegister als_ctrl{0};
   als_ctrl.active_mode = true;
   als_ctrl.gain = gain;
-  this->reg((uint8_t) CommandRegisters::ALS_CONTR) = als_ctrl.raw;
-  delay(2);
-
   AlsControlRegister read_als_ctrl{0};
-  read_als_ctrl.raw = this->reg((uint8_t) CommandRegisters::ALS_CONTR).get();
-  if (read_als_ctrl.gain != gain) {
-    ESP_LOGW(TAG, "Failed to set gain. We will try one more time.");
-    this->reg((uint8_t) CommandRegisters::ALS_CONTR) = als_ctrl.raw;
-    delay(2);
-  }
+  return this->write_byte((uint8_t) CommandRegisters::ALS_CONTR, als_ctrl.raw) &&
+         this->read_byte((uint8_t) CommandRegisters::ALS_CONTR, &read_als_ctrl.raw) && read_als_ctrl.gain == gain &&
+         read_als_ctrl.active_mode;
 }
 
-void LTRAlsPsComponent::configure_integration_time_(IntegrationTime time) {
+bool LTRAlsPsComponent::configure_integration_time_(IntegrationTime time) {
   MeasurementRateRegister meas{0};
   meas.measurement_repeat_rate = this->repeat_rate_;
   meas.integration_time = time;
-  this->reg((uint8_t) CommandRegisters::MEAS_RATE) = meas.raw;
-  delay(2);
-
   MeasurementRateRegister read_meas{0};
-  read_meas.raw = this->reg((uint8_t) CommandRegisters::MEAS_RATE).get();
-  if (read_meas.integration_time != time) {
-    ESP_LOGW(TAG, "Failed to set integration time. We will try one more time.");
-    this->reg((uint8_t) CommandRegisters::MEAS_RATE) = meas.raw;
-    delay(2);
-  }
+  return this->write_byte((uint8_t) CommandRegisters::MEAS_RATE, meas.raw) &&
+         this->read_byte((uint8_t) CommandRegisters::MEAS_RATE, &read_meas.raw) && read_meas.integration_time == time &&
+         read_meas.measurement_repeat_rate == this->repeat_rate_;
 }
 
 LtrDataAvail LTRAlsPsComponent::is_als_data_ready_(AlsReadings &data) {
   AlsPsStatusRegister als_status{0};
-
-  als_status.raw = this->reg((uint8_t) CommandRegisters::ALS_PS_STATUS).get();
+  // A failed final-byte read can leave the latch locked even when new-data status is clear.
+  if (this->als_latch_release_pending_) {
+    uint8_t discarded;
+    if (!this->read_byte((uint8_t) CommandRegisters::ALS_DATA_CH0_1, &discarded)) {
+      return LtrDataAvail::LTR_IO_ERROR;
+    }
+    this->als_latch_release_pending_ = false;
+    return LtrDataAvail::LTR_NO_DATA;
+  }
+  if (!this->read_byte((uint8_t) CommandRegisters::ALS_PS_STATUS, &als_status.raw)) {
+    return LtrDataAvail::LTR_IO_ERROR;
+  }
   if (!als_status.als_new_data)
     return LtrDataAvail::LTR_NO_DATA;
 
-  if (als_status.data_invalid) {
-    ESP_LOGW(TAG, "Data available but not valid");
-    return LtrDataAvail::LTR_BAD_DATA;
-  }
   ESP_LOGV(TAG, "Data ready, reported gain is %.0f", get_gain_coeff(als_status.gain));
   if (data.gain != als_status.gain) {
-    ESP_LOGW(TAG, "Actual gain differs from requested (%.0f)", get_gain_coeff(data.gain));
+    ESP_LOGV(TAG, "Ignoring ALS data from previous gain (requested %.0f)", get_gain_coeff(data.gain));
+    return LtrDataAvail::LTR_STALE_GAIN;
+  }
+  if (als_status.data_invalid) {
+    ESP_LOGV(TAG, "Waiting for valid ALS data");
     return LtrDataAvail::LTR_BAD_DATA;
   }
   return LtrDataAvail::LTR_DATA_OK;
 }
 
-void LTRAlsPsComponent::read_sensor_data_(AlsReadings &data) {
-  data.ch1 = 0;
-  data.ch0 = 0;
-  uint8_t ch1_0 = this->reg((uint8_t) CommandRegisters::ALS_DATA_CH1_0).get();
-  uint8_t ch1_1 = this->reg((uint8_t) CommandRegisters::ALS_DATA_CH1_1).get();
-  uint8_t ch0_0 = this->reg((uint8_t) CommandRegisters::ALS_DATA_CH0_0).get();
-  uint8_t ch0_1 = this->reg((uint8_t) CommandRegisters::ALS_DATA_CH0_1).get();
-  data.ch1 = encode_uint16(ch1_1, ch1_0);
-  data.ch0 = encode_uint16(ch0_1, ch0_0);
+bool LTRAlsPsComponent::read_sensor_data_(AlsReadings &data) {
+  uint8_t bytes[4]{};
+  bool success = true;
+  // Complete the documented order even after an error so the final byte releases the data latch.
+  for (uint8_t i = 0; i < 4; i++) {
+    const bool byte_ok = this->read_byte((uint8_t) CommandRegisters::ALS_DATA_CH1_0 + i, &bytes[i]);
+    if (i == 3)
+      this->als_latch_release_pending_ = !byte_ok;
+    if (!byte_ok)
+      success = false;
+  }
+  if (!success) {
+    return false;
+  }
+  data.ch1 = encode_uint16(bytes[1], bytes[0]);
+  data.ch0 = encode_uint16(bytes[3], bytes[2]);
 
   ESP_LOGV(TAG, "Got sensor data: CH1 = %d, CH0 = %d", data.ch1, data.ch0);
+  return true;
+}
+
+bool LTRAlsPsComponent::decrease_sensitivity_(AlsReadings &data) {
+  const AlsGain prev_gain = get_prev(GAINS, data.gain);
+  if (prev_gain != data.gain) {
+    data.gain = prev_gain;
+    data.number_of_adjustments++;
+    return true;
+  }
+  const IntegrationTime prev_time = get_prev(INT_TIMES, data.integration_time);
+  if (prev_time != data.integration_time) {
+    data.integration_time = prev_time;
+    data.number_of_adjustments++;
+    return true;
+  }
+  return false;
 }
 
 bool LTRAlsPsComponent::are_adjustments_required_(AlsReadings &data) {
   if (!this->automatic_mode_enabled_)
     return false;
 
-  if (data.number_of_adjustments > 15) {
-    // sometimes sensors fail to change sensitivity. this prevents us from infinite loop
-    ESP_LOGW(TAG, "Too many sensitivity adjustments done. Apparently, sensor reconfiguration fails. Stopping.");
-    return false;
-  }
-  data.number_of_adjustments++;
-
   // Recommended thresholds as per datasheet
   static const uint16_t LOW_INTENSITY_THRESHOLD = 1000;
   static const uint16_t HIGH_INTENSITY_THRESHOLD = 30000;
-  static const AlsGain GAINS[GAINS_COUNT] = {GAIN_1, GAIN_2, GAIN_4, GAIN_8, GAIN_48, GAIN_96};
-  static const IntegrationTime INT_TIMES[TIMES_COUNT] = {
-      INTEGRATION_TIME_50MS,  INTEGRATION_TIME_100MS, INTEGRATION_TIME_150MS, INTEGRATION_TIME_200MS,
-      INTEGRATION_TIME_250MS, INTEGRATION_TIME_300MS, INTEGRATION_TIME_350MS, INTEGRATION_TIME_400MS};
 
-  if (data.ch0 <= LOW_INTENSITY_THRESHOLD) {
+  // Use both channels so IR-heavy light cannot repeatedly increase gain into CH1 saturation.
+  const uint16_t intensity = std::max(data.ch0, data.ch1);
+  if (intensity >= HIGH_INTENSITY_THRESHOLD) {
+    if (this->decrease_sensitivity_(data)) {
+      ESP_LOGV(TAG, "High illuminance. Decreasing sensitivity.");
+      return true;
+    }
+  } else if (intensity <= LOW_INTENSITY_THRESHOLD) {
     AlsGain next_gain = get_next(GAINS, data.gain);
     if (next_gain != data.gain) {
       data.gain = next_gain;
+      data.number_of_adjustments++;
       ESP_LOGV(TAG, "Low illuminance. Increasing gain.");
       return true;
     }
     IntegrationTime next_time = get_next(INT_TIMES, data.integration_time);
-    if (next_time != data.integration_time) {
+    // The IC clamps integration above the repeat period; do not normalize lux using an unachievable time.
+    if (next_time != data.integration_time && get_itime_ms(next_time) <= get_meas_time_ms(this->repeat_rate_)) {
       data.integration_time = next_time;
+      data.number_of_adjustments++;
       ESP_LOGV(TAG, "Low illuminance. Increasing integration time.");
-      return true;
-    }
-  } else if (data.ch0 >= HIGH_INTENSITY_THRESHOLD) {
-    AlsGain prev_gain = get_prev(GAINS, data.gain);
-    if (prev_gain != data.gain) {
-      data.gain = prev_gain;
-      ESP_LOGV(TAG, "High illuminance. Decreasing gain.");
-      return true;
-    }
-    IntegrationTime prev_time = get_prev(INT_TIMES, data.integration_time);
-    if (prev_time != data.integration_time) {
-      data.integration_time = prev_time;
-      ESP_LOGV(TAG, "High illuminance. Decreasing integration time.");
       return true;
     }
   } else {
@@ -461,20 +549,20 @@ bool LTRAlsPsComponent::are_adjustments_required_(AlsReadings &data) {
 
 void LTRAlsPsComponent::apply_lux_calculation_(AlsReadings &data) {
   if ((data.ch0 == 0xFFFF) || (data.ch1 == 0xFFFF)) {
-    ESP_LOGW(TAG, "Sensors got saturated");
+    this->als_warning_(LOG_STR("ALS channels saturated at current range"));
+    data.lux = NAN;
+    return;
+  }
+
+  const float ch0 = data.ch0;
+  const float ch1 = data.ch1;
+  const float total = ch0 + ch1;
+  if (total <= 0.0f) {
     data.lux = 0.0f;
     return;
   }
 
-  if ((data.ch0 == 0x0000) && (data.ch1 == 0x0000)) {
-    ESP_LOGW(TAG, "Sensors blacked out");
-    data.lux = 0.0f;
-    return;
-  }
-
-  float ch0 = data.ch0;
-  float ch1 = data.ch1;
-  float ratio = ch1 / (ch0 + ch1);
+  const float ratio = ch1 / total;
   float als_gain = get_gain_coeff(data.gain);
   float als_time = ((float) get_itime_ms(data.integration_time)) / 100.0f;
   float inv_pfactor = this->glass_attenuation_factor_;
@@ -487,7 +575,6 @@ void LTRAlsPsComponent::apply_lux_calculation_(AlsReadings &data) {
   } else if (ratio < 0.85f && ratio >= 0.64f) {
     lux = (0.5926f * ch0 + 0.1185f * ch1);
   } else {
-    ESP_LOGW(TAG, "Impossible ch1/(ch0 + ch1) ratio");
     lux = 0.0f;
   }
   lux = inv_pfactor * lux / als_gain / als_time;
