@@ -154,6 +154,7 @@ export function DxConfirmDialog({
   title,
   body,
   confirmLabel,
+  cancelLabel = TEXT.cancel,
   danger = false,
   returnFocus,
   onCancel,
@@ -163,6 +164,7 @@ export function DxConfirmDialog({
   title: string;
   body: string;
   confirmLabel: string;
+  cancelLabel?: string;
   danger?: boolean;
   returnFocus?: React.RefObject<HTMLElement>;
   onCancel: () => void;
@@ -173,7 +175,7 @@ export function DxConfirmDialog({
         <p className="dx-modal-title">{title}</p>
         <p className="dx-modal-body">{body}</p>
         <div className="dx-modal-actions">
-          <button ref={cancel} className="dx-btn" onClick={onCancel}>{TEXT.cancel}</button>
+          <button ref={cancel} className="dx-btn" onClick={onCancel}>{cancelLabel}</button>
           <button className={`dx-btn solid${danger ? ' danger' : ''}`} onClick={onConfirm}>{confirmLabel}</button>
         </div>
       </Drawer>}</Presence>;

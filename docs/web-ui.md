@@ -58,7 +58,7 @@ Five tabs, all on the hash, in this nav order:
 
 | Route | What it does |
 |---|---|
-| `#/home` | The voice orb (assistant phase, mute, voice volume, LED ring colours), sensor readings with sparklines and calibration, timers, and the transcript per wake word |
+| `#/home` | The voice orb (assistant phase, mute, voice volume) and its Customize drawer - the orb's colors, and the LED ring's color, brightness, style and per-moment animations - sensor readings with sparklines and calibration, timers, and the transcript per wake word |
 | `#/wake-word` | Which wake words the device answers to, each with its sensitivity tuner, voice pipeline and Finished Speaking Detection; the wake chime and the stop word |
 | `#/presence` | Live radar plot with zones, or gate energies, and the radar's own settings |
 | `#/audio` | The local speaker and voice volume; TTS routing and area ducking as trees over your Home Assistant areas, with the remote speakers' volume, mic guard, timer ring and wake chime |
@@ -97,6 +97,7 @@ only the handful of things `web_server` has no concept of get custom endpoints.
 | `GET /api/sat1/sysmon` | Twelve hours of memory samples and the FreeRTOS task table (developer builds) |
 | `GET /api/sat1/ha` | The cached Home Assistant area and player tree |
 | `GET`/`POST /api/sat1/sel` | The routing and ducking selection |
+| `GET`/`POST /api/sat1/ring`, `POST /api/sat1/ring/reset`, `POST /api/sat1/ring/preview`, `POST /api/sat1/ring/preview/stop` | The LED ring's style and per-moment animations, and previews played on the ring (see The LED ring studio) |
 | `GET /api/sat1/login/nonce`, `POST /api/sat1/login` | Challenge-response sign-in; also accepts a `key` |
 | `POST /api/sat1/login/start`, `GET /api/sat1/login/poll` | The device-presence pairing window |
 | `POST /api/sat1/logout`, `POST /api/sat1/logout_all` | Expire this cookie; revoke every session |
@@ -279,7 +280,12 @@ expanded media view dressed as drawers):
 | Gzipped, as embedded | **49,367** |
 | Budget | 51,200 |
 
-That is 96% of the ceiling. The budget has been raised twice: from 40,960 B when the media footer
+October 2026, with the LED ring studio (see below), the document is 576,864 B raw and 181,409 B
+gzipped; the studio's renderer, pages, styles and copy account for about 15 KB of the gzipped
+figure. `npm run build` prints both numbers against the 52 KB target, which the app outgrew well
+before the studio. Flash is 48.8% used on a WiFi build.
+
+The September figure was 96% of the ceiling. The budget has been raised twice: from 40,960 B when the media footer
 landed at 99.8% of it, to 48 KB for the visual-polish pass, and to 50 KB (with the owner's approval)
 when the mobile sign-in work landed — the login screen, the challenge-response SHA-256/HMAC and the
 QR encoder cost about 7 KB together, and the parts that could never run were trimmed first (QR
@@ -562,6 +568,106 @@ album's numbered tracks, a playlist's songs, a podcast's episodes with dates, le
 points - and every level can still play or queue the whole item. Long listings arrive in Music
 Assistant's 500-item partial messages and are gathered before rendering (`gatherResult` in
 `ma.js`). Search is socket-only: the relay has no route to Music Assistant's library.
+
+## The LED ring studio
+
+The Home tab's Customize button opens a chooser with two animated cards: App theme (the voice orb's
+colors, which also color the app) and the LED ring. They are styled separately and never change each other: the orb's
+colors live in the browser (`localStorage` `sat1.orb`), the ring's in the device. Firmware without
+a ring entity skips the chooser and opens the orb page. Picking an orb color morphs the sphere,
+plays a short ripple with a scale pop; with reduced motion the sphere crossfades to a still frame
+instead. What floats over the page is tinted about 7% toward the orb's first color, in both
+themes: every drawer and dialog, the header, the tab bar and side nav, popovers and menus (the
+appearance menu, dropdown lists, hint bubbles) and the toast. The tokens are `--surface-orb`,
+`--pop-orb` and `--toast-orb` in `styles/tokens.css`; `drawer.css` makes `--surface-orb` each
+panel's `--surface`, and the browser chrome's `theme-color` takes the same mix so it stays matched
+to the header (`chromeColor` in `lib/theme.js`). Drawers, the header and the navs ease to a new
+color over 0.6 s, so the drawer you pick in shifts as you pick;
+`paintOrb` raises `data-orb-ease` for that, and a Light/Dark switch leaves it down, so the navs
+change inside the page's own crossfade rather than trailing it.
+The page's own cards stay neutral (owner's choice from side-by-side mockups, October 2026).
+
+While the device waits for its wake word the ring is off, unless the LED Ring light is turned on
+in Home Assistant; then it shows that light's color, still. There is no idle animation.
+
+**The LED Ring page** plays the conversation on the device as soon as it opens - Wake word heard,
+Listening, Thinking, Replying, three seconds each, round and round - so every color, brightness
+and style pick shows on the ring as it is made. The tour is a run of previews, below every real
+voice phase, so a real wake word still wins; it pauses while the tab is hidden and ends when the
+page closes. The live ring at the top draws whatever the device is showing, from the LED Ring
+Moment sensor over the event stream; for timers, volume and mute it polls `GET /api/sat1/ring` for
+the arc and the marks the device is drawing from. Under it a link opens the ring guide. The color
+and brightness are the LED Ring light's own, written through its REST entity, so they are the same
+controls as the light in Home Assistant. The entity only takes them as a `turn_on`, so while the
+light is off (as it was when the pages opened) each pick is followed by a `turn_off`: the moments
+draw in the new color, and the ring stays off at idle. The ring style chips (Classic, Calm,
+Aurora, Party, Minimal) apply the style, which the touring ring picks up at once. A preview's
+brightness is the light's when control_leds lights it, so the firmware runs a preview again when
+the light's brightness changes; the effect and the moment are the same, so the animation carries
+on at the new brightness instead of waiting for the tour's next step.
+
+**Customize animations** lists the eight moments a style changes: Wake word heard, Listening,
+Thinking and Replying; then Timer running, Timer done, Volume and Something went wrong. Muted is
+not listed, because it is the same in every style (see below). A moment changed from its style is
+tagged EDITED, and one with its own colors OWN COLORS. The device stays dark on this page until
+asked: each row's Preview plays that moment for six seconds (again to stop), and Tour all moments
+plays each in turn, on screen and on the ring. A tap anywhere else on a row opens the moment's
+editor, which plays the draft on the device for as long as it is open, replayed as it changes.
+The editor picks one of 12 animations and its colors (the ring color, a blend either side of it,
+a rainbow, or one to three colors of its own, with presets), then the motion: clockwise or
+counter-clockwise for Spin, Comet, Orbit, Wave and Flow, where a Ripple starts (north, east, south
+or west), where the Dot sits (read as a clock face), speed, size and brightness. Flow turns the
+moment's colors round the ring; with Rainbow colors it is the rainbow Party uses, and with a single
+color it is a steady ring. Picking another animation starts its size, start or position from the
+default, since each reads that setting differently. Saving any moment makes the style Custom,
+copied from the preset it started from, and Reset puts a moment, or every moment, back. The
+editor is the drawer's only page with unsaved work - the theme and the ring's color, brightness
+and style save as they are picked - so leaving it with changes, by its back button or by the
+drawer closing any of its ways, first asks Leave without saving? in the app's confirm dialog
+(`DxConfirmDialog`). Keep editing stays, and a pull-down that was stopped springs back.
+
+Some things do not change with the style, by design:
+
+- Timer running and Volume are always an arc, because the lit length is the information.
+- Errors are always red.
+- Muted is the red marks over what the ring shows at idle - nothing, or the LED Ring light's
+  color: red beside each mic when the mics are off, red arcs between them when the speaker is
+  silent. A running timer shows its own two red marks instead.
+- Setup, startup, update, sign-in, warning, headphone and factory reset signals keep their fixed
+  YAML effects. The ring guide (What do the lights mean?) shows each one as its effect draws it,
+  and a tap plays it on the device. Signals that look the same share a card (Home Assistant not
+  ready covers both of its causes, Done or approved the update and sign-in successes, Refused or
+  failed the warning flashes and a failed update). One that plays once, a few flashes or a sweep,
+  repeats on its card after a pause, and a tap plays it twice on the device in step with the card.
+
+During the four conversation moments, the four LEDs nearest the mics (0, 6, 12 and 18) are held
+to half brightness. The cap does not apply to timers, volume, mute,
+errors or the fixed signals, whose LEDs are already the YAML's own. The likely reason the cap is
+needed, LED noise reaching the mics, has not been measured.
+
+**Firmware.** `esphome/components/satellite1_ring` owns the styles. `ring_fx_core.h` is a pure
+24-LED renderer with no ESPHome dependency; the voice_assistant_leds light's Styled effect draws
+the current moment through it. Each `control_leds` child script names its moment (`set_moment`), which
+publishes the LED Ring Moment diagnostic text sensor (disabled by default in Home Assistant). The
+style is also an **LED Ring Style** select in Home Assistant, whose Custom option is the edited
+style. Edits are saved to NVS as one blob, three seconds after the last change, so a slider drag
+costs one flash write.
+
+`frontend/src/lib/ringfx.js` is a line-for-line port of the renderer, so every preview shows
+the frame the device draws. `frontend/test/ringfx-golden.txt` holds 548 frames both must
+reproduce: `npm test` checks the port, and CI's LED ring renderer job builds
+`satellite1_ring/test/ring_fx_core_test.cpp` on the host and checks the firmware's copy, plus
+Classic against the YAML lambdas it replaced. Change the math in both files, then regenerate the
+frames with `npm run golden`.
+
+| Endpoint | Parameters | Does |
+|---|---|---|
+| `GET /api/sat1/ring` | | The style, the preset it was copied from (`base`), the current moment and preview, the last drawn inputs (`in`), and each moment's animation (`m`) |
+| `POST /api/sat1/ring` | `style` | Switches the style |
+| `POST /api/sat1/ring` | `m`, `fx`, `cm`, `c`, `sp`, `br`, `dir`, `p` | Saves one moment; `c` is up to three comma-separated hex colors for `cm=own` |
+| `POST /api/sat1/ring/reset` | `m`, or `all=1` | Puts one moment, or all of them, back to the preset |
+| `POST /api/sat1/ring/preview` | `m`, `ms` (500-20000, default 6000), and optionally a draft as for a save | Plays a moment or a fixed signal on the ring; a real moment arriving cancels it |
+| `POST /api/sat1/ring/preview/stop` | | Ends a preview early |
 
 ## Add to home screen
 

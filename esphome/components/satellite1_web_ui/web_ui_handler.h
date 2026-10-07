@@ -41,6 +41,10 @@
 #include "esphome/components/tas2780/tas2780.h"
 #endif
 
+#ifdef USE_SAT1_WEB_UI_RING
+#include "esphome/components/satellite1_ring/ring_fx.h"
+#endif
+
 #include "esphome/core/entity_base.h"
 // For millis_64() in wake_test_active() - the 64-bit clock every deadline here compares against.
 #include "esphome/core/hal.h"
@@ -586,6 +590,13 @@ class WebUIHandler : public AsyncWebHandler {
   void set_speaker_amp(tas2780::TAS2780 *amp) { this->speaker_amp_ = amp; }
 #endif
 
+#ifdef USE_SAT1_WEB_UI_RING
+  /// Set from generated code, before the listener accepts anything. The ring's per-moment styles
+  /// are one select's worth of state in Home Assistant but nine styles in the app, so the LED
+  /// Ring page reads and edits them through /api/sat1/ring rather than an entity per field.
+  void set_ring(satellite1_ring::RingFx *ring) { this->ring_ = ring; }
+#endif
+
   // NOLINTNEXTLINE(readability-identifier-naming)
   bool canHandle(AsyncWebServerRequest *request) const override;
   // NOLINTNEXTLINE(readability-identifier-naming)
@@ -665,6 +676,13 @@ class WebUIHandler : public AsyncWebHandler {
 #endif
 #ifdef USE_SAT1_WEB_UI_AMP
     AMP,
+#endif
+#ifdef USE_SAT1_WEB_UI_RING
+    RING,
+    RING_SET,
+    RING_RESET,
+    RING_PREVIEW,
+    RING_PREVIEW_STOP,
 #endif
 #ifdef USE_SAT1_WEB_UI_SOUNDS
     SOUND,
@@ -771,6 +789,18 @@ class WebUIHandler : public AsyncWebHandler {
   /// GET /api/sat1/amp: the TAS2780's power mode, activity and digital volume level, for the
   /// TAS2780 card on Settings > Developer. Session-gated like every /api/sat1 read.
   void handle_amp_(AsyncWebServerRequest *request);
+#endif
+#ifdef USE_SAT1_WEB_UI_RING
+  /// GET /api/sat1/ring: the active style, the style it was copied from, the moment on the ring
+  /// now, and every moment's animation.
+  void handle_ring_(AsyncWebServerRequest *request);
+  /// POST /api/sat1/ring?style=... applies a style; ?m=...&fx=&cm=&c=&sp=&br=&dir=&p= edits one
+  /// moment (copying a preset into Custom first). POST /api/sat1/ring/reset?m=... or ?all=1.
+  void handle_ring_set_(AsyncWebServerRequest *request);
+  void handle_ring_reset_(AsyncWebServerRequest *request);
+  /// POST /api/sat1/ring/preview?m=...&ms=... plays a moment or support signal on the device,
+  /// optionally as an unsaved draft (the same style fields as an edit); /preview/stop ends it.
+  void handle_ring_preview_(AsyncWebServerRequest *request);
 #endif
 #ifdef USE_SAT1_CRASH_REPORT
   /// The crash history and its metadata as JSON; the two big payloads live on routes of their own.
@@ -1021,6 +1051,9 @@ class WebUIHandler : public AsyncWebHandler {
 
 #ifdef USE_SAT1_WEB_UI_AMP
   tas2780::TAS2780 *speaker_amp_{nullptr};
+#endif
+#ifdef USE_SAT1_WEB_UI_RING
+  satellite1_ring::RingFx *ring_{nullptr};
 #endif
 
 #ifdef USE_VOICE_ASSISTANT

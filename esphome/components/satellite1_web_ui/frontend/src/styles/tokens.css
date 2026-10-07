@@ -40,7 +40,19 @@
   --orb-ink: #a78bfa;
   --orb-ctl: #a78bfa;
   --orb-ctl-on: #111113;
+
+  /* A little of the orb's colour (lib/theme.js ORB_TINT), in either theme, so the chrome and what
+     floats over the page follow the theme color the person picked: drawers and dialogs (drawer.css
+     makes it each panel's --surface), the header, the tab bar and side nav, popovers and menus, and
+     the toast. The page's own cards stay neutral. */
+  --surface-orb: color-mix(in srgb, var(--orb-a) 7%, var(--surface));
+  --pop-orb: color-mix(in srgb, var(--orb-a) 7%, var(--pop));
+  --toast-orb: color-mix(in srgb, var(--orb-a) 7%, var(--toast-bg));
+  /* How long the drawers and navs take to follow it: only while a new color is being picked
+     (bits.tsx paintOrb). A switch between Light and Dark is the view transition's to animate. */
+  --orb-ease: 0s;
 }
+:root[data-orb-ease] { --orb-ease: .6s; }
 
 :root[data-theme='light'] {
   color-scheme: light;

@@ -1,11 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { HINTS, TEXT } from '../copy.js';
+import { HINTS, RING, TEXT } from '../copy.js';
 import { entity, pathFor, post } from '../lib/device.js';
 import type { Ctx, Orb } from '../ctx';
-import { Mic, MicOff } from '../icons';
-import { errorHoldUntil, errorSeen, hexToRgb, hsvToRgb, isOn, ORB_LABEL, orbState, orbView, pctTo255, rgbHue, ringPct } from '../lib/orb.js';
+import { ChevronLeft, ChevronRight, Mic, MicOff, X } from '../icons';
+import { errorHoldUntil, errorSeen, isOn, ORB_LABEL, orbState, orbView } from '../lib/orb.js';
+import { ringApi, ringRgb } from '../lib/ring.js';
+import { M_LISTEN, STYLES } from '../lib/ringfx.js';
 import { tipDone } from '../lib/tips.js';
 import { Drawer, Presence } from './Drawer';
+import { MomentRing } from './RingPreview';
+import { RingStudio, ringColorName, styleName } from './RingStudio';
+import type { RingData, RingView } from './RingStudio';
+import { DxConfirmDialog } from './settings/dx';
 const PARTICLE_COUNT = 720;
 const TWO_PI = Math.PI * 2;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
@@ -96,34 +102,53 @@ function createStateMix(initial: OrbState) {
 }
 const ERROR_FROM_RGB = toRgb('#ff4444');
 const ERROR_TO_RGB = toRgb('#ff8800');
-function ParticlesOrb({
+/** A pick's dance: a ripple through the sphere for DANCE_S, with a scale pop in its first POP_S. */
+const DANCE_S = 1.2;
+const POP_S = 0.3;
+/**
+ * The sphere. A color change morphs over about half a second rather than cutting; `dance` is a
+ * counter, and each change of it plays the pick's dance. Paused, it stops drawing once the morph
+ * has settled - it is under a drawer, or muted, and a still frame is all anyone sees.
+ */
+export function ParticlesOrb({
   state,
   size,
   colorFrom,
   colorTo,
-  paused = false
+  paused = false,
+  dance = 0
 }: {
   state: OrbState;
   size: number;
   colorFrom: string;
   colorTo: string;
   paused?: boolean;
+  dance?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef(state);
   const pausedRef = useRef(paused);
+  const danceRef = useRef(dance);
   const colorRef = useRef({
     from: colorFrom,
     to: colorTo
   });
+  const still = useRef<(() => void) | null>(null);
   useEffect(() => {
     stateRef.current = state;
     pausedRef.current = paused;
+    danceRef.current = dance;
     colorRef.current = {
       from: colorFrom,
       to: colorTo
     };
   });
+  // Reduced motion draws one frame, so a new color is a new frame - faded in, not moved.
+  useEffect(() => {
+    if (!still.current) return;
+    still.current();
+    canvasRef.current?.animate?.([{ opacity: 0.35 }, { opacity: 1 }], { duration: 320, easing: 'ease-out' });
+  }, [colorFrom, colorTo, state]);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -146,6 +171,23 @@ function ParticlesOrb({
     const angleX = 0.32;
     let last: number | null = null;
     let running = true;
+    const shownFrom = toRgb(colorRef.current.from);
+    const shownTo = toRgb(colorRef.current.to);
+    let danceSeen = danceRef.current;
+    let danceAt = -10;
+    let settled = 0;
+    /** Moves the drawn colors toward the asked-for ones; returns how far they still have to go. */
+    const morph = (dt: number, snap: boolean) => {
+      const tf = toRgb(colorRef.current.from),
+        tt = toRgb(colorRef.current.to);
+      let gap = 0;
+      for (let k = 0; k < 3; k++) {
+        shownFrom[k] = snap ? tf[k] : approach(shownFrom[k], tf[k], 7, dt);
+        shownTo[k] = snap ? tt[k] : approach(shownTo[k], tt[k], 7, dt);
+        gap = Math.max(gap, Math.abs(shownFrom[k] - tf[k]), Math.abs(shownTo[k] - tt[k]));
+      }
+      return gap;
+    };
     const render = (dt: number, isStatic = false) => {
       const st = stateRef.current;
       const easeDt = isStatic ? 60 : dt;
@@ -157,6 +199,15 @@ function ParticlesOrb({
         const k = stateMotion(s);
         if (k === 'ripple') ripple += w[s];else if (k === 'pulse') pulse += w[s];else if (k === 'flow') flow += w[s];
       }
+      if (danceRef.current !== danceSeen) {
+        danceSeen = danceRef.current;
+        danceAt = t;
+      }
+      const since = t - danceAt;
+      const dancing = !isStatic && since >= 0 && since < DANCE_S ? Math.sin(Math.PI * since / DANCE_S) : 0;
+      const pop = dancing && since < POP_S ? Math.sin(Math.PI * since / POP_S) * 0.07 : 0;
+      ripple += dancing * 0.9;
+      morph(dt, isStatic);
       const wIdle = w.idle,
         wConn = w.connecting,
         wError = w.error,
@@ -171,9 +222,9 @@ function ParticlesOrb({
       const breathe = 0.05 * (0.25 + wIdle * 0.75) * Math.sin(t * 1.1) * motionScale;
       const conv = pulse * (0.22 + 0.12 * Math.sin(t * 2.8 * (spin + 1)));
       const expand = flow * (0.08 - level * 0.32);
-      const radius = baseRadius * (1 + breathe + level * 0.16 + expand - conv);
-      const from = mixRgb(toRgb(colorRef.current.from), ERROR_FROM_RGB, wError);
-      const to = mixRgb(toRgb(colorRef.current.to), ERROR_TO_RGB, wError);
+      const radius = baseRadius * (1 + breathe + level * 0.16 + expand - conv + pop);
+      const from = mixRgb(shownFrom, ERROR_FROM_RGB, wError);
+      const to = mixRgb(shownTo, ERROR_TO_RGB, wError);
       const shakeAmp = wError * radius * 0.05 * motionScale;
       const shakeX = shakeAmp * (Math.sin(t * 26) * 0.5 + Math.sin(t * 15.7));
       const shakeY = shakeAmp * (Math.sin(t * 22) * 0.5 + Math.sin(t * 13.1));
@@ -234,15 +285,24 @@ function ParticlesOrb({
       ctx.globalCompositeOperation = 'source-over';
     };
     if (reduce) {
+      still.current = () => render(0, true);
       render(0, true);
-      return;
+      return () => {
+        still.current = null;
+      };
     }
     const frame = (now: number) => {
       raf = 0;
-      const dt = last === null || pausedRef.current ? 0 : Math.min((now - last) / 1000, 0.1);
+      const step = last === null ? 0 : Math.min((now - last) / 1000, 0.1);
+      const dt = pausedRef.current ? 0 : step;
       last = now;
       t += dt;
-      render(dt);
+      // Paused, the frame only changes while a color is still morphing: draw until it lands.
+      if (pausedRef.current) {
+        if (morph(step, false) < 0.5) settled++;
+        else settled = 0;
+      } else settled = 0;
+      if (settled < 3) render(dt);
       if (running) raf = requestAnimationFrame(frame);
     };
     const observer = new IntersectionObserver(([entry]) => {
@@ -270,70 +330,6 @@ function ParticlesOrb({
     height: size,
     display: 'block'
   }} aria-hidden="true" />;
-}
-/**
- * A just-written value, held over the stale state that follows it. A control writes and then keeps
- * rendering from the entity or poll behind it, which does not know about the write for up to a poll
- * interval - so a slider's thumb snapped back to the old value and jumped forward again when the
- * echo landed (reported from Safari on the phone, September 2026, but present everywhere). The held
- * value wins until the echo comes within `tol` of it, which absorbs rounding on values that
- * round-trip through 0-255, or until five seconds pass - the escape for a write the device refused,
- * where the stale value is the truth. It re-renders on hold so callers need no state of their own.
- */
-export function useHeld(value: number, tol: number): [number, (v: number) => void] {
-  const held = useRef<{ v: number; at: number } | null>(null);
-  const [, bump] = useState(0);
-  if (held.current && (Math.abs(value - held.current.v) <= tol || Date.now() - held.current.at > 5000)) held.current = null;
-  return [held.current ? held.current.v : value, v => {
-    held.current = { v, at: Date.now() };
-    bump(n => n + 1);
-  }];
-}
-
-/**
- * The picker's LED sliders: they follow the drag on screen and write once, on the native change at
- * release, because a write per input event would queue a request per pixel of drag (MSlider has the
- * same rule). preact/compat turns onChange into input events, so the commit listens for it directly.
- */
-function LedRange({
-  label,
-  text,
-  value,
-  max,
-  tol,
-  className,
-  ariaLabel,
-  onCommit
-}: {
-  label: string;
-  text: (v: number) => string;
-  value: number;
-  max: number;
-  tol: number;
-  className?: string;
-  ariaLabel: string;
-  onCommit: (v: number) => void;
-}) {
-  const [held, hold] = useHeld(value, tol);
-  const [draft, setDraft] = useState<number | null>(null);
-  const shown = draft ?? held;
-  const input = useRef<HTMLInputElement>(null);
-  const commit = useRef(onCommit);
-  commit.current = onCommit;
-  useEffect(() => {
-    const el = input.current;
-    if (!el) return;
-    const on = () => {
-      const v = Number(el.value);
-      hold(v);
-      setDraft(null);
-      commit.current(v);
-    };
-    el.addEventListener('change', on);
-    return () => el.removeEventListener('change', on);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return <label className="hue-label"><small className="muted hue-cap">{label}</small><span>{text(shown)}</span><input ref={input} className={'hue' + (className ? ' ' + className : '')} type="range" min={0} max={max} value={shown} onChange={e => setDraft(Number(e.currentTarget.value))} aria-label={ariaLabel} /></label>;
 }
 const ORB_PRESETS = [{
   label: 'Adaptive',
@@ -446,14 +442,17 @@ function useErrorHold(error: VoiceError | undefined, live: OrbState) {
   return { holding: until > 0 && !running, drop: () => error && setGone(error.n) };
 }
 
+/** The Customize drawer's pages: the chooser, the orb's, and the LED ring's (RingStudio). */
+type Page = 'choose' | 'orb' | RingView;
+
 /**
  * The assistant's orb: its state follows the phase the Home tab polls, its colours are the shell's
- * persisted `orb`, and the picker writes the LED ring and keeps it lit while open. `onOrbColor`
- * fires only on a person's pick, so mounting never overwrites the saved choice. At rest, `tips`
- * (orbTips) take the label's place; the label stays in the accessibility tree, so a screen reader
- * hears the state change and not every tip. A pipeline error's message (`error`) takes the same
- * place, in red, so a two-line message grows up into the orb's margin rather than pushing the
- * buttons below it down.
+ * persisted `orb`, and Customize opens the drawer that styles it and, separately, the LED ring.
+ * `onOrbColor` fires only on a person's pick, so mounting never overwrites the saved choice. At
+ * rest, `tips` (orbTips) take the label's place; the label stays in the accessibility tree, so a
+ * screen reader hears the state change and not every tip. A pipeline error's message (`error`)
+ * takes the same place, in red, so a two-line message grows up into the orb's margin rather than
+ * pushing the buttons below it down.
  */
 export function VoiceOrb({
   ctx,
@@ -473,8 +472,10 @@ export function VoiceOrb({
   tips?: string[];
 }) {
   const [colorPanel, setColorPanel] = useState(false);
+  const [page, setPage] = useState<Page>('choose');
   const [sel, setSel] = useState(() => ORB_PRESETS.find(p => p.from === orb.a && p.to === orb.b)?.label ?? 'Custom');
   const [customHue, setCustomHue] = useState(() => Number(/^hsl\(\s*([\d.]+)/.exec(orb.a)?.[1] ?? 290));
+  const [dance, setDance] = useState(0);
   const [orbSize, setOrbSize] = useState(180);
   useEffect(() => {
     const on = () => setOrbSize(sizeFor(window.innerWidth));
@@ -496,35 +497,66 @@ export function VoiceOrb({
   const talk = !!onTalk && !muted && TAPPABLE.includes(live);
   const running = live !== 'idle';
   const shown = useTip(tips, !view.muted && view.state === 'idle');
-  const ring = entity(ctx, 'ring');
-  const hasRing = !!ring;
-  // The ring is lit for as long as the picker is open, so each pick shows on the device as it is
-  // made, and goes dark when the picker closes by any route - Done, the scrim, Escape, the handle,
-  // or leaving the page (owner, October 2026). Requests are single-flight, so a slider commit made
-  // just before Done still lands ahead of the turn_off.
+  const light = entity(ctx, 'ring');
+  const hasRing = !!light;
+  // The ring's styles, read when the drawer opens: undefined until they answer, null on firmware
+  // without satellite1_ring, whose LED Ring page then offers color, brightness and effect only.
+  const [ringData, setRingData] = useState<RingData | null | undefined>(undefined);
+  const reloadRing = async () => {
+    try {
+      setRingData(await ringApi.load());
+    } catch {
+      setRingData(null);
+    }
+  };
   useEffect(() => {
-    if (!colorPanel || !hasRing) return;
-    post(pathFor(ctx, 'ring', 'turn_on'));
-    return () => {
-      post(pathFor(ctx, 'ring', 'turn_off'));
-    };
+    if (colorPanel && hasRing) reloadRing();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [colorPanel, hasRing]);
-  const ringColor = ring?.color || { r: 255, g: 255, b: 255 };
-  // Every colour pick posts turn_on with the colour, so picking on a dark ring lights it in that
-  // colour - one gesture instead of toggle-then-pick (owner, September 2026).
-  const ringOn = (params: Record<string, number>) => post(`${pathFor(ctx, 'ring', 'turn_on')}?${new URLSearchParams(params as unknown as Record<string, string>)}`);
-  const ringRgb = ([r, g, b]: number[]) => ringOn({ r, g, b });
+  const open = () => {
+    setPage(hasRing ? 'choose' : 'orb');
+    setColorPanel(true);
+  };
+  // The theme and the ring's color, brightness and style save as they are picked; a moment's edits
+  // wait for Save. So the moment editor is the one page that can lose work, and leaving it - back,
+  // or the drawer closing any of its ways - asks first. `then` is what the leave was going to do.
+  const dirty = useRef(false);
+  const [leaving, setLeaving] = useState<(() => void) | null>(null);
+  const leave = (then: () => void) => {
+    if (!dirty.current) {
+      then();
+      return true;
+    }
+    setLeaving(() => then);
+    return false;
+  };
+  const close = () => leave(() => setColorPanel(false));
+  const go = (p: Page) => {
+    leave(() => setPage(p));
+  };
+  // Each page starts at its top, not wherever the last one was scrolled to.
+  const top = useRef<HTMLDivElement>(null);
+  const pageKey = typeof page === 'string' ? page : page.page + (page.m ?? '');
+  useLayoutEffect(() => {
+    top.current?.closest('.dw-panel')?.scrollTo(0, 0);
+  }, [pageKey]);
+  const pickOrb = (label: string, from: string, to: string) => {
+    setSel(label);
+    onOrbColor(from, to);
+    setDance(d => d + 1);
+  };
   const pickCustom = (h: number) => {
     setCustomHue(h);
     onOrbColor(hueFrom(h), hueTo(h));
   };
+  const ringView = typeof page === 'object' ? page : null;
+  const label = page === 'choose' ? RING.choose_eyebrow : page === 'orb' ? RING.orb_eyebrow : RING.ring_eyebrow;
   return <div className="orb-wrap">
     <div className="orb-stage" style={{
       margin: `${-Math.round(orbSize * ORB_OVERLAP)}px 0`,
       pointerEvents: 'none'
     }}>
-      <ParticlesOrb state={view.state} size={orbSize} colorFrom={view.muted ? '#ef4444' : orb.a} colorTo={view.muted ? '#b91c1c' : orb.b} paused={view.muted} />
+      <ParticlesOrb state={view.state} size={orbSize} colorFrom={view.muted ? '#ef4444' : orb.a} colorTo={view.muted ? '#b91c1c' : orb.b} paused={view.muted || colorPanel} />
       {talk && <button className="orb-tap" style={{
         width: Math.round(orbSize * ORB_TAP),
         height: Math.round(orbSize * ORB_TAP)
@@ -542,39 +574,66 @@ export function VoiceOrb({
       <div className="orb-tools">
       <button className="orb-hint customize-btn" onClick={() => {
           tipDone('color');
-          setColorPanel(true);
-        }} aria-label="Customize orb color"><span aria-hidden="true" className="customize-dot" /><span>Customize</span></button>
+          open();
+        }} aria-label={hasRing ? 'Customize the orb and LED ring' : 'Customize orb color'}><span aria-hidden="true" className="customize-dot" /><span>Customize</span></button>
       {mute && <button className="orb-hint customize-btn mute-btn" onClick={() => {
           tipDone('mute');
           post(pathFor(ctx, 'mute_mics', muted ? 'turn_off' : 'turn_on'));
         }} aria-pressed={muted} aria-label={muted ? 'Unmute microphone' : 'Mute microphone'} title={HINTS.mute}>{muted ? <MicOff size={18} strokeWidth={2.2} /> : <Mic size={18} />}</button>}
       </div>
     </div>
-    <Presence>{colorPanel && <Drawer label="Orb color" onClose={() => setColorPanel(false)} className="orb-sheet color-panel">
-        <span className="eyebrow">ORB COLOR</span>
-        <h2>Pick a glow.</h2>
-        {ring && <p className="muted">Also updates your device LED ring.</p>}
-        <div className="swatches">
-          {ORB_PRESETS.map(s => <button key={s.label} className={'swatch ' + (sel === s.label ? 'on' : '')} aria-pressed={sel === s.label} onClick={() => {
-          setSel(s.label);
-          onOrbColor(s.from, s.to);
-          if (ring) ringRgb(hexToRgb(s.from));
-        }}><span className="swatch-dot" style={{
-            background: `linear-gradient(135deg, ${s.from}, ${s.to})`
-          }} /><small>{s.label}</small></button>)}
-          <button className={'swatch ' + (sel === 'Custom' ? 'on' : '')} aria-pressed={sel === 'Custom'} onClick={() => {
-          setSel('Custom');
-          pickCustom(customHue);
-        }}><span className="swatch-dot" style={{
-            background: 'conic-gradient(red,yellow,lime,cyan,blue,magenta,red)'
-          }} /><small>Custom</small></button>
+    <Presence>{colorPanel && <Drawer label={label} onClose={close} className={'orb-sheet color-panel' + (ringView ? ' ring-sheet' : '')}>
+        <div ref={top} key={ringView ? 'ring' : pageKey} className="cz-page">
+        {page === 'choose' && <div className="rs-page">
+            <span className="eyebrow">{RING.choose_eyebrow}</span>
+            <h2>{RING.choose_title}</h2>
+            <p className="muted rs-lead">{RING.choose_lead}</p>
+            <div className="cz-cards">
+              <button className="cz-card" onClick={() => go('orb')}>
+                <ParticlesOrb state="idle" size={110} colorFrom={orb.a} colorTo={orb.b} />
+                <strong>{RING.choose_orb}</strong>
+                <small>{sel}</small>
+                <span className="cz-go">{RING.choose_go}<ChevronRight size={14} /></span>
+              </button>
+              <button className="cz-card" onClick={() => go({ page: 'ring' })}>
+                <MomentRing m={M_LISTEN} style={ringData?.m[M_LISTEN] ?? STYLES.classic[M_LISTEN]} ring={ringRgb(light)} size={110} />
+                <strong>{RING.choose_ring}</strong>
+                <small>{ringColorName(light)}{ringData ? ` · ${styleName(ringData.style)}` : ''}</small>
+                <span className="cz-go">{RING.choose_go}<ChevronRight size={14} /></span>
+              </button>
+            </div>
+            <button className="primary wide" onClick={close}>{RING.done}</button>
+          </div>}
+        {page === 'orb' && <div className="rs-page">
+            {hasRing ? <div className="rs-top"><button className="rs-back" onClick={() => go('choose')}><ChevronLeft size={18} />{RING.back}</button><button className="dw-x" aria-label="Close" onClick={close}><X size={18} /></button></div> : <div className="rs-top end"><button className="dw-x" aria-label="Close" onClick={close}><X size={18} /></button></div>}
+            <div className="rs-hero"><ParticlesOrb state="idle" size={150} colorFrom={orb.a} colorTo={orb.b} dance={dance} /></div>
+            <span className="eyebrow">{RING.orb_eyebrow}</span>
+            <h2>{RING.orb_title}</h2>
+            <div className="swatches">
+              {ORB_PRESETS.map(s => <button key={s.label} className={'swatch ' + (sel === s.label ? 'on' : '')} aria-pressed={sel === s.label} onClick={() => pickOrb(s.label, s.from, s.to)}><span className="swatch-dot" style={{
+                  background: `linear-gradient(135deg, ${s.from}, ${s.to})`
+                }} /><small>{s.label}</small></button>)}
+              <button className={'swatch ' + (sel === 'Custom' ? 'on' : '')} aria-pressed={sel === 'Custom'} onClick={() => {
+                  setSel('Custom');
+                  pickCustom(customHue);
+                  setDance(d => d + 1);
+                }}><span className="swatch-dot" style={{
+                  background: 'conic-gradient(red,yellow,lime,cyan,blue,magenta,red)'
+                }} /><small>Custom</small></button>
+            </div>
+            {sel === 'Custom' && <label className="hue-label"><small className="muted hue-cap">Orb / theme color</small><span>Hue · {customHue}°</span><input className="hue" type="range" min={0} max={359} value={customHue} onChange={e => pickCustom(Number(e.target.value))} aria-label="Custom hue" /></label>}
+            <button className="primary wide" onClick={close}>{RING.done}</button>
+          </div>}
+        {ringView && <RingStudio ctx={ctx} data={ringData} reload={reloadRing} view={ringView} go={go} onBack={() => go('choose')} onClose={close} onDirty={d => {
+            dirty.current = d;
+          }} />}
         </div>
-        {sel === 'Custom' && <label className="hue-label"><small className="muted hue-cap">Orb / theme color</small><span>Hue · {customHue}°</span><input className="hue" type="range" min={0} max={359} value={customHue} onChange={e => pickCustom(Number(e.target.value))} aria-label="Custom hue" /></label>}
-        {sel === 'Custom' && ring && <LedRange label="LED Ring color" text={v => `Hue · ${v}°`} value={rgbHue(ringColor.r, ringColor.g, ringColor.b)} max={359} tol={2} ariaLabel="LED ring hue" onCommit={h => ringRgb(hsvToRgb(h, 1))} />}
-        {sel === 'Custom' && ring && <LedRange label="LED Brightness" text={v => `${v}%`} value={ringPct(ring)} max={100} tol={1} className="led-bright" ariaLabel="LED brightness" onCommit={v => v === 0 ? post(pathFor(ctx, 'ring', 'turn_off')) : ringOn({
-          brightness: pctTo255(v)
-        })} />}
-        <button className="primary wide" onClick={() => setColorPanel(false)}>Done</button>
       </Drawer>}</Presence>
+    <DxConfirmDialog open={!!leaving} title={RING.leave_title} body={RING.leave_body} confirmLabel={RING.leave} cancelLabel={RING.stay} danger onCancel={() => setLeaving(null)} onConfirm={() => {
+        const then = leaving;
+        setLeaving(null);
+        dirty.current = false;
+        then?.();
+      }} />
   </div>;
 }

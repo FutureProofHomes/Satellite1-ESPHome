@@ -10,7 +10,8 @@ import { Activity, ArrowUp, Check, ChevronDown, Clock, Plus, X } from '../icons'
 import { agentName, clock, DEFAULT_AGENT, fitBytes, isOn, lineId, offsetSpec, offsetText, orbState, orbTips, pipelineAgent, readAgentMap, reading, rememberAgent, savedAgent, setupStamp, stepOffset, timerLabel, timerLeft, transcriptRows, transcriptWindows } from '../lib/orb.js';
 import { HintBtn } from './bits';
 import { Switch } from './controls';
-import { useHeld, VoiceOrb } from './VoiceOrb';
+import { useHeld } from './LedRange';
+import { VoiceOrb } from './VoiceOrb';
 import { useWakeWords } from './WakeTab';
 import { Drawer, Presence } from './Drawer';
 import { Pager } from './Pager';

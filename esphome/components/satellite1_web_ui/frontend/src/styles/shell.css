@@ -30,6 +30,10 @@ html[data-short], html[data-short] body { background: var(--surface); }
    is the inset itself and no less, so no control reaches into the status bar, where a tap is
    iOS's scroll-to-top. */
 .app > header { padding-top: max(6px, var(--sat)) !important; padding-bottom: 6px !important; min-height: 0 !important; }
+
+/* The header carries the theme color's tint like the nav (tokens.css --surface-orb); bits.tsx tints
+   the browser chrome above it to match (lib/theme.js chromeColor). */
+.app > header { background: var(--surface-orb) !important; transition: background-color var(--orb-ease) ease; }
 .app > header .header-left { min-height: 44px; }
 .app > header .device-chip { min-height: 44px !important; font-size: 14px !important; }
 .app > header .header-actions { gap: 12px !important; }
@@ -59,7 +63,7 @@ html[data-short], html[data-short] body { background: var(--surface); }
 }
 
 /* The appearance menu (bits.tsx ThemeMenu), portaled and placed under its button. */
-.theme-menu { position: fixed; z-index: 500; min-width: 210px; padding: 6px; background: var(--pop); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-pop); animation: menuIn .16s cubic-bezier(.2,.8,.2,1); transform-origin: top right; }
+.theme-menu { position: fixed; z-index: 500; min-width: 210px; padding: 6px; background: var(--pop-orb); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-pop); animation: menuIn .16s cubic-bezier(.2,.8,.2,1); transform-origin: top right; }
 @keyframes menuIn { from { opacity: 0; transform: scale(.96) translateY(-4px); } }
 .theme-opt { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 8px 12px; border-radius: 10px; background: transparent; color: var(--text); font-size: 15px; font-weight: 500; text-align: left; }
 .theme-opt span { flex: 1; display: flex; flex-direction: column; }

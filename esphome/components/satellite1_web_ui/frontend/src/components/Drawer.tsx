@@ -86,7 +86,8 @@ export function Drawer({
   children
 }: {
   label: string;
-  onClose: () => void;
+  /** Returning false keeps the drawer open - it asked first - and a drag that closed it springs back. */
+  onClose: () => void | boolean;
   /** The panel's own classes, for what sits inside it. */
   className?: string;
   role?: 'dialog' | 'alertdialog';
@@ -181,10 +182,9 @@ export function Drawer({
     root.current?.classList.remove('dw-drag');
     const dy = d.y - d.y0;
     const v = performance.now() - d.t > 90 ? 0 : d.v;
-    if (dy > d.h * 0.25 || v > 0.5 && dy > 12) close.current();else {
-      if (panel.current) panel.current.style.transform = '';
-      root.current?.style.removeProperty('--dw-p');
-    }
+    if ((dy > d.h * 0.25 || v > 0.5 && dy > 12) && close.current() !== false) return true;
+    if (panel.current) panel.current.style.transform = '';
+    root.current?.style.removeProperty('--dw-p');
     return true;
   };
 

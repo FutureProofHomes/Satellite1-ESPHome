@@ -209,7 +209,7 @@ export const HINTS = {
     "The amplifier's output-level ceiling, applied on top of the digital volume. The notch on the track is the factory default, 15 dBV - the right everyday setting, and the slider snaps to it. Higher values make everything louder but can add distortion, and on a 5 V supply the chip's built-in limiter will duck the sound to protect the power rail. Lower it if the speaker distorts at high volume.",
 
   led_ring:
-    "The ring the assistant animates. Colour and brightness set here are the resting state - the device still overrides both while it is listening, thinking or reporting an error.",
+    "The ring the assistant animates. Colour and brightness set here show while it is idle, waiting for its wake word - the device still overrides both while it is listening, thinking or reporting an error.",
 
   timers:
     'Timers set by voice, held on the device - they keep counting and still ring if Home Assistant goes away. Voice is also how they are managed: name one when you set it ("set a pizza timer for ten minutes"), pause or cancel it the same way.',
@@ -1423,6 +1423,164 @@ export const CONFIRM = {
 export const PRESENCE = {
   Approaching: "Closer",
   "Moving Away": "Away",
+};
+
+/**
+ * The Customize drawer and the LED ring's pages: the chooser, the orb page, the LED Ring page, the
+ * animations list and editor, and the ring guide. The orb and the ring are styled separately.
+ *
+ * Moment names are what the ring is saying in the room, not the firmware's phases. Each moment has
+ * a short line (the guide's cards) and a long one (the editor's header). The fixed signals have one
+ * line each: what it means, and the one thing to do about it where there is one.
+ */
+export const RING = {
+  // The chooser.
+  choose_eyebrow: "CUSTOMIZE",
+  choose_title: "Make it yours.",
+  choose_lead: "What would you like to style?",
+  choose_orb: "App theme",
+  choose_ring: "LED ring",
+  choose_go: "Style",
+  // The orb page.
+  orb_eyebrow: "APP THEME",
+  orb_title: "Pick a glow.",
+  // The LED Ring page.
+  ring_eyebrow: "LED RING",
+  ring_title: "Style the ring.",
+  live: "LIVE",
+  guide_link: "Read the guide to learn what every pattern means",
+  color: "COLOR",
+  custom: "Custom",
+  hue: "Hue",
+  brightness: "Brightness",
+  style: "RING STYLE",
+  customize: "Customize animations",
+  customize_sub: "Pick a look for listening, thinking, timers and more",
+  done: "Done",
+  back: "Back",
+  // The animations list.
+  list_back: "LED Ring",
+  list_eyebrow: "RING ANIMATIONS",
+  list_title: "Every moment, your way.",
+  // {base} is the preset a Custom style was copied from.
+  list_lead_custom: "Started from {base}. Colors follow your LED ring unless a moment has its own.",
+  list_lead: "Change any moment and your style becomes Custom, starting from {base}. Colors follow your LED ring unless a moment has its own.",
+  previewing: "PREVIEWING",
+  // The big ring while nothing is playing: the device is off on this page until asked.
+  list_off: "OFF · PREVIEW A MOMENT BELOW",
+  preview: "Preview",
+  preview_stop: "Stop",
+  tour: "Tour all moments",
+  tour_stop: "Stop the tour",
+  group_conv: "CONVERSATION",
+  group_more: "TIMERS, VOLUME AND STATUS",
+  // The guide's Timers and Heads-up filters.
+  group_timers: "TIMERS AND VOLUME",
+  group_status: "STATUS",
+  tag_edit: "EDITED",
+  tag_own: "OWN COLORS",
+  // {base} as above.
+  reset_all: "Reset to {base}",
+  // The editor.
+  edit_back: "Ring animations",
+  edit_eyebrow: "MOMENT",
+  edit_preview: "PLAYING ON YOUR SATELLITE1",
+  animation: "ANIMATION",
+  animation_aside: "12 to choose from",
+  arc_note: "This moment is always an arc, because the lit part is the information - the time left, or the volume. Pick its colors and brightness.",
+  colors: "COLORS",
+  colors_aside: "Ring color is the default",
+  own_note: "Own colors replace your LED ring color for this moment only. The animations list tags it, so you can always tell why it looks different.",
+  err_note: "Errors are always red, so they always mean the same thing. You can still change how they move.",
+  add_color: "Add a color",
+  motion: "MOTION",
+  cw: "Clockwise",
+  ccw: "Counter-clockwise",
+  speed: "Speed",
+  heads: "Lights",
+  tail: "Tail length",
+  // Where a ripple starts, in order round the ring from the top.
+  start: "Starts at",
+  sides: ["North", "East", "South", "West"],
+  // Where the dot sits, read like a clock face; {h} is the hour.
+  position: "Position",
+  clock: "{h} o'clock",
+  clock_half: "{h}:30",
+  // Speed words, slowest first, for sp 10-400 (100 is the firmware's normal pace).
+  speeds: ["Slow", "Relaxed", "Steady", "Lively", "Fast"],
+  reset: "Reset to {base}",
+  save: "Save",
+  saved: "Saved to your Satellite1.",
+  failed: "Your Satellite1 did not take that. Try again.",
+  // Asked when the editor is left - back, or the drawer closing - with changes not yet saved.
+  leave_title: "Leave without saving?",
+  leave_body: "You have changes to this moment that are not saved. If you leave now, they will be lost.",
+  leave: "Leave",
+  stay: "Keep editing",
+  // The guide.
+  guide_eyebrow: "RING GUIDE",
+  guide_title: "What your ring is saying.",
+  guide_lead: "Tap any pattern to play it on your Satellite1.",
+  filter_all: "All",
+  filter_conv: "Conversation",
+  filter_timers: "Timers",
+  filter_heads: "Heads-up",
+  guide_fixed: "ALWAYS THE SAME",
+  guide_fixed_aside: "So support can help",
+  tag_style: "YOUR STYLE",
+  tag_fixed: "FIXED",
+  // The color modes, the animations, and the styles.
+  cm: { ring: "Ring color", blend: "Ring blend", rainbow: "Rainbow", own: "Own colors", red: "Red, fixed" },
+  fx: {
+    off: "Off", solid: "Solid", breathe: "Breathe", pulse: "Pulse", spin: "Spin", comet: "Comet", orbit: "Orbit",
+    ripple: "Ripple", twinkle: "Twinkle", wave: "Wave", flow: "Flow", dot: "Dot", arc: "Arc",
+  },
+  styles: {
+    classic: ["Classic", "The original"],
+    calm: ["Calm", "Soft and slow"],
+    aurora: ["Aurora", "Flowing blend"],
+    party: ["Party", "All the colors"],
+    minimal: ["Minimal", "One quiet light"],
+    custom: ["Custom", "Your changes"],
+  },
+  // Own-color presets: three stops each.
+  palettes: {
+    Ocean: ["38bdf8", "2563eb", "1e40af"],
+    Aurora: ["34d399", "22d3ee", "6366f1"],
+    Sunset: ["fbbf24", "f97316", "dc2626"],
+    Candy: ["38bdf8", "a78bfa", "f472b6"],
+    Forest: ["a3e635", "22c55e", "15803d"],
+  },
+  moments: {
+    idle: ["Idle", "Waiting for the wake word.", "Waiting for its wake word. The ring is off, unless the LED Ring light is turned on in Home Assistant - then it shows that light's color."],
+    wake: ["Wake word heard", "It heard its name. Go ahead and talk.", "Your Satellite1 heard its wake word, or someone pressed the action button. It lasts a moment, until it starts listening."],
+    listen: ["Listening", "Recording what you say.", "Your Satellite1 is recording what you say. It starts right after the wake word and ends when you stop talking."],
+    think: ["Thinking", "Working on an answer.", "Home Assistant is working out what you asked and what to say back."],
+    reply: ["Replying", "Speaking the answer.", "Your Satellite1 is speaking the answer. When it finishes, the ring goes back to how it was."],
+    timer: ["Timer running", "The lit arc is the time left.", "A timer is running. The lit arc is the time left, and it shrinks as the timer runs down."],
+    ring: ["Timer done", "Time is up. Say stop or tap the button.", "A timer finished. The ring keeps going until you say stop or press the action button."],
+    vol: ["Volume", "Shows the new level while you change it.", "Shows the volume while you change it. One red light at the top means the volume is at zero."],
+    mute: ["Muted", "Mics are off. Red marks sit by each mic.", "The microphones are off, or the speaker is silent. A red mark beside each of the four mics means the mics are off; red arcs between them mean the speaker is silent."],
+    err: ["Something went wrong", "The request failed. Try again.", "The last request failed - Home Assistant could not be reached, or could not finish it. Try again."],
+  },
+  // Every signal the device can show, named for the live ring. Signals that look alike share one
+  // guide card (GUIDE_FIXED in RingStudio.tsx), so that card's line covers each of them.
+  fixed: {
+    improv: ["Setting up", "Ready to join Wi-Fi. Open the app to finish setup."],
+    init: ["Starting up", "Online, waiting for Home Assistant. Until it is on the network the ring is a soft warm white instead."],
+    no_ha: ["Home Assistant not ready", "Lost Home Assistant, or its voice assistant is not ready yet. Normal while Home Assistant restarts or updates. If it stays, check the voice pipeline in Home Assistant."],
+    not_ready: ["Not ready", "Connected, but the voice assistant is not ready yet. Check its pipeline in Home Assistant."],
+    xmos: ["Updating", "Updating audio firmware. The blue empties as it goes. Do not unplug."],
+    xmos_done: ["Done or approved", "An audio firmware update finished, or a sign-in was approved."],
+    xmos_fail: ["Update failed", "The audio firmware update did not finish. Start it again before unplugging."],
+    login: ["Sign-in request", "Someone is signing in to this page. Press the action button to approve."],
+    login_ok: ["Signed in", "The sign-in was approved."],
+    warning: ["Refused or failed", "Unmuting while the mute switch is on, a declined sign-in, a reply that could not play on another speaker, or an audio firmware update that did not finish - start that again before unplugging."],
+    action: ["Button touched", "The ring lights while you touch the action button."],
+    jack_in: ["Headphones plugged in", "Two lights run round the ring and meet when you plug into the headphone jack."],
+    jack_out: ["Headphones unplugged", "The same two lights run back the other way when you unplug."],
+    factory: ["Factory reset", "Keep holding: it resets when the ring is full. Let go to cancel."],
+  },
 };
 
 /**

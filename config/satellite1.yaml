@@ -104,6 +104,7 @@ external_components:
       - mww_runtime_loader
       - satellite1
       - satellite1_radar
+      - satellite1_ring
       - satellite1_web_ui
       - ethernet
       - tas2780

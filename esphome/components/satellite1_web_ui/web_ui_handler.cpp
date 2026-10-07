@@ -242,6 +242,16 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
     if (url == "/api/sat1/crash/erase")
       return Route::CRASH_ERASE;
 #endif
+#ifdef USE_SAT1_WEB_UI_RING
+    if (url == "/api/sat1/ring")
+      return Route::RING_SET;
+    if (url == "/api/sat1/ring/reset")
+      return Route::RING_RESET;
+    if (url == "/api/sat1/ring/preview")
+      return Route::RING_PREVIEW;
+    if (url == "/api/sat1/ring/preview/stop")
+      return Route::RING_PREVIEW_STOP;
+#endif
     return Route::NONE;
   }
 
@@ -299,6 +309,10 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
 #ifdef USE_SAT1_WEB_UI_AMP
   if (url == "/api/sat1/amp")
     return Route::AMP;
+#endif
+#ifdef USE_SAT1_WEB_UI_RING
+  if (url == "/api/sat1/ring")
+    return Route::RING;
 #endif
 #ifdef USE_SAT1_WEB_UI_SOUNDS
   // A prefix like MEDIA_SET's: the sound's name rides the path. Exempt in the session gate for the
@@ -486,6 +500,21 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
 #ifdef USE_SAT1_WEB_UI_AMP
     case Route::AMP:
       this->handle_amp_(request);
+      break;
+#endif
+#ifdef USE_SAT1_WEB_UI_RING
+    case Route::RING:
+      this->handle_ring_(request);
+      break;
+    case Route::RING_SET:
+      this->handle_ring_set_(request);
+      break;
+    case Route::RING_RESET:
+      this->handle_ring_reset_(request);
+      break;
+    case Route::RING_PREVIEW:
+    case Route::RING_PREVIEW_STOP:
+      this->handle_ring_preview_(request);
       break;
 #endif
 #ifdef USE_SAT1_WEB_UI_SOUNDS
@@ -2772,6 +2801,99 @@ void WebUIHandler::handle_amp_(AsyncWebServerRequest *request) {
 }
 
 #endif  // USE_SAT1_WEB_UI_AMP
+
+#ifdef USE_SAT1_WEB_UI_RING
+
+/// Shape: {"style":"custom","base":"aurora","moment":"idle","preview":"",
+///         "in":{"ratio":6200,"mic":0,"spk":0},"m":{"wake":{"fx":"comet","cm":"blend","sp":80,"br":100,"fl":0,"p":12,"dir":1,"c":[]},...}}
+///
+///   style    the active style: classic, calm, aurora, party, minimal or custom
+///   base     the preset Custom was copied from; the app tags moments that differ from it
+///   moment   what the ring shows now (the LED Ring Moment sensor's value)
+///   preview  the moment or signal a preview is playing, "" when none
+///   in       what the last Styled frame drew from: the timer or volume ratio in basis points and
+///            the mic-muted and speaker-silent flags, so the live ring draws the same arc and marks
+///   m        each moment's animation: fx and cm by name, sp and br in percent, fl the raw flags
+///            (1 reversed, 2 fixed orbit, 4 no timer dip, 8 base only while the light is on), p
+///            spin heads or comet length (0 = default), dir +1/-1, and c the own-color stops
+void WebUIHandler::handle_ring_(AsyncWebServerRequest *request) {
+  if (this->ring_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  const std::string body = this->ring_->web_json();
+  request->send(200, "application/json", body.c_str());
+}
+
+namespace {
+std::string ring_param(AsyncWebServerRequest *request, const char *name) {
+  auto *p = request->getParam(name);
+  return p == nullptr ? std::string() : std::string(p->value().c_str());
+}
+
+// An integer field, -1 when absent or malformed (the component leaves the field as it is).
+int ring_int(AsyncWebServerRequest *request, const char *name) {
+  auto *p = request->getParam(name);
+  if (p == nullptr)
+    return -1;
+  char *end = nullptr;
+  const long v = strtol(p->value().c_str(), &end, 10);
+  if (end == p->value().c_str() || *end != '\0' || v < -1 || v > 100000)
+    return -1;
+  return static_cast<int>(v);
+}
+
+int ring_dir(AsyncWebServerRequest *request) {
+  const std::string d = ring_param(request, "dir");
+  return d == "-1" ? -1 : d == "1" ? 1 : 0;
+}
+}  // namespace
+
+void WebUIHandler::handle_ring_set_(AsyncWebServerRequest *request) {
+  if (this->ring_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  bool ok;
+  if (auto *style = request->getParam("style"); style != nullptr) {
+    ok = this->ring_->web_set_style(std::string(style->value().c_str()));
+  } else {
+    ok = this->ring_->web_set_moment(ring_param(request, "m"), ring_param(request, "fx"), ring_param(request, "cm"),
+                                     ring_param(request, "c"), ring_int(request, "sp"), ring_int(request, "br"),
+                                     ring_dir(request), ring_int(request, "p"));
+  }
+  request->send(ok ? 200 : 400, "application/json", ok ? "{\"ok\":1}" : "{\"ok\":0}");
+}
+
+void WebUIHandler::handle_ring_reset_(AsyncWebServerRequest *request) {
+  if (this->ring_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  const bool ok = this->ring_->web_reset(ring_param(request, "m"), ring_param(request, "all") == "1");
+  request->send(ok ? 200 : 400, "application/json", ok ? "{\"ok\":1}" : "{\"ok\":0}");
+}
+
+void WebUIHandler::handle_ring_preview_(AsyncWebServerRequest *request) {
+  if (this->ring_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+  if (request->url_to(url_buf) == "/api/sat1/ring/preview/stop") {
+    this->ring_->web_preview_stop();
+    request->send(200, "application/json", "{\"ok\":1}");
+    return;
+  }
+  const int ms = ring_int(request, "ms");
+  const bool ok = this->ring_->web_preview(ring_param(request, "m"), ms < 0 ? 6000 : static_cast<uint32_t>(ms),
+                                           ring_param(request, "fx"), ring_param(request, "cm"),
+                                           ring_param(request, "c"), ring_int(request, "sp"), ring_int(request, "br"),
+                                           ring_dir(request), ring_int(request, "p"));
+  request->send(ok ? 200 : 400, "application/json", ok ? "{\"ok\":1}" : "{\"ok\":0}");
+}
+
+#endif  // USE_SAT1_WEB_UI_RING
 
 #ifdef USE_SAT1_CRASH_REPORT
 

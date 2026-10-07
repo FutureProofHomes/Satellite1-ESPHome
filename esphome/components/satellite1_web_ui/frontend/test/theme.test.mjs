@@ -7,7 +7,7 @@ import test from "node:test";
 
 import { colorRgb, contrast, INK_ON, orbTokens } from "../src/lib/orb.js";
 import { valueAt } from "../src/lib/range.js";
-import { parseThemePref, resolveTheme } from "../src/lib/theme.js";
+import { chromeColor, parseThemePref, resolveTheme, THEME_COLOR } from "../src/lib/theme.js";
 
 test("nothing stored, or anything unknown, is Auto", () => {
   assert.equal(parseThemePref(null), "auto");
@@ -23,6 +23,13 @@ test("Auto follows the system; Light and Dark ignore it", () => {
   assert.equal(resolveTheme("auto", false), "light");
   assert.equal(resolveTheme("light", true), "light");
   assert.equal(resolveTheme("dark", false), "dark");
+});
+
+test("the browser chrome takes the header's tint: 7% of the orb in sRGB, as color-mix does", () => {
+  // The values Chrome computes for --surface-orb with the default violet (#a78bfa).
+  assert.equal(chromeColor("light", [167, 139, 250]), "#f5f3fd");
+  assert.equal(chromeColor("dark", [167, 139, 250]), "#292736");
+  assert.equal(chromeColor("dark", null), THEME_COLOR.dark);
 });
 
 const hex = (h) => colorRgb(h);

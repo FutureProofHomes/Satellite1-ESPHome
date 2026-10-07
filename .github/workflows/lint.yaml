@@ -61,6 +61,21 @@ jobs:
           site=$(python -c "import esphome, os; print(os.path.join(os.path.dirname(esphome.__file__), 'components', 'micro_wake_word'))")
           scripts/check_vendored_mww.sh "$site"
 
+  led-ring-renderer:
+    name: LED ring renderer parity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # The firmware's renderer (satellite1_ring/ring_fx_core.h) on the host, against the frames
+      # the web app's port must also draw (the frontend tests check those from the other side),
+      # and its Classic style against the YAML lambdas it replaced.
+      - name: Build and run the host test
+        run: |
+          g++ -std=c++17 -O1 -Wall -o ring_fx_core_test esphome/components/satellite1_ring/test/ring_fx_core_test.cpp
+          ./ring_fx_core_test esphome/components/satellite1_web_ui/frontend/test/ringfx-golden.txt
+
   web-ui-bundle:
     name: web UI bundle
     runs-on: ubuntu-latest

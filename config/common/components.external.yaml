@@ -20,6 +20,7 @@ external_components:
       - mww_runtime_loader
       - satellite1
       - satellite1_radar
+      - satellite1_ring
       - satellite1_web_ui
       - tas2780
       # Vendored (see esphome/components/voice_assistant/FPH_VENDOR.md).

@@ -48,6 +48,13 @@ try:
     from esphome.components.tas2780.audio_dac import tas2780 as TAS2780
 except ImportError:
     TAS2780 = None
+
+# Optional too: without the ring styles in the build, /api/sat1/ring does not exist and the LED
+# Ring page shows only the light's own color, brightness and effect.
+try:
+    from esphome.components.satellite1_ring import RingFx
+except ImportError:
+    RingFx = None
 from esphome.components.sendspin import (
     SendspinHub,
     request_controller_support,
@@ -96,6 +103,7 @@ CONF_MEDIA_PLAYER_ID = "media_player_id"
 CONF_SENDSPIN_MEDIA_PLAYER_ID = "sendspin_media_player_id"
 CONF_SENDSPIN_HUB_ID = "sendspin_hub_id"
 CONF_SPEAKER_AMP_ID = "speaker_amp_id"
+CONF_RING_ID = "ring_id"
 CONF_ON_HA_REFRESH = "on_ha_refresh"
 CONF_ON_HA_SELECT = "on_ha_select"
 CONF_ON_ASK = "on_ask"
@@ -301,6 +309,14 @@ CONFIG_SCHEMA = cv.All(
             **(
                 {cv.Optional(CONF_SPEAKER_AMP_ID): cv.use_id(TAS2780)}
                 if TAS2780 is not None
+                else {}
+            ),
+            # The LED ring styles (satellite1_ring), behind GET/POST /api/sat1/ring and its reset
+            # and preview routes. Nine per-moment styles are too many fields for entities, so the
+            # LED Ring page reads and edits them here; the style alone is also a select.
+            **(
+                {cv.Optional(CONF_RING_ID): cv.use_id(RingFx)}
+                if RingFx is not None
                 else {}
             ),
             # The Sendspin hub itself, beyond the media_player entity above. The protocol carries
@@ -566,6 +582,12 @@ async def to_code(config):
         # not exist, so the handler must not include it.
         cg.add_define("USE_SAT1_WEB_UI_AMP", True)
         cg.add(var.set_speaker_amp(await cg.get_variable(config[CONF_SPEAKER_AMP_ID])))
+
+    if CONF_RING_ID in config:
+        # A define for the same reason: the handler includes ring_fx.h only when the component is
+        # in the build.
+        cg.add_define("USE_SAT1_WEB_UI_RING", True)
+        cg.add(var.set_ring(await cg.get_variable(config[CONF_RING_ID])))
 
     if mic := config.get(CONF_MIC_MONITOR):
         cg.add_define("USE_SAT1_MIC_MONITOR", True)

@@ -87,7 +87,7 @@
 .ww-dd-btn { width: auto; min-width: 160px; }
 .au-sel-btn:hover, .dx-sel-btn:hover, .ww-dd-btn:hover { background: var(--fill-press); }
 .au-sel-btn.open, .dx-sel-btn.open, .ww-dd-btn.open, .ww-dd-btn:focus-visible { border-color: var(--orb-ctl) !important; box-shadow: 0 0 0 3px var(--orb-a20); outline: none; }
-.au-sel-pop, .dx-sel-pop, .ww-dd-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 50; min-width: 100%; margin: 0; padding: 4px; list-style: none; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--pop); box-shadow: var(--shadow-pop); animation: popIn .16s ease; }
+.au-sel-pop, .dx-sel-pop, .ww-dd-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 50; min-width: 100%; margin: 0; padding: 4px; list-style: none; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--pop-orb); box-shadow: var(--shadow-pop); animation: popIn .16s ease; }
 .dx-sel-pop { z-index: 1000; }
 @keyframes popIn { from { opacity: 0; transform: translateY(-6px); } }
 .au-sel-opt, .dx-sel-opt, .ww-dd-opt { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px !important; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font-size: 14px; text-align: left; white-space: nowrap; cursor: pointer; transition: background .12s; }
@@ -104,7 +104,7 @@
 .hint-btn::before { content: ''; position: absolute; inset: -13px; }
 .hint-btn:hover { border-color: var(--muted); color: var(--text); }
 .hint-btn[aria-expanded="true"] { border-color: var(--orb-ink); color: var(--orb-ink); }
-.hint-bubble { position: fixed; z-index: 9999; max-width: min(280px, calc(100vw - 16px)); padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--pop); box-shadow: var(--shadow-pop); color: var(--text); font-size: 13px; font-weight: 400; line-height: 1.5; letter-spacing: 0; text-align: left; pointer-events: auto; }
+.hint-bubble { position: fixed; z-index: 9999; max-width: min(280px, calc(100vw - 16px)); padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--pop-orb); box-shadow: var(--shadow-pop); color: var(--text); font-size: 13px; font-weight: 400; line-height: 1.5; letter-spacing: 0; text-align: left; pointer-events: auto; }
 
 /* ----- The wake word graph ----- */
 .lg-fire { fill: var(--orb-ctl); }

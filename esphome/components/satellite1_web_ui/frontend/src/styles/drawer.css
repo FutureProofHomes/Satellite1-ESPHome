@@ -9,7 +9,11 @@
 .dw-scrim { position: absolute; inset: 0; background: var(--scrim); opacity: var(--dw-p, 1); animation: dwFade .3s ease; transition: opacity .26s ease; }
 .dw-out .dw-scrim { opacity: 0; animation: none; }
 
+/* Tinted with the theme color (tokens.css --surface-orb), and the tint is the panel's --surface, so
+   whatever inside is painted with the surface - a sticky header, a swatch's ring - matches it. The
+   color eases while a theme color is picked (--orb-ease). */
 .dw-panel {
+  --surface: var(--surface-orb);
   position: absolute; left: 0; right: 0; bottom: 0; margin: 0 auto;
   width: 100%; max-width: 560px; max-height: calc(100dvh - var(--sat) - 16px);
   overflow-y: auto; overscroll-behavior: contain;
@@ -19,7 +23,7 @@
   box-shadow: 0 -10px 40px rgba(0, 0, 0, .25);
   outline: none;
   animation: dwUp .36s cubic-bezier(.32, .72, 0, 1);
-  transition: transform .26s cubic-bezier(.32, .72, 0, 1);
+  transition: transform .26s cubic-bezier(.32, .72, 0, 1), background-color var(--orb-ease) ease;
 }
 .dw-out .dw-panel { transform: translate3d(0, 105%, 0); animation: none; }
 .dw-drag .dw-panel, .dw-drag .dw-scrim { transition: none; }
@@ -62,7 +66,7 @@
     border-bottom: 1px solid var(--line); border-radius: 20px;
     box-shadow: var(--shadow-pop);
     animation-name: dwPop; animation-duration: .24s;
-    transition: transform .2s ease, opacity .2s ease;
+    transition: transform .2s ease, opacity .2s ease, background-color var(--orb-ease) ease;
   }
   .dw-out .dw-panel { transform: scale(.96); opacity: 0; }
   .dw-grab { position: static; height: 20px; padding: 0; cursor: default; }
@@ -72,4 +76,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .dw-panel, .dw-scrim { animation: none; transition: none; }
+  .dw-panel { transition: background-color var(--orb-ease) ease; }
 }

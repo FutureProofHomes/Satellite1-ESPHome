@@ -249,6 +249,7 @@ binary_sensor:
               condition:
                 lambda: return !id(action_button_touched);
               then:
+                - lambda: id(ring_fx).set_moment("factory");
                 - light.turn_on:
                     brightness: 100%
                     id: voice_assistant_leds
@@ -260,6 +261,9 @@ binary_sensor:
                 - wait_until:
                     binary_sensor.is_off: btn_action
                 - light.turn_off: voice_assistant_leds
+                # Cancelled: hand the ring back to whatever the chain says now, which also moves
+                # the LED Ring Moment sensor off "factory".
+                - script.execute: control_leds
                 - script.execute:
                     id: play_sound
                     priority: true

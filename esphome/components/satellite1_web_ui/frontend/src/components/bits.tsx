@@ -3,8 +3,8 @@ import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { TEXT } from '../copy.js';
 import { Check, CircleHalf, Moon, Sun } from '../icons';
-import { orbTokens } from '../lib/orb.js';
-import { THEME_COLOR, THEME_KEY, THEME_PREFS, parseThemePref, resolveTheme } from '../lib/theme.js';
+import { colorRgb, orbTokens } from '../lib/orb.js';
+import { THEME_KEY, THEME_PREFS, chromeColor, parseThemePref, resolveTheme } from '../lib/theme.js';
 
 export type ThemePref = 'auto' | 'light' | 'dark';
 type Theme = 'dark' | 'light';
@@ -59,7 +59,7 @@ function paint() {
     '--orb-ctl-on': t.ctlOn
   };
   for (const k in vars) root.style.setProperty(k, vars[k]);
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOR[look.theme]);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', chromeColor(look.theme, colorRgb(look.orb.a)));
 }
 paint();
 
@@ -88,10 +88,17 @@ export function setThemePref(pref: ThemePref) {
   lookSubs.forEach(f => f());
 }
 
-/** A person's orb pick, repainting every orb-derived token. */
+let orbEase: ReturnType<typeof setTimeout> | undefined;
+/** A person's orb pick, repainting every orb-derived token. The tinted surfaces ease to it while
+ *  data-orb-ease is up (tokens.css --orb-ease); a theme switch leaves it down, because the view
+ *  transition crossfades the page whole and a surface still easing after it would lag behind. */
 export function paintOrb(a: string, b: string) {
   if (a === look.orb.a && b === look.orb.b) return;
   look.orb = { a, b };
+  const root = document.documentElement;
+  root.dataset.orbEase = '';
+  clearTimeout(orbEase);
+  orbEase = setTimeout(() => delete root.dataset.orbEase, 700);
   paint();
 }
 

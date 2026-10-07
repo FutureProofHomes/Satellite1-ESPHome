@@ -7,7 +7,8 @@
   "scripts": {
     "build": "node build.mjs",
     "dev": "node dev.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "golden": "node test/golden.mjs"
   },
   "dependencies": {
     "preact": "10.29.8"

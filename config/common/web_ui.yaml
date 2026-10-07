@@ -226,6 +226,12 @@ satellite1_web_ui:
   # playing.
   media_player_id: external_media_player
 
+  # The LED ring styles (common/led_ring.yaml), behind the LED Ring page: GET/POST /api/sat1/ring,
+  # /api/sat1/ring/reset and /api/sat1/ring/preview[/stop]. The style itself is also the
+  # ring_style select below, and the moment the ring shows is the ring_moment text sensor, so the
+  # page follows Home Assistant and the device over /events.
+  ring_id: ring_fx
+
   # The TAS2780 amplifier card (GET /api/sat1/amp, the analog gain and line-out keys) is developer
   # tooling: config/satellite1.dev.yaml wires it onto Settings > Developer. The speaker channel
   # select below stays a customer control on the Audio tab.
@@ -498,6 +504,7 @@ satellite1_web_ui:
       # value alone.
       fsd_1: fsd_primary
       fsd_2: fsd_secondary
+      ring_style: ring_style_select
 
     buttons:
       restart: restart_button
@@ -533,6 +540,7 @@ satellite1_web_ui:
       radar_module: radar_detected_text
       remote_tts_status: tts_routing_status
       ask_status: web_ui_ask_status
+      ring_moment: ring_moment_text
 
     events:
       action_button: action_button_press_event

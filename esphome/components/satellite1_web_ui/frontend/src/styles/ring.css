@@ -1,0 +1,130 @@
+/* ===== The Customize drawer: the chooser, the orb page, the LED ring's pages ===== */
+/* components/VoiceOrb.tsx and components/RingStudio.tsx. Each page slides in a little when it
+   opens; the drawer itself does not move between them. */
+
+.cz-page { position: relative; }
+.rs-page { animation: rsIn .26s cubic-bezier(.32, .72, 0, 1); }
+@keyframes rsIn { from { opacity: 0; transform: translate3d(14px, 0, 0); } }
+
+.rs-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.rs-top.end { justify-content: flex-end; }
+.rs-back { display: inline-flex; align-items: center; gap: 2px; min-height: 36px; padding: 0 8px 0 0; background: transparent; color: var(--muted); font-size: 14px; font-weight: 600; }
+.rs-back:hover { color: var(--text); }
+.rs-lead { margin: 0 0 6px; font-size: 13px; line-height: 1.45; }
+
+.rs-hero { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 4px 0 18px; }
+.rs-cap { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .14em; }
+.rs-live { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 25%, transparent); }
+.rs-link { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; padding: 6px 10px 6px 14px; border-radius: 999px; background: var(--surface2); color: var(--orb-ink); font-size: 12px; font-weight: 600; text-align: center; }
+.rs-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+
+.rs-sec { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 22px 0 10px; }
+.rs-sec small { color: var(--muted); font-size: 12px; }
+.rs-group { display: flex; margin: 22px 0 10px; }
+
+/* Ring swatches are rings: the color round a dark face. */
+.rs-swatches { margin: 6px 0 18px; }
+.rs-ringdot { background: radial-gradient(circle, #141418 54%, var(--c) 56%, var(--c) 100%); box-shadow: 0 0 10px color-mix(in srgb, var(--c) 45%, transparent); }
+.rs-ringdot.rainbow { background: radial-gradient(circle, #141418 54%, transparent 56%), conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
+.swatch.on .rs-ringdot { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text), 0 0 14px color-mix(in srgb, var(--c, #fff) 55%, transparent); }
+
+/* A row of tiles that scrolls sideways: effects and styles. */
+.rs-strip { display: flex; gap: 8px; overflow-x: auto; margin: 0 -20px; padding: 2px 20px 8px; scroll-padding-inline: 20px; scrollbar-width: none; scroll-snap-type: x proximity; }
+.rs-strip::-webkit-scrollbar { display: none; }
+.rs-tile { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 64px; padding: 10px 8px 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface2); color: var(--text); scroll-snap-align: start; }
+.rs-tile small { color: var(--muted); font-size: 12px; font-weight: 600; }
+.rs-tile strong { font-size: 13px; }
+.rs-tile.rs-wide { min-width: 96px; }
+
+/* The ring's sliders: name and value on one row, the slider under both. */
+.ring-sheet .hue-label { display: grid; grid-template-columns: 1fr auto; align-items: baseline; column-gap: 12px; }
+.ring-sheet .hue-label span, .ring-sheet .hue-label .hue-cap { margin-bottom: 0; }
+.ring-sheet .hue-label span { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ring-sheet .hue-label input { grid-column: 1 / -1; }
+.ring-sheet .hue-label .rs-seg { grid-column: 1 / -1; margin: 6px 0 0; }
+.rs-tile.on { border-color: var(--text); }
+.rs-tile.on small { color: var(--text); }
+
+.rs-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.rs-grid .rs-tile { min-width: 0; }
+
+.rs-rows { border: 1px solid var(--line); border-radius: 16px; background: var(--surface2); overflow: hidden; margin: 0 0 4px; }
+.rs-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; background: transparent; color: var(--text); text-align: left; border-bottom: 1px solid var(--line); }
+.rs-row:last-child { border-bottom: 0; }
+.rs-row:hover { background: var(--fill-hover); }
+.rs-row > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.rs-row strong { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.rs-row small { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.rs-row > svg { flex: none; color: var(--muted); }
+.rs-rows + .primary, .rs-foot { margin-top: 18px; }
+.rs-strip + .rs-rows { margin-top: 16px; }
+
+/* A row with its own Preview: the chevron's button reaches over the whole row, so a tap anywhere
+   but Preview opens the moment. */
+.rs-row.split { position: relative; }
+.rs-row-go { flex: none; display: grid; place-items: center; min-height: 0; padding: 0; background: transparent; color: var(--muted); }
+.rs-row-go::after { content: ''; position: absolute; inset: 0; }
+.rs-prev { position: relative; z-index: 1; flex: none; display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--text); font-size: 12px; font-weight: 600; }
+.rs-prev.on { border-color: color-mix(in srgb, var(--orb-a) 60%, transparent); background: color-mix(in srgb, var(--orb-a) 18%, var(--surface2)); color: var(--orb-ink); }
+
+.rs-tag { padding: 2px 6px; border-radius: 6px; background: color-mix(in srgb, var(--orb-a) 18%, transparent); color: var(--orb-ink); font-size: 9px; font-style: normal; font-weight: 800; letter-spacing: .12em; }
+.rs-tag.fixed { display: inline-flex; align-items: center; gap: 3px; background: var(--fill-hover); color: var(--muted); }
+
+.rs-dots { display: inline-flex; gap: 3px; }
+.rs-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.rs-dot.rainbow { background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
+
+.rs-note { display: flex; gap: 8px; align-items: flex-start; margin: 14px 0; padding: 10px 12px; border-radius: 12px; background: var(--surface2); color: var(--muted); font-size: 12px; line-height: 1.45; }
+.rs-note svg { flex: none; margin-top: 1px; }
+
+.rs-foot { display: flex; gap: 10px; }
+.rs-foot > * { flex: 1; }
+.rs-page > .primary.wide { margin-top: 18px; }
+
+.rs-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; padding: 0 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface2); color: var(--text); font-size: 13px; font-weight: 600; }
+.rs-btn.on { border-color: color-mix(in srgb, var(--orb-a) 60%, transparent); background: color-mix(in srgb, var(--orb-a) 18%, var(--surface2)); color: var(--orb-ink); }
+.rs-btn.big { min-height: 48px; border-radius: 12px; font-size: 15px; }
+
+.rs-seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; padding: 3px; border-radius: 12px; background: var(--surface2); margin-bottom: 4px; }
+.rs-seg.two { grid-template-columns: 1fr 1fr; margin-bottom: 12px; }
+.rs-seg button { min-height: 36px; padding: 0 4px; border-radius: 9px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; }
+.rs-seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--line); }
+
+.rs-bar { height: 14px; margin: 4px 0 12px; border-radius: 7px; }
+.rs-stops { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.rs-stop { display: inline-flex; align-items: center; gap: 2px; padding: 4px 6px 4px 4px; border-radius: 999px; background: var(--surface2); }
+.rs-stop label { position: relative; display: inline-flex; align-items: center; gap: 6px; color: var(--text); font: 600 12px/1 'SF Mono', ui-monospace, monospace; cursor: pointer; }
+.rs-stop input { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; opacity: 0; cursor: pointer; }
+.rs-stop i { width: 20px; height: 20px; border-radius: 50%; }
+.rs-stop button { display: grid; place-items: center; width: 22px; height: 22px; min-height: 22px; padding: 0; border-radius: 50%; background: transparent; color: var(--muted); }
+.rs-add { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 0 10px; border-radius: 999px; background: transparent; border: 1px dashed var(--line-strong); color: var(--muted); font-size: 12px; font-weight: 600; }
+.rs-palettes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 6px; }
+.rs-palettes button { display: flex; flex-direction: column; gap: 5px; padding: 0; background: transparent; }
+.rs-palettes i { height: 28px; border-radius: 8px; }
+.rs-palettes small { color: var(--muted); font-size: 11px; text-align: center; }
+
+.rs-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 4px; }
+.rs-filters button { min-height: 34px; padding: 0 12px; border-radius: 10px; background: var(--surface2); color: var(--text); font-size: 13px; font-weight: 600; }
+.rs-filters button.on { background: var(--orb-fill); color: #fff; }
+
+.rs-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.rs-card { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding: 12px; border: 1px solid transparent; border-radius: 16px; background: var(--surface2); color: var(--text); text-align: left; transition: border-color .2s; }
+.rs-card.on { border-color: color-mix(in srgb, var(--orb-a) 70%, transparent); }
+.rs-card strong { margin-top: 6px; font-size: 14px; }
+.rs-card small { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.rs-card-top { display: flex; justify-content: space-between; align-items: flex-start; width: 100%; }
+
+/* The chooser's two cards. */
+.cz-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 18px 0 4px; }
+.cz-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 16px 10px 14px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface2); color: var(--text); text-align: center; }
+.cz-card canvas { margin-bottom: 8px; }
+.cz-card strong { font-size: 14px; line-height: 1.25; }
+.cz-card small { color: var(--muted); font-size: 12px; }
+.cz-go { display: inline-flex; align-items: center; margin-top: 8px; color: var(--orb-ink); font-size: 13px; font-weight: 700; }
+
+[data-theme='light'] .rs-ringdot:not(.rainbow) { background: radial-gradient(circle, #2a2a30 54%, var(--c) 56%, var(--c) 100%); }
+[data-theme='light'] .rs-ringdot.rainbow { background: radial-gradient(circle, #2a2a30 54%, transparent 56%), conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
+
+@media (prefers-reduced-motion: reduce) {
+  .rs-page { animation: none; }
+}

@@ -261,6 +261,12 @@ class Satellite1WebUI : public Component {
   void set_speaker_amp(tas2780::TAS2780 *amp) { this->handler_.set_speaker_amp(amp); }
 #endif
 
+#ifdef USE_SAT1_WEB_UI_RING
+  /// The ring styles behind /api/sat1/ring. Without them the routes do not exist and the LED Ring
+  /// page keeps to the light's own color, brightness and effect.
+  void set_ring(satellite1_ring::RingFx *ring) { this->handler_.set_ring(ring); }
+#endif
+
 #ifdef USE_SAT1_MIC_MONITOR
   /// Developer builds: the mic monitor behind GET /api/sat1/mic. From generated code.
   void set_mic_monitor_microphone(microphone::Microphone *mic) { this->handler_.mic_monitor().set_microphone(mic); }
