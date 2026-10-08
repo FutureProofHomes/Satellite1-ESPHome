@@ -56,6 +56,12 @@ speaker:
       - id: media_mixing_input
         timeout: never
         buffer_duration: 100ms
+      # The OpenAI Realtime conversation's voice (common/openai_realtime.yaml), fed through
+      # realtime_resampling_speaker. Finite for the same reason as the announcement input: the
+      # component finishes it after each answer, and a stall must not hold it open forever.
+      - id: realtime_mixing_input
+        timeout: 3s
+        buffer_duration: 100ms
 
   # Vritual speakers to resample each pipelines' audio, if necessary, as the mixer speaker requires the same sample rate
   - platform: resampler

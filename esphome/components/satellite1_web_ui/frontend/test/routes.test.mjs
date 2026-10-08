@@ -50,7 +50,7 @@ test("every route survives a round trip", () => {
     const { tab, sub } = parseRoute(h);
     assert.equal(routeHash(tab, sub), h);
   }
-  for (const p of ["device", "updates", "security", "logs", "integrations", "recovery", "developer", "community"]) {
+  for (const p of ["device", "updates", "security", "logs", "integrations", "openai", "recovery", "developer", "community"]) {
     const h = `#/settings/${p}`;
     const { tab, sub } = parseRoute(h);
     assert.equal(routeHash(tab, sub), h);

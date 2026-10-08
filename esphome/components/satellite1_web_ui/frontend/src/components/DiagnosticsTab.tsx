@@ -12,6 +12,7 @@ import { Switch } from './controls';
 import { DeveloperCards } from './settings/Developer';
 import { CrashCard, LogsCard } from './settings/Logs';
 import { AuthTokenCard, ChangePasswordCard } from './settings/Security';
+import { OpenAICards } from './settings/OpenAI';
 
 const RELEASES_URL = 'https://github.com/FutureProofHomes/Satellite1-ESPHome/releases';
 const XMOS_RELEASES_URL = 'https://github.com/FutureProofHomes/Satellite1-XMOS/releases';
@@ -366,6 +367,10 @@ const ROUTE_HEADLINES: Record<string, {
     prefix: 'Connect ',
     em: 'everything.'
   },
+  'openai': {
+    prefix: 'Talk in ',
+    em: 'real time.'
+  },
   'recovery': {
     prefix: 'Back from the ',
     em: 'brink.'
@@ -398,6 +403,9 @@ export const SETTINGS_ROUTES = [{
 }, {
   slug: 'integrations',
   label: 'Integrations'
+}, {
+  slug: 'openai',
+  label: 'OpenAI'
 }, {
   slug: 'recovery',
   label: 'Recovery'
@@ -499,6 +507,11 @@ export function DiagnosticsTab({
   useEffect(() => {
     if (subRoute === 'developer' && noDevTools) location.replace(routeHash('SETTINGS', 'device-info'));
   }, [subRoute, noDevTools]);
+  // Same for Settings > OpenAI on a build without the openai_realtime component (no "oai" key).
+  const noOpenAI = !!ctx.device && !ctx.device.oai;
+  useEffect(() => {
+    if (subRoute === 'openai' && noOpenAI) location.replace(routeHash('SETTINGS', 'device-info'));
+  }, [subRoute, noOpenAI]);
 
   // A toast's action sets its intent and then the hash, so a new page takes it on arrival; a toast
   // pointing at the page already open dispatches toast-intent instead, because an identical hash
@@ -541,6 +554,7 @@ export function DiagnosticsTab({
       {active.slug === 'logs' && <LogsCard ctx={ctx} intent={intent?.card === 'log' ? intent : null} />}
       {active.slug === 'logs' && <CrashCard ctx={ctx} reveal={intent?.card === 'crash'} />}
       {active.slug === 'integrations' && <HomeAssistantCard ctx={ctx} />}
+      {active.slug === 'openai' && <OpenAICards ctx={ctx} />}
       {active.slug === 'recovery' && <RecoveryCards ctx={ctx} />}
       {active.slug === 'developer' && (ctx.device ? <DeveloperCards ctx={ctx} /> : <Pending ctx={ctx} title="Developer" />)}
       {active.slug === 'community' && <CommunityLinks />}

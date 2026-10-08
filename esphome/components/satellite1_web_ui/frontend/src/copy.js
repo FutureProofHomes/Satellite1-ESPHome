@@ -10,6 +10,16 @@
  */
 
 export const HINTS = {
+  oai_protocol:
+    "Realtime servers speak one of two formats: the current one api.openai.com uses, or the earlier beta format most self-hosted and compatible servers still use. The device reads which one from the server's first message and adapts; this shows what the last conversation or test used.",
+  /* Settings > OpenAI. The connection hint says what the base URL is (the OpenAI SDK convention, so
+     any compatible relay's documentation applies) and where the key goes - the device, not the
+     browser. The enabled hint names every start the switch reroutes, because a person who turns it
+     on and then presses the button deserves to know the button changed too. */
+  oai_connection:
+    "The device talks to the Realtime API itself, over a WebSocket. The base URL is the API's root: https://api.openai.com/v1 for OpenAI, or any compatible server - including one on your network, such as http://192.168.1.20:8000/v1. Connect first: the device asks that server for its models and voices, and the pickers offer exactly those. The key is stored on the device and never shown again; only its last four characters are. A server on your network may need no key.",
+  oai_enabled:
+    "When on, the wake word, the orb's tap and the action button start a live OpenAI Realtime conversation instead of the Home Assistant pipeline. Talk over the reply to interrupt it. The conversation ends when you say goodbye, after 20 seconds of silence, or when you say the wake word again.",
   // tts_routing, tts_local_speaker, tts_targets and tts_manual_ids are gone. The first two described
   // switches that no longer exist; the tree is now the whole control and explains itself by being a
   // list of rooms with "Local Speaker" at the top of it. The manual id field was replaced by the "No
@@ -319,6 +329,54 @@ export const HINTS = {
 };
 
 export const TEXT = {
+  oai_card: "OpenAI Realtime",
+  oai_status_card: "Conversation",
+  oai_enabled: "Use for conversations",
+  oai_base_url: "Base URL",
+  oai_connects_to: "Connects to",
+  oai_bad_url: "Enter an address starting with https://, http://, wss:// or ws://.",
+  oai_api_key: "API key",
+  oai_key_ph: "sk-…",
+  oai_key_stored: "Stored key %s - type to replace",
+  oai_key_remove: "Remove the stored key",
+  oai_key_keep: "Keep the stored key",
+  oai_key_dropped: "This is a different server, so the stored key will not be sent to it. Type a key for this server, or save without one if it needs none.",
+  oai_needs_key: "api.openai.com needs an API key before a conversation can start.",
+  oai_model: "Model",
+  oai_voice: "Voice",
+  oai_step_connect: "1. Connect",
+  oai_step_choose: "2. Choose the model and voice",
+  oai_connect: "Connect",
+  oai_refresh: "Refresh lists",
+  oai_connecting: "Connecting and fetching the model list…",
+  oai_not_connected: "Not connected yet.",
+  oai_connected: "Connected - this server offers %m and %v.",
+  oai_n_models: ["%d Realtime model", "%d Realtime models"],
+  oai_n_voices: ["%d voice", "%d voices"],
+  oai_connected_no_list: "Connected - this server has no model list.",
+  oai_connect_first_models: "Connect to load the models",
+  oai_connect_first_voices: "Connect to load the voices",
+  oai_no_model_list: "This server lists no models - type the model name it expects.",
+  oai_no_voice_list: "This server lists no voices - type the voice name it expects.",
+  oai_server_voices: "%d of these come from the server's own voice list.",
+  oai_not_offered: "not offered by this server",
+  oai_save_connect_first: "Connect successfully before saving a new address, key, model or voice.",
+  oai_local_tls: "A server on your network usually has no publicly trusted certificate - the device only accepts those. Use http:// (or ws://) for it.",
+  oai_optional_local: "(optional for a local server)",
+  oai_protocol: "Protocol",
+  oai_save: "Save",
+  oai_saving: "Saving…",
+  oai_saved: "OpenAI settings saved",
+  oai_save_failed: "The device did not answer. Check it is online and try again.",
+  oai_load_failed: "Could not read the OpenAI settings from the device.",
+  oai_test: "Test connection",
+  oai_testing: "Testing…",
+  oai_test_save_first: "Save your changes first",
+  oai_status: "Status",
+  oai_in_use: "Wake word starts",
+  oai_in_use_yes: "OpenAI Realtime",
+  oai_in_use_no: "Home Assistant",
+  oai_last_error: "Last error",
   /* The login screen. The device sign-in is offered first and the password second, because the
      password is the thing iOS made miserable enough to build all of this around. The three mode
      lines follow what the poll reports - the device picks how it can be answered when the window

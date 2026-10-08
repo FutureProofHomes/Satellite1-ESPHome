@@ -1,0 +1,30 @@
+/* Settings > OpenAI. The form reuses the password card's column (.dx-pwc); these only label the
+   fields and colour the one-line notes under them. */
+.oai-form { gap: 14px; }
+.oai-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.oai-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.oai-note { font-size: 12px; line-height: 1.45; color: var(--muted); margin: 0; overflow-wrap: anywhere; }
+.oai-note.oai-bad { color: var(--danger); }
+.oai-note.oai-warn { color: color-mix(in srgb, var(--danger) 55%, var(--text)); }
+.oai-note.oai-ok { color: var(--orb-ctl); }
+.oai-link { padding: 0; border: 0; background: none; color: var(--orb-ctl); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.oai-link:focus-visible { outline: 2px solid var(--orb-ctl); outline-offset: 2px; border-radius: 2px; }
+.oai-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.oai-form .dx-in[aria-invalid="true"] { border-color: var(--danger); }
+.oai-form .dx-sel { width: 100%; }
+
+/* Connect first: the step labels, the connection line, and the locked pickers. */
+.oai-step { margin: 6px 0 -4px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.oai-opt { font-weight: 500; color: var(--muted); }
+.oai-conn { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--fill-hover); }
+.oai-conn .oai-note { flex: 1 1 200px; }
+.oai-conn .oai-connect { margin-left: auto; }
+.oai-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--line-strong); }
+.oai-dot.ok { background: var(--orb-ctl); }
+.oai-dot.error { background: var(--danger); }
+.oai-dot.loading { background: var(--orb-ctl); animation: oaiPulse 1s ease-in-out infinite; }
+@keyframes oaiPulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .oai-dot.loading { animation: none; } }
+.oai-locked { opacity: .55; }
+.oai-locked .dx-sel-btn { cursor: not-allowed; }
+.oai-form .dx-sel-pop { max-height: 320px; overflow-y: auto; }

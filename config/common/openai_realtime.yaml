@@ -1,0 +1,156 @@
+####################################################################################################
+# OpenAI Realtime: a live, full-duplex voice conversation with an OpenAI Realtime model, straight
+# from the device over a WebSocket - the alternative to the Home Assistant Assist pipeline. Any
+# server that speaks the Realtime protocol works the same way, including a self-hosted one on the
+# local network (http:// or ws://); the device detects whether it speaks the GA or the beta format.
+#
+# What it shares with the Assist pipeline, and what it does not:
+#   - The same microphone channel (sat1_mics channel 0, the XMOS echo-cancelled stream), the same
+#     wake words (micro_wake_word keeps running throughout), the same LED ring and web UI orb (the
+#     triggers below drive voice_assistant_phase exactly as voice_assistant.yaml does).
+#   - Its own speaker path: realtime_resampling_speaker -> realtime_mixing_input, a third input on
+#     the mixer in speaker.yaml. Media keeps playing underneath, ducked like it is for a response.
+#   - Device control goes back through Home Assistant: the model gets one `home_assistant` tool,
+#     answered by conversation.process (Assist's own intent handling), so "turn off the kitchen
+#     lights" works exactly as it does in the Assist pipeline. This needs "Allow the device to
+#     perform Home Assistant actions" on the device's integration entry, which the web UI already
+#     relies on for other features.
+#
+# Turning it on: Settings > OpenAI in the web UI - base URL, API key, model, voice, and the "Use for
+# conversations" switch. Nothing below needs editing; the values here are only a fresh device's
+# defaults. When the switch is on, the wake word, the orb tap and the action button start a Realtime
+# conversation instead of the Assist pipeline (voice_assistant.yaml, web_ui_assist.yaml,
+# buttons.yaml). The conversation ends on goodbye (the model's end_conversation tool), 20 s of
+# silence, the wake word said again, the action button, or the mute switch.
+#
+# Barge-in: talking over the model stops its audio at once and truncates the unheard part of the
+# answer on the server, so "wait, what was that?" refers to what was actually heard. It relies on
+# the XMOS echo canceller keeping the device's own voice out of channel 0; if a setup ever hears
+# itself (an external speaker on the line-out far from the device), set `half_duplex: true`.
+#
+# See docs/openai-realtime.md.
+####################################################################################################
+
+speaker:
+  # The model speaks 24 kHz mono PCM; the mixer runs at 48 kHz. 300 ms of buffer here rides out a
+  # main loop stalled by a busy moment; playback_latency below accounts for it plus the mixer's and
+  # the I2S speaker's own buffers when estimating how much of an interrupted answer was heard.
+  - platform: resampler
+    id: realtime_resampling_speaker
+    output_speaker: realtime_mixing_input
+    sample_rate: 48000
+    bits_per_sample: 16
+    buffer_duration: 300ms
+
+openai_realtime:
+  id: oai_rt
+  microphone:
+    microphone: sat1_mics
+    channels: 0
+  speaker: realtime_resampling_speaker
+  muted: !lambda return id(master_mute_switch).state;
+  # Resampler (300 ms) + mixer input (100 ms) + I2S speaker (500 ms default) hold at most ~900 ms;
+  # in steady playback they sit around two thirds full.
+  playback_latency: 700ms
+  idle_timeout: 20s
+  instructions: >-
+    You are the voice assistant of a Satellite1 smart speaker in someone's home. Speak naturally and
+    briefly - one to three sentences unless asked for more. You are heard, not read: no lists,
+    markdown, URLs or emoji. For anything about the home - lights, climate, media, timers, sensors,
+    the state of devices, or anything Home Assistant knows - call the home_assistant tool with the
+    request in plain words and tell the user the outcome in your own words. When the user says
+    goodbye or that they are done, say a short goodbye and call end_conversation.
+  tools:
+    - name: home_assistant
+      description: >-
+        Send a request to the Home Assistant smart home (Assist). Use it to control devices, set
+        timers, or ask about the state of anything in the home. Returns Home Assistant's answer.
+      parameters:
+        type: object
+        properties:
+          command:
+            type: string
+            description: >-
+              The request in plain words, as the user would say it to a voice assistant, for
+              example "turn off the kitchen lights" or "what is the temperature in the bedroom".
+        required: [command]
+
+  on_start:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
+    - script.execute: control_leds
+    - script.execute: audio_gain_reconcile
+  on_listening:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
+    - script.execute: control_leds
+  on_speech_started:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
+    - script.execute: control_leds
+  on_speech_stopped:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
+    - script.execute: control_leds
+  on_response_started:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
+    - script.execute: control_leds
+  on_interrupted:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
+    - script.execute: control_leds
+  # The two halves of each exchange for the Voice card in the web UI, as voice_assistant.yaml files
+  # them. Only the assistant's half arrives unless input_transcription_model is set (it costs a
+  # transcription per utterance).
+  on_user_transcript:
+    - lambda: id(web_ui_app)->push_utterance(x, true);
+  on_assistant_transcript:
+    - lambda: id(web_ui_app)->push_utterance(x, false);
+  on_error:
+    - lambda: id(web_ui_app)->note_voice_error(message);
+    - lambda: id(voice_assistant_phase) = ${voice_assist_error_phase_id};
+    - script.execute: control_leds
+  on_end:
+    - if:
+        condition:
+          lambda: return id(voice_assistant_phase) == ${voice_assist_error_phase_id};
+        then:
+          - delay: 1s
+    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+    - script.execute: control_leds
+    - script.execute: audio_gain_reconcile
+
+  on_function_call:
+    - if:
+        condition:
+          lambda: return name == "home_assistant";
+        then:
+          - if:
+              condition: api.connected
+              then:
+                - homeassistant.action:
+                    action: conversation.process
+                    data:
+                      text: !lambda |-
+                        auto doc = esphome::json::parse_json(arguments);
+                        const char *command = doc["command"] | "";
+                        return std::string(command);
+                    capture_response: true
+                    on_success:
+                      - openai_realtime.send_function_result:
+                          call_id: !lambda return call_id;
+                          output: !lambda |-
+                            // Home Assistant's whole answer: the spoken reply under
+                            // response.speech.plain.speech, plus what it did (response_type, data
+                            // targets). The model reads the JSON and phrases the outcome itself.
+                            std::string out;
+                            serializeJson(response, out);
+                            return out;
+                    on_error:
+                      - openai_realtime.send_function_result:
+                          call_id: !lambda return call_id;
+                          output: !lambda |-
+                            return std::string(R"({"error":"Home Assistant could not handle the request"})");
+              else:
+                - openai_realtime.send_function_result:
+                    call_id: !lambda return call_id;
+                    output: '{"error":"Home Assistant is not connected right now"}'
+        else:
+          - openai_realtime.send_function_result:
+              call_id: !lambda return call_id;
+              output: '{"error":"Unknown tool"}'

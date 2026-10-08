@@ -190,13 +190,18 @@ export function DxSelect({
   options,
   onChange,
   label,
-  buttonRef
+  buttonRef,
+  disabled = false,
+  placeholder
 }: {
   value: string;
   options: (string | [string, string])[];
   onChange: (v: string) => void;
   label?: string;
   buttonRef?: React.RefObject<HTMLButtonElement>;
+  /** Locked: shows `placeholder` (or the value) and does not open. */
+  disabled?: boolean;
+  placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -214,15 +219,15 @@ export function DxSelect({
     };
   }, [open]);
   const pairs = options.map(o => Array.isArray(o) ? o : [o, o]);
-  const shown = pairs.find(([v]) => v === value)?.[1] ?? value;
+  const shown = disabled && placeholder ? placeholder : pairs.find(([v]) => v === value)?.[1] ?? value;
   return <div ref={ref} className="dx-sel">
-      <button ref={buttonRef} className={`dx-sel-btn${open ? ' open' : ''}`} aria-haspopup="listbox" aria-expanded={open} aria-label={label} onClick={() => setOpen(v => !v)}>
+      <button ref={buttonRef} className={`dx-sel-btn${open ? ' open' : ''}`} aria-haspopup="listbox" aria-expanded={open} aria-label={label} disabled={disabled} onClick={() => !disabled && setOpen(v => !v)}>
         <span>{shown}</span>
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
           <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
-      {open && <div className="dx-sel-pop" role="listbox" aria-label={label}>
+      {open && !disabled && <div className="dx-sel-pop" role="listbox" aria-label={label}>
           {pairs.map(([v, l]) => <button key={v} role="option" aria-selected={v === value} className={`dx-sel-opt${v === value ? ' active' : ''}`} onClick={() => {
         onChange(v);
         setOpen(false);

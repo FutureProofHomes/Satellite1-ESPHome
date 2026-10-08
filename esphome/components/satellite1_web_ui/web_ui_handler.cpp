@@ -199,6 +199,14 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
     // relay "cfg" to Home Assistant as a command.
     if (url == "/api/sat1/ma/cfg")
       return Route::MA_CFG_SET;
+#ifdef USE_OPENAI_REALTIME
+    if (url == "/api/sat1/openai")
+      return Route::OPENAI_SET;
+    if (url == "/api/sat1/openai/models")
+      return Route::OPENAI_MODELS;
+    if (url == "/api/sat1/openai/test")
+      return Route::OPENAI_TEST;
+#endif
     // A prefix like the media commands: the verb rides the path as /api/sat1/ma/<cmd>. Tested after
     // the refresh above, which would otherwise match the prefix too.
     if (strncmp(url_buf, "/api/sat1/ma/", 13) == 0)
@@ -280,6 +288,12 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
     return Route::MA;
   if (url == "/api/sat1/ma/cfg")
     return Route::MA_CFG;
+#ifdef USE_OPENAI_REALTIME
+  // Behind the session gate like the Music Assistant connection: it names the server and model,
+  // never the key.
+  if (url == "/api/sat1/openai")
+    return Route::OPENAI;
+#endif
   if (url == "/api/sat1/sel")
     return Route::SEL;
 #ifdef USE_WIFI
@@ -458,6 +472,20 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
     case Route::MA_CFG_SET:
       this->handle_ma_cfg_set_(request);
       break;
+#ifdef USE_OPENAI_REALTIME
+    case Route::OPENAI:
+      this->handle_openai_(request);
+      break;
+    case Route::OPENAI_SET:
+      this->handle_openai_set_(request);
+      break;
+    case Route::OPENAI_MODELS:
+      this->handle_openai_models_(request);
+      break;
+    case Route::OPENAI_TEST:
+      this->handle_openai_test_(request);
+      break;
+#endif
     case Route::SEL:
       this->handle_sel_(request);
       break;
@@ -560,7 +588,11 @@ void WebUIHandler::handleBody(AsyncWebServerRequest *request, uint8_t *data, siz
   // The two JSON-body POSTs share one buffer and one discipline; everything else parses query
   // parameters and never needs a body.
   const Route route = match_route_(request);
-  if (route != Route::SEL_SET && route != Route::MA_CFG_SET)
+  bool json_body = route == Route::SEL_SET || route == Route::MA_CFG_SET;
+#ifdef USE_OPENAI_REALTIME
+  json_body = json_body || route == Route::OPENAI_SET || route == Route::OPENAI_MODELS;
+#endif
+  if (!json_body)
     return;
 
   // Cleared on the first chunk rather than after the last, so a connection dropped mid-body cannot
@@ -2574,6 +2606,123 @@ void WebUIHandler::handle_ma_cfg_set_(AsyncWebServerRequest *request) {
   request->send(200, "application/json", "{\"ok\":1}");
 }
 
+#ifdef USE_OPENAI_REALTIME
+/// `"key":true|false|1|0` anywhere in the body. Absent reports false.
+static bool json_bool_value(const std::string &body, const char *key, bool &out) {
+  const std::string needle = std::string("\"") + key + "\":";
+  const size_t at = body.find(needle);
+  if (at == std::string::npos)
+    return false;
+  size_t i = at + needle.size();
+  while (i < body.size() && body[i] == ' ')
+    i++;
+  if (body.compare(i, 4, "true") == 0 || body.compare(i, 1, "1") == 0) {
+    out = true;
+    return true;
+  }
+  if (body.compare(i, 5, "false") == 0 || body.compare(i, 1, "0") == 0) {
+    out = false;
+    return true;
+  }
+  return false;
+}
+
+static void openai_send_json(AsyncWebServerRequest *request, int status, const json::SerializationBuffer<> &json) {
+  httpd_resp_set_status(*request, status == 200 ? "200 OK" : "400 Bad Request");
+  httpd_resp_set_type(*request, "application/json");
+  httpd_resp_set_hdr(*request, "Cache-Control", CACHE_REVALIDATE);
+  httpd_resp_set_hdr(*request, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(*request, json.c_str(), static_cast<ssize_t>(json.size()));
+}
+
+void WebUIHandler::handle_openai_(AsyncWebServerRequest *request) {
+  using namespace openai_realtime;
+  if (this->openai_ == nullptr) {
+    request->send(404, "application/json", "{}");
+    return;
+  }
+  // Built with ArduinoJson (rt_messages.cpp, host-tested): the model and voice lists come from a
+  // remote server and must not be able to break the document.
+  StatusView v;
+  v.settings = this->openai_->get_settings();
+  v.configured = this->openai_->is_configured();
+  Endpoints ep;
+  std::string why;
+  if (derive_endpoints(v.settings.base_url, v.settings.model, ep, why))
+    v.realtime_url = ep.realtime_url;
+  v.state = session_state_name(this->openai_->get_state());
+  v.phase = phase_name(this->openai_->get_phase());
+  v.proto = this->openai_->get_flavor_name();
+  v.last_error = this->openai_->get_last_error();
+  v.models = this->openai_->get_models_status();
+  v.test = this->openai_->get_test_status();
+  openai_send_json(request, 200, json::build_json([&v](JsonObject root) { fill_status(root, v); }));
+  v.settings.api_key.assign(v.settings.api_key.size(), '\0');
+}
+
+void WebUIHandler::handle_openai_set_(AsyncWebServerRequest *request) {
+  if (this->openai_ == nullptr) {
+    request->send(404, "application/json", "{}");
+    return;
+  }
+  const std::string body = this->body_;
+  this->body_.clear();
+  if (body == "!" || body.empty()) {
+    openai_send_json(request, 400, json::build_json([](JsonObject root) { openai_realtime::fill_result(root, false, "body"); }));
+    return;
+  }
+  using namespace openai_realtime;
+  std::string base, model, voice, key;
+  bool enabled = false;
+  if (!json_string_value(body, "base_url", base, MAX_BASE_URL) || !json_string_value(body, "model", model, MAX_MODEL) ||
+      !json_string_value(body, "voice", voice, MAX_VOICE) || !json_bool_value(body, "enabled", enabled)) {
+    openai_send_json(request, 400, json::build_json([](JsonObject root) { openai_realtime::fill_result(root, false, "fields"); }));
+    return;
+  }
+  bool clear_key = false;
+  json_bool_value(body, "clear_key", clear_key);
+  const bool has_key = json_string_value(body, "api_key", key, MAX_API_KEY) && !key.empty();
+  const std::string empty;
+  const std::string *key_ptr = has_key ? &key : (clear_key ? &empty : nullptr);
+  std::string err;
+  const bool ok = this->openai_->apply_settings(enabled, base, model, voice, key_ptr, err);
+  key.assign(key.size(), '\0');
+  if (!ok) {
+    openai_send_json(request, 400, json::build_json([&err](JsonObject root) { openai_realtime::fill_result(root, false, err.c_str()); }));
+    return;
+  }
+  openai_send_json(request, 200, json::build_json([](JsonObject root) { openai_realtime::fill_result(root, true, nullptr); }));
+}
+
+void WebUIHandler::handle_openai_models_(AsyncWebServerRequest *request) {
+  if (this->openai_ == nullptr) {
+    request->send(404, "application/json", "{}");
+    return;
+  }
+  const std::string body = this->body_;
+  this->body_.clear();
+  std::string base, key;
+  if (body == "!" || !json_string_value(body, "base_url", base, openai_realtime::MAX_BASE_URL)) {
+    openai_send_json(request, 400, json::build_json([](JsonObject root) { openai_realtime::fill_result(root, false, "base_url"); }));
+    return;
+  }
+  if (!json_string_value(body, "api_key", key, openai_realtime::MAX_API_KEY))
+    key.clear();
+  const uint32_t gen = this->openai_->request_models(base, key);
+  key.assign(key.size(), '\0');
+  openai_send_json(request, 200, json::build_json([gen](JsonObject root) { openai_realtime::fill_ok_gen(root, gen); }));
+}
+
+void WebUIHandler::handle_openai_test_(AsyncWebServerRequest *request) {
+  if (this->openai_ == nullptr) {
+    request->send(404, "application/json", "{}");
+    return;
+  }
+  const uint32_t gen = this->openai_->request_test();
+  openai_send_json(request, 200, json::build_json([gen](JsonObject root) { openai_realtime::fill_ok_gen(root, gen); }));
+}
+#endif  // USE_OPENAI_REALTIME
+
 bool WebUIHandler::take_ma_write(MaWrite &out) {
   if (!this->ma_pending_.load(std::memory_order_acquire))
     return false;
@@ -3432,6 +3581,13 @@ void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
   // %u with an explicit cast rather than PRIu32: these are raw string literals, so a PRIu32 in the
   // middle of one is not a macro at all - it is the eleven characters `" PRIu32 "`.
   w.printf(R"("reset":"%s","uptime":%u,)", reset_reason_str_(), static_cast<unsigned int>(millis_64() / 1000));
+
+#ifdef USE_OPENAI_REALTIME
+  // Whether Settings > OpenAI exists on this build, and whether a Realtime conversation is live.
+  if (this->openai_ != nullptr)
+    w.printf(R"("oai":{"on":%s,"st":"%s"},)", this->openai_->is_enabled() ? "true" : "false",
+             openai_realtime::session_state_name(this->openai_->get_state()));
+#endif
 
 #ifdef USE_SAT1_CRASH_REPORT
   // How many crash records /api/sat1/crash holds, so the card knows to fetch without a poll of its

@@ -26,6 +26,8 @@ const SUBS = [
   ["security", "security"],
   ["logs", "logs"],
   ["integrations", "integrations"],
+  // Builds with the openai_realtime component only; Settings sends it to Device Info elsewhere.
+  ["openai", "openai"],
   ["recovery", "recovery"],
   // Developer builds only (config/satellite1.dev.yaml). Shell code hides it elsewhere, and on a
   // release build Settings sends it to Device Info.

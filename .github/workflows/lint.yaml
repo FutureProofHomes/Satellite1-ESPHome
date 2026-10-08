@@ -76,6 +76,33 @@ jobs:
           g++ -std=c++17 -O1 -Wall -o ring_fx_core_test esphome/components/satellite1_ring/test/ring_fx_core_test.cpp
           ./ring_fx_core_test esphome/components/satellite1_web_ui/frontend/test/ringfx-golden.txt
 
+  openai-realtime-utils:
+    name: OpenAI Realtime helpers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # The pure parts of the openai_realtime component - URL derivation (kept in step with the
+      # web app's lib/openai.js), JSON scanning, base64 and the 16 -> 24 kHz resampler - on the host.
+      - name: Build and run the helper test
+        run: |
+          g++ -std=c++17 -O2 -Wall -I esphome/components/openai_realtime -o test_rt_util \
+            tests/openai_realtime/test_rt_util.cpp esphome/components/openai_realtime/rt_util.cpp
+          ./test_rt_util
+
+      # Every JSON message the component builds, against the ArduinoJson release ESPHome 2026.9
+      # pins; then an independent parser (Python's json) validates every one of them.
+      - name: Fetch ArduinoJson 7.4.3
+        run: git clone --depth 1 --branch v7.4.3 https://github.com/bblanchon/ArduinoJson.git /tmp/ArduinoJson
+      - name: Build and run the message test
+        run: |
+          g++ -std=c++17 -O2 -Wall -I esphome/components/openai_realtime -I /tmp/ArduinoJson/src -o test_rt_messages \
+            tests/openai_realtime/test_rt_messages.cpp esphome/components/openai_realtime/rt_messages.cpp \
+            esphome/components/openai_realtime/rt_util.cpp
+          ./test_rt_messages
+          ./test_rt_messages --dump | python3 -c 'import json, sys; [json.loads(line) for line in sys.stdin]'
+
   web-ui-bundle:
     name: web UI bundle
     runs-on: ubuntu-latest

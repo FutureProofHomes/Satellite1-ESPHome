@@ -35,6 +35,10 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
+  - id: realtime_duck_db
+    type: int
+    restore_value: no
+    initial_value: '0'
   - id: announcement_duck_db
     type: int
     restore_value: no
@@ -137,65 +141,83 @@ micro_wake_word:
                           else:
                             - if:
                                 condition:
-                                  voice_assistant.is_running:
+                                  openai_realtime.is_active:
                                 then:
-                                  # A response this device routed elsewhere is playing there too, so the local
-                                  # stop fans out. The script's own guard makes it free when nothing was routed.
-                                  - voice_assistant.stop:
-                                  - script.execute: tts_remote_stop
-                                # Stop any other media player announcement
+                                  # A live OpenAI Realtime conversation (common/openai_realtime.yaml):
+                                  # the wake word said again hangs up, as it stops the pipeline below.
+                                  - openai_realtime.stop:
                                 else:
                                   - if:
                                       condition:
-                                        media_player.is_announcing:
-                                          id: external_media_player
-
+                                        voice_assistant.is_running:
                                       then:
-                                        # Ahead of the local stop on purpose: the broadcast's guard reads the
-                                        # announcement source's state, and stopping the pipeline is what makes
-                                        # that unreadable. Order is enough - the stop below is a command the
-                                        # media player processes on its own loop, after this guard has run.
-                                        - script.execute: tts_stop_broadcast
-                                        - media_player.stop:
-                                            announcement: true
-                                            id: external_media_player
-                                        # The usual path for "stop" mid-response: the pipeline has ended by the
-                                        # time the audio is still playing, so is_running above is already false.
+                                        # A response this device routed elsewhere is playing there too, so the local
+                                        # stop fans out. The script's own guard makes it free when nothing was routed.
+                                        - voice_assistant.stop:
                                         - script.execute: tts_remote_stop
-                                      # Start the voice assistant and play the wake sound, if enabled
+                                      # Stop any other media player announcement
                                       else:
-                                        # Ahead of the local chime so the call is out before the 300ms below,
-                                        # and outside the switch beneath it because that one governs this
-                                        # device's speaker alone - each target's own Wake sound decides for
-                                        # itself. Everything that suppresses the local chime still suppresses
-                                        # this: muted microphones, a ringing timer, a running assistant and an
-                                        # announcement already playing are all branches that never reach here.
-                                        - script.execute: remote_wake_chime_send
-                                        # This wake word's finished speaking detection, copied onto Home
-                                        # Assistant's select before the start that reads it (see the
-                                        # select: block below). The write leaves from the web UI's loop
-                                        # within an iteration; the chime's 300ms covers its trip, and
-                                        # without a chime a queued write gets 150ms of its own. Nothing
-                                        # queued - unset, or already Home Assistant's value - waits for
-                                        # nothing.
                                         - if:
                                             condition:
-                                              switch.is_on: wake_sound
+                                              media_player.is_announcing:
+                                                id: external_media_player
+
                                             then:
-                                              - lambda: id(web_ui_app)->queue_fsd_for(wake_word);
-                                              - script.execute:
-                                                  id: play_sound
-                                                  priority: true
-                                                  sound_file: "wake_word_triggered_sound"
-                                              - delay: 300ms
+                                              # Ahead of the local stop on purpose: the broadcast's guard reads the
+                                              # announcement source's state, and stopping the pipeline is what makes
+                                              # that unreadable. Order is enough - the stop below is a command the
+                                              # media player processes on its own loop, after this guard has run.
+                                              - script.execute: tts_stop_broadcast
+                                              - media_player.stop:
+                                                  announcement: true
+                                                  id: external_media_player
+                                              # The usual path for "stop" mid-response: the pipeline has ended by the
+                                              # time the audio is still playing, so is_running above is already false.
+                                              - script.execute: tts_remote_stop
+                                            # Start the voice assistant and play the wake sound, if enabled
                                             else:
+                                              # Ahead of the local chime so the call is out before the 300ms below,
+                                              # and outside the switch beneath it because that one governs this
+                                              # device's speaker alone - each target's own Wake sound decides for
+                                              # itself. Everything that suppresses the local chime still suppresses
+                                              # this: muted microphones, a ringing timer, a running assistant and an
+                                              # announcement already playing are all branches that never reach here.
+                                              - script.execute: remote_wake_chime_send
+                                              # This wake word's finished speaking detection, copied onto Home
+                                              # Assistant's select before the start that reads it (see the
+                                              # select: block below). The write leaves from the web UI's loop
+                                              # within an iteration; the chime's 300ms covers its trip, and
+                                              # without a chime a queued write gets 150ms of its own. Nothing
+                                              # queued - unset, or already Home Assistant's value - waits for
+                                              # nothing.
                                               - if:
                                                   condition:
-                                                    lambda: return id(web_ui_app)->queue_fsd_for(wake_word);
+                                                    switch.is_on: wake_sound
                                                   then:
-                                                    - delay: 150ms
-                                        - voice_assistant.start:
-                                            wake_word: !lambda return wake_word;
+                                                    - lambda: id(web_ui_app)->queue_fsd_for(wake_word);
+                                                    - script.execute:
+                                                        id: play_sound
+                                                        priority: true
+                                                        sound_file: "wake_word_triggered_sound"
+                                                    - delay: 300ms
+                                                  else:
+                                                    - if:
+                                                        condition:
+                                                          lambda: return id(web_ui_app)->queue_fsd_for(wake_word);
+                                                        then:
+                                                          - delay: 150ms
+                                              # Settings > OpenAI's "Use for conversations": a live OpenAI
+                                              # Realtime conversation instead of the Assist pipeline. The
+                                              # chime above already played; the FSD write it queued is
+                                              # harmless (Home Assistant's select, unused here).
+                                              - if:
+                                                  condition:
+                                                    openai_realtime.is_enabled:
+                                                  then:
+                                                    - openai_realtime.start:
+                                                  else:
+                                                    - voice_assistant.start:
+                                                        wake_word: !lambda return wake_word;
 
 # Runtime wake word loading: the device's two wake word slots, which the web app's Primary/Secondary
 # pickers write. A slot holds a built-in model id or a microWakeWord manifest URL; URLs are
@@ -539,7 +561,7 @@ script:
           const float ref = (voice_vol > media_vol) ? voice_vol : media_vol;
 
           const bool voice_active =
-              id(va).is_running() ||
+              id(va).is_running() || id(oai_rt).is_active() ||
               id(external_media_player).state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING ||
               id(timer_ringing).state;
 
@@ -572,6 +594,9 @@ script:
 
           id(media_duck_db) = clamp(media_duck, 0, max_duck);
           id(announcement_duck_db) = clamp(ann_duck, 0, max_duck);
+          // An OpenAI Realtime conversation always plays here, at the voice level: TTS routing
+          // has no say over it (its speech is not an announcement and never leaves the device).
+          id(realtime_duck_db) = clamp((int) (db_per_unit * (ref - voice_vol) + 0.5f), 0, max_duck);
           // The same remap the media player applies to its own volume, against ref instead of
           // media_vol. That is what makes DACProxy's floor exact rather than approximate: the two
           // writers differ only in their input.
@@ -600,6 +625,10 @@ script:
       - mixer_speaker.apply_ducking:
           id: announcement_mixing_input
           decibel_reduction: !lambda return (uint8_t) id(announcement_duck_db);
+          duration: 0.0s
+      - mixer_speaker.apply_ducking:
+          id: realtime_mixing_input
+          decibel_reduction: !lambda return (uint8_t) id(realtime_duck_db);
           duration: 0.0s
       - if:
           condition:

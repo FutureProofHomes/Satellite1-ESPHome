@@ -99,6 +99,8 @@ packages:
   spk: !include common/speaker.yaml
   mp: !include common/media_player.yaml
   va: !include common/voice_assistant.yaml
+  # OpenAI Realtime conversations over a WebSocket, configured in the web UI (Settings > OpenAI).
+  openai_rt: !include common/openai_realtime.yaml
   # An inline package purely for where it sits: handing the Remote TTS Targets their volumes back has
   # to reach Home Assistant before the calls that play the response on them, and ESPHome runs a
   # trigger's automations in merge order - so this must be listed ahead of tts_routing, which owns

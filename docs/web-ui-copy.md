@@ -1215,3 +1215,59 @@ substitutions in `config/common/voice_assistant.yaml`. They have to stay aligned
 They sit in the header of the Assistant card on the home page, above the transcript: the phase and the
 words it produced belong together. The transcript rows are labelled `User` and `Assist` — the two
 parties — rather than the earlier `heard` and `said`, which read as verbs about the device.
+
+---
+
+## Settings > OpenAI
+
+The page for the OpenAI Realtime voice component (docs/openai-realtime.md). Shown only on builds
+that include `openai_realtime` (the state payload's `oai` key). Strings live in `copy.js` under the
+`oai_` prefix.
+
+| Key | Text |
+| --- | --- |
+| `oai_card` | OpenAI Realtime |
+| `oai_status_card` | Conversation |
+| `oai_enabled` | Use for conversations |
+| `oai_base_url` | Base URL |
+| `oai_connects_to` | Connects to |
+| `oai_bad_url` | Enter an address starting with https://, http://, wss:// or ws://. |
+| `oai_api_key` | API key |
+| `oai_key_ph` | sk-… |
+| `oai_key_stored` | Stored key %s - type to replace |
+| `oai_key_remove` | Remove the stored key |
+| `oai_key_keep` | Keep the stored key |
+| `oai_key_dropped` | This is a different server, so the stored key will not be sent to it. Type a key for this server, or save without one if it needs none. |
+| `oai_needs_key` | api.openai.com needs an API key before a conversation can start. |
+| `oai_model` | Model |
+| `oai_voice` | Voice |
+| `oai_step_connect` / `oai_step_choose` | 1. Connect / 2. Choose the model and voice |
+| `oai_connect` / `oai_refresh` | Connect / Refresh lists |
+| `oai_connecting` | Connecting and fetching the model list… |
+| `oai_not_connected` | Not connected yet. |
+| `oai_connected` | Connected - this server offers %m and %v. (`oai_n_models`, `oai_n_voices`: "%d Realtime model(s)", "%d voice(s)") |
+| `oai_connected_no_list` | Connected - this server has no model list. |
+| `oai_connect_first_models` / `oai_connect_first_voices` | Connect to load the models / Connect to load the voices |
+| `oai_no_model_list` | This server lists no models - type the model name it expects. |
+| `oai_no_voice_list` | This server lists no voices - type the voice name it expects. |
+| `oai_server_voices` | %d of these come from the server's own voice list. |
+| `oai_not_offered` | not offered by this server |
+| `oai_save_connect_first` | Connect successfully before saving a new address, key, model or voice. |
+| `oai_local_tls` | A server on your network usually has no publicly trusted certificate - the device only accepts those. Use http:// (or ws://) for it. |
+| `oai_optional_local` | (optional for a local server) |
+| `oai_protocol` | Protocol |
+| `oai_save` / `oai_saving` / `oai_saved` | Save / Saving… / OpenAI settings saved |
+| `oai_save_failed` | The device did not answer. Check it is online and try again. |
+| `oai_load_failed` | Could not read the OpenAI settings from the device. |
+| `oai_test` / `oai_testing` | Test connection / Testing… |
+| `oai_test_save_first` | Save your changes first |
+| `oai_status` | Status |
+| `oai_in_use` | Wake word starts |
+| `oai_in_use_yes` / `oai_in_use_no` | OpenAI Realtime / Home Assistant |
+| `oai_last_error` | Last error |
+
+Hints: `oai_connection` (what the base URL is - OpenAI or any compatible server, local ones
+included - that the pickers offer what the connected server lists, where the key is kept),
+`oai_enabled` (which starts the switch reroutes, and how a conversation ends) and `oai_protocol`
+(the two Realtime wire formats and that the device detects which one a server speaks).
+Field refusals from the device (`SAVE_ERRORS` in `lib/openai.js`) name the field in plain words.

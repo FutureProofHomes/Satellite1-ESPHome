@@ -352,7 +352,7 @@ export function Satellite1Now({
   const { device, deviceError } = useDeviceState(tab === 'SETTINGS' ? 2000 : 10000);
   // Developer is a dev-build page; the dot says the mic monitor is still listening or recording
   // after the person has walked off to another page.
-  const settingsRoutes = SETTINGS_ROUTES.filter(r => r.slug !== 'developer' || hasDevTools(device));
+  const settingsRoutes = SETTINGS_ROUTES.filter(r => (r.slug !== 'developer' || hasDevTools(device)) && (r.slug !== 'openai' || !!device?.oai));
   const [micOn, setMicOn] = useState(micActive());
   useEffect(() => subscribeMic(() => setMicOn(micActive())), []);
   const subLabel = (r: { slug: string; label: string }) => (r.slug === 'developer' && micOn ? <>{r.label}<span className="dev-dot" aria-hidden="true" /></> : r.label);

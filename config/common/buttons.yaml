@@ -154,9 +154,12 @@ binary_sensor:
                     else:
                       - if:
                           condition:
-                            voice_assistant.is_running:
+                            or:
+                              - voice_assistant.is_running:
+                              - openai_realtime.is_active:
                           then:
                             - voice_assistant.stop:
+                            - openai_realtime.stop:
                           else:
                             - if:
                                 condition:

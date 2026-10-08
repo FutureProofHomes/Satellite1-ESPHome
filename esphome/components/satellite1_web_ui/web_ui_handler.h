@@ -37,6 +37,11 @@
 #include "esphome/components/crash_report/crash_report.h"
 #endif
 
+#ifdef USE_OPENAI_REALTIME
+#include "esphome/components/openai_realtime/openai_realtime.h"
+#include "esphome/components/json/json_util.h"
+#endif
+
 #ifdef USE_SAT1_WEB_UI_AMP
 #include "esphome/components/tas2780/tas2780.h"
 #endif
@@ -561,6 +566,12 @@ class WebUIHandler : public AsyncWebHandler {
   void set_crash_report(crash_report::CrashReport *cr) { this->crash_report_ = cr; }
 #endif
 
+#ifdef USE_OPENAI_REALTIME
+  /// The OpenAI Realtime voice component, behind Settings > OpenAI (GET/POST /api/sat1/openai,
+  /// POST /api/sat1/openai/models and /api/sat1/openai/test). Every call into it is thread-safe.
+  void set_openai_realtime(openai_realtime::OpenAIRealtime *rt) { this->openai_ = rt; }
+#endif
+
 #ifdef USE_SAT1_LOG_HISTORY
   /// The rings GET /api/sat1/log serves. Begun from generated code, ahead of every component's
   /// setup, so the history starts with the boot rather than with this component's turn.
@@ -639,6 +650,12 @@ class WebUIHandler : public AsyncWebHandler {
     MA_SET,
     MA_CFG,
     MA_CFG_SET,
+#ifdef USE_OPENAI_REALTIME
+    OPENAI,         // GET  /api/sat1/openai
+    OPENAI_SET,     // POST /api/sat1/openai         (JSON body)
+    OPENAI_MODELS,  // POST /api/sat1/openai/models  (JSON body)
+    OPENAI_TEST,    // POST /api/sat1/openai/test
+#endif
     SEL,
     SEL_SET,
     MUTE_HOLD,
@@ -754,6 +771,19 @@ class WebUIHandler : public AsyncWebHandler {
   /// Loads the stored connection once, lazily: the first request that needs it pays the flash
   /// read, and a device whose owner never connects the tier never touches the preference at all.
   void ma_cfg_load_();
+#ifdef USE_OPENAI_REALTIME
+  /// GET /api/sat1/openai: the stored connection (never the key - only whether one is stored and its
+  /// last four characters), the session's live state, and the latest /models and test results.
+  void handle_openai_(AsyncWebServerRequest *request);
+  /// POST /api/sat1/openai: {"enabled","base_url","model","voice"[,"api_key"][,"clear_key"]}. An
+  /// absent api_key keeps the stored one (unless the base URL moved to another host).
+  void handle_openai_set_(AsyncWebServerRequest *request);
+  /// POST /api/sat1/openai/models: {"base_url"[,"api_key"]} - starts the background /models fetch
+  /// the page runs whenever its base URL changes; the result rides GET /api/sat1/openai.
+  void handle_openai_models_(AsyncWebServerRequest *request);
+  /// POST /api/sat1/openai/test: a real Realtime handshake with the saved settings, no audio.
+  void handle_openai_test_(AsyncWebServerRequest *request);
+#endif
 #ifdef USE_WIFI
   /// GET /api/sat1/wifi/scan: the networks the last scan saw, deduplicated by SSID (a mesh
   /// answers once per node) and read straight from the wifi component's own result vector - the
@@ -1035,6 +1065,10 @@ class WebUIHandler : public AsyncWebHandler {
 
 #ifdef USE_SAT1_CRASH_REPORT
   crash_report::CrashReport *crash_report_{nullptr};
+#endif
+
+#ifdef USE_OPENAI_REALTIME
+  openai_realtime::OpenAIRealtime *openai_{nullptr};
 #endif
 
 #ifdef USE_SAT1_LOG_HISTORY

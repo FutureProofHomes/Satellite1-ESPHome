@@ -18,6 +18,7 @@ external_components:
       # Vendored (see esphome/components/micro_wake_word/FPH_VENDOR.md).
       - micro_wake_word
       - mww_runtime_loader
+      - openai_realtime
       - satellite1
       - satellite1_radar
       - satellite1_ring

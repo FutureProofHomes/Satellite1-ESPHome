@@ -245,6 +245,11 @@ class Satellite1WebUI : public Component {
   void set_crash_report(crash_report::CrashReport *cr) { this->handler_.set_crash_report(cr); }
 #endif
 
+#ifdef USE_OPENAI_REALTIME
+  /// The OpenAI Realtime component behind Settings > OpenAI. From generated code.
+  void set_openai_realtime(openai_realtime::OpenAIRealtime *rt) { this->handler_.set_openai_realtime(rt); }
+#endif
+
 #ifdef USE_SAT1_LOG_HISTORY
   /// From generated code, before any component's setup, so the history begins at boot.
   void begin_log_history(size_t size, size_t alert_size, uint8_t level);

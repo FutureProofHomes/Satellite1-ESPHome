@@ -41,6 +41,13 @@ try:
 except ImportError:
     CrashReport = None
 
+# Optional too: without openai_realtime in the build, Settings > OpenAI and the /api/sat1/openai*
+# endpoints do not exist and the state payload carries no "oai" key, which is what hides the page.
+try:
+    from esphome.components.openai_realtime import OpenAIRealtime
+except ImportError:
+    OpenAIRealtime = None
+
 # Optional again: without the TAS2780 in the build, GET /api/sat1/amp does not exist and the
 # Developer page's TAS2780 card renders without its live readings. The class lives in
 # the platform module (audio_dac.py) because tas2780 is an audio_dac platform, not a component.
@@ -97,6 +104,7 @@ CONF_ON_PASSWORD_CHANGE = "on_password_change"
 CONF_MICRO_WAKE_WORD_ID = "micro_wake_word_id"
 CONF_WAKE_LOADER_ID = "wake_loader_id"
 CONF_CRASH_REPORT_ID = "crash_report_id"
+CONF_OPENAI_REALTIME_ID = "openai_realtime_id"
 CONF_VOICE_ASSISTANT_ID = "voice_assistant_id"
 CONF_VOICE_PHASE = "voice_phase"
 CONF_MEDIA_PLAYER_ID = "media_player_id"
@@ -292,6 +300,13 @@ CONFIG_SCHEMA = cv.All(
             **(
                 {cv.Optional(CONF_CRASH_REPORT_ID): cv.use_id(CrashReport)}
                 if CrashReport is not None
+                else {}
+            ),
+            # The OpenAI Realtime voice component (common/openai_realtime.yaml), whose connection -
+            # base URL, API key, model, voice - Settings > OpenAI edits.
+            **(
+                {cv.Optional(CONF_OPENAI_REALTIME_ID): cv.use_id(OpenAIRealtime)}
+                if OpenAIRealtime is not None
                 else {}
             ),
             # Media players are not covered by web_server either - it registers no media_player
@@ -543,6 +558,11 @@ async def to_code(config):
 
     if CONF_CRASH_REPORT_ID in config:
         cg.add(var.set_crash_report(await cg.get_variable(config[CONF_CRASH_REPORT_ID])))
+
+    if CONF_OPENAI_REALTIME_ID in config:
+        cg.add(
+            var.set_openai_realtime(await cg.get_variable(config[CONF_OPENAI_REALTIME_ID]))
+        )
 
     # Begun here rather than in setup() so the rings catch every component's setup logging: this
     # statement runs ahead of App.setup(), and after the logger's own pre_setup, which its higher

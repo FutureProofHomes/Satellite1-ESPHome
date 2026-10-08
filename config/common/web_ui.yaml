@@ -220,6 +220,10 @@ satellite1_web_ui:
   # session-gated - the dump is raw RAM contents.
   crash_report_id: crash_rpt
 
+  # The OpenAI Realtime voice component (common/openai_realtime.yaml): Settings > OpenAI edits its
+  # base URL, API key, model and voice, and GET /api/sat1/state carries its "oai" flag.
+  openai_realtime_id: oai_rt
+
   # The local speaker player, for GET/POST /api/sat1/media - web_server has no media_player handler,
   # so the endpoints are the only way the app sees or moves it. Its Sendspin counterpart is named in
   # common/sendspin.yaml beside the player it points at; the endpoints prefer that one while it is

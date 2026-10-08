@@ -62,6 +62,7 @@ script:
             and:
               - switch.is_off: master_mute_switch
               - not: voice_assistant.is_running
+              - not: openai_realtime.is_active
           then:
             - lambda: |-
                 id(web_ui_app)->note_manual_start(word);
@@ -74,8 +75,15 @@ script:
                 priority: true
                 sound_file: "center_button_press_sound"
             - delay: 300ms
-            - voice_assistant.start:
-                wake_word: !lambda 'return word;'
+            # Settings > OpenAI's "Use for conversations" (common/openai_realtime.yaml).
+            - if:
+                condition:
+                  openai_realtime.is_enabled:
+                then:
+                  - openai_realtime.start:
+                else:
+                  - voice_assistant.start:
+                      wake_word: !lambda 'return word;'
 
   # The orb's tap: silence a ringing timer, stop a running assistant, or start one - the button's
   # single press in the same order, without its media pause. Nothing during start-up, as the button,
@@ -99,9 +107,12 @@ script:
                 else:
                   - if:
                       condition:
-                        voice_assistant.is_running:
+                        or:
+                          - voice_assistant.is_running:
+                          - openai_realtime.is_active:
                       then:
                         - voice_assistant.stop:
+                        - openai_realtime.stop:
                       else:
                         - script.execute:
                             id: assist_start_by_hand
