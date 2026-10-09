@@ -61,7 +61,7 @@ Five tabs, all on the hash, in this nav order:
 | `#/home` | The voice orb (assistant phase, mute, voice volume) and its Customize drawer - the orb's colors, and the LED ring's color, brightness, style and per-moment animations - sensor readings with sparklines and calibration, timers, and the transcript per wake word |
 | `#/wake-word` | Which wake words the device answers to, each with its sensitivity tuner, voice pipeline and Finished Speaking Detection; the wake chime and the stop word |
 | `#/presence` | Live radar plot with zones, or gate energies, and the radar's own settings |
-| `#/audio` | The local speaker and voice volume; TTS routing and area ducking as trees over your Home Assistant areas, with the remote speakers' volume, mic guard, timer ring and wake chime |
+| `#/audio` | One Audio Routing card: the three announcement and ducking levels, then one list of your Home Assistant areas and speakers with an Announce and a Duck box on each row (this device's own row holds "Announce on this device"), then the wake chime, timer ring and echo guard for the speakers ticked to Announce; the speaker's Channel below |
 | `#/settings/<page>` | `device` (facts and buttons), `updates`, `security` (auth token, password), `logs` (live logs, crash reports), `integrations` (Home Assistant side panel), `recovery` (ESP32, XMOS and radar maintenance), `developer` (developer builds only: the XMOS firmware picker, the mic monitor, the TAS2780 amplifier, logs from several devices, the system monitor), `community` |
 
 When the device has a media player, the media bar rides along the bottom of every tab.
@@ -391,13 +391,13 @@ truncated, so a very large installation degrades visibly rather than silently.
 
 Each player row carries a capability int alongside its id and name — bit 1 says the player answers
 `media_player.play_media`, bit 2 `media_player.volume_set` — read from Home Assistant's
-`supported_features` when the payload is rendered. The routing tree greys out rows without bit 1 and
-the ducking tree rows without bit 2, each with a one-line reason, rather than omitting them: a player
-silently missing from the list reads as a bug. Selecting a whole area shows a full tick on the area
+`supported_features` when the payload is rendered. The speaker list disables a row's Announce box
+without bit 1 and its Duck box without bit 2, captioning the row with a one-line reason, rather than
+omitting it: a player silently missing from the list reads as a bug. Selecting a whole area shows a full tick on the area
 and on its eligible players, while the greyed rows stay unticked — the call skips them, so showing
 them selected would misstate what plays — and the stored selection still says "whole area", which is
-what keeps the Route TTS To All Area Players switch in Home Assistant flipping with it. Permanently
-ineligible rows — an incompatible player or this device's own media player — are always shown
+what keeps the Route Announcements To All Area Players switch in Home Assistant flipping with it. Permanently
+ineligible boxes — an incompatible player's, or this device's own Duck box — are always shown
 unticked and disabled, even if an old explicit selection still names one. The call-time walks in
 `tts_routing.yaml` and `area_ducking.yaml` apply the same capability tests and reject this device
 itself when expanding the selection, which matters more than the cosmetics: Home Assistant rejects
@@ -406,13 +406,34 @@ incompatible player in a selected area used to be able to silence an announcemen
 in the call.
 
 Each row also carries an availability flag: 0 when Home Assistant reported the player `unavailable`
-or `unknown` at render time. An offline row greys out and gains an "Offline" marker in both trees,
-but — unlike a missing capability — its checkbox keeps working and a prior tick stays ticked, because
+or `unknown` at render time. An offline row greys out and gains an "Offline" caption,
+but — unlike a missing capability — its checkboxes keep working and a prior tick stays ticked, because
 being offline is transient and the selection is a setting its owner still wants when the speaker
 returns. The call-time walk in `tts_routing.yaml` applies the same state test, so no routing, chime,
 stop or volume call targets an offline player; ducking's walk already rejected unavailable states.
 Availability is as fresh as the cached payload — synced on connect and once per page load — so a
 player that drops while the page is open shows stale until reload, like every other fact in it.
+
+Two more capability bits say how a player is ducked while it plays this device's responses (October
+2026). Bit 8 is a Sonos, native or `sonos_cloud`, or a Satellite1 with an Announcement Volume
+control: the firmware holds it announcing, so it lowers its own music. Bit 16 is any other brand
+that answers `volume_set`, or whose features are unknown: the firmware turns it down to Remote
+Ducking Volume. A Satellite1 on older firmware gets neither. These are the same tests
+`duck_players_jinja` in `area_ducking.yaml` applies at call time; see
+[TTS-Routing.md](TTS-Routing.md#routed-speakers-stay-ducked). `routedLocks` in `lib/audio.js` finds
+every row that is eligible to announce, ticked to Announce and carries either bit, and the list shows
+those rows' Duck boxes ticked and disabled. A ticked box that could be unticked would be a false
+promise, since the firmware ducks them regardless. A locked box counts as ticked in its area's Duck
+box and count, so a room whose players all play responses reads whole, and the bulk boxes never add a
+locked player to the Duck selection. That way, unticking Announce later does not leave a speaker
+ducked by a pick nobody made.
+
+The one exception is a Satellite1 on older firmware ticked to Announce: its Duck box stays free and
+the row is captioned "Older firmware" (`olderSatellite`), because the firmware ducks it only if it is
+ticked to Duck. Both bits are read off the payload, so the caption appears only when some row in it
+carries bit 8 or 16 (`heldBits`). When this page drives a device on older firmware — through the
+device switcher — no row carries either bit, and every Sonos would otherwise read as an older
+Satellite1.
 
 The device rows carry the switcher's variant labels alongside the jump fields (September 2026): the
 device's transport (`e`/`w`, read from its own Network Status sensor's `Eth:`/`WiFi:` prefix — runtime
@@ -688,10 +709,12 @@ the app's dark background, so the home-screen icon, the splash and the app agree
 
 ## The routing and ducking selection
 
-The Config route's two trees write one selection that lives on the device, in NVS, and is read and
-written at `GET`/`POST /api/sat1/sel`. It stores whole areas by id, individually chosen players, and
-carve-outs from a whole area — so "the whole living room except the TV" is stored as an area plus one
-exclusion, and a speaker added to that area later is picked up without anyone revisiting the setting.
+The Audio page's speaker list writes one selection that lives on the device, in NVS, and is read and
+written at `GET`/`POST /api/sat1/sel`. It holds two lists, `routing` behind the Announce column and
+`duck` behind the Duck column, plus the `local` flag. Each list stores whole areas by id,
+individually chosen players, and carve-outs from a whole area — so "the whole living room except the
+TV" is stored as an area plus one exclusion, and a speaker added to that area later is picked up
+without anyone revisiting the setting.
 
 The two switches Home Assistant keeps are projections of that selection rather than peers of it, so
 there is nothing to keep in step. Both carry `restore_mode: DISABLED`, without which ESPHome acts on a
@@ -699,6 +722,49 @@ restored value at boot and the turn action writes a stale state into the store.
 
 This replaced a comma-separated text entity, and it is a breaking change with renamed and deleted
 entities. [TTS-Routing.md](TTS-Routing.md) has the upgrade notes.
+
+### The Audio page's layout
+
+One card, **Audio Routing**, with "Route assistant responses, announcements, timer rings and wake
+chimes to selected speakers" under the title, then the Speaker card with the Channel select (October
+2026; until then routing and ducking were two cards, each with its own tree).
+
+- **The levels**, together in one tinted panel at the top:
+  - **Announcement Volume** (`announcement_volume`, "Follow speaker volume" at 0). This device's own
+    level for responses, timers and chimes, so it never greys.
+  - **Remote Announcement Volume** (`remote_announcement_volume`, "Follow speaker volume" at 0),
+    greyed while nothing is ticked to Announce.
+  - **Remote Ducking Volume** (`duck_volume`, the `duck_area_volume` number; "Mute playback" at 0),
+    greyed while nothing is ticked to Duck and no speaker ticked to Announce is turned down to it. A
+    Sonos or Satellite1 ticked to Announce alone leaves it greyed, because those lower their own
+    music instead.
+- **The speaker list**, set slightly apart below the panel. A header row names the columns
+  (Speaker, Announce, Duck) and carries the ⓘ that explains them. Each area is a row with an
+  Announce and a Duck box that tick the whole area, and a count under its name ("Announce 1/10 ·
+  Duck 1/11"); the area this device sits in opens by default. Speakers with no area go under "No
+  Area Assigned". Ticking a speaker's Announce box locks its Duck box on, as described above.
+- **This device's own row** holds the "Announce on this device" setting in its Announce box, which
+  writes the selection's `local` flag. It is greyed, and shown ticked, while nothing else is ticked
+  to Announce, because a response with nowhere else to go always plays here. Its caption says what
+  that means now: "always answers when nothing else announces", "answers here too" or "answers only
+  on the speakers ticked". Its Duck box is always disabled: this device never ducks itself through
+  the list. If the payload has no row for this device (`selfGroup` returns `undefined`, as when Home
+  Assistant has not sent its media player), an "Announce on this device" switch takes its place
+  above the list.
+- **For speakers ticked to Announce**: **Remote Wake Chime**, **Remote Timer Ring** and **Remote
+  Echo Guard**, all greyed while nothing is ticked to Announce.
+
+The levels render before Home Assistant has sent any areas, so the sliders never disappear with the
+list. In each slider the reading sits on the label's line when both fit and drops under the label
+when they do not, so a long label is never squeezed; the slider takes the full width below.
+
+Every label is the entity's own name in Home Assistant, so the app and Home Assistant never disagree
+about what a setting is called. Two entities were renamed for it in October 2026: Duck Area Volume
+became **Remote Ducking Volume** and Remote Sync Guard became **Remote Echo Guard**. Their internal
+ids, and the app's keys for them (`duck_volume`, `remote_sync_guard`), stay as they were, because a
+page served by one firmware version reads the entity keys of devices on another through the device
+switcher. Announcement Volume keeps its name because peers find it by an entity id ending in
+`_announcement_volume`. [TTS-Routing.md](TTS-Routing.md) has what the renames do to Home Assistant.
 
 ## Finished speaking detection, per wake word
 

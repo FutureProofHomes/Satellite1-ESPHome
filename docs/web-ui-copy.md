@@ -27,13 +27,13 @@ Attached to the small **i** beside a label. One is open at a time.
 
 The route was called Controls until the September 2026 rename pass; the page is the one you land on,
 so it is named for that. Two hints moved here with their rows in the same pass: `mute` and
-`voice_override`, both now in the Assistant card (the renamed Voice card, whose transcript rows are
-labelled User and Assist rather than heard and said).
+`voice_override`, both into the Assistant card (the renamed Voice card, whose transcript rows are
+labelled User and Assist rather than heard and said). `voice_override` has since gone back to the
+Audio page, renamed `announcement_volume`, where it shares the routing card with the remote level.
 
 | Key | Where | Text |
 | --- | --- | --- |
 | `mute` | Assistant card, Mute microphones | Cuts the microphones in hardware, not software - wake word detection stops with them. The mute button on the device does the same thing. |
-| `voice_override` | Assistant card, Voice Volume Override | How loud this device speaks when the assistant replies, separate from media volume. Zero follows the media volume instead. Speakers you route answers to have their own level - Remote TTS volume, on the Audio page. |
 | `finished_speaking` | Assistant card, Finished speaking detection | How long the assistant waits after you stop talking before it answers. Aggressive answers fastest; Relaxed tolerates longer mid-sentence pauses. Each wake word has its own setting. Home Assistant keeps only one, so just before the assistant listens, the device copies the wake word's choice onto it - which is why Finished speaking detection on Home Assistant's device page changes as different wake words are used. A change made there only lasts until a wake word sets it again. The action button uses the Primary wake word's setting. |
 | `temp` | Calibration editor, title row | Reads high by design - the sensor sits inside a warm enclosure, next to the board. Calibrate against a thermometer in the same room. |
 | `temp_unit` | Temperature editor, Fahrenheit row | Shows temperatures in Fahrenheit throughout this app. The device stores and reports Celsius either way, so Home Assistant and the saved calibration are unaffected. |
@@ -122,7 +122,7 @@ looking at a third of them was the more expensive problem.
 | `usb_power` | USB-C Power Supply | What the USB-C power supply agreed to deliver. Chargers that speak USB Power Delivery negotiate a voltage and the most current they will supply at it - the ~ marks that ceiling: the device draws only what it needs, usually far less. 5 V is a plain supply that negotiated nothing. 9 V or more is what lets the speaker amplifier run at High gain, for full loudness. |
 | `speaker_amp` | TAS2780 card title (Developer) | The chip that drives the built-in speaker. What you hear is three levels multiplied together: the power gain mode the amplifier picks from your USB-C supply, the digital volume the firmware computes from your sliders, and the analog gain set below. |
 | `amp_mode` | TAS2780, Power gain mode (Developer) | Picked automatically from the measured power supply - it is a reading, not a setting. High gain: a 9 V or higher USB-PD supply is connected and the speaker can reach full loudness. Low gain: the device is on a plain 5 V supply, so maximum loudness is reduced. Off: the amplifier is shut down, normally because line out is selected. A supply that negotiates 9 V or more (the USB-C Power Supply row on Device Info) is what unlocks High gain. |
-| `amp_dvc` | TAS2780, Digital volume (Developer) | How far open the amplifier's digital volume control is right now - the level the firmware computes from the volume buttons, Voice Volume Override and ducking. Shown so you can see what the amplifier is actually being fed; it is managed automatically and has no handle here. To change it, use the volume controls. |
+| `amp_dvc` | TAS2780, Digital volume (Developer) | How far open the amplifier's digital volume control is right now - the level the firmware computes from the media volume and Announcement Volume. Shown so you can see what the amplifier is actually being fed; it is managed automatically and has no handle here. To change it, use the volume controls. |
 | `amp_gain` | TAS2780, Analog gain (Developer) | The amplifier's output-level ceiling, applied on top of the digital volume. The notch on the track is the factory default, 15 dBV - the right everyday setting, and the slider snaps to it. Higher values make everything louder but can add distortion, and on a 5 V supply the chip's built-in limiter will duck the sound to protect the power rail. Lower it if the speaker distorts at high volume. |
 | `speaker_channel` | Audio, Speaker card, Channel | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
 | `launch` | Launch card title | Scan the code with a phone, or paste the link into a Home Assistant dashboard button, and that browser lands here already signed in - no password, no button press. The code carries the device's current network address, so any phone on your network can scan it; the link carries the device's permanent name, the right form to paste somewhere that keeps it. Anyone who has either can sign in with it, so treat them like the password. Sign out everywhere revokes them and every session, then issues a new one. |
@@ -377,8 +377,8 @@ expires two minutes after the app's last keepalive and always restores the confi
 The **word picker** expands inline (the modal sheet is retired) from a pill's chevron, `+ Add
 word`, or the empty state's one button (`ww_choose`, under `ww_route_none` — "on the device, no
 cloud" leads for a first-time owner deciding whether to trust a microphone). Inside, it wears the
-/audio route's tree clothes — the sunken scrolling box, group headers with a caret and a count
-pill, the drawn checkbox — because that is the app's one selection-list pattern. A row's small
+/audio route's speaker-list clothes — the sunken scrolling box, group headers with a caret and a
+count pill, the drawn checkbox — because that is the app's one selection-list pattern. A row's small
 facts — languages ("en"), model size ("61 KB"), the `ww_unverified` caveat, the
 training-generation tag that disambiguates twins ("v3"), and `ww_on_other` on the row the other
 slot holds — all wear that same count-pill shape; only the speak button keeps its own glyph. The
@@ -433,28 +433,35 @@ The route was called Config until the September 2026 rename pass. Mute microphon
 volume left for the home page, the wake words card became the Wake Word route above, and the
 speaker's own wiring - the old Audio Output card, grown into Speaker amplifier - moved to
 Diagnostics under the Device card (owner call, September 2026), where it sits beside the USB-C
-Power Supply reading that decides the amp's gain mode. What remains here is where sound goes: the
-two trees.
+Power Supply reading that decides the amp's gain mode. What remains here is where sound goes: one
+Audio Routing card holding the levels, the speaker list, and the three settings that follow a
+response to the speakers ticked to Announce (October 2026; until then routing and ducking were two
+cards with a tree each).
 
-Two controls here still write to entities in `config/common/tts_routing.yaml` and
-`config/common/area_ducking.yaml`, so their wording has to agree with what Home Assistant shows. The
-two trees do not: they write the device's own selection at `/api/sat1/sel`, and they are the only face
-that selection has.
+The levels, the wake chime, the timer ring and the echo guard write to entities in
+`config/common/tts_routing.yaml` and `config/common/area_ducking.yaml`, and each label is that
+entity's name in Home Assistant, so the app and Home Assistant say the same thing. Two entities were
+renamed to make that true: Duck Area Volume is now Remote Ducking Volume and Remote Sync Guard is now
+Remote Echo Guard. Their keys below keep the old ids, because a page served by one firmware reads
+another firmware's entities through the device switcher. The speaker list does not write an entity:
+it writes the device's own selection at `/api/sat1/sel`, and it is the only face that selection has.
 
 | Key | Where | Text |
 | --- | --- | --- |
-| `remote_routing` | Audio routing card title | Plays this device's audio on other speakers as well as this one: the assistant's spoken answers, sign-in prompts, ringing timers, and the wake chime if you turn that on below. Tick a room to include every player in it, or open the room and pick players. Local Speaker is this device's own speaker - untick it and answers play only where you have chosen. |
-| `area_ducking` | Area ducking card title | Turns other speakers down while the assistant listens and answers, then puts them back where they were. Tick a room to cover every player in it. |
-| `remote_tts_volume` | Remote TTS volume | How loud answers are on the remote speakers. This device's own level is Voice Volume Override, on the home page. Sonos reads the level from the announcement itself; anything else has its volume set for the answer and put back afterwards. |
-| `remote_wake_chime` | Remote wake chime | Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to. On Sonos and similar speakers the chime can land up to a second late - their clip playback has a fixed startup cost the device cannot remove. |
-| `remote_timer_ring` | Remote timer ring | Rings a finished timer on the target speakers too, until the alarm is stopped. Saying "stop" at any speaker silences it everywhere. |
-| `remote_sync_guard` | Remote sync guard | How long this device keeps its microphone closed after a routed answer, so it cannot hear its own answer from a speaker running slightly behind and mistake it for you. It only engages when the assistant is about to listen again - a continued conversation or voice sign-in; one-shot answers skip it entirely. |
-| `duck_volume` | Duck volume | The level they drop to. Players already quieter than this are left alone, so a whole-house group does not get turned up. |
+| `audio_routing` | Audio Routing card title | Pick which speakers play this device's responses, and which turn down while you talk to it. A speaker that plays responses is always turned down as well. Tick a room to cover every speaker in it, including ones added later, or open the room and pick speakers. |
+| `announcement_volume` | Announcement Volume, first in the levels panel | How loud this device plays assistant replies, timers, chimes and announcements, separate from the media volume. At 0 it follows the media player volume. The volume buttons change only the media volume. |
+| `remote_announcement_volume` | Remote Announcement Volume, second in the levels panel | How loud this device's responses and timer rings play on the speakers ticked to Announce. Above 0, each plays at this level and gets its own level back afterwards. At 0 each speaker follows its own volume, so a Satellite1 whose volume is 0 stays silent. |
+| `duck_volume` | Remote Ducking Volume, third in the levels panel | The level speakers ticked to Duck drop to. Players already quieter than this are left alone, so a whole-house group does not get turned up. A Sonos or Satellite1 ticked to Announce lowers its own music instead. |
+| `speaker_columns` | Speaker, the speaker list's header row | Announce plays this device's assistant responses, sign-in prompts and ringing timers on the speaker, and the wake chime if Remote Wake Chime is on. Duck turns the speaker down while the assistant listens and answers, then puts it back. A speaker ticked to Announce is always turned down too, so its Duck box fills in by itself - except a Satellite1 on older firmware. This device's own Announce box decides whether it also answers out loud when its responses go to other speakers; timers, chimes and other announcements play here either way. It greys out while nothing else is ticked to Announce, because the device always answers itself then. |
+| `local_speaker` | Announce on this device, the switch that replaces this device's row when Home Assistant has not listed it | Turn off to play responses only on the speakers ticked to Announce. Timers, chimes and other announcements still play here. |
+| `remote_wake_chime` | Remote Wake Chime | Plays the wake chime on the speakers ticked to Announce too, so you can hear that the device heard you from the room the sound is going to. A Satellite1 among them chimes only if its own Wake sound is on. On Sonos and similar speakers the chime can land up to a second late - their clip playback has a fixed startup cost the device cannot remove. |
+| `remote_timer_ring` | Remote Timer Ring | Rings a finished timer on the speakers ticked to Announce too, until the alarm is stopped. Saying "stop" at any speaker silences it everywhere. |
+| `remote_sync_guard` | Remote Echo Guard | How long this device keeps its microphone closed after a routed answer, so it cannot hear its answer echo from a speaker running slightly behind and mistake it for you. It only engages when the assistant is about to listen again - a continued conversation or voice sign-in; one-shot answers skip it entirely. |
 
-`voice_override` and `remote_tts_volume` are the pair most easily confused, and with Voice Volume Override
-back on the home page they are on separate routes again. Each hint therefore names the speakers it
-moves and points at the other by its on-screen label and page, because the hints are now the only
-thing keeping the pair apart.
+`announcement_volume` and `remote_announcement_volume` are the pair most easily confused, so they
+sit next to each other in the levels panel, with labels that differ only by "Remote" and hints that
+each name the speakers they move. Both read "Follow speaker volume" at 0; the hints say what
+following means for each.
 
 Six hints were deleted rather than reworded, and the reason is worth recording: they explained
 switches that no longer exist (`tts_routing`, `tts_local_speaker`, `duck_area`, `duck_tts_targets`) or
@@ -462,13 +469,23 @@ described the tree in prose when the tree now shows the same thing directly (`tt
 `duck_players`). `tts_manual_ids` went with the free-text entity id field it belonged to, replaced by
 the "No Area Assigned" group, which names those players instead of asking someone to know their ids.
 
-The trees carry no ⓘ of their own, because they have no row to hang one off — `remote_routing` and
-`area_ducking` sit on the card titles instead and are where each tree is explained. That is also the only
-place `Local Speaker` is described: it is the one tick whose effect does not follow from its name, since
-it silences this device rather than adding a target.
+`remote_routing` and `area_ducking`, the two cards' title hints, went when the cards merged (October
+2026): `audio_routing` replaces both on the one card title, and `speaker_columns` on the list's
+header row explains what each column does. The window the duck covers ("while the assistant listens
+and answers") is stated in `speaker_columns` and nowhere else, so `duck_volume` deliberately does not
+repeat it - stating it in both made the two bubbles read as descriptions of different features.
 
-`duck_volume` deliberately no longer says when the ducking happens. That is in `area_ducking` directly
-above it, and stating the window in both made the two bubbles read as descriptions of different features.
+The old "Play responses on this device" switch became this device's own Announce box, so the list
+answers "where do responses play?" in one column. `local_speaker` survives only on the stand-in
+switch shown when the device's own row is missing from the list. The row's caption after "This
+device ·" says what the box is doing now: `self_always`, `self_too` or `self_remote_only`.
+
+A speaker ticked to Announce is always ducked - a Sonos or current Satellite1 by its own announcement
+ducking, anything else by volume - so its Duck box shows ticked and disabled. It needs no caption:
+the ticked Announce box beside it is the reason, and `duck_locked` is what a screen reader hears for
+the box. `duck_routed` ("Routed"), the caption the locked rows carried in the old ducking tree, is
+gone. Not every Satellite1 locks: one on older firmware is not kept ducked, so its Duck box stays a
+normal checkbox and its row says `cap_old_firmware` ("Older firmware").
 
 ### Header
 
@@ -710,12 +727,22 @@ the last because `zi_more` already says a zone needs three corners.
 | `ha_blocked` | Home Assistant is not letting this device perform actions, so your areas and speakers cannot be listed - and answers play only on this speaker until it can. |
 | `ha_too_old` | This Home Assistant is older than 2025.12, which cannot answer the calls these lists are built from. Update Home Assistant to choose speakers here. |
 | `show_fix` | Show fix |
-| `ha_no_area` | This device is not in a Home Assistant area, so “Route TTS To All Area Players” and “Duck All Area Players” have no room to refer to. You can still pick any room below. Assign it to an area in Home Assistant and refresh. |
+| `ha_no_area` | This device is not in a Home Assistant area, so “Route Announcements To All Area Players” and “Duck All Area Players” have no room to refer to. You can still pick any room below. Assign it to an area in Home Assistant and refresh. |
 | `ha_no_players` | Home Assistant has no media players at all, so there is nothing to choose between. |
 | `ha_truncated` | Too many areas to send in one go, so the list is cut short. Players already chosen are still used, whether or not they appear below. |
 | `cap_no_media` | Can't play media |
 | `cap_no_volume` | No volume control |
+| `cap_old_firmware` | Older firmware |
 | `cap_self` | This device |
+| `self_always` | always answers when nothing else announces |
+| `self_too` | answers here too |
+| `self_remote_only` | answers only on the speakers ticked |
+| `col_speaker` | Speaker |
+| `col_announce` | Announce |
+| `col_duck` | Duck |
+| `duck_locked` | turned down while it announces |
+| `for_announce` | For speakers ticked to Announce |
+| `local_label` | Announce on this device |
 | `player_offline` | Offline |
 | `cl_aria` | FutureProofHomes community links |
 | `cl_docs` | Docs |
@@ -776,7 +803,7 @@ answer rather than whatever was last chosen for it.
 header. The button itself is only an icon, so this text is the whole of its name.
 
 `ha_refresh` and `ha_refreshing` are gone with the button they labelled. The device's cached list is now
-synced once per load of the app, when the Config route first appears, rather than on demand — so the
+synced once per load of the app, when the Audio route first appears, rather than on demand — so the
 gesture that fetches a newly added speaker is reloading the page. There is no interval behind it: the
 device otherwise only re-asks Home Assistant five seconds after the native API connects. The device
 switcher also asks for a sync each time it opens, so its availability dots are at most a couple of
@@ -1172,25 +1199,34 @@ edit:
   button already say so. `Release notes`, a plain link, stands in when the notes cannot be read. The
   running firmware is Device Info's, with `Up to date` under it, or `Installing…`; an offered update is
   the Updates page's alone, so Device Info says nothing while one is waiting (owner call, October 2026).
-- `Local Speaker`, `No Area Assigned`, `whole area` and the `n/m` counts in the two trees. All four are
-  structure rather than explanation - the first two are row labels and the last two are state readouts.
-- `Play assistant audio on selected players` and `Lower the volume on selected players upon wake word
-  detection`, the two tree headings. Both say what ticking something does, and leave the rest to the card's
-  ⓘ. The second was `Quieten while talking`, which was inaccurate: the duck also covers the listening half
-  of the interaction. It wraps to two lines at every phone width, which is deliberate — the alternative was
-  a heading that stopped short of naming the trigger. The first was `Play assistant responses on selected
-  players`, widened alongside the card's retitle from `Remote routing` to `Audio routing` when the feature
-  grew past responses (sign-in prompts, timer rings, the chime); the Home Assistant entities keep their
-  legacy TTS names, since renaming an ESPHome entity orphans it.
+- `No Area Assigned`, `whole area` and the `n/m` counts in the speaker list, each count prefixed by
+  its column's name (`Announce 1/10 · Duck 1/11`; a column with nothing to count is left out). All
+  three are structure rather than explanation - the first is a row label and the last two are state
+  readouts.
+- `Audio Routing`, the card's title, and `Route assistant responses, announcements, timer rings and
+  wake chimes to selected speakers` directly under it, which says what the card does and leaves the
+  rest to the card's ⓘ. Until the two cards merged (October 2026) this was the routing card, titled
+  `Route Announcement and Assistant Responses`, and the ducking card carried `Lower the volume on
+  selected players upon wake word detection`; that line was `Quieten while talking` before it, which
+  was inaccurate because the duck also covers the listening half of the interaction. The routing card
+  was `Voice Response Routing` over `Route the assistant voice response to selected speakers` before
+  that, renamed when its first box gained this device's own level (owner call, October 2026).
+- The Audio Routing card's labels, which are the Home Assistant entities' names (October 2026): the
+  three levels `Announcement Volume`, `Remote Announcement Volume` and `Remote Ducking Volume`, and
+  `Remote Wake Chime`, `Remote Timer Ring` and `Remote Echo Guard` under the speaker list. They were
+  `Device Announcement & Response Volume`, `Remote Announcement & Response Volume`, `Area Ducking
+  Volume`, `Remote wake chime`, `Remote timer ring` and `Remote mic guard`, with a `Play responses on
+  this device` switch that is now this device's own Announce box.
 - The five route names in the nav drawer — `Home`, `Wake Word`, `Audio`, `Presence`, `Diagnostics`, in
   that order — which are the same strings as the routes themselves. The drawer has no heading; the
   device name is in the bar above it.
 - `Connected` and `Nothing plugged in` on Speaker amplifier's Line out row, and the three volume sliders'
-  zero readouts: `follow media` on Voice Volume Override, `follow device` on Remote TTS volume (zero means
-  "leave every target's volume alone", per tts_routing.yaml), and `mute` on Duck volume — deliberately
-  not "follow device", because area_ducking.yaml is explicit that zero is literal there: ducked players
-  are set to 0% for the length of the interaction. All are readouts of a value rather than descriptions
-  of a control.
+  zero readouts: `Follow speaker volume` on both Announcement Volume and Remote Announcement Volume
+  (on the remote one, zero means "leave every target's volume alone", per tts_routing.yaml), and
+  `Mute playback` on Remote Ducking Volume — deliberately not a "follow" phrase, because
+  area_ducking.yaml is explicit that zero is literal there: ducked players are set to 0% for the
+  length of the interaction. All are readouts of a value rather than descriptions of a control. The
+  readouts drop under their label when the two do not fit side by side, which the layout allows for.
 - The TAS2780 card's own readouts (Settings > Developer): the Analog gain slider speaks dBV, with the factory
   default (15 dBV) marked as a notch on the track that the drag snaps to rather than named in the
   readout — "where was it before I touched it" never needs support, and the hint spells the number
