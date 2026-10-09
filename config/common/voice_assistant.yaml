@@ -22,23 +22,14 @@ globals:
     restore_value: no
     # initial_value: ${voice_assist_not_ready_phase_id}
   # True from the moment a TTS response starts streaming until the announcement pipeline drains.
-  # Set before any audio exists, which is what lets audio_gain_reconcile reach the voice level ahead
-  # of a response this device produced; one arriving from elsewhere is recognized by the pipeline's
-  # HTTP source instead. Either way, wake/timer/button chimes stay at the media level.
+  # Set before any audio exists. audio_gain_reconcile reads it to silence this device's own
+  # response when "Play responses on this device" is off and the response went to other speakers.
   - id: tts_playing
     type: bool
     restore_value: no
     initial_value: 'false'
-  # Gain state computed by audio_gain_reconcile. Written only by that script, so the
-  # apply_ducking templates and audio_gain_raise all see one consistent set of values.
-  - id: media_duck_db
-    type: int
-    restore_value: no
-    initial_value: '0'
-  - id: announcement_duck_db
-    type: int
-    restore_value: no
-    initial_value: '0'
+  # The DAC level audio_gain_reconcile last asked for. Written only by that script, so a deferred
+  # audio_gain_raise applies the newest answer rather than the one that armed it.
   - id: dac_target_volume
     type: float
     restore_value: no
@@ -317,7 +308,8 @@ voice_assistant:
           - script.execute: control_leds
           # Start a script that would potentially enable the stop word if the response is longer than a second
           - script.execute: activate_stop_word_once
-          # The response is now audio, not a chime, so let it play at the Voice Override level.
+          # Marks the response as this device's own, which is what "Play responses on this
+          # device" silences when it is off.
           - lambda: id(tts_playing) = true;
           - script.execute: audio_gain_reconcile
   on_tts_start:
@@ -501,139 +493,106 @@ script:
                 then:
                   - script.execute: stop_word_disarm
 
-  # Single owner of the shared output gain. The mixer has no per-pipeline gain of its own (a
-  # source speaker's set_volume forwards straight to the shared output speaker), so the only way
-  # to make voice louder than music is to raise the DAC and duck each channel back down to the
-  # level it should have had. Everything below is a pure function of the current state, so
-  # running it from any trigger at any time converges on the same answer; nothing latches.
+  # The only writer of the output level and both mixer gains. Music and announcements share one
+  # DAC, so the DAC sits at the louder of the two levels and each mixer input is scaled down to its
+  # own, with 0 as true silence (mixer_speaker set_gain, vendored in esphome/components/mixer).
+  # Everything below is a pure function of the current state, so running it from any trigger at
+  # any time converges on the same answer; nothing latches.
   #
-  # See docs/TTS-Routing.md for the gain model and what holding the DAC high costs.
+  # See docs/TTS-Routing.md for the gain model.
   - id: audio_gain_reconcile
     mode: restart
     then:
       - lambda: |-
-          // dB per unit of media player volume. The span comes from DACProxy; 0.9 is the media
-          // player's own volume remap (volume_min: 0.1, volume_max: 1.0 in media_player.yaml),
-          // and it and dac_target_volume below have to move together.
+          // dB per unit of level. The span comes from DACProxy; 0.9 is the media player's own
+          // volume remap (volume_min: 0.1, volume_max: 1.0 in media_player.yaml), and it and
+          // dac_target_volume below have to move together.
           const float db_per_unit = id(dac_proxy).volume_span_db() * 0.9f;
 
-          // Deepest duck the mixer can apply: DECIBEL_REDUCTION_TABLE has 51 entries and
-          // apply_ducking() clamps to size() - 1, so asking for more is silently the same thing.
-          const int max_duck = 50;
-
-          const float media_vol = id(external_media_player).volume;
-          // 0 on the slider means "no override": voice follows the media volume. Resolved here
-          // so the sentinel stays out of the gain math, where 0.0 would duck the response by the
-          // full media level.
+          // Mute and volume 0 are the same thing to the music: no music.
+          const float media_setting = id(external_media_player).volume;
+          const float music =
+              (id(external_media_player).is_muted() || media_setting < 0.001f) ? 0.0f : media_setting;
+          // 0 on the slider means "auto": announcements follow the music level, so one volume
+          // and one mute govern the whole device.
           //
           // has_state() is not padding: Number::state is uninitialized until its first
           // publish_state(), and the media player publishes its own volume from setup(), which
           // fires on_volume and lands here - so this can run before the slider has restored.
-          const float voice_setting =
+          const float av_setting =
               id(tts_volume).has_state() ? id(tts_volume).state / 100.0f : 0.0f;
-          const float voice_vol = (voice_setting > 0.0f) ? voice_setting : media_vol;
-          // The level the DAC is driven to, so whichever channel needs to be loudest can reach
-          // its own level without a boost. Deliberately not conditional on anything speaking:
-          // holding it here is what lets an announcement this device did not initiate - and so
-          // had no warning of - start at the right level on its first sample.
-          const float ref = (voice_vol > media_vol) ? voice_vol : media_vol;
+          float announcement = (av_setting > 0.0f) ? av_setting : music;
+          // The level the DAC is driven to, so whichever input needs to be loudest gets there
+          // without a boost. Deliberately not conditional on anything playing: holding it here is
+          // what lets an announcement this device had no warning of start at the right level on
+          // its first sample.
+          const float ref = std::max(music, announcement);
+
+          if (id(tts_routing_to_remote) && id(tts_playing) && !id(web_ui_app)->selection().local_speaker()) {
+            // "Play responses on this device" is off and the response went to other speakers.
+            announcement = 0.0f;
+          }
 
           const bool voice_active =
               id(va).is_running() ||
               id(external_media_player).state == media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING ||
               id(timer_ringing).state;
 
-          int media_duck = (int) (db_per_unit * (ref - media_vol) + 0.5f);
-          if (voice_active) {
-            media_duck += 20;
-          }
+          // A level of 0 is gain 0, not a large cut: that is the whole point of the gain stage.
+          auto gain_for = [&](float level, float extra_db) -> float {
+            if (level <= 0.0f) {
+              return 0.0f;
+            }
+            const float db = -db_per_unit * (ref - level) - extra_db;
+            return std::min(1.0f, powf(10.0f, db / 20.0f));
+          };
+          const float music_gain = gain_for(music, voice_active ? 20.0f : 0.0f);
+          const float ann_gain = gain_for(announcement, 0.0f);
 
-          int ann_duck;
-          if (id(tts_routing_to_remote) && id(tts_playing) && !id(web_ui_app)->selection().local_speaker()) {
-            // Silence the local response; it has been asked to play only on the remote targets. With
-            // the app's "Local Speaker" row ticked - which is how it ships - the response is routed
-            // and played here as well, falling through below like any other speech.
-            ann_duck = max_duck;
-          } else {
-            // Announcements arriving over HTTP are speech, whoever sent them: this device's own
-            // response, a tts.speak, or one another Satellite1 routed here. All play at the voice
-            // level, because no announce_volume ever reaches the firmware; docs/TTS-Routing.md
-            // explains why. Chimes come from the audio-file source instead and still track the
-            // media volume, so raising Voice Override cannot make the wake sound scary.
-            //
-            // tts_playing stays in the test even though it implies an HTTP announcement: it is
-            // set at on_intent_progress, before any audio exists, which is what gives
-            // audio_gain_raise time to finish before a local response starts.
-            const bool http_announcement =
-                id(http_announcement_source).get_state() == media_source::MediaSourceState::PLAYING;
-            const float ann_ref = (id(tts_playing) || http_announcement) ? voice_vol : media_vol;
-            ann_duck = (int) (db_per_unit * (ref - ann_ref) + 0.5f);
-          }
+          // An input that is playing and about to be cut must not hear the DAC go up until the cut
+          // has reached the audio already queued downstream (the I2S speaker's 500 ms buffer on top
+          // of the mixer's 100 ms), or it blasts for a moment. Read before the new gains land.
+          auto cut_while_playing = [](mixer_speaker::SourceSpeaker *input, float next) -> bool {
+            return (next < input->get_gain() - 0.001f) && (input->is_running() || input->has_buffered_data());
+          };
+          const bool must_wait = cut_while_playing(id(media_mixing_input), music_gain) ||
+                                 cut_while_playing(id(announcement_mixing_input), ann_gain);
 
-          id(media_duck_db) = clamp(media_duck, 0, max_duck);
-          id(announcement_duck_db) = clamp(ann_duck, 0, max_duck);
-          // The same remap the media player applies to its own volume, against ref instead of
-          // media_vol. That is what makes DACProxy's floor exact rather than approximate: the two
-          // writers differ only in their input.
+          id(media_mixing_input)->set_gain(music_gain);
+          id(announcement_mixing_input)->set_gain(ann_gain);
+
           id(dac_target_volume) = 0.1f + ref * 0.9f;
-
-          // Compared against the floor, not the level the DAC is at: the media player writes its
-          // own volume from I2SAudioSpeaker::loop(), which lands after this script has run, so the
-          // hardware says nothing about what this script last asked for.
-          //
-          // Lowering is safe at any moment - buffered audio just plays a little quieter than
-          // intended. Raising has to wait for the ducking below to reach the samples already in
-          // flight, so that is left to audio_gain_raise.
-          if (id(dac_target_volume) <= id(dac_proxy).volume_floor() + 0.005f) {
-            id(dac_proxy).set_volume_floor(id(dac_target_volume));
+          const float level_now = id(dac_proxy).level();
+          if (id(dac_target_volume) <= level_now + 0.0005f) {
+            // Lowering is safe at any moment - queued audio just plays a little quieter.
+            id(audio_gain_raise).stop();
+            id(dac_proxy).set_level(id(dac_target_volume));
+          } else if (must_wait) {
+            // Re-armed on every new cut, so the wait always covers the newest one.
+            id(audio_gain_raise).execute();
+          } else if (!id(audio_gain_raise).is_running()) {
+            id(dac_proxy).set_level(id(dac_target_volume));
           }
+          // Otherwise a raise is already waiting out an earlier cut and will apply this target.
 
           ESP_LOGD("audio_gain",
-                   "media %.2f, voice %.2f, ref %.2f -> media duck %d dB, announcement duck %d dB, "
-                   "DAC %.2f (now %.2f)",
-                   media_vol, voice_vol, ref, id(media_duck_db), id(announcement_duck_db),
-                   id(dac_target_volume), id(dac_proxy).volume());
-      - mixer_speaker.apply_ducking:
-          id: media_mixing_input
-          decibel_reduction: !lambda return (uint8_t) id(media_duck_db);
-          duration: 0.0s
-      - mixer_speaker.apply_ducking:
-          id: announcement_mixing_input
-          decibel_reduction: !lambda return (uint8_t) id(announcement_duck_db);
-          duration: 0.0s
-      - if:
-          condition:
-            lambda: 'return id(dac_target_volume) > id(dac_proxy).volume_floor() + 0.005f;'
-          then:
-            # The wait only protects music already mixed and queued, so skip it when the media
-            # channel is stopped with an empty buffer - an announcement this device did not start
-            # is already streaming by the time the reconciler runs, and the delay would play its
-            # first 800ms at the old level and then jump. Worst case for skipping is the tail of
-            # already-finished media playing a moment louder than it would have.
-            - if:
-                condition:
-                  lambda: |-
-                    return id(media_mixing_input).is_stopped() &&
-                           !id(media_mixing_input).has_buffered_data();
-                then:
-                  - script.stop: audio_gain_raise
-                  - lambda: id(dac_proxy).set_volume_floor(id(dac_target_volume));
-                else:
-                  - script.execute: audio_gain_raise
+                   "music %.2f, announcement %.2f (setting %.2f), ref %.2f -> music gain %.3f, "
+                   "announcement gain %.3f, DAC %.2f (now %.2f)%s",
+                   music, announcement, av_setting, ref, music_gain, ann_gain, id(dac_target_volume),
+                   id(dac_proxy).level(), id(audio_gain_raise).is_running() ? ", raise deferred" : "");
 
-  # Deferred half of the reconciler: raise the DAC only once the ducking above has reached the audio
-  # already queued downstream, or music blasts for a moment. i2s_audio_speaker defaults to
-  # buffer_duration: 500ms on top of the mixer's 100ms, so ~600ms is genuinely in flight. Its own
-  # script so a burst of volume events re-arms the delay rather than discarding a committed raise.
+  # Deferred half of the reconciler: raise the DAC only once a gain cut has reached the audio
+  # already queued downstream. i2s_audio_speaker defaults to buffer_duration: 500ms on top of the
+  # mixer's 100ms, so ~600ms is genuinely in flight. Reads dac_target_volume when it fires, so a
+  # burst of reconciles in the meantime lands as the newest answer.
   - id: audio_gain_raise
     mode: restart
     then:
       - delay: 800ms
-      - lambda: id(dac_proxy).set_volume_floor(id(dac_target_volume));
+      - lambda: id(dac_proxy).set_level(id(dac_target_volume));
 
-  # The voice assistant pipeline ends before its audio does, so hold the announcement channel
-  # at the Voice Override level until the response has actually drained. Dropping to the chime
-  # level any earlier makes the tail of the response jump.
+  # The voice assistant pipeline ends before its audio does, so keep tts_playing - and with it the
+  # "Play responses on this device" silence - until the response has actually drained.
   - id: release_tts_playback_level
     mode: restart
     then:

@@ -657,6 +657,11 @@ bool TAS2780::set_mute_on() {
 
 bool TAS2780::set_volume(float volume) {
   this->volume_ = clamp<float>(volume, 0.0, 1.0);
+  // Mute lives in the same DVC register as the level, so writing the level while muted would
+  // replace the mute code with an audible attenuation. set_mute_off() writes the recorded level.
+  if (this->is_muted_) {
+    return true;
+  }
   return this->write_volume_();
 }
 

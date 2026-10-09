@@ -2773,7 +2773,7 @@ void WebUIHandler::handle_sound_(AsyncWebServerRequest *request) {
 ///   pending  the ~100 ms activation window while the SAR ADC settles and the mode is still being
 ///            chosen; the card words this as measuring rather than showing the stale mode.
 ///   dvc      how far open the digital volume control is, 0-100: the level the firmware computed
-///            from the volume slider, voice override and ducking - what the amp is actually fed.
+///            from the media volume and Announcement Volume - what the amp is actually fed.
 ///   muted    the DVC mute (0xC9), so the card can say "Muted" instead of a misleading 0%.
 ///
 /// Read from the httpd task without a lock, deliberately: every field is an aligned byte-or-less

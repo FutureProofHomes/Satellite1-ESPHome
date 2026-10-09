@@ -168,10 +168,10 @@ script:
           else:
             - dac_proxy.activate_line_out:
       # Switching outputs swaps which DAC is live, and the two have very different volume
-      # curves (31.5 dB vs 47.25 dB across the usable range), so the ducking that goes with a
-      # given level is not the same on both and the gain state has to be re-derived on every
-      # switch. DACProxy re-applies the volume itself as part of activating a DAC, which is what
-      # keeps the level right in the gap before this script's reconcile lands.
+      # curves (31.5 dB vs 47.25 dB across the usable range), so the mixer gains that go with a
+      # given pair of levels are not the same on both and have to be re-derived on every
+      # switch. DACProxy re-applies its level as part of activating a DAC, which is what keeps
+      # the output right in the gap before this script's reconcile lands.
       - script.execute: audio_gain_reconcile
 
   - id: refresh_audio_output

@@ -103,14 +103,16 @@ media_player:
       sources:
         - http_media_source
 
+    # Volume and mute travel down the speaker chain to DACProxy, which ignores both: the reconciler
+    # alone turns them into the music gain and the DAC level, so every change has to reach it.
     on_mute:
       - script.execute: control_leds
+      - script.execute: audio_gain_reconcile
     on_unmute:
       - script.execute: control_leds
+      - script.execute: audio_gain_reconcile
     on_volume:
       - script.execute: control_leds
-      # The media player writes the new volume straight to the DAC on its way down the
-      # speaker chain, so re-derive the whole gain state against it.
       - script.execute: audio_gain_reconcile
     # Duck the media channel while an announcement plays
     on_announcement:

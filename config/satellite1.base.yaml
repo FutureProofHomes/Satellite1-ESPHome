@@ -68,10 +68,8 @@ esphome:
         - lambda: id(audio_output_speaker_requested) = id(dac_proxy).active_dac == 0;
         - script.execute: refresh_audio_output
 
-        # The restored DAC level is safe on its own, since DACProxy persists the media volume rather
-        # than any level the reconciler raised it to. What is missing is the raise that goes with a
-        # Voice Override, because the floor is never persisted - so derive the gain state now that
-        # the DAC is set up and the slider has restored.
+        # DACProxy restores the last level, but both mixer gains start at unity, so derive the
+        # whole gain state now that the DAC is set up and the Announcement Volume has restored.
         - script.execute: audio_gain_reconcile
 
         # If after 10 minutes, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
