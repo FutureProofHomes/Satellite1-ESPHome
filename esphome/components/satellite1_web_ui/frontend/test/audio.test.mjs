@@ -15,12 +15,16 @@ import {
   areaState,
   haProblem,
   hasTargets,
+  heldBits,
   looseCount,
   looseLocked,
   looseState,
   nudge,
+  olderSatellite,
+  routedLocks,
   rowOn,
   rowWhy,
+  selfGroup,
   toggleArea,
   toggleLoose,
   togglePlayer,
@@ -75,16 +79,24 @@ test("only a device with no area keeps its lists", () => {
   assert.equal(treePayload(null, { text: TEXT.ha_pending }), null);
 });
 
-test("each row says why it is grey, permanent reasons first", () => {
-  assert.equal(rowWhy(kitchen.p[0], NEED_VOLUME), null);
-  assert.equal(rowWhy(kitchen.p[1], NEED_VOLUME), TEXT.cap_no_volume);
-  assert.equal(rowWhy(kitchen.p[1], NEED_MEDIA), null);
-  assert.equal(rowWhy(kitchen.p[2], NEED_MEDIA), TEXT.cap_self);
-  assert.equal(rowWhy(kitchen.p[3], NEED_MEDIA), TEXT.player_offline);
-  assert.equal(rowWhy(["media_player.x", "X", 2, 0], NEED_MEDIA), TEXT.cap_no_media);
-  // Rows cached before the caps and availability fields existed stay usable in both trees.
-  assert.equal(rowWhy(["media_player.old", "Old"], NEED_MEDIA), null);
-  assert.equal(rowWhy(["media_player.old", "Old"], NEED_VOLUME), null);
+test("each row says which job it can't do, permanent reasons first", () => {
+  assert.equal(rowWhy(kitchen.p[0]), null);
+  assert.equal(rowWhy(kitchen.p[1]), TEXT.cap_no_volume);
+  assert.equal(rowWhy(kitchen.p[2]), TEXT.cap_self);
+  assert.equal(rowWhy(kitchen.p[3]), TEXT.player_offline);
+  assert.equal(rowWhy(["media_player.x", "X", 2, 0]), TEXT.cap_no_media);
+  assert.equal(rowWhy(["media_player.y", "Y", 3, 0], false, true), TEXT.player_offline);
+  // Older firmware only in a payload built with bits 8 and 16; the kitchen's Sonos predates them.
+  assert.equal(rowWhy(den.p[2], false, true), TEXT.cap_old_firmware);
+  assert.equal(rowWhy(den.p[2]), null);
+  assert.equal(heldBits(house), true);
+  assert.equal(heldBits({ areas: [kitchen], loose }), false);
+  assert.equal(heldBits(null), false);
+  // A Duck box held on by Announce needs no volume control, so the held Sonos shell says nothing.
+  assert.equal(rowWhy(den.p[4]), TEXT.cap_no_volume);
+  assert.equal(rowWhy(den.p[4], true), null);
+  // Rows cached before the caps and availability fields existed stay usable in both columns.
+  assert.equal(rowWhy(["media_player.old", "Old"]), null);
 });
 
 test("ticking a whole area clears its picks and carve-outs", () => {
@@ -149,6 +161,98 @@ test("the No Area Assigned group bulk-toggles eligible players only", () => {
   const stale = sel([], ["media_player.all", "media_player.cast"]);
   assert.deepEqual(plain(toggleLoose(stale, loose, NEED_VOLUME)), { areas: [], extra: ["media_player.cast"], excluded: [] });
   assert.equal(looseLocked(sel(), [["media_player.cast", "Cast", 1, 1]], NEED_VOLUME), true);
+});
+
+// Caps 8: held by the silent clip (Sonos, current Satellite1). 16: turned down to Area Ducking
+// Volume (any other brand). The older Satellite1 has neither; the cloud shell plays but has no
+// volume control, and is held all the same.
+const den = {
+  i: "den",
+  n: "Den",
+  p: [
+    ["media_player.den_sonos", "Den Sonos", 11, 1],
+    ["media_player.den_sat", "Den Satellite1", 11, 1],
+    ["media_player.den_old", "Den Satellite1 old", 3, 1],
+    ["media_player.den_tv", "Den TV", 19, 1],
+    ["media_player.den_cloud", "Den Sonos cloud", 9, 1],
+  ],
+};
+const houseLoose = [
+  ["media_player.cast_group", "Cast group", 19, 1],
+  ["media_player.spare", "Spare", 19, 1],
+];
+const house = { areas: [den], loose: houseLoose };
+
+test("routed players that are always ducked lock on, older Satellite1s do not", () => {
+  const routing = sel(["den"], ["media_player.cast_group"], ["den:media_player.den_tv"]);
+  const locks = routedLocks(house, routing);
+  assert.deepEqual([...locks.ids].sort(), [
+    "media_player.cast_group",
+    "media_player.den_cloud",
+    "media_player.den_sat",
+    "media_player.den_sonos",
+  ]);
+  // The cast group is turned down to Remote Ducking Volume, so the slider stays live.
+  assert.equal(locks.level, true);
+  assert.equal(routedLocks(house, sel(["den"], [], ["den:media_player.den_tv"])).level, false);
+  assert.equal(routedLocks(null, routing).ids.size, 0);
+  // Rows cached before bits 8 and 16 existed never lock.
+  assert.equal(routedLocks({ areas: [kitchen] }, sel(["kitchen"])).ids.size, 0);
+});
+
+test("locked rows count as ticked, and a room of them locks its box", () => {
+  const locked = routedLocks(house, sel(["den"], [], ["den:media_player.den_tv"])).ids;
+  assert.equal(areaState(sel(), den, NEED_VOLUME, locked), "mixed");
+  assert.equal(areaCount(sel(), den, NEED_VOLUME, locked), "3/5");
+  assert.equal(areaLocked(sel(), den, NEED_VOLUME, locked), false);
+  const both = sel([], ["media_player.den_old", "media_player.den_tv"]);
+  assert.equal(areaState(both, den, NEED_VOLUME, locked), "on");
+  const sonosOnly = { i: "bath", n: "Bath", p: [den.p[0]] };
+  const bathLock = new Set(["media_player.den_sonos"]);
+  assert.equal(areaState(sel(), sonosOnly, NEED_VOLUME, bathLock), "on");
+  assert.equal(areaLocked(sel(), sonosOnly, NEED_VOLUME, bathLock), true);
+  // Taking a whole room clears picks as always; locked rows are covered by the area id like the rest.
+  assert.deepEqual(plain(toggleArea(sel(), den, NEED_VOLUME, locked)), { areas: ["den"], extra: [], excluded: [] });
+});
+
+test("the No Area Assigned bulk box never picks a locked player", () => {
+  const locked = new Set(["media_player.cast_group"]);
+  assert.equal(looseState(sel(), houseLoose, NEED_VOLUME, locked), "mixed");
+  assert.equal(looseCount(sel(), houseLoose, NEED_VOLUME, locked), "1/2");
+  const all = toggleLoose(sel(), houseLoose, NEED_VOLUME, locked);
+  assert.deepEqual(plain(all), { areas: [], extra: ["media_player.spare"], excluded: [] });
+  assert.equal(looseState(all, houseLoose, NEED_VOLUME, locked), "on");
+  assert.deepEqual(plain(toggleLoose(all, houseLoose, NEED_VOLUME, locked)), { areas: [], extra: [], excluded: [] });
+  assert.equal(looseLocked(sel(), [houseLoose[0]], NEED_VOLUME, locked), true);
+});
+
+test("a column with nothing to count in a group says nothing", () => {
+  const tvOnly = { i: "den", n: "Den", p: [["media_player.tv", "TV", 1, 1]] };
+  assert.equal(areaCount(sel(), tvOnly, NEED_VOLUME), "");
+  assert.equal(areaCount(sel(["den"]), tvOnly, NEED_VOLUME), "");
+  assert.equal(areaCount(sel(), tvOnly, NEED_MEDIA), "0/1");
+  const selfOnly = { i: "hall", n: "Hall", p: [kitchen.p[2]] };
+  assert.equal(areaCount(sel(), selfOnly, NEED_MEDIA), "");
+  assert.equal(looseCount(sel(), [["media_player.cast", "Cast", 1, 1]], NEED_VOLUME), "");
+  // A locked row is counted though it takes no volume: a held Sonos shell.
+  assert.equal(looseCount(sel(), [["media_player.cloud", "Cloud", 9, 1]], NEED_VOLUME, new Set(["media_player.cloud"])), "1/1");
+});
+
+test("only a Satellite1 on older firmware reads as one", () => {
+  assert.equal(olderSatellite(den.p[2]), true);
+  assert.equal(olderSatellite(den.p[0]), false);
+  assert.equal(olderSatellite(den.p[3]), false);
+  assert.equal(olderSatellite(kitchen.p[2]), false);
+  // The TV plays but takes no volume, and a row cached before caps existed says nothing.
+  assert.equal(olderSatellite(kitchen.p[1]), false);
+  assert.equal(olderSatellite(["media_player.old", "Old"]), false);
+});
+
+test("this device's row is found in its area, in No Area Assigned, or not at all", () => {
+  assert.equal(selfGroup({ areas: [den, kitchen] }), "kitchen");
+  assert.equal(selfGroup({ areas: [den], loose: [["media_player.self", "Satellite", 7, 1]] }), null);
+  assert.equal(selfGroup(house), undefined);
+  assert.equal(selfGroup(null), undefined);
 });
 
 test("anything chosen, whole areas or picks, is an active selection", () => {

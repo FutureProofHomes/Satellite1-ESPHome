@@ -1055,12 +1055,11 @@ section.now.now-compact .timer {
 .au-tree-count { font-size:12px; color:var(--muted); white-space:nowrap; }
 .au-tree-ps { padding:0 0 4px 32px; }
 .au-tree-p { display:flex; align-items:center; gap:10px; min-height:44px; padding:10px 14px 10px 0; border-top:1px solid var(--line); }
-.au-tree-self { padding:10px 14px; border-bottom:1px solid var(--line); background:color-mix(in srgb, var(--orb-a) 8%, transparent); }
+.au-tree-head { padding:12px 14px; border-bottom:1px solid var(--line); background:color-mix(in srgb, var(--orb-a) 8%, transparent); }
 .au-tree-off { opacity:.55; }
 .au-tree-player-name { flex:1; font-size:13px; color:var(--text); }
 .au-tree-why { font-size:12px; color:var(--muted); white-space:nowrap; }
 .au-tree-p { min-width:0; }
-.au-tree-self { flex-wrap:wrap; }
 
 /* AudioTab — responsive route layout */
 @media (min-width: 640px) {
@@ -1069,7 +1068,6 @@ section.now.now-compact .timer {
   .au-route-cards { display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
   .au-route-cards .au-card { margin-bottom:0; }
   .au-tree-player-name { overflow-wrap:anywhere; word-break:break-word; min-width:0; }
-  .au-tree-self { flex-wrap:wrap; gap:8px; }
 }
 @media (min-width: 1024px) {
   .app > .control.au-route { grid-column:2 !important; grid-row:2 !important; display:flex !important; flex-direction:column !important; gap:0 !important; padding:32px 32px 24px !important; max-width:900px; height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - var(--sab)) !important; }

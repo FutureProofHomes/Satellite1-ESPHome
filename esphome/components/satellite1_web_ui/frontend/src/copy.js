@@ -11,9 +11,9 @@
 
 export const HINTS = {
   // tts_routing, tts_local_speaker, tts_targets and tts_manual_ids are gone. The first two described
-  // switches that no longer exist; the tree is now the whole control and explains itself by being a
-  // list of rooms with "Local Speaker" at the top of it. The manual id field was replaced by the "No
-  // Area Assigned" group, which shows those players by name instead of asking for their entity ids.
+  // switches that no longer exist; the speaker list is now the whole control and explains itself by
+  // being a list of rooms. The manual id field was replaced by the "No Area Assigned" group, which
+  // shows those players by name instead of asking for their entity ids.
 
   /* The switcher sheet. What needs saying is not "this is a list of devices", which is visible, but
      which device the page's controls currently belong to - the single fact that makes the whole page
@@ -41,44 +41,58 @@ export const HINTS = {
   ha_ingress:
     "Puts your Satellite1s in Home Assistant's sidebar, proxied through Home Assistant itself - so it works wherever Home Assistant does, on your local network or over a public https address. hass_ingress is a third-party integration, not part of this firmware. The YAML covers every Satellite1 Home Assistant knows about: this device is the one visible \"Satellite1 Fleet\" entry, the rest sit hidden behind it, and the device switcher reaches them all from inside the panel. Anyone who can open the panel reaches the devices' sign-in pages through it; the YAML limits the panel to admin users - remove the require_admin line to show it to everyone.",
 
-  /* On the card title rather than a row, because what needs explaining is the tree, and the tree has no
-     row of its own to hang an ⓘ off. This is also the only place Local Speaker is explained: it is the
-     one tick in there whose effect is not obvious from its name, since it silences this device rather
-     than adding a target. */
-  remote_routing:
-    "Plays this device's audio on other speakers as well as this one: the assistant's spoken answers, sign-in prompts, ringing timers, and the wake chime if you turn that on below. Tick a room to include every player in it, or open the room and pick players. Local Speaker is this device's own speaker - untick it and answers play only where you have chosen.",
+  /* On the card title. What needs saying up front is that one list does two jobs, and the one rule
+     joining them; how each column behaves is on the column heading's hint, next to the boxes. */
+  audio_routing:
+    "Pick which speakers play this device's responses, and which turn down while you talk to it. A speaker that plays responses is always turned down as well. Tick a room to cover every speaker in it, including ones added later, or open the room and pick speakers.",
 
-  /* The last sentence names the three behaviours behind the one slider - Sonos reading the level off
-     the announcement, another Satellite1 having its voice volume set, anything else its media volume -
-     because one slider that acts three ways gets reported as a bug unless something says so. It is
-     here rather than a paragraph under the slider because you need to read it once. */
-  remote_tts_volume:
-    "How loud answers are on the remote speakers. This device's own level is the one on the Local Speaker row. Sonos reads the level from the announcement itself; another Satellite1 has its voice volume set for the answer, and anything else its media volume, both put back afterwards.",
+  /* On the Speaker heading above the two columns. The duck's window is stated here and nowhere else.
+     It is wider than people assume: the duck goes out at the wake word and the volumes come back when
+     the answer ends - so it is quiet while it listens to you, not only while it answers.
 
+     A speaker ticked to Announce is always ducked (October 2026), by its own announcement ducking or
+     by volume, so its Duck box fills in and does nothing - except a Satellite1 on older firmware,
+     whose row says so. The last two sentences cover this device's own Announce box, which is the
+     "Announce on this device" setting rather than a routing pick. */
+  speaker_columns:
+    "Announce plays this device's assistant responses, sign-in prompts and ringing timers on the speaker, and the wake chime if Remote Wake Chime is on. Duck turns the speaker down while the assistant listens and answers, then puts it back. A speaker ticked to Announce is always turned down too, so its Duck box fills in by itself - except a Satellite1 on older firmware. This device's own Announce box decides whether it also answers out loud when its responses go to other speakers; timers, chimes and other announcements play here either way. It greys out while nothing else is ticked to Announce, because the device always answers itself then.",
+
+  /* The switch that stands in for this device's Announce box when its row is not in the list - no
+     Home Assistant yet, or a list cut short. What needs saying is the narrowness: it silences this
+     device's own responses only, so a timer or a chime still sounding here is not a bug. Greyed while
+     nothing is ticked, because only a response that also goes elsewhere is affected. */
+  local_speaker:
+    "Turn off to play responses only on the speakers ticked to Announce. Timers, chimes and other announcements still play here.",
+
+  /* One slider acts three ways - Sonos reads the level off the announcement, another Satellite1 has
+     its Announcement Volume set and put back, anything else its media volume - so the hint states the
+     outcome, which is the same on all three, rather than the mechanism. The last sentence is the
+     surprise at 0: a Satellite1 left at volume 0 is silent, as it is for its own sounds. */
+  remote_announcement_volume:
+    "How loud this device's responses and timer rings play on the speakers ticked to Announce. Above 0, each plays at this level and gets its own level back afterwards. At 0 each speaker follows its own volume, so a Satellite1 whose volume is 0 stays silent.",
+
+  /* A Satellite1 target is asked only if its own Wake sound is on (wake_chime_targets_jinja), so
+     a silent one is its owner's choice rather than a fault. */
   remote_wake_chime:
-    "Plays the wake chime on the target speakers too, so you can hear that the device heard you from the room the sound is going to. On Sonos and similar speakers the chime can land up to a second late - their clip playback has a fixed startup cost the device cannot remove.",
+    "Plays the wake chime on the speakers ticked to Announce too, so you can hear that the device heard you from the room the sound is going to. A Satellite1 among them chimes only if its own Wake sound is on. On Sonos and similar speakers the chime can land up to a second late - their clip playback has a fixed startup cost the device cannot remove.",
 
   remote_timer_ring:
-    'Rings a finished timer on the target speakers too, until the alarm is stopped. Saying "stop" at any speaker silences it everywhere.',
+    'Rings a finished timer on the speakers ticked to Announce too, until the alarm is stopped. Saying "stop" at any speaker silences it everywhere.',
 
+  /* Remote Echo Guard. Keyed by the select's id, which keeps its old name because a page served by
+     one firmware version reads the entity keys of a device running another. */
   remote_sync_guard:
-    "How long this device keeps its microphone closed after a routed answer, so it cannot hear its own answer from a speaker running slightly behind and mistake it for you. It only engages when the assistant is about to listen again - a continued conversation or voice sign-in; one-shot answers skip it entirely.",
+    "How long this device keeps its microphone closed after a routed answer, so it cannot hear its answer echo from a speaker running slightly behind and mistake it for you. It only engages when the assistant is about to listen again - a continued conversation or voice sign-in; one-shot answers skip it entirely.",
 
-  // duck_area, duck_players and duck_tts_targets are gone for the same reason. Ducking is now the same
-  // tree, and the answer to "which players" is visibly the thing being ticked.
+  // duck_area, duck_players and duck_tts_targets are gone for the same reason, and area_ducking went
+  // with its card when the two lists became one: the answer to "which players" is visibly the thing
+  // being ticked.
 
-  /* The window is stated here and nowhere else. It is wider than people assume: the duck goes out on the
-     voice assistant's on_start, which is the wake word, and the volumes come back on on_end - so it is
-     quiet while it listens to you, not only while it answers. The old label said "while talking", which
-     described half of it. */
-  area_ducking:
-    "Turns other speakers down while the assistant listens and answers, then puts them back where they were. Tick a room to cover every player in it.",
-
-  /* Deliberately does not repeat when the ducking happens - that is on the card above this row, and
-     saying it twice made the two bubbles look like they were describing different things. What is left is
-     the part that only applies to this slider: it is a floor, not a reduction. */
+  /* Remote Ducking Volume. Deliberately does not repeat when the ducking happens - that is on the
+     column heading's hint. What is left is the part that only applies to this slider: it is a floor,
+     not a reduction, and a Sonos or Satellite1 ticked to Announce does not use it. */
   duck_volume:
-    "The level they drop to. Players already quieter than this are left alone, so a whole-house group does not get turned up.",
+    "The level speakers ticked to Duck drop to. Players already quieter than this are left alone, so a whole-house group does not get turned up. A Sonos or Satellite1 ticked to Announce lowers its own music instead.",
 
   // "and the offset is stored on the device" used to end this. It is what `calibrate` says two rows below
   // it in the same editor, so it was cut. The instrument to compare against stays: that part is specific to
@@ -167,11 +181,11 @@ export const HINTS = {
   // exists for Home Assistant; the two write the same cutoffs, last writer wins, and the per-word
   // override is re-asserted at boot.
 
-  // Names the speaker it moves, and names the other slider by its on-screen label, because the pair
-  // share the Audio page's routing card (this one on the Local Speaker row, the other below it) and
-  // the hints are the only thing keeping them apart.
-  voice_override:
-    "How loud this device speaks when the assistant replies, separate from media volume. Zero follows the media volume instead. Speakers you route answers to have their own level - Remote Speaker Volume, below.",
+  // The first slider on the Audio page's routing card. Lists everything it covers, because
+  // "announcement" undersells it - timers and chimes ride the same pipeline. The last sentence answers
+  // the support question the volume buttons raise: they never move this.
+  announcement_volume:
+    "How loud this device plays assistant replies, timers, chimes and announcements, separate from the media volume. At 0 it follows the media player volume. The volume buttons change only the media volume.",
 
   /* Finished speaking detection, set per wake word. Three things need saying: what the options
      trade against each other, that each wake word has its own, and why Home Assistant's single
@@ -199,7 +213,7 @@ export const HINTS = {
   /* The Digital volume row. Read-only on purpose, and the hint says where the writable levers are
      so nobody hunts for a handle on this row. */
   amp_dvc:
-    "How far open the amplifier's digital volume control is right now - the level the firmware computes from the volume buttons, Voice Volume Override and ducking. Shown so you can see what the amplifier is actually being fed; it is managed automatically and has no handle here. To change it, use the volume controls.",
+    "How far open the amplifier's digital volume control is right now - the level the firmware computes from the media volume and Announcement Volume. Shown so you can see what the amplifier is actually being fed; it is managed automatically and has no handle here. To change it, use the volume controls.",
 
   /* The Analog gain slider. The default is named because the row offers the full range, and "where
      was it before I touched it" must never require support - the notch on the track marks it and
@@ -1228,20 +1242,40 @@ export const TEXT = {
   show_fix: "Show fix",
 
   ha_no_area:
-    "This device is not in a Home Assistant area, so \u201CRoute TTS To All Area Players\u201D and \u201CDuck All Area Players\u201D have no room to refer to. You can still pick any room below. Assign it to an area in Home Assistant and refresh.",
+    "This device is not in a Home Assistant area, so \u201CRoute Announcements To All Area Players\u201D and \u201CDuck All Area Players\u201D have no room to refer to. You can still pick any room below. Assign it to an area in Home Assistant and refresh.",
 
   ha_no_players:
     "Home Assistant has no media players at all, so there is nothing to choose between.",
 
-  /* Why a greyed player row in a target tree cannot be ticked - it lacks the capability the tree's
-     call needs (media_player.play_media for routing, media_player.volume_set for ducking). One
-     short reason per tree, not per integration: the row has no room for a diagnosis, and "what this
-     speaker cannot do" is the part its owner can act on. */
+  /* Why a box on a player row cannot be ticked - the player lacks the capability that column's call
+     needs (media_player.play_media for Announce, media_player.volume_set for Duck). One short reason
+     per column, not per integration: the row has no room for a diagnosis, and "what this speaker
+     cannot do" is the part its owner can act on. */
   cap_no_media: "Can't play media",
   cap_no_volume: "No volume control",
-  /* This device's own media player, shown greyed rather than omitted. Routing to yourself is the
-     Local Speaker row's job, and ducking your own volume while you talk is never right. */
+  /* A Satellite1 whose firmware predates keeping routed speakers ducked: its Duck box stays free
+     while it announces, and this is the row's only explanation of why. */
+  cap_old_firmware: "Older firmware",
+  /* This device's own row. Its Duck box is greyed - ducking your own volume while you talk is never
+     right - and its Announce box is the "Announce on this device" setting, so the caption after the
+     dot says what that box is doing now. "Always" while nothing else is ticked to Announce, because
+     the device answers itself then whatever the box says. */
   cap_self: "This device",
+  self_always: "always answers when nothing else announces",
+  self_too: "answers here too",
+  self_remote_only: "answers only on the speakers ticked",
+
+  /* The speaker list's column headings, and the line under each room's name, which counts each
+     column: "Announce 1/3 · Duck whole area". */
+  col_speaker: "Speaker",
+  col_announce: "Announce",
+  col_duck: "Duck",
+  /* The label read out for a Duck box held on by Announce, which has no caption of its own: the
+     ticked Announce box beside it is the reason. */
+  duck_locked: "turned down while it announces",
+  /* Over Remote Wake Chime, Remote Timer Ring and Remote Echo Guard, which act only on those. */
+  for_announce: "For speakers ticked to Announce",
+  local_label: "Announce on this device",
 
   /* A player Home Assistant cannot currently reach. Greyed like the capability rows above, but the
      checkbox keeps working and a prior selection stays ticked: being offline is transient, and the

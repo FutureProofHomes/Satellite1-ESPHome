@@ -55,8 +55,8 @@ substitutions:
   # with two entity ids would otherwise appear twice. This device's own media player used to be
   # rejected through `mine` from the shared walk; it is now kept and tagged (caps bit 4 below), so
   # the app can show it greyed with "This device" instead of leaving a hole where its owner expects
-  # a row - routing to yourself is the "Play responses on this device" switch's job, and ducking
-  # yourself while you talk is never right, but a player silently missing from the list reads as a bug. Measured against a
+  # a row - its Announce box is the "Announce on this device" setting, and ducking yourself while
+  # you talk is never right, but a player silently missing from the list reads as a bug. Measured against a
   # 22-area, 104-media-player installation: 82 bytes per player (85 with the capability int below,
   # 87 with availability), 90 per device, 4.3KB in total - before
   # the switcher's URL and availability fields (roughly 30 bytes per device) and its variant labels
@@ -107,10 +107,10 @@ substitutions:
   # display-only. An int, never a boolean, for the literal_eval reason above.
   #
   # Bits 8 and 16 say what happens to a player while it plays this device's responses, which the
-  # ducking tree shows as a locked tick (October 2026). 8: a Sonos, or a Satellite1 on firmware with
-  # an Announcement Volume control, is held announcing by interaction_hold_loop in tts_routing.yaml
-  # and lowers its own music. 16: any other brand that answers volume_set is turned down to Area
-  # Ducking Volume. A Satellite1 on older firmware gets neither, and is ducked only if ticked. The
+  # app shows as a locked Duck box beside a ticked Announce box (October 2026). 8: a Sonos, or a
+  # Satellite1 on firmware with an Announcement Volume control, is held announcing by
+  # interaction_hold_loop in tts_routing.yaml and lowers its own music. 16: any other brand that
+  # answers volume_set is turned down to Remote Ducking Volume. A Satellite1 on older firmware gets neither, and is ducked only if ticked. The
   # same tests as duck_players_jinja in area_ducking.yaml, which is where they take effect.
   #
   # Registry ghosts are dropped before any of that: an entity that is in Home Assistant's registry

@@ -81,7 +81,7 @@ substitutions:
   # supported_features is kept at this pass; offline players never make it into a call regardless,
   # because the `room` walk rejects silent and unavailable states on its own, and `targets_list`
   # (which tts_players and the volume walks derive from) is filtered for them in announce_targets_resolve.
-  # The same bit drives the greyed-out rows in the app's ducking tree, which also mark offline
+  # The same bit drives the greyed-out Duck boxes in the app's speaker list, which also mark offline
   # players from the payload's availability field.
   #
   # Routed speakers stay ducked through the whole interaction whatever the ducking selection says,

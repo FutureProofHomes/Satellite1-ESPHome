@@ -526,10 +526,10 @@ switch:
     restore_mode: RESTORE_DEFAULT_ON
 
   # "Remote TTS Mutes Local Voice" was here. Deleted: whether this device speaks the answer aloud is
-  # now the app's "Play responses on this device" switch on the Audio page, stored as `local_speaker`
-  # in the selection, where it sits next to the places the answer can go instead of being a separate
-  # inverted switch someone has to reason about. Default flipped with it - the app's switch is on out
-  # of the box, which is the same behaviour as this switch shipping off.
+  # now the app's "Announce on this device" box, this device's own row in the Audio page's speaker
+  # list, stored as `local_speaker` in the selection. It sits next to the places the answer can go
+  # instead of being a separate inverted switch someone has to reason about. Default flipped with it -
+  # the app's box is ticked out of the box, which is the same behaviour as this switch shipping off.
   #
   # Still carried out by audio_gain_reconcile, which silences the local announcement channel rather than
   # stopping the pipeline - so the wake chime still plays either way, and on_end and both watchdogs
@@ -1151,7 +1151,7 @@ script:
                   # An unanswered call is also what a revoked checkbox looks like, so ask again.
                   - script.execute: ha_action_probe
 
-  # Asks every eligible Remote TTS Target to sound its own wake chime. Fired from
+  # Asks every eligible routing target to sound its own wake chime. Fired from
   # on_wake_word_detected ahead of the local chime, and nothing waits on it: the chime is not part
   # of the interaction, and the assistant must start regardless.
   #
@@ -1662,7 +1662,7 @@ script:
   #
   # The guard is what keeps this honest. tts_remote_sent means this turn's play_media actually went
   # out, and tts_routing_to_remote is cleared once the local pipeline drains - and the local
-  # pipeline always receives the response, silenced when "Play responses on this device" is off,
+  # pipeline always receives the response, silenced when "Announce on this device" is unticked,
   # so its lifetime tracks the remote playback closely enough to gate on. After it clears, a wake word is
   # a new conversation, not an interruption, and stopping targets then could cut off resumed music.
   #

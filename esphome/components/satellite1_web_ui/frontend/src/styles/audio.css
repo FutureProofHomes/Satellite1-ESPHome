@@ -1,15 +1,15 @@
 /* The Audio tab's states the design's mock never had to draw. */
 
-/* Why a tree is empty: a quiet caption under the tree title rather than a banner (owner decision,
-   September 2026), since the empty tree is already the signal. */
+/* Why the speaker list is empty: a quiet caption above it rather than a banner (owner decision,
+   September 2026), since the empty list is already the signal. */
 .au-ha-state { margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: var(--muted); }
 .au-ha-state p { margin: 0; }
 .au-ha-state p + p { margin-top: 6px; }
 .au-fix { display: inline; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--orb-ink); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .au-missing { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
 
-/* Each card's backdrop-filter makes it a stacking context, so the mic guard's list would open
-   underneath the Area Ducking card below it. */
+/* Each card's backdrop-filter makes it a stacking context, so the echo guard's list would open
+   underneath the card below it. */
 .au-card:has(.au-sel-pop) { position: relative; z-index: 10; }
 
 /* The layout fixes below outrank the design's rules on specificity, not just order. */
@@ -20,22 +20,56 @@
   .app > .tab-content-enter > section.control.au-route { max-width: none; }
 }
 
-/* One column for every box in a tree and one for every name. An area row's box sits after its 16px
-   caret and a 10px gap, so Local Speaker and the players, which have no caret, start 40px in too. */
-.au-tree .au-tree-ps { padding-left: 40px; }
-.au-tree > .au-tree-self { padding-left: 40px; column-gap: 10px; }
+/* The routing card carries two columns of boxes on every row, so it takes the wider share. */
+@media (min-width: 640px) {
+  .au-route .au-route-cards { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+}
 
-/* The cards sit side by side from 640px, the app's breakpoint, where each is under 300px wide. So a
-   name wraps between words, never inside one, the greyed-row reason wraps rather than taking the
-   name's room, and Local Speaker's stepper drops to its own line when a word would not fit beside it. */
+/* The three levels, grouped in one tinted box above the list and set a little apart from it. */
+.au-vols { display: grid; gap: 18px; margin-bottom: 16px; padding: 14px 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--orb-a) 8%, transparent); }
+
+/* The speaker list. Every row - headings, rooms, players - ends in the same two fixed cells, one per
+   column; a 44px box sits centred in each, and the cell is wide enough for its heading. */
+.au-boxes { flex: none; display: flex; }
+.au-cell { width: 70px; display: grid; place-items: center; }
+.au-cols { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 14px; border-bottom: 1px solid var(--line); }
+.au-cols-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
+.au-cols-name > span:first-child, .au-cols .au-cell { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.au-list > .au-tree-row + .au-cols { border-top: 1px solid var(--line); }
+/* On a phone the names need every pixel; "ANNOUNCE" still fits a 62px cell set tight. */
+@media (max-width: 479px) {
+  .au-cell { width: 62px; }
+  .au-cols-name > span:first-child, .au-cols .au-cell { font-size: 10px; letter-spacing: 0; }
+}
+
+/* A name with its caption under it, taking whatever the boxes leave. */
+.au-tree-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.au-tree-text > * { flex: none; }
+.au-list .au-tree-h { gap: 10px; padding: 4px 14px; }
+.au-list .au-tree-count { white-space: normal; font-size: 11.5px; }
+
+/* One column for every name: a room's sits after its 16px caret and a 10px gap, so the players,
+   which have no caret, start 40px in too. Rows are as tall as their boxes. */
+.au-tree .au-tree-ps { padding-left: 40px; padding-bottom: 0; }
+.au-list .au-tree-p { padding-top: 2px; padding-bottom: 2px; }
+
+/* A name wraps between words, never inside one, and the reason under it wraps rather than taking
+   the name's room. */
 .au-tree-p .au-tree-player-name { min-width: auto; overflow-wrap: break-word; word-break: normal; }
-.au-tree-p .au-tree-why { white-space: normal; text-align: right; }
+.au-tree-p .au-tree-why { white-space: normal; font-size: 11.5px; }
 
-.au-step { display: flex; align-items: center; gap: 6px; margin-left: auto; }
-.au-step .au-sel-btn { width: 40px; padding: 0; justify-content: center; }
-.au-step .mslider-val { min-width: 30px; text-align: center; }
+/* "Announce on this device" as a switch, when this device's row is not in the list to carry it. */
+.au-tree-row { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 9px 14px; }
 
-/* "Local Speaker" stays on one line; when the volume stepper does not fit beside it, the stepper
-   takes its own line rather than squeezing the name. */
-.au-tree-self { row-gap: 6px; }
-.au-tree-self .au-tree-player-name { flex: 1 0 auto; white-space: nowrap; }
+/* Over the rows that act only on the speakers ticked to Announce. */
+.au-sub { margin: 16px 0 2px; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+
+/* A level. The slider's own box is dissolved so its reading can share the label's line: the label
+   keeps its natural width, so when the two do not fit (the 0 readings are whole phrases) the
+   reading wraps under it instead of squeezing it, and the track always takes a line of its own. */
+.au-vol { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 4px; }
+.au-vol.disabled { opacity: .4; }
+.au-vol-label { flex: 1 1 auto; display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }
+.au-vol .mslider { display: contents; }
+.au-vol .mslider-top { margin-left: auto; white-space: nowrap; }
+.au-vol .mslider-track { flex: 1 0 100%; margin-top: 4px; }

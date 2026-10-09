@@ -451,8 +451,8 @@ satellite1_web_ui:
       temp_offset: temp_offset_ui
       humidity_offset: humidity_offset_ui
       lux_offset: lux_offset_ui
-      voice_override: announcement_volume
-      remote_tts_volume: remote_announcement_volume
+      announcement_volume: announcement_volume
+      remote_announcement_volume: remote_announcement_volume
       duck_volume: duck_area_volume
 
     # The routing target list is not here. It used to be a text entity the tree wrote a
@@ -488,8 +488,8 @@ satellite1_web_ui:
       # visibly the same control rather than two that happen to agree.
       #
       # tts_mute_local and duck_tts_targets were here. Both entities are deleted; the first is now the
-      # app's "Local Speaker" row and the second is unconditional.
-      tts_routing: route_announcements_area
+      # app's "Announce on this device" box and the second is unconditional.
+      route_announcements: route_announcements_area
       remote_wake_chime: remote_wake_chime
       remote_timer_ring: remote_timer_ring
       duck_area: duck_area_players
@@ -543,7 +543,7 @@ satellite1_web_ui:
       # state. Presence itself comes from "Radar Target", which satellite1_radar registers at runtime
       # from a C++ literal shared by both handlers, so it has no id to map and does not need one.
       radar_module: radar_detected_text
-      remote_tts_status: remote_announcement_status
+      remote_announcement_status: remote_announcement_status
       ask_status: web_ui_ask_status
       ring_moment: ring_moment_text
 

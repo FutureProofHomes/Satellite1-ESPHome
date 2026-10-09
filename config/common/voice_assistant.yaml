@@ -23,7 +23,7 @@ globals:
     # initial_value: ${voice_assist_not_ready_phase_id}
   # True from the moment a TTS response starts streaming until the announcement pipeline drains.
   # Set before any audio exists. audio_gain_reconcile reads it to silence this device's own
-  # response when "Play responses on this device" is off and the response went to other speakers.
+  # response when "Announce on this device" is unticked and the response went to other speakers.
   - id: tts_playing
     type: bool
     restore_value: no
@@ -312,8 +312,8 @@ voice_assistant:
           - script.execute: control_leds
           # Start a script that would potentially enable the stop word if the response is longer than a second
           - script.execute: activate_stop_word_once
-          # Marks the response as this device's own, which is what "Play responses on this
-          # device" silences when it is off.
+          # Marks the response as this device's own, which is what unticking "Announce on this
+          # device" silences.
           - lambda: id(tts_playing) = true;
           - script.execute: audio_gain_reconcile
   on_tts_start:
@@ -533,7 +533,7 @@ script:
           const float ref = std::max(music, announcement);
 
           if (id(tts_routing_to_remote) && id(tts_playing) && !id(web_ui_app)->selection().local_speaker()) {
-            // "Play responses on this device" is off and the response went to other speakers.
+            // "Announce on this device" is unticked and the response went to other speakers.
             announcement = 0.0f;
           }
 
@@ -596,7 +596,7 @@ script:
       - lambda: id(dac_proxy).set_level(id(dac_target_volume));
 
   # The voice assistant pipeline ends before its audio does, so keep tts_playing - and with it the
-  # "Play responses on this device" silence - until the response has actually drained.
+  # "Announce on this device" silence - until the response has actually drained.
   - id: release_tts_playback_level
     mode: restart
     then:

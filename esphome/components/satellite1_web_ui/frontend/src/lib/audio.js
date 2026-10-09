@@ -22,13 +22,21 @@
 import { TEXT } from "../copy.js";
 import { HA_NEVER, haBlocked, haTooOld } from "./device.js";
 
-/** The capability a tree's call needs of a player: play_media for routing, volume_set for ducking.
- *  They differ, which is why the same tree greys different rows in each card. */
+/** The capability each column's call needs of a player: play_media for Announce, volume_set for
+ *  Duck. They differ, which is why a row can grey one of its boxes and not the other. */
 export const NEED_MEDIA = 1;
 export const NEED_VOLUME = 2;
-/** Caps bit 4: this device's own media player. Never eligible - routing to itself is the Local
- *  Speaker row's job, and ducking its own volume while it talks is never right. */
+/** Caps bit 4: this device's own media player. Never eligible - its Announce box is the "Announce
+ *  on this device" setting rather than a routing pick, and ducking its own volume while it talks
+ *  is never right. */
 const CAP_SELF = 4;
+/** Caps bits 8 and 16: ducked whenever it plays this device's responses, whatever the ducking
+ *  selection says (web_ui_ha.yaml). 8 lowers its own music, held by a silent clip - a Sonos, or a
+ *  Satellite1 on current firmware; 16 is turned down to Remote Ducking Volume - any other brand.
+ *  Neither on a Satellite1 running older firmware, which is ducked only if ticked. */
+const CAP_HELD = 8;
+const CAP_LEVEL = 16;
+const NONE = new Set();
 
 /**
  * Why the area and player lists are not here, or null when they are: always one precise state,
@@ -69,14 +77,45 @@ export const eligible = (row, need) => capOk(row, need) && !isSelf(row);
 export const isLive = (row) => (row[3] ?? 1) !== 0;
 
 /**
- * The grey caption on a row, or null. Permanent reasons outrank offline, so a row that is both
- * says why it stays grey after the player comes back.
+ * The grey caption on a player row, or null. One row carries both columns, so it names whichever
+ * job the player cannot do; permanent reasons outrank offline, so a row that is both says why a box
+ * stays grey after the player comes back. `locked` is a Duck box held on by Announce, which needs no
+ * volume control - a held Sonos shell has none - so its absence goes unsaid there. `bits` is
+ * heldBits(payload), without which no row can be told apart as older firmware.
  */
-export function rowWhy(row, need) {
+export function rowWhy(row, locked = false, bits = false) {
   if (isSelf(row)) return TEXT.cap_self;
-  if (!capOk(row, need)) return need === NEED_VOLUME ? TEXT.cap_no_volume : TEXT.cap_no_media;
+  if (!capOk(row, NEED_MEDIA)) return TEXT.cap_no_media;
+  if (!capOk(row, NEED_VOLUME) && !locked) return TEXT.cap_no_volume;
   if (!isLive(row)) return TEXT.player_offline;
+  if (bits && olderSatellite(row)) return TEXT.cap_old_firmware;
   return null;
+}
+
+/**
+ * A Satellite1 on firmware from before routed speakers were kept ducked: it plays and takes a
+ * volume, but carries neither bit 8 nor 16, which web_ui_ha.yaml withholds only from a
+ * FutureProofHomes device with no Announcement Volume to hold. Its Duck box stays free while it
+ * announces. Only meaningful in a payload built with the bits (heldBits): a device on firmware
+ * older than them sends every row without either, and this page also drives such devices.
+ */
+export const olderSatellite = (row) =>
+  row[2] !== undefined && !isSelf(row) && (row[2] & 3) === 3 && !(row[2] & (CAP_HELD | CAP_LEVEL));
+
+/** Whether any row carries bit 8 or 16, which is the payload's only sign of being built with them. */
+export const heldBits = (payload) =>
+  [...(payload?.areas || []).flatMap((a) => a.p), ...(payload?.loose || [])].some(
+    (r) => ((r[2] ?? 0) & (CAP_HELD | CAP_LEVEL)) !== 0,
+  );
+
+/**
+ * Where this device's own row is: its area's id, null for "No Area Assigned", undefined when the
+ * payload does not carry it - no payload yet, or one cut short (`t`). The list hangs the "Announce
+ * on this device" box off that row, so the page falls back to a switch when it is missing.
+ */
+export function selfGroup(payload) {
+  for (const area of payload?.areas || []) if (area.p.some(isSelf)) return area.i;
+  return (payload?.loose || []).some(isSelf) ? null : undefined;
 }
 
 /** Whether anything is chosen: the device's own test for "routing (or ducking) is on". */
@@ -91,6 +130,33 @@ export const isOn = (sel, areaId, id) =>
 /** A player row's tick: never on for an ineligible row, whatever an old selection names - the
  *  call-time walks skip it, so a tick would be a false promise. */
 export const rowOn = (sel, areaId, row, need) => eligible(row, need) && isOn(sel, areaId, row[0]);
+
+/**
+ * The Duck column's locked boxes: the players ticked to Announce that are ducked for it regardless
+ * (caps 8 or 16), as `ids`. `level` says whether any of them is turned down to Remote Ducking
+ * Volume, which is what keeps that slider live with nothing ticked to Duck. Tested with
+ * play_media's eligibility because that is what puts a player in the routing walk.
+ */
+export function routedLocks(payload, routing) {
+  const ids = new Set();
+  let level = false;
+  const walk = (areaId) => (row) => {
+    const caps = row[2] ?? 0;
+    if (!(caps & (CAP_HELD | CAP_LEVEL)) || !eligible(row, NEED_MEDIA) || !isOn(routing, areaId, row[0])) return;
+    ids.add(row[0]);
+    if (caps & CAP_LEVEL) level = true;
+  };
+  for (const area of payload?.areas || []) area.p.forEach(walk(area.i));
+  (payload?.loose || []).forEach(walk(null));
+  return { ids, level };
+}
+
+/** The rows a group's box and count read over: those a person could tick, and the locked ones,
+ *  which show ticked whether or not they could be - a held Sonos needs no volume control. */
+const counted = (rows, need, locked) => rows.filter((r) => eligible(r, need) || locked.has(r[0]));
+const ticked = (sel, areaId, row, locked) => locked.has(row[0]) || isOn(sel, areaId, row[0]);
+/** A group with nothing left to change: no row a person could tick that is not locked already. */
+const nothingFree = (rows, need, locked) => !rows.some((r) => eligible(r, need) && !locked.has(r[0]));
 
 const copy = (sel) => ({ areas: new Set(sel.areas), extra: new Set(sel.extra), excluded: new Set(sel.excluded) });
 
@@ -116,23 +182,25 @@ export function togglePlayer(sel, areaId, id) {
  * Over eligible rows only, or an area with a greyed player in it could never read as whole and
  * "select whole area" would look broken. A whole area reads "on" unless something is carved out of
  * it, which is exactly what the firmware's two derived switches report, so this box and the switch
- * in Home Assistant agree.
+ * in Home Assistant agree - and "mixed" with everything carved out, since the area itself is still
+ * chosen. `locked` (routedLocks) counts as ticked, so a room whose players all play responses reads
+ * whole.
  */
-export function areaState(sel, area, need) {
-  const ids = area.p.filter((r) => eligible(r, need)).map((r) => r[0]);
-  if (sel.areas.has(area.i)) return ids.some((id) => sel.excluded.has(`${area.i}:${id}`)) ? "mixed" : "on";
-  const on = ids.filter((id) => sel.extra.has(id)).length;
-  return on === 0 ? "off" : on === ids.length ? "on" : "mixed";
+export function areaState(sel, area, need, locked = NONE) {
+  const rows = counted(area.p, need, locked);
+  if (!rows.length) return sel.areas.has(area.i) ? "on" : "off";
+  const on = rows.filter((r) => ticked(sel, area.i, r, locked)).length;
+  if (on === rows.length) return "on";
+  return on === 0 && !sel.areas.has(area.i) ? "off" : "mixed";
 }
 
-/** "whole area", or "chosen/eligible". */
-export function areaCount(sel, area, need) {
-  const rows = area.p.filter((r) => eligible(r, need));
-  if (sel.areas.has(area.i)) {
-    const cut = rows.filter((r) => sel.excluded.has(`${area.i}:${r[0]}`)).length;
-    return cut === 0 ? "whole area" : `${rows.length - cut}/${rows.length}`;
-  }
-  return `${rows.filter((r) => sel.extra.has(r[0])).length}/${rows.length}`;
+/** "whole area", or "ticked/counted" - or "" when the column has no row in this area to count, so
+ *  the line under the area's name leaves that column out. */
+export function areaCount(sel, area, need, locked = NONE) {
+  const rows = counted(area.p, need, locked);
+  if (!rows.length) return "";
+  const on = rows.filter((r) => ticked(sel, area.i, r, locked)).length;
+  return sel.areas.has(area.i) && on === rows.length ? "whole area" : `${on}/${rows.length}`;
 }
 
 /**
@@ -141,8 +209,8 @@ export function areaCount(sel, area, need) {
  * the whole thing is what a tri-state box trains people to expect. Either way the area's carve-outs
  * and individual picks are cleared, since the area id now says everything about it.
  */
-export function toggleArea(sel, area, need) {
-  const state = areaState(sel, area, need);
+export function toggleArea(sel, area, need, locked = NONE) {
+  const state = areaState(sel, area, need, locked);
   const next = copy(sel);
   for (const k of sel.excluded) if (k.startsWith(`${area.i}:`)) next.excluded.delete(k);
   for (const r of area.p) next.extra.delete(r[0]);
@@ -151,35 +219,39 @@ export function toggleArea(sel, area, need) {
   return next;
 }
 
-/** Nothing eligible to add, and nothing chosen to remove: the bulk box has no job. */
-export const areaLocked = (sel, area, need) =>
-  areaState(sel, area, need) === "off" && !area.p.some((r) => eligible(r, need));
+/** The bulk box has no job: nothing it could tick that is not locked already, and either a locked
+ *  row deciding the box or nothing chosen for it to remove. */
+export const areaLocked = (sel, area, need, locked = NONE) =>
+  nothingFree(area.p, need, locked) &&
+  (area.p.some((r) => locked.has(r[0])) || areaState(sel, area, need, locked) === "off");
 
-export function looseState(sel, loose, need) {
-  const rows = loose.filter((r) => eligible(r, need));
-  const on = rows.filter((r) => sel.extra.has(r[0])).length;
+export function looseState(sel, loose, need, locked = NONE) {
+  const rows = counted(loose, need, locked);
+  const on = rows.filter((r) => ticked(sel, null, r, locked)).length;
   return on === 0 ? "off" : on === rows.length ? "on" : "mixed";
 }
 
-export function looseCount(sel, loose, need) {
-  const rows = loose.filter((r) => eligible(r, need));
-  return `${rows.filter((r) => sel.extra.has(r[0])).length}/${rows.length}`;
+export function looseCount(sel, loose, need, locked = NONE) {
+  const rows = counted(loose, need, locked);
+  return rows.length ? `${rows.filter((r) => ticked(sel, null, r, locked)).length}/${rows.length}` : "";
 }
 
-/** Scoped to eligible rows both ways, so the bulk box never adds or removes a greyed row. */
-export function toggleLoose(sel, loose, need) {
-  const all = looseState(sel, loose, need) === "on";
+/** Scoped to eligible rows both ways, so the bulk box never adds or removes a greyed row - and to
+ *  unlocked ones, so a routed player is not quietly picked for ducking it would lose on unrouting. */
+export function toggleLoose(sel, loose, need, locked = NONE) {
+  const all = looseState(sel, loose, need, locked) === "on";
   const next = copy(sel);
   for (const r of loose) {
-    if (!eligible(r, need)) continue;
+    if (!eligible(r, need) || locked.has(r[0])) continue;
     if (all) next.extra.delete(r[0]);
     else next.extra.add(r[0]);
   }
   return next;
 }
 
-export const looseLocked = (sel, loose, need) =>
-  looseState(sel, loose, need) === "off" && !loose.some((r) => eligible(r, need));
+export const looseLocked = (sel, loose, need, locked = NONE) =>
+  nothingFree(loose, need, locked) &&
+  (loose.some((r) => locked.has(r[0])) || looseState(sel, loose, need, locked) === "off");
 
 /** One press of a ± stepper: a step either way, onto the step grid, inside the range. */
 export function nudge(value, dir, min, max, step) {
