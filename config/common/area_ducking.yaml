@@ -1,5 +1,5 @@
 # Turns down the other media players in this device's Home Assistant area while the voice assistant
-# is running, and sets the Remote TTS Volume on the routing targets. Both work by snapshotting the
+# is running, and sets the Remote Announcement Volume on the routing targets. Both work by snapshotting the
 # current volumes into a Home Assistant scene and playing that scene back afterwards.
 #
 # See docs/TTS-Routing.md for setup, the design decisions and the alternatives that were rejected.
@@ -66,7 +66,7 @@ substitutions:
   # after a factory reset. Worth reinstating if that friction shows up in practice.
   #
   # `tts_players` is now split off using the resolved routing list rather than a raw target string,
-  # which is why ${tts_targets_resolve} runs first. Silent states are still rejected rather than
+  # which is why ${announce_targets_resolve} runs first. Silent states are still rejected rather than
   # audible ones selected, because an amplifier never reports `playing` while it is the loudest thing
   # in the room, and Music Assistant entities are still rejected outright so a speaker with two entity
   # ids cannot be ducked twice - now doubly necessary, since expanding a whole area returns them.
@@ -74,19 +74,28 @@ substitutions:
   # integration duplicates every Sonos as a clip-only shell, and the native twin is the one to duck.
   #
   # `pick` also drops players whose supported_features lacks VOLUME_SET (4), for the reason
-  # tts_targets_resolve documents at length: these end up as explicit entity lists on
+  # announce_targets_resolve documents at length: these end up as explicit entity lists on
   # media_player.volume_set, where one entity missing the required feature makes Home Assistant
   # reject the whole call before setting anything - nobody's music would duck. Filtering at `pick`
   # keeps the duck and its restore consistent, since both derive from it. A player with unreadable
   # supported_features is kept at this pass; offline players never make it into a call regardless,
   # because the `room` walk rejects silent and unavailable states on its own, and `targets_list`
-  # (which tts_players and the volume walks derive from) is filtered for them in tts_targets_resolve.
+  # (which tts_players and the volume walks derive from) is filtered for them in announce_targets_resolve.
   # The same bit drives the greyed-out rows in the app's ducking tree, which also mark offline
   # players from the payload's availability field.
+  #
+  # Routed speakers stay ducked through the whole interaction whatever the ducking selection says,
+  # in one of two ways. A Sonos, or a peer Satellite1 with an Announcement Volume entity, is held
+  # announcing by interaction_hold_loop in tts_routing.yaml and ducks its own music, so it is kept
+  # out of both lists here - a volume duck on top would be a second duck and a second thing to hand
+  # back. Every other routed speaker cannot be held that way and is ducked by volume instead, chosen
+  # or not and unticked or not: `routed` adds it after the ducking selection's exclusions are
+  # applied. A peer on older firmware is neither, and is ducked only if chosen, as it always was.
   duck_players_jinja: >-
     ${self_area_jinja}
-    ${tts_targets_resolve}
+    ${announce_targets_resolve}
     {% set ma = integration_entities('music_assistant') + integration_entities('sonos_cloud') %}
+    {% set hsonos = integration_entities('sonos') + integration_entities('sonos_cloud') %}
     {% set dcut = duck_cut.split(',') | map('trim') | reject('eq', '')
                   | map('regex_replace', '^[^:]*:', '') | list %}
     {% set chosen = namespace(e=[]) %}
@@ -95,8 +104,23 @@ substitutions:
     {% endfor %}
     {% set chosen.e = chosen.e
                       + (duck_extra.split(',') | map('trim') | map('lower') | reject('eq', '') | list) %}
+    {% set routed = namespace(vol=[], held=[]) %}
+    {% for t in targets_list %}
+      {% set d = device_id(t) %}
+      {% if t in hsonos %}
+        {% set routed.held = routed.held + [t] %}
+      {% elif d and device_attr(d, 'manufacturer') == 'FutureProofHomes' %}
+        ${peer_av_entity_jinja}
+        {% if av | count > 0 %}
+          {% set routed.held = routed.held + [t] %}
+        {% endif %}
+      {% else %}
+        {% set routed.vol = routed.vol + [t] %}
+      {% endif %}
+    {% endfor %}
     {% set dcap = namespace(p=[]) %}
-    {% for t in chosen.e | unique | reject('in', dcut) %}
+    {% for t in ((chosen.e | reject('in', dcut) | list) + routed.vol) | unique
+                | reject('in', routed.held) %}
       {% set f = state_attr(t, 'supported_features') %}
       {% if f is none or f | int | bitwise_and(4) %}
         {% set dcap.p = dcap.p + [t] %}
@@ -115,19 +139,26 @@ substitutions:
     {% set players = room | reject('in', targets_list) | list %}
     {% set tts_players = room | select('in', targets_list) | list %}
 
-  # The Remote TTS Targets whose volume has to be set for them, as `vol_players`. Expects `targets`
+  # A target's Announcement Volume number, as `av`: a one-entry list for a peer Satellite1 and empty
+  # for anything else. Expects `d`, the target's device. The entity id follows the entity name, so
+  # it ends `_announcement_volume` - and so does Remote Announcement Volume's, which is why the
+  # matches are sorted: on one device the two share everything up to that suffix, and
+  # `announcement_volume` sorts ahead of `remote_announcement_volume`.
+  peer_av_entity_jinja: >-
+    {% set av = (device_entities(d) | select('match', 'number\.') | select('search', '_announcement_volume$')
+                 | sort | list)[:1]
+                if d and device_attr(d, 'manufacturer') == 'FutureProofHomes' else [] %}
+
+  # The routing targets whose volume has to be set for them, as `vol_players`. Expects `targets`
   # and defines nothing else, so it can be pasted after the walk above.
   #
   # Only Sonos reads the per-call volume the announcement carries, so it is left out - sonos_cloud
   # entities with it, since that integration reads the same extra.volume key per clip - as is any
-  # Satellite1 with a Voice Override entity, whatever its value. Above 0 the peer's own standing
-  # preference wins; at 0 tts_volume_override_jinja below writes the override instead, which reaches
-  # the announcement channel without touching the media one. It used to keep the at-0 peer here too,
-  # and that pairing was audible: volume_set moved the peer's *music* from the duck level to Remote
-  # TTS Volume the moment intent processing started, a second or more before the response arrived to
-  # justify it. Only peers with no override entity at all - older builds - still take volume_set,
-  # where it remains the one available lever. Targets with no volume_level are dropped: nothing to
-  # snapshot, so nothing this firmware could hand back.
+  # Satellite1 with an Announcement Volume entity: peer_av_hold sets that instead, which reaches the
+  # peer's announcements without touching its music. Only peers with no
+  # such entity - older builds - still take volume_set, where it remains the one available lever.
+  # Targets with no volume_level are dropped: nothing to snapshot, so nothing this firmware could
+  # hand back.
   # Players without VOLUME_SET (bit 4) are dropped for the reason duck_players_jinja explains -
   # `targets_list` is filtered for play_media, not for this, and one such player in an explicit
   # volume_set list fails the call for all of them.
@@ -137,10 +168,9 @@ substitutions:
     {% for t in targets_list %}
       {% set d = device_id(t) %}
       {% set vf = state_attr(t, 'supported_features') %}
-      {% set vo = (device_entities(d) | select('search', 'voice_override') | list)
-                  if d and device_attr(d, 'manufacturer') == 'FutureProofHomes' else [] %}
+      ${peer_av_entity_jinja}
       {% if t not in percall
-            and vo | count == 0
+            and av | count == 0
             and state_attr(t, 'volume_level') is not none
             and (vf is none or vf | int | bitwise_and(4)) %}
         {% set vns.v = vns.v + [t] %}
@@ -148,37 +178,35 @@ substitutions:
     {% endfor %}
     {% set vol_players = vns.v %}
 
-  # The peer Satellite1 Voice Override numbers among the targets, as `vo_players`, with the entity ids
-  # themselves rather than their media players - a number entity is what has to be written.
+  # What peer_av_hold sets each peer Satellite1's Announcement Volume to, as `av_levels`: the number
+  # entity - what has to be written, rather than its media player - mapped to its level, as the
+  # string scene.apply requires. Expects `vol` (this device's Remote Announcement Volume) and
+  # `targets_list`.
   #
-  # This is the other side of tts_volume_targets_jinja above, which deliberately skips a Satellite1
-  # whose Voice Override is already above 0 because that peer has its own standing preference. That
-  # left the case the app's Remote TTS Volume slider is actually about: a Satellite1 target at 0, where
-  # "no override" means speech follows the media volume and volume_set is the wrong lever because it
-  # moves music too. Setting the peer's Voice Override is the right lever, and the entity says so.
-  #
-  # Only for the duration of the announcement. That number also governs the peer's *own* speech, so
-  # leaving it changed silently reconfigures another device from this one's settings page - the kind of
-  # cross-device write that is very hard to explain when someone notices it months later. Peers with no
-  # such entity simply do not appear here, which covers the older builds among them.
-  tts_volume_override_jinja: >-
-    {% set ons = namespace(v=[]) %}
-    {% for t in targets_list %}
-      {% set d = device_id(t) %}
-      {% set vo = (device_entities(d) | select('search', 'voice_override') | list)
-                  if d and device_attr(d, 'manufacturer') == 'FutureProofHomes' else [] %}
-      {% if vo | count > 0 and states(vo | first) | float(-1) == 0 %}
-        {% set ons.v = ons.v + [vo | first] %}
-      {% endif %}
-    {% endfor %}
-    {% set vo_players = ons.v %}
+  # `vol` for every peer among the targets, whatever each one was set to: this device's level wins
+  # on every kind of target. Nothing at 0, where each peer's responses follow its own setting. There
+  # used to be a rule at 0 for peers ducked by volume, holding them at their music's pre-duck level;
+  # no peer with this entity is ducked by volume any more (duck_players_jinja), so its music level
+  # is its own throughout and there is nothing to hold.
+  peer_av_levels_jinja: >-
+    {% set lns = namespace(m={}) %}
+    {% if vol | int > 0 %}
+      {% for t in targets_list %}
+        {% set d = device_id(t) %}
+        ${peer_av_entity_jinja}
+        {% if av | count > 0 and (av | first) not in lns.m %}
+          {% set lns.m = lns.m | combine({av | first: vol | int | string}) %}
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+    {% set av_levels = lns.m %}
 
   # The scene this package parks the pre-duck volumes in, as a slug. scene.create validates the id
   # with cv.slug, and App.get_name() carries the MAC suffix, so every Satellite1 owns its own.
   # Expects `name`.
   duck_scene_slug: "('sat1_duck_' ~ name) | slugify"
 
-  # A second scene, holding only the Remote TTS Targets, because scene.turn_on applies a whole scene
+  # A second scene, holding only the routing targets, because scene.turn_on applies a whole scene
   # and the two halves are released at different moments.
   duck_tts_scene_slug: "('sat1_ducktts_' ~ name) | slugify"
 
@@ -187,11 +215,11 @@ substitutions:
   # value here becomes the volume every speaker in the room is set to.
   duck_level_lambda: "return id(duck_area_volume).has_state() ? id(duck_area_volume).state / 100.0f : 0.0f;"
 
-  # The same level with a floor under it, for the Remote TTS Targets alone. Expects `duck`.
+  # The same level with a floor under it, for the routing targets alone. Expects `duck`.
   #
   # volume_level 0 means mute, not "very quiet", and on ESPHome's own media player it means mute in
   # hardware - which DACProxy writes to flash. A muted target plays the response at no level at all,
-  # Voice Override included, so a 0% duck used to take the answer with it. The room keeps the literal
+  # Announcement Volume included, so a 0% duck used to take the answer with it. The room keeps the literal
   # 0: a player not about to speak has no use for the distinction.
   duck_tts_level_jinja: "[duck | float, 0.01] | max"
 
@@ -244,6 +272,14 @@ substitutions:
     {% set sid = 'scene.' ~ (${duck_tts_scene_slug}) %}
     {% set held = state_attr(sid, 'entity_id') | default([], true) | list %}
 
+  # The peers' Announcement Volumes, parked by peer_av_hold. A third scene because its lifetime is
+  # its own: it spans an interaction and a ringing timer alike, and is handed back only when both
+  # have ended.
+  peer_av_scene_slug: "('sat1_peerav_' ~ name) | slugify"
+  peer_av_scene_entity_jinja: >-
+    {% set sid = 'scene.' ~ (${peer_av_scene_slug}) %}
+    {{ [sid] if sid in (states.scene | map(attribute='entity_id') | list) else [] }}
+
 globals:
   # True from the moment the duck calls go out until the volumes have been handed back. This, not the
   # switch, is what area_duck_release tests: someone who turns the feature off midway has disabled it
@@ -262,7 +298,7 @@ globals:
     restore_value: no
     initial_value: 'false'
 
-  # Remote TTS Volume as it read when this interaction started, which decides when the targets get
+  # Remote Announcement Volume as it read when this interaction started, which decides when the targets get
   # their volumes back. A snapshot rather than a live read because the decision is taken on one
   # trigger and acted on across two more, and a slider moved in between would leave one half
   # following a rule the other never saw.
@@ -289,6 +325,41 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+
+  # The two holders of the peer Announcement Volume hold, and whether the hold is in place - the
+  # peers' own values parked in the peer scene and the peers set to this device's level. One hold
+  # for both, so a ring that starts during a conversation, or the other way round, can never park
+  # this device's own level as a peer's "original".
+  - id: peer_av_hold_interaction
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: peer_av_hold_ring
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: peer_av_held
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # Whether the hold in progress is the one that made the peer scene, which its scene.apply needs:
+  # it renders after the scene.create, before Home Assistant has added the scene it can filter by.
+  - id: peer_av_parking
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  # Counts area_duck_start runs, and the count as area_duck_release found it when it decided the
+  # interaction had ended - so the release can tell, after its two-second wait, whether another
+  # interaction has started since.
+  - id: area_duck_starts
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: area_duck_release_starts
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
 
 switch:
   # "Duck every media player in this device's own area."
@@ -325,9 +396,9 @@ switch:
   # ducking is ducked whether or not the response is also going to it.
   #
   # It was opt-in because ducking a target was only safe when the response reached that target at a
-  # level not derived from its standing volume - true for a Satellite1 with its own Voice Override, for
-  # a Sonos reading the per-call level, and for anything once Remote TTS Volume is above 0, but not
-  # otherwise, where the response would arrive ducked. What closed that gap is the peer Voice Override
+  # level not derived from its standing volume - true for a Satellite1 with its own Announcement Volume, for
+  # a Sonos reading the per-call level, and for anything once Remote Announcement Volume is above 0, but not
+  # otherwise, where the response would arrive ducked. What closed that gap is the peer Announcement Volume
   # work below: the level a Satellite1 target plays at is now set for the call and put back afterwards,
   # so the unsafe case has stopped being reachable through the app. duck_tts_level_jinja still floors
   # the level for targets, which is the other half of the same protection.
@@ -336,13 +407,13 @@ number:
   # The level every ducked player is set to. Absolute, not a reduction: one volume_set carries a
   # single volume for the whole list, which is what keeps ducking to one action call.
   #
-  # 0 is literal here, unlike Remote TTS Volume and Voice Override where it means "leave alone" -
-  # the switch above does the enabling. The Remote TTS Targets are the exception and get a floor;
-  # see duck_tts_level_jinja. Unrelated to the decibel ducking in audio_gain_reconcile: volume_level
+  # 0 is literal here, unlike Remote Announcement Volume and Announcement Volume where it means "follow" -
+  # the switch above does the enabling. The routing targets are the exception and get a floor;
+  # see duck_tts_level_jinja. Unrelated to the music gain in audio_gain_reconcile: volume_level
   # is a linear fraction each integration reads however it likes.
   - platform: template
     id: duck_area_volume
-    name: "Duck Area Volume"
+    name: "Remote Ducking Volume"
     unit_of_measurement: "%"
     min_value: 0
     max_value: 100
@@ -368,6 +439,14 @@ script:
   - id: area_duck_start
     mode: single
     then:
+      - lambda: 'id(area_duck_starts) += 1;'
+      # The peers' Announcement Volume, set from the moment this device listens rather than with
+      # the response, so a peer playing music has seconds rather than 250ms to raise its amplifier.
+      # Held for the whole interaction, continued conversation included; self-gated.
+      - script.execute:
+          id: peer_av_hold
+          holder: interaction
+          hold: true
       - if:
           condition:
             and:
@@ -441,7 +520,7 @@ script:
       # The targets' duck again, for the second and later turns of a continued conversation. Separate
       # from the block below because that one's guard belongs to the snapshot, taken once and held
       # for the whole conversation, while the duck has to be re-issued every turn -
-      # tts_targets_volume_apply lifts the targets for each response and nothing else brings them
+      # announce_targets_volume_apply lifts the targets for each response and nothing else brings them
       # down. Ahead of that block rather than after it, which is what keeps the two exclusive. The
       # room needs no equivalent: a player already ducked drops out of `players` on its own.
       #
@@ -451,7 +530,7 @@ script:
           condition:
             and:
               - api.connected:
-              - lambda: 'return ${duck_active_expr};'
+              - lambda: 'return ${duck_routing_on_expr};'
               - lambda: |-
                   return id(area_duck_conversation_held) && id(area_duck_tts_active);
           then:
@@ -479,25 +558,29 @@ script:
                       call: "media_player.volume_set"
                       reason: !lambda 'return error;'
 
-      # The Remote TTS Targets, in a scene of their own and outside the room's block - two independent
+      # The routing targets, in a scene of their own and outside the room's block - two independent
       # features write to their volume and only one is area ducking, so nesting this under Duck Area
-      # Players would have made Remote TTS Volume depend on a ducking switch. One snapshot covers
+      # Players would have made Remote Announcement Volume depend on a ducking switch. One snapshot covers
       # both, taken before anything is touched: a second scene.create later would record a volume
-      # this firmware had itself just written.
+      # this firmware had itself just written. Held speakers are not in it - interaction_hold_loop
+      # keeps those down (see duck_players_jinja) - and peer_av_hold parks the peers' Announcement
+      # Volumes in a scene of their own.
       #
-      # Both flags cross the wire as strings and so are tested with `| int`, never as bare truth -
-      # a false flag arrives as "0", and a non-empty string is true in Jinja.
+      # Every routed interaction, ducking chosen or not, since a routed speaker that cannot be held
+      # is always ducked. Where there is nothing to snapshot, Home Assistant logs that it will not
+      # make an empty scene, the same as the room's block in a quiet room.
+      #
+      # do_vol crosses the wire as a string and so is tested with `| int`, never as bare truth - a
+      # false flag arrives as "0", and a non-empty string is true in Jinja.
       - if:
           condition:
             and:
               - api.connected:
-              - lambda: |-
-                  return !id(area_duck_tts_active) && ${duck_routing_on_expr} &&
-                         (${duck_active_expr} || id(remote_tts_volume).state > 0);
+              - lambda: 'return !id(area_duck_tts_active) && ${duck_routing_on_expr};'
           then:
             - lambda: |-
                 id(area_duck_tts_active) = true;
-                id(area_duck_tts_volume) = (int) id(remote_tts_volume).state;
+                id(area_duck_tts_volume) = (int) id(remote_announcement_volume).state;
             - homeassistant.action:
                 action: scene.create
                 data_template:
@@ -505,15 +588,10 @@ script:
                   entities: >-
                     ${duck_players_jinja}
                     ${tts_volume_targets_jinja}
-                    ${tts_volume_override_jinja}
                     {% set s = namespace(snap={}) %}
-                    {% for p in (tts_players if do_duck | int else [])
-                                | union(vol_players if do_vol | int else []) %}
+                    {% for p in tts_players | union(vol_players if do_vol | int else []) %}
                       {% set s.snap = s.snap | combine({p: {'state': 'unknown',
                                                             'volume_level': state_attr(p, 'volume_level')}}) %}
-                    {% endfor %}
-                    {% for v in (vo_players if do_vol | int else []) %}
-                      {% set s.snap = s.snap | combine({v: {'state': states(v)}}) %}
                     {% endfor %}
                     {{ s.snap }}
                 variables:
@@ -526,50 +604,46 @@ script:
                   duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas.c_str();'
                   duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra.c_str();'
                   duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded.c_str();'
-                  do_duck: !lambda 'return ${duck_active_expr} ? 1 : 0;'
-                  do_vol: !lambda 'return id(remote_tts_volume).state > 0 ? 1 : 0;'
+                  do_vol: !lambda 'return id(remote_announcement_volume).state > 0 ? 1 : 0;'
                 on_error:
                   - script.execute:
                       id: area_duck_call_error
                       call: "scene.create"
                       reason: !lambda 'return error;'
-            # The duck itself, now unconditional for anything chosen. `duck` is still sent unfloored, because the filter inside duck_players_jinja
-            # compares against it and this list has to be the one scene.create snapshotted; the floor
-            # belongs to the level being written, not to who is being written to.
-            - if:
-                condition:
-                  and:
-                    - lambda: 'return ${duck_active_expr};'
-                then:
-                  - homeassistant.action:
-                      action: media_player.volume_set
-                      data_template:
-                        entity_id: >-
-                          ${duck_players_jinja}
-                          {{ tts_players }}
-                        volume_level: "{{ ${duck_tts_level_jinja} }}"
-                      variables:
-                        mac: !lambda 'return esphome::get_mac_address_pretty();'
-                        name: !lambda 'return App.get_name();'
-                        duck: !lambda '${duck_level_lambda}'
-                        sel_areas: !lambda '${duck_skip_areas_lambda}'
-                        sel_extra: !lambda '${duck_skip_extra_lambda}'
-                        sel_cut: !lambda '${duck_skip_cut_lambda}'
-                        duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas.c_str();'
-                        duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra.c_str();'
-                        duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded.c_str();'
-                      on_error:
-                        - script.execute:
-                            id: area_duck_call_error
-                            call: "media_player.volume_set"
-                            reason: !lambda 'return error;'
+            # The duck itself, unconditional: tts_players is the chosen and the always-ducked routed
+            # speakers together. `duck` is still sent unfloored, because the filter inside
+            # duck_players_jinja compares against it and this list has to be the one scene.create
+            # snapshotted; the floor belongs to the level being written, not to who is being
+            # written to.
+            - homeassistant.action:
+                action: media_player.volume_set
+                data_template:
+                  entity_id: >-
+                    ${duck_players_jinja}
+                    {{ tts_players }}
+                  volume_level: "{{ ${duck_tts_level_jinja} }}"
+                variables:
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  name: !lambda 'return App.get_name();'
+                  duck: !lambda '${duck_level_lambda}'
+                  sel_areas: !lambda '${duck_skip_areas_lambda}'
+                  sel_extra: !lambda '${duck_skip_extra_lambda}'
+                  sel_cut: !lambda '${duck_skip_cut_lambda}'
+                  duck_areas: !lambda 'return id(web_ui_app)->selection().duck().areas.c_str();'
+                  duck_extra: !lambda 'return id(web_ui_app)->selection().duck().extra.c_str();'
+                  duck_cut: !lambda 'return id(web_ui_app)->selection().duck().excluded.c_str();'
+                on_error:
+                  - script.execute:
+                      id: area_duck_call_error
+                      call: "media_player.volume_set"
+                      reason: !lambda 'return error;'
       - if:
           condition:
-            lambda: 'return id(area_duck_active) || id(area_duck_tts_active);'
+            lambda: 'return id(area_duck_active) || id(area_duck_tts_active) || id(peer_av_hold_interaction);'
           then:
             - script.execute: area_duck_watchdog
 
-  # Hand the Remote TTS Targets back. The restore itself, with no opinion about when it should happen;
+  # Hand the routing targets back. The restore itself, with no opinion about when it should happen;
   # the two scripts below own that, and both come through here.
   #
   # Self-gated on area_duck_tts_active and clearing it at the end rather than the start, which is what
@@ -617,7 +691,7 @@ script:
   # ESPHome runs same-trigger automations in merge order, which this package cannot influence from
   # inside itself. That file explains the arrangement.
   #
-  # At Remote TTS Volume 0 the targets get their own levels back just before the response plays on
+  # At Remote Announcement Volume 0 the targets get their own levels back just before the response plays on
   # them; above 0 the level they are sitting at is the one it is meant to arrive at, so
   # area_duck_release picks them up afterwards instead.
   - id: area_duck_release_tts_targets
@@ -681,8 +755,10 @@ script:
           else:
             # First, and before the restore below opens its two-second window, or the flag would
             # still say "held" to a genuinely new interaction landing inside it.
-            - lambda: 'id(area_duck_conversation_held) = false;'
-            # Outside the room's block, because the targets can be held by Remote TTS Volume alone
+            - lambda: |-
+                id(area_duck_conversation_held) = false;
+                id(area_duck_release_starts) = id(area_duck_starts);
+            # Outside the room's block, because the targets can be held by Remote Announcement Volume alone
             # and area_duck_active is false for that whole interaction. This one call covers every
             # route: where the early release already ran it finds the flag clear and does nothing.
             # Started rather than awaited, so it runs alongside the room's own restore.
@@ -724,6 +800,20 @@ script:
                   - lambda: |-
                       id(area_duck_active) = false;
                       ESP_LOGD("area_ducking", "area media player volumes restored");
+            # This interaction's claim on the peers' Announcement Volume. The peers get their own
+            # values back here unless a ringing timer still holds them, after the room's restore.
+            #
+            # The room's two seconds are long enough for the next interaction to start, and it holds under
+            # the same holder, so one that started meanwhile is left to release the claim itself -
+            # unless the watchdog is forcing this one, which is not waiting on anything.
+            - if:
+                condition:
+                  lambda: 'return id(area_duck_starts) == id(area_duck_release_starts) || id(area_duck_force_release);'
+                then:
+                  - script.execute:
+                      id: peer_av_hold
+                      holder: interaction
+                      hold: false
             # Outside the block above, because an interaction that only touched the targets started
             # the watchdog without ever setting area_duck_active. Inside this branch rather than
             # after the whole if, because a deferred release is not an ended interaction and the
@@ -740,7 +830,7 @@ script:
       - delay: 3min
       - if:
           condition:
-            lambda: 'return id(area_duck_active) || id(area_duck_tts_active);'
+            lambda: 'return id(area_duck_active) || id(area_duck_tts_active) || id(peer_av_hold_interaction);'
           then:
             # Forced, because three minutes without an end of interaction is exactly the shape of a
             # state machine that is not going to reach IDLE on its own - and without this the
@@ -792,21 +882,188 @@ script:
                     ${duck_tts_scene_entity_jinja}
                 variables:
                   name: !lambda 'return App.get_name();'
+      # The peers' Announcement Volumes, on their own test because a ringing timer can hold them
+      # with no duck in progress.
+      - if:
+          condition:
+            lambda: 'return !id(peer_av_held);'
+          then:
+            - homeassistant.action:
+                action: scene.turn_on
+                data_template:
+                  entity_id: >-
+                    ${peer_av_scene_entity_jinja}
+                variables:
+                  name: !lambda 'return App.get_name();'
+            - delay: 2s
+            - homeassistant.action:
+                action: scene.delete
+                data_template:
+                  entity_id: >-
+                    ${peer_av_scene_entity_jinja}
+                variables:
+                  name: !lambda 'return App.get_name();'
+
+  # Holds or releases the peers' Announcement Volume for one holder - `interaction` (area_duck_start
+  # and area_duck_release) or `ring` (timer_remote_ring_loop and timer_remote_ring_stop in
+  # tts_routing.yaml). Above 0, Remote Announcement Volume is the level every routing target plays
+  # this device's responses and rings at, and a peer Satellite1 reads its level from its own
+  # Announcement Volume, so that is what gets set. At 0 nothing is held: see peer_av_levels_jinja.
+  # The visible cost is accepted: the peer's slider shows the held level for the length of the hold,
+  # and a change made there meanwhile is overwritten by the hand-back.
+  #
+  # The first holder parks the peers' own values in the peer scene and then sets them; the last one
+  # to let go plays the scene back. Queued, so a hold and a release can never interleave and a hold
+  # arriving during the hand-back starts a fresh scene after it.
+  - id: peer_av_hold
+    mode: queued
+    max_runs: 6
+    parameters:
+      holder: string
+      hold: bool
+    then:
+      - if:
+          condition:
+            lambda: 'return hold;'
+          then:
+            # Nothing to hold at Remote Announcement Volume 0: see peer_av_levels_jinja.
+            - if:
+                condition:
+                  and:
+                    - api.connected:
+                    - lambda: |-
+                        return ${duck_routing_on_expr} && id(remote_announcement_volume).has_state() &&
+                               id(remote_announcement_volume).state > 0;
+                then:
+                  - lambda: |-
+                      if (holder == "ring") {
+                        id(peer_av_hold_ring) = true;
+                      } else {
+                        id(peer_av_hold_interaction) = true;
+                      }
+                      id(peer_av_parking) = !id(peer_av_held);
+                  - if:
+                      condition:
+                        lambda: 'return id(peer_av_parking);'
+                      then:
+                        - lambda: |-
+                            id(peer_av_held) = true;
+                            ESP_LOGD("area_ducking", "holding peer Announcement Volume at %d%% (%s)",
+                                     (int) id(remote_announcement_volume).state, holder.c_str());
+                        # Same fire-and-forget ordering as area_duck_start: Home Assistant renders
+                        # the snapshot before it reads the scene.apply off the connection, so the
+                        # values parked are the peers' own.
+                        - homeassistant.action:
+                            action: scene.create
+                            data_template:
+                              scene_id: "{{ ${peer_av_scene_slug} }}"
+                              entities: >-
+                                ${self_area_jinja}
+                                ${announce_targets_resolve}
+                                ${peer_av_levels_jinja}
+                                {% set s = namespace(snap={}) %}
+                                {% for v in av_levels %}
+                                  {% set s.snap = s.snap | combine({v: {'state': states(v)}}) %}
+                                {% endfor %}
+                                {{ s.snap }}
+                            variables:
+                              mac: !lambda 'return esphome::get_mac_address_pretty();'
+                              name: !lambda 'return App.get_name();'
+                              sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                              sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                              sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
+                              vol: !lambda 'return (int) id(remote_announcement_volume).state;'
+                            on_error:
+                              - script.execute:
+                                  id: area_duck_call_error
+                                  call: "scene.create"
+                                  reason: !lambda 'return error;'
+                  # Every hold, not only the first: a continued conversation's next turn and a ring
+                  # starting during an interaction both land here with the scene already made. Those
+                  # write only what the scene parked, so nothing is set that the hand-back would miss.
+                  - homeassistant.action:
+                      action: scene.apply
+                      data_template:
+                        entities: >-
+                          ${self_area_jinja}
+                          ${announce_targets_resolve}
+                          ${peer_av_levels_jinja}
+                          {% set sid = 'scene.' ~ (${peer_av_scene_slug}) %}
+                          {% set parked = state_attr(sid, 'entity_id') | default([], true) | list %}
+                          {% set s = namespace(m={}) %}
+                          {% for v, lv in av_levels.items() if not (held | int) or v in parked %}
+                            {% set s.m = s.m | combine({v: lv}) %}
+                          {% endfor %}
+                          {{ s.m }}
+                      variables:
+                        mac: !lambda 'return esphome::get_mac_address_pretty();'
+                        name: !lambda 'return App.get_name();'
+                        sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                        sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                        sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
+                        vol: !lambda 'return (int) id(remote_announcement_volume).state;'
+                        held: !lambda 'return id(peer_av_parking) ? 0 : 1;'
+                      on_error:
+                        - script.execute:
+                            id: area_duck_call_error
+                            call: "scene.apply"
+                            reason: !lambda 'return error;'
+          else:
+            - lambda: |-
+                if (holder == "ring") {
+                  id(peer_av_hold_ring) = false;
+                } else {
+                  id(peer_av_hold_interaction) = false;
+                }
+            - if:
+                condition:
+                  lambda: 'return id(peer_av_held) && !id(peer_av_hold_interaction) && !id(peer_av_hold_ring);'
+                then:
+                  - lambda: |-
+                      id(peer_av_held) = false;
+                      ESP_LOGD("area_ducking", "handing peer Announcement Volume back (%s)", holder.c_str());
+                  # Not gated on the API: with the connection down the calls are dropped, and the
+                  # scene survives for area_duck_recover to play back on reconnect.
+                  - homeassistant.action:
+                      action: scene.turn_on
+                      data_template:
+                        entity_id: >-
+                          ${peer_av_scene_entity_jinja}
+                      variables:
+                        name: !lambda 'return App.get_name();'
+                      on_error:
+                        - script.execute:
+                            id: area_duck_call_error
+                            call: "scene.turn_on"
+                            reason: !lambda 'return error;'
+                  - delay: 2s
+                  - homeassistant.action:
+                      action: scene.delete
+                      data_template:
+                        entity_id: >-
+                          ${peer_av_scene_entity_jinja}
+                      variables:
+                        name: !lambda 'return App.get_name();'
+                      on_error:
+                        - script.execute:
+                            id: area_duck_call_error
+                            call: "scene.delete"
+                            reason: !lambda 'return error;'
 
   # Set the level the response is to arrive at, on the targets that will not set it themselves.
   #
-  # Gated on area_duck_tts_active rather than on Remote TTS Volume directly, which is what ties this to
+  # Gated on area_duck_tts_active rather than on Remote Announcement Volume directly, which is what ties this to
   # the snapshot: that flag is only set once the current volumes are parked in a scene, so this can
   # never move a level nothing is going to hand back. The captured volume is read for the same reason.
   #
   # Fired from tts_route_response in tts_routing.yaml, immediately ahead of the play_media call and
-  # the 250ms it waits out whenever Remote TTS Volume is set. It used to fire from on_intent_start,
+  # the 250ms it waits out whenever Remote Announcement Volume is set. It used to fire from on_intent_start,
   # a whole trigger earlier, and that was audible: a generic target playing music sat at full volume
   # for all of intent processing and TTS generation before the response arrived to justify it. The
   # 250ms is now the whole of the dispatch-to-application slack - dispatch order is guaranteed by
   # the connection, application still costs a networked speaker a round trip - and the target's own
   # fetch-and-buffer time pads it further in practice.
-  - id: tts_targets_volume_apply
+  - id: announce_targets_volume_apply
     mode: restart
     then:
       - if:
@@ -819,14 +1076,14 @@ script:
                 ESP_LOGD("area_ducking", "setting TTS target volumes to %d%%",
                          id(area_duck_tts_volume));
             # An empty list is a no-op, so an installation whose targets the expression filters out
-            # entirely - all Sonos, or all Satellite1 with their own override set - costs one call
+            # entirely - all Sonos, or all Satellite1 - costs one call
             # that does nothing rather than a guard that cannot be evaluated from this side.
             - homeassistant.action:
                 action: media_player.volume_set
                 data_template:
                   entity_id: >-
                     ${self_area_jinja}
-                    ${tts_targets_resolve}
+                    ${announce_targets_resolve}
                     ${tts_volume_targets_jinja}
                     {{ vol_players }}
                   volume_level: "{{ (vol | int) / 100 }}"
@@ -841,30 +1098,8 @@ script:
                       id: area_duck_call_error
                       call: "media_player.volume_set"
                       reason: !lambda 'return error;'
-            # The Satellite1 targets sitting at "no override", where volume_set would move music
-            # instead of speech. Their Voice Override is set for this announcement and handed back by
-            # area_duck_restore, which released the snapshot scene this was recorded in. Same empty-list
-            # reasoning as above: an installation with no such peer costs one call that does nothing.
-            - homeassistant.action:
-                action: number.set_value
-                data_template:
-                  entity_id: >-
-                    ${self_area_jinja}
-                    ${tts_targets_resolve}
-                    ${tts_volume_override_jinja}
-                    {{ vo_players }}
-                  value: "{{ vol | int }}"
-                variables:
-                  mac: !lambda 'return esphome::get_mac_address_pretty();'
-                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
-                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
-                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
-                  vol: !lambda 'return id(area_duck_tts_volume);'
-                on_error:
-                  - script.execute:
-                      id: area_duck_call_error
-                      call: "number.set_value"
-                      reason: !lambda 'return error;'
+            # Peer Satellite1s are not set here: peer_av_hold set their Announcement Volume when
+            # this device started listening.
 
   # Reporting for every call this package fires, in a script of its own for the same reason
   # tts_call_error is one: on_error's arguments are the error string plus the enclosing automation's,
@@ -904,7 +1139,7 @@ voice_assistant:
   # A loser never sets either duck flag, so its release below is a no-op.
   on_listening:
     - script.execute: area_duck_start
-  # tts_targets_volume_apply is not triggered here: tts_route_response executes it just before the
+  # announce_targets_volume_apply is not triggered here: tts_route_response executes it just before the
   # play_media call, which is as late as the lift can happen - see the script's own comment.
   on_end:
     - script.execute: area_duck_release

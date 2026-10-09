@@ -8,7 +8,7 @@
 #
 # The sync carries everything Home Assistant knows and this device does not: which areas exist, which
 # media players are in them, and which other FutureProofHomes devices are on the network. It is
-# rendered on Home Assistant's side, exactly as tts_targets_ma_check already does, so only the result
+# rendered on Home Assistant's side, exactly as announce_targets_ma_check already does, so only the result
 # crosses the wire rather than the whole entity registry.
 #
 # It arrives a page at a time, because the native API's receive buffer grows to the largest message
@@ -51,12 +51,12 @@ substitutions:
   # partial result. That is stricter than Developer Tools: a template that renders there can still
   # fail here.
   #
-  # Music Assistant entities are rejected for the reason tts_targets_ma_check explains - a speaker
+  # Music Assistant entities are rejected for the reason announce_targets_ma_check explains - a speaker
   # with two entity ids would otherwise appear twice. This device's own media player used to be
   # rejected through `mine` from the shared walk; it is now kept and tagged (caps bit 4 below), so
   # the app can show it greyed with "This device" instead of leaving a hole where its owner expects
-  # a row - routing to yourself is the Local Speaker row's job, and ducking yourself while you talk
-  # is never right, but a player silently missing from the list reads as a bug. Measured against a
+  # a row - routing to yourself is the "Play responses on this device" switch's job, and ducking
+  # yourself while you talk is never right, but a player silently missing from the list reads as a bug. Measured against a
   # 22-area, 104-media-player installation: 82 bytes per player (85 with the capability int below,
   # 87 with availability), 90 per device, 4.3KB in total - before
   # the switcher's URL and availability fields (roughly 30 bytes per device) and its variant labels
@@ -106,6 +106,13 @@ substitutions:
   # trees as "This device" - the call-time walks still reject it through `mine`, so the tag is
   # display-only. An int, never a boolean, for the literal_eval reason above.
   #
+  # Bits 8 and 16 say what happens to a player while it plays this device's responses, which the
+  # ducking tree shows as a locked tick (October 2026). 8: a Sonos, or a Satellite1 on firmware with
+  # an Announcement Volume control, is held announcing by interaction_hold_loop in tts_routing.yaml
+  # and lowers its own music. 16: any other brand that answers volume_set is turned down to Area
+  # Ducking Volume. A Satellite1 on older firmware gets neither, and is ducked only if ticked. The
+  # same tests as duck_players_jinja in area_ducking.yaml, which is where they take effect.
+  #
   # Registry ghosts are dropped before any of that: an entity that is in Home Assistant's registry
   # but that no loaded integration provides gets a stub state with `restored: true` (a stale
   # registration from renamed or re-registered hardware - found on a live install as
@@ -120,7 +127,7 @@ substitutions:
   # The fourth element is availability: 1 while the player's state is anything real, 0 for
   # `unavailable` or `unknown`. The app greys an offline row and marks it "Offline" without
   # touching its checkbox - the selection persists, so the player resumes routing and ducking the
-  # moment it comes back - and tts_targets_resolve in tts_routing.yaml applies the same state test
+  # moment it comes back - and announce_targets_resolve in tts_routing.yaml applies the same state test
   # at call time, so no play_media, chime, stop or volume call targets a player that is off the
   # network. Missing on payloads cached by older firmware, which the app reads as online - the
   # behaviour those payloads always had.
@@ -284,6 +291,7 @@ substitutions:
   web_ui_ha_jinja: >-
     ${self_area_jinja}
     {% set ma = integration_entities('music_assistant') %}
+    {% set hsonos = integration_entities('sonos') + integration_entities('sonos_cloud') %}
     {% set my = mac | lower | replace(':', '') %}
     {% set out = namespace(areas=[], rows=[], dev=[], loose=[], me='', fav='', cand=[]) %}
     {% for e in ma | select('match', 'media_player\.') %}
@@ -308,10 +316,16 @@ substitutions:
                   | reject('in', ma) %}
         {% if not state_attr(e, 'restored') %}
         {% set f = state_attr(e, 'supported_features') %}
+        {% set d = device_id(e) %}
+        ${peer_av_entity_jinja}
         {% set out.rows = out.rows + [[e, state_attr(e, 'friendly_name') or e,
              (4 if e in mine else 0) +
              (3 if f is none else (1 if f | int | bitwise_and(512) else 0)
-                                + (2 if f | int | bitwise_and(4) else 0)),
+                                + (2 if f | int | bitwise_and(4) else 0)) +
+             (8 if e in hsonos or av | count > 0
+              else 16 if (not d or device_attr(d, 'manufacturer') != 'FutureProofHomes')
+                         and (f is none or f | int | bitwise_and(4))
+              else 0),
              0 if states(e) in ['unavailable', 'unknown'] else 1]] %}
         {% endif %}
       {% endfor %}
@@ -325,10 +339,16 @@ substitutions:
                 | reject('in', ma) | reject('in', assigned) %}
       {% if not state_attr(e, 'restored') %}
       {% set f = state_attr(e, 'supported_features') %}
+      {% set d = device_id(e) %}
+      ${peer_av_entity_jinja}
       {% set out.loose = out.loose + [[e, state_attr(e, 'friendly_name') or e,
            (4 if e in mine else 0) +
            (3 if f is none else (1 if f | int | bitwise_and(512) else 0)
-                              + (2 if f | int | bitwise_and(4) else 0)),
+                              + (2 if f | int | bitwise_and(4) else 0)) +
+           (8 if e in hsonos or av | count > 0
+            else 16 if (not d or device_attr(d, 'manufacturer') != 'FutureProofHomes')
+                       and (f is none or f | int | bitwise_and(4))
+            else 0),
            0 if states(e) in ['unavailable', 'unknown'] else 1]] %}
       {% endif %}
     {% endfor %}

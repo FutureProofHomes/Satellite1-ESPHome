@@ -241,10 +241,15 @@ satellite1_web_ui:
   # the fetcher is a Sonos or Cast with no session). The keys are the URL tails the calls in
   # tts_routing.yaml render - change one and the other must move with it. All files are MP3 in
   # media_player.yaml because a Sonos AudioClip accepts MP3 and WAV only. stop_clip is the Sonos
-  # stop preempt: a new clip interrupts a playing one, which is the only stop a clip has.
+  # stop preempt: a new clip interrupts a playing one, which is the only stop a clip has. The ring
+  # goes out as timer_finished_remote, the local ring's sound with a silent tail (media_player.yaml).
+  # hold_silence and wake_word_triggered_hold are the routed-speaker hold's clips, fetched here by a
+  # Sonos only - Satellite1 peers play the same files from their own flash.
   sounds:
-    timer_finished.mp3: timer_finished_sound
+    timer_finished_remote.mp3: timer_finished_remote_sound
     wake_word_triggered.mp3: wake_word_triggered_sound
+    wake_word_triggered_hold.mp3: wake_word_triggered_hold_sound
+    hold_silence.mp3: hold_silence_sound
     stop_clip.mp3: stop_clip_sound
 
   # Whether a voice approval could be heard right now, read when a pairing window opens. Only the
@@ -446,8 +451,8 @@ satellite1_web_ui:
       temp_offset: temp_offset_ui
       humidity_offset: humidity_offset_ui
       lux_offset: lux_offset_ui
-      voice_override: tts_volume
-      remote_tts_volume: remote_tts_volume
+      voice_override: announcement_volume
+      remote_tts_volume: remote_announcement_volume
       duck_volume: duck_area_volume
 
     # The routing target list is not here. It used to be a text entity the tree wrote a
@@ -484,7 +489,7 @@ satellite1_web_ui:
       #
       # tts_mute_local and duck_tts_targets were here. Both entities are deleted; the first is now the
       # app's "Local Speaker" row and the second is unconditional.
-      tts_routing: tts_routing_enabled
+      tts_routing: route_announcements_area
       remote_wake_chime: remote_wake_chime
       remote_timer_ring: remote_timer_ring
       duck_area: duck_area_players
@@ -538,7 +543,7 @@ satellite1_web_ui:
       # state. Presence itself comes from "Radar Target", which satellite1_radar registers at runtime
       # from a C++ literal shared by both handlers, so it has no id to map and does not need one.
       radar_module: radar_detected_text
-      remote_tts_status: tts_routing_status
+      remote_tts_status: remote_announcement_status
       ask_status: web_ui_ask_status
       ring_moment: ring_moment_text
 

@@ -17,7 +17,24 @@ substitutions:
   # costs ~2% extra flash. The local mono announcement pipeline plays them unchanged - the decode
   # chain carries the file's own channel count and the mixer maps it onto its 2-channel output.
   timer_finished_sound_file: sounds/timer_finished.mp3
+  # The mirrored ring's clip: timer_finished.mp3's frames unchanged, then 2.5s of digital silence,
+  # 5.28s in all. Longer than the ring loop's resend interval on purpose, so each re-fire arrives
+  # while a clip is still playing rather than after one ended: no target goes idle between rings,
+  # which is what keeps its music ducked (and a peer's stop word armed) for the whole ring. Nothing
+  # plays it locally.
+  timer_finished_remote_sound_file: sounds/timer_finished_remote.mp3
   wake_word_triggered_sound_file: sounds/wake_word_triggered.mp3
+  # The routed-speaker hold's two clips (interaction_hold_loop in tts_routing.yaml), both 5.28s for
+  # the same reason as the ring's: longer than the 3.5s resend, so each re-fire replaces a clip still
+  # playing and the speaker stays ducked from the wake word to the answer. A peer plays them from
+  # its own flash, a Sonos fetches them from this device; nothing plays them locally.
+  #
+  # hold_silence opens with ~0.1s of pink noise peaking near -75 dBFS, far below audibility, then
+  # digital silence - pure silence is what the stop clip below found a Sonos would not register.
+  # wake_word_triggered_hold is the wake chime's frames unchanged plus silence, so the chime is the
+  # first hold clip. The silence in both is 32 kbps, which keeps each under 35KB.
+  hold_silence_sound_file: sounds/hold_silence.mp3
+  wake_word_triggered_hold_sound_file: sounds/wake_word_triggered_hold.mp3
   # ~0.4s faint fading 550 Hz tone. The Sonos stop preempt in tts_routing.yaml: a playing
   # AudioClip cannot be cancelled through Home Assistant, but a new LOW-priority clip interrupts
   # a playing LOW clip at any time, so announcing this IS the stop. Deliberately not digital
@@ -49,8 +66,14 @@ audio_file:
     file: ${mute_switch_off_sound_file}
   - id: timer_finished_sound
     file: ${timer_finished_sound_file}
+  - id: timer_finished_remote_sound
+    file: ${timer_finished_remote_sound_file}
   - id: wake_word_triggered_sound
     file: ${wake_word_triggered_sound_file}
+  - id: hold_silence_sound
+    file: ${hold_silence_sound_file}
+  - id: wake_word_triggered_hold_sound
+    file: ${wake_word_triggered_hold_sound_file}
   - id: stop_clip_sound
     file: ${stop_clip_sound_file}
   - id: center_button_press_sound
@@ -63,7 +86,7 @@ audio_file:
     file: ${center_button_long_press_sound_file}
   # A fifth of a second of true silence, 8kHz mono, ~3KB of flash (0.2s granularity replaced the
   # original 0.5s clip when the whole guard scale moved - owner decision, September 26 2026). The
-  # remote sync guard in tts_routing.yaml enqueues it 1-10 times behind a routed response so the
+  # remote echo guard in tts_routing.yaml enqueues it 1-10 times behind a routed response so the
   # announcement pipeline stays in ANNOUNCING past the remote targets' playback skew - which is
   # the one lever YAML has over when the assistant reopens the microphone. See tts_routing.yaml
   # for why a clip and not a delay.

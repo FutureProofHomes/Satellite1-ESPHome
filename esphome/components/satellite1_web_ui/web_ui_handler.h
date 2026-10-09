@@ -391,7 +391,7 @@ class WebUIHandler : public AsyncWebHandler {
   /// What tts_routing's probe concluded about the "Allow the device to perform Home Assistant
   /// actions" checkbox: 0 unknown, 1 allowed, 2 blocked (the checkbox is off), 3 unverifiable
   /// (Home Assistant predates 2025.12 and answers no action call). Pushed from
-  /// tts_routing_status_publish - the one script every verdict transition already runs through -
+  /// remote_announcement_status_publish - the one script every verdict transition already runs through -
   /// and served as `actions` on /api/sat1/ha, where it is what lets the app tell "tick this
   /// checkbox" apart from "upgrade Home Assistant" instead of hedging between them. An atomic
   /// because it is written from the main loop and read from the httpd task, the same split as the

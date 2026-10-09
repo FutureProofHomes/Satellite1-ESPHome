@@ -187,7 +187,7 @@ class VoiceAssistant final : public Component {
   // FPH: ran: set from VOICE_ASSISTANT_INTENT_END's continue_conversation arg and from
   // FPH: msg.start_conversation on an announce, both strictly before on_end fires, and consumed
   // FPH: by the state machine only after - so it is valid inside an on_end automation. The remote
-  // FPH: sync guard in config/common/tts_routing.yaml gates its silence padding on it (a routed
+  // FPH: echo guard in config/common/tts_routing.yaml gates its silence padding on it (a routed
   // FPH: answer with no listen window coming needs no mic guard). The whole vendor exists for
   // FPH: this getter; see FPH_VENDOR.md.
   bool get_continue_conversation() const { return this->continue_conversation_; }  // FPH:

@@ -97,7 +97,7 @@ packages:
   spk: !include common/speaker.yaml
   mp: !include common/media_player.yaml
   va: !include common/voice_assistant.yaml
-  # An inline package purely for where it sits: handing the Remote TTS Targets their volumes back has
+  # An inline package purely for where it sits: handing the routing targets their volumes back has
   # to reach Home Assistant before the calls that play the response on them, and ESPHome runs a
   # trigger's automations in merge order - so this must be listed ahead of tts_routing, which owns
   # the other blocks on both triggers below.
@@ -106,7 +106,7 @@ packages:
   # and clears its own flag, so being called twice hands the volumes back once; the empty-string test
   # keeps the intent-progress events that carry no URL from restarting it. Whether this is the right
   # moment is the script's own decision - see area_ducking.yaml.
-  duck_tts_targets_release_first:
+  duck_announce_targets_release_first:
     voice_assistant:
       on_intent_progress:
         - if:

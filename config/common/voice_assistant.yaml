@@ -132,8 +132,12 @@ micro_wake_word:
                                 then:
                                   # A response this device routed elsewhere is playing there too, so the local
                                   # stop fans out. The script's own guard makes it free when nothing was routed.
+                                  # Before the answer went out, the routed speakers are playing hold clips
+                                  # instead, and interaction_hold_stop ends those; each script's guard leaves
+                                  # the other's case alone.
                                   - voice_assistant.stop:
                                   - script.execute: tts_remote_stop
+                                  - script.execute: interaction_hold_stop
                                 # Stop any other media player announcement
                                 else:
                                   - if:
@@ -520,7 +524,7 @@ script:
           // publish_state(), and the media player publishes its own volume from setup(), which
           // fires on_volume and lands here - so this can run before the slider has restored.
           const float av_setting =
-              id(tts_volume).has_state() ? id(tts_volume).state / 100.0f : 0.0f;
+              id(announcement_volume).has_state() ? id(announcement_volume).state / 100.0f : 0.0f;
           float announcement = (av_setting > 0.0f) ? av_setting : music;
           // The level the DAC is driven to, so whichever input needs to be loudest gets there
           // without a boost. Deliberately not conditional on anything playing: holding it here is

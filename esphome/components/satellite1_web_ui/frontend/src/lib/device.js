@@ -348,7 +348,7 @@ export function peerOrigin(d) {
  * yet, 1 allowed, 2 blocked (the "Allow the device to perform Home Assistant actions" checkbox is
  * off), 3 unverifiable (Home Assistant predates 2025.12 and answers no action call, so a silence
  * must not accuse the checkbox). It is tts_routing's ha_actions_allowed verdict, pushed into the
- * component at every transition - see tts_routing_status_publish.
+ * component at every transition - see remote_announcement_status_publish.
  *
  * A stale payload is still served with its real age rather than withheld, because a list of speakers
  * from a minute ago is more use than an empty one - so `stale` is advice to the UI, not an error.

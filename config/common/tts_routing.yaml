@@ -21,7 +21,7 @@ substitutions:
   #
   # Areas expand at call time rather than being enumerated when they are picked, which is what makes a
   # speaker added to a room later get included without anyone revisiting the setting. Music Assistant
-  # entities are rejected during expansion for the reason tts_targets_ma_check explains: expanding an
+  # entities are rejected during expansion for the reason announce_targets_ma_check explains: expanding an
   # area returns them, and on the test installation area_entities('media_room') gives 18 players where
   # the app offers 12 - the other 6 are duplicates that clip on Sonos. Rejecting them here is what
   # stops whole-area mode from quietly reintroducing what the app filtered out.
@@ -53,7 +53,7 @@ substitutions:
   # cannot condemn what it cannot read. The same feature bits and the same state test drive the
   # app's greyed-out rows (web_ui_ha.yaml), so what the tree shows as untickable or offline and
   # what this walk removes agree by construction.
-  tts_targets_resolve: >-
+  announce_targets_resolve: >-
     {% set dupes = integration_entities('music_assistant') + integration_entities('sonos_cloud') %}
     {% set cut = sel_cut.split(',') | map('trim') | reject('eq', '')
                  | map('regex_replace', '^[^:]*:', '') | list %}
@@ -75,12 +75,12 @@ substitutions:
     {% set targets_list = cap.t %}
 
   # The same thing as a value, for the calls that just want an entity_id.
-  tts_targets_jinja: >-
-    ${tts_targets_resolve}
+  announce_targets_jinja: >-
+    ${announce_targets_resolve}
     {{ targets_list }}
 
   # Targets eligible for a remote wake chime, as `chime_players`. Expects `targets_list` and `mac`, so
-  # ${tts_targets_resolve} has to run ahead of it.
+  # ${announce_targets_resolve} has to run ahead of it.
   #
   # Each must be a Satellite1 (by manufacturer - every ESPHome device shares the esphome integration),
   # have its own Wake sound switch on, and not be this device. A switch that cannot be found counts as
@@ -100,7 +100,7 @@ substitutions:
     {% set chime_players = cns.t %}
 
   # The Stop Announcement buttons of the Satellite1s among the targets, as a list, for
-  # tts_remote_stop below. Expects `targets_list`, so ${tts_targets_resolve} has to run ahead of it.
+  # tts_remote_stop below. Expects `targets_list`, so ${announce_targets_resolve} has to run ahead of it.
   #
   # A button rather than media_player.media_stop, and the distinction is load-bearing. Home
   # Assistant's ESPHome integration sends a plain STOP with no announcement flag
@@ -196,7 +196,7 @@ substitutions:
   # Non-Satellite1 targets, as `other_players`, for the calls that hand out a device-served sound
   # URL: everything in the resolved list that is not a FutureProofHomes device. Sonos included -
   # unlike the stop split above, nothing here is destructive, so there is no platform to spare.
-  # Expects `targets_list`, so ${tts_targets_resolve} has to run ahead of it.
+  # Expects `targets_list`, so ${announce_targets_resolve} has to run ahead of it.
   non_sat1_targets_jinja: >-
     {% set ons = namespace(p=[]) %}
     {% for t in targets_list %}
@@ -206,6 +206,40 @@ substitutions:
       {% endif %}
     {% endfor %}
     {% set other_players = ons.p %}
+
+  # The routing targets interaction_hold_loop keeps announcing, split by how each is reached:
+  # `hold_peers` play the hold clips from their own flash, `hold_sonos` fetch them from this
+  # device. Expects `targets_list`, so ${announce_targets_resolve} has to run ahead of it.
+  #
+  # A peer counts while `playing` - the hold exists to keep music down, and holding an idle peer
+  # would only cost it its own wake word for the length of the interaction - and only on firmware
+  # that carries the clips, recognised by its Announcement Volume control (peer_av_entity_jinja in
+  # area_ducking.yaml), which shipped in the same release. An older peer would refuse the file every
+  # cycle ("Unknown file"), so it is left out and behaves as it always did. Every routed Sonos
+  # counts, whatever its state: a sonos_cloud shell's state says nothing about the music, and a
+  # silent clip on an idle Sonos costs nothing. Everything else routed is volume-ducked instead
+  # (duck_players_jinja in area_ducking.yaml).
+  hold_targets_jinja: >-
+    {% set hsonos = integration_entities('sonos') + integration_entities('sonos_cloud') %}
+    {% set hns = namespace(p=[], s=[]) %}
+    {% for t in targets_list %}
+      {% if t in hsonos %}
+        {% set hns.s = hns.s + [t] %}
+      {% elif states(t) == 'playing' %}
+        {% set d = device_id(t) %}
+        ${peer_av_entity_jinja}
+        {% if av | count > 0 %}
+          {% set hns.p = hns.p + [t] %}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+    {% set hold_peers = hns.p %}
+    {% set hold_sonos = hns.s %}
+
+  # One hold cycle, in ms because the loop's delay and its first-cycle arithmetic are lambdas. The
+  # timer ring's interval and for its reason: the hold clips run 5.28s, so each re-fire lands while
+  # the last one is still playing.
+  interaction_hold_interval_ms: "3500"
 
   # C++ spliced into the lambdas that render a device-served sound URL. The device serves its two
   # travelling sounds itself (GET /api/sat1/sounds/<name>.mp3 in satellite1_web_ui, session-gate
@@ -225,8 +259,13 @@ substitutions:
       }
     }
 
-  # One remote ring cycle: the MP3's 2.73s plus the 500ms gap the local ring's playlist delay uses,
-  # rounded up so remote clips cannot pile onto each other when a target starts late.
+  # One remote ring cycle: the ring's 2.73s plus the 500ms gap the local ring's playlist delay
+  # uses. The clip sent is longer on purpose: timer_finished_remote.mp3 runs 5.28s with its silent
+  # tail, so every re-fire lands while the last clip is still playing and no target goes idle (and
+  # lifts its music) between rings. Measured at a peer, Home Assistant and fetch jitter stretched
+  # cycles to 4.7s; the tail covers it. The overlap relies on the target replacing a playing
+  # announcement with the next, as Satellite1 and Sonos do; one that queued them instead would fall
+  # ~1.8s further behind every ring.
   timer_remote_ring_interval: 3500ms
 
   # This device's own ESPHome config entry, or the empty string. Expects `mac`.
@@ -299,12 +338,12 @@ globals:
     restore_value: no
     initial_value: 'false'
   # The target list pre-normalized, so the log can print a pasteable call. Only read into a log line.
-  - id: tts_targets_literal
+  - id: announce_targets_literal
     type: std::string
     restore_value: no
   # False is both "checked, all native" and "not checked yet", so the status entity only accuses the
   # target list once a call has said so.
-  - id: tts_targets_have_ma
+  - id: announce_targets_have_ma
     type: bool
     restore_value: no
     initial_value: 'false'
@@ -315,6 +354,30 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  # interaction_hold_loop's state. hold_active is the loop's licence to send, withdrawn the moment
+  # the answer starts going out. hold_sent and hold_last_send_ms gate the stop and time the hand-off
+  # to the answer. hold_chime_ms is when remote_wake_chime_send handed out the tailed chime, which
+  # tells the loop's first cycle which targets already have a hold clip playing.
+  - id: hold_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: hold_sent
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: hold_last_send_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: hold_chime_sent
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: hold_chime_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
 
 # "Remote TTS Targets" was a text entity here. Deleted, and this is the change the whole redesign
 # turns on.
@@ -346,8 +409,8 @@ globals:
 satellite1_web_ui:
   on_selection_change:
     - script.execute: ha_action_probe
-    - script.execute: tts_targets_ma_check
-    - script.execute: tts_routing_status_publish
+    - script.execute: announce_targets_ma_check
+    - script.execute: remote_announcement_status_publish
     - script.execute: tts_announce_format_apply
     # The local speaker lives in the selection too, and this is what carries a change to it - including
     # one made mid-response, which is why it reconciles rather than latching at the start of a turn.
@@ -364,7 +427,7 @@ esphome:
   on_boot:
     - priority: -100
       then:
-        - script.execute: tts_routing_status_publish
+        - script.execute: remote_announcement_status_publish
         # The first ListEntities of the boot then carries the right format and no reload is needed.
         - script.execute: tts_announce_format_apply
 
@@ -401,7 +464,7 @@ api:
           - script.execute: ha_action_probe
           # Re-taken every connection: an all-native target list reads differently once Music
           # Assistant has adopted those players.
-          - script.execute: tts_targets_ma_check
+          - script.execute: announce_targets_ma_check
 
 switch:
   # "Send responses to every media player in this device's own area."
@@ -421,8 +484,8 @@ switch:
   # Whether a response is going anywhere at all is now ${tts_routing_active}, not this switch. A
   # target picked in another room routes with this off, which the old master switch could not express.
   - platform: template
-    id: tts_routing_enabled
-    name: "Route TTS To All Area Players"
+    id: route_announcements_area
+    name: "Route Announcements To All Area Players"
     icon: "mdi:speaker-multiple"
     entity_category: config
     # DISABLED, and load bearing. With any other mode Switch::get_initial_state_with_restore_mode()
@@ -438,7 +501,7 @@ switch:
     turn_off_action:
       - lambda: 'id(web_ui_app)->selection().set_routing_whole_own_area(false);'
 
-  # Whether the Remote TTS Targets sound their own wake chime when this device hears the wake word.
+  # Whether the routing targets sound their own wake chime when this device hears the wake word.
   # Eligibility is decided per call by wake_chime_targets_jinja, so targets need no reflash.
   # Independent of this device's own Wake sound, which governs its own speaker alone.
   - platform: template
@@ -463,12 +526,12 @@ switch:
     restore_mode: RESTORE_DEFAULT_ON
 
   # "Remote TTS Mutes Local Voice" was here. Deleted: whether this device speaks the answer aloud is
-  # now the "Local Speaker" row at the top of the app's target list, stored as `local_speaker` in the
-  # selection, where it sits next to the other places the answer can go instead of being a separate
-  # inverted switch someone has to reason about. Default flipped with it - the app's row is ticked out
+  # now the app's "Play responses on this device" switch on the Audio page, stored as `local_speaker`
+  # in the selection, where it sits next to the places the answer can go instead of being a separate
+  # inverted switch someone has to reason about. Default flipped with it - the app's switch is on out
   # of the box, which is the same behaviour as this switch shipping off.
   #
-  # Still carried out by audio_gain_reconcile, which ducks the local announcement channel rather than
+  # Still carried out by audio_gain_reconcile, which silences the local announcement channel rather than
   # stopping the pipeline - so the wake chime still plays either way, and on_end and both watchdogs
   # still have a local drain to wait for. It now reconciles from the selection-change trigger in
   # common/web_ui.yaml, which is what lets a change made mid-response land on that response.
@@ -502,7 +565,7 @@ select:
   # - the un-duck and the stop windows release at local drain as if the guard did not exist.
   - platform: template
     id: remote_sync_guard
-    name: "Remote Sync Guard"
+    name: "Remote Echo Guard"
     icon: "mdi:timer-sand"
     entity_category: config
     optimistic: true
@@ -528,7 +591,7 @@ button:
   # media_player.media_stop cannot).
   #
   # NEVER make this internal: true, and do not disable it by default. Like wake_sound and
-  # tts_volume, other Satellite1s find it by substring over device_entities() -
+  # announcement_volume, other Satellite1s find it by substring over device_entities() -
   # 'stop_announcement' - and internal removes an entity from the native API, while button.press
   # refuses a disabled entity. Either would silently break every router's stop fan-out. It also
   # has to keep this object id: rename the entity and every peer on older firmware stops finding
@@ -576,15 +639,18 @@ button:
       - script.execute: tts_remote_stop
 
 number:
-  # This device's own level for speech: its own responses, and every announcement it receives.
-  # 0 means "no override" and speech follows the media volume.
+  # This device's own level for everything on the announcement pipeline: its own responses, every
+  # announcement it receives, timers, chimes and button sounds. 0 means "auto": announcements
+  # follow the media volume, and mute or volume 0 silences the whole device. Above 0, mute and
+  # volume 0 silence music only. The volume buttons never change it.
   #
-  # Local only - nothing here travels with a routed call. On a device that is somebody else's
-  # routing target it also decides whether that router may set this device's volume;
-  # tts_volume_targets_jinja in area_ducking.yaml is the filter that asks.
+  # On a device that is somebody else's routing target, a router with its Remote Announcement
+  # Volume above 0 sets this for the length of an interaction or a ringing timer and puts it back
+  # afterwards (peer_av_hold in area_ducking.yaml), which is why it must stay visible to Home
+  # Assistant: routers find it by its entity id ending in `_announcement_volume`.
   - platform: template
-    id: tts_volume
-    name: "Voice Override"
+    id: announcement_volume
+    name: "Announcement Volume"
     unit_of_measurement: "%"
     min_value: 0
     max_value: 100
@@ -598,12 +664,14 @@ number:
     on_value:
       - script.execute: audio_gain_reconcile
 
-  # The level asked of the speakers a response is routed to. Nothing local reads it. 0 means "leave
-  # every target's volume alone". Above 0 it also arms tts_targets_volume_apply in area_ducking.yaml,
-  # since only Sonos reads the per-call level the announcement carries.
+  # The level this device's responses and timer rings play at on the speakers they are routed to.
+  # Nothing local reads it. Above 0 it wins on every kind of target: Sonos reads it off the
+  # announcement, a peer Satellite1 has its Announcement Volume set to it (peer_av_hold), and
+  # anything else has its volume set (announce_targets_volume_apply), all handed back afterwards.
+  # 0 means "leave every target's volume alone", so each one plays at its own level.
   - platform: template
-    id: remote_tts_volume
-    name: "Remote TTS Volume"
+    id: remote_announcement_volume
+    name: "Remote Announcement Volume"
     unit_of_measurement: "%"
     min_value: 0
     max_value: 100
@@ -621,8 +689,8 @@ text_sensor:
   # customer wondering why one did not has a single place to look. docs/TTS-Routing.md lists the
   # states and what each one means.
   - platform: template
-    id: tts_routing_status
-    name: "Remote TTS Status"
+    id: remote_announcement_status
+    name: "Remote Announcement Status"
     icon: "mdi:cast-audio"
     entity_category: "diagnostic"
     update_interval: never
@@ -641,7 +709,7 @@ text_sensor:
         return std::string("Blocked: allow HA actions in device settings");
       }
       // Ahead of the version caveat, because this was established by a call HA actually ran.
-      if (id(tts_targets_have_ma)) {
+      if (id(announce_targets_have_ma)) {
         return std::string("Music Assistant ids in targets");
       }
       if (id(ha_actions_allowed) == 3) {
@@ -753,7 +821,7 @@ script:
                   - lambda: |-
                       id(ha_action_probe_pending) = false;
                       id(ha_actions_allowed) = id(ha_supports_action_replies) ? 2 : 3;
-                  - script.execute: tts_routing_status_publish
+                  - script.execute: remote_announcement_status_publish
                   - if:
                       condition:
                         lambda: 'return id(ha_actions_allowed) == 2;'
@@ -788,16 +856,16 @@ script:
             ESP_LOGI("tts_routing", "Home Assistant actions are allowed");
           }
           id(ha_actions_allowed) = 1;
-      - script.execute: tts_routing_status_publish
+      - script.execute: remote_announcement_status_publish
 
-  # Warns when Remote TTS Targets holds Music Assistant entity ids, which serialize playback across
+  # Warns when the routing targets hold Music Assistant entity ids, which serialize playback across
   # the targets and make Sonos start late and clip.
   #
   # get_queue only reads, so aiming it at the target list changes nothing, and the answer is in
   # whether one comes back: a target MA owns produces a response, a list it owns none of raises
   # HomeAssistantError, and no MA at all raises ServiceNotFound. Both failures are the correct
   # configuration, which is why success is the branch that complains.
-  - id: tts_targets_ma_check
+  - id: announce_targets_ma_check
     mode: restart
     then:
       - if:
@@ -813,7 +881,7 @@ script:
                 data_template:
                   entity_id: >-
                     ${self_area_jinja}
-                    ${tts_targets_jinja}
+                    ${announce_targets_jinja}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
                   sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
@@ -824,29 +892,29 @@ script:
                 response_template: "{{ response.keys() | list | join(', ') }}"
                 on_success:
                   - lambda: |-
-                      id(tts_targets_have_ma) = true;
+                      id(announce_targets_have_ma) = true;
                       // Split across messages: logger tx_buffer_size defaults to 512 bytes.
                       ESP_LOGE("tts_routing",
-                               "Remote TTS Targets contains Music Assistant entity ids: %s",
+                               "Routing targets contain Music Assistant entity ids: %s",
                                response["response"].as<const char *>());
                       ESP_LOGE("tts_routing",
                                "  Responses sent to these play one speaker at a time and clip on "
                                "Sonos. Fix: replace each with the native entity id for the same "
                                "speaker - the one the speaker's own integration created.");
-                  - script.execute: tts_routing_status_publish
+                  - script.execute: remote_announcement_status_publish
                 # No Music Assistant entity in the list, or no Music Assistant at all.
                 on_error:
-                  - lambda: 'id(tts_targets_have_ma) = false;'
-                  - script.execute: tts_routing_status_publish
+                  - lambda: 'id(announce_targets_have_ma) = false;'
+                  - script.execute: remote_announcement_status_publish
           else:
             # Nothing was asked, so nothing is known: a verdict about a target list that has since
             # been edited must not outlive it.
-            - lambda: 'id(tts_targets_have_ma) = false;'
+            - lambda: 'id(announce_targets_have_ma) = false;'
 
-  # Re-reads Remote TTS Status, whose update_interval is never.
-  - id: tts_routing_status_publish
+  # Re-reads Remote Announcement Status, whose update_interval is never.
+  - id: remote_announcement_status_publish
     then:
-      - component.update: tts_routing_status
+      - component.update: remote_announcement_status
       # The web app reads the same verdict as `actions` on /api/sat1/ha, where it is what lets the
       # onboarding screen say "tick this checkbox" or "upgrade Home Assistant" instead of hedging
       # between them. Pushed here because this script is the one chokepoint every transition of
@@ -861,7 +929,7 @@ script:
   # of the call, so the device genuinely does not know the resolved list. What it logs instead is what
   # was chosen - `area:media_room` alongside any individually picked ids - which is the honest answer
   # and still tells you where to look when a response goes somewhere unexpected.
-  - id: tts_targets_parse
+  - id: announce_targets_parse
     then:
       - lambda: |-
           const auto &sel = id(web_ui_app)->selection().routing();
@@ -888,7 +956,7 @@ script:
           };
           append(sel.areas.c_str(), "area:");
           append(sel.extra.c_str(), "");
-          id(tts_targets_literal) = "[" + all + "]";
+          id(announce_targets_literal) = "[" + all + "]";
 
   # MP3 while routing is on, FLAC when it is off. Home Assistant reads this format off ListEntities
   # and hands it to the TTS engine, so it decides the extension on the one URL every target is
@@ -942,7 +1010,7 @@ script:
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
 
-  # Sends the response to the Remote TTS Targets, for whichever of the two triggers arrives first.
+  # Sends the response to the routing targets, for whichever of the two triggers arrives first.
   # on_intent_progress normally wins, ~36ms after intent start against ~1.1s for on_tts_end, so
   # every target starts from the same moment this speaker does. on_tts_end is the fallback for a TTS
   # engine that does not stream.
@@ -957,27 +1025,41 @@ script:
             lambda: 'return id(tts_routing_to_remote) && !id(tts_remote_sent);'
           then:
             - lambda: 'id(tts_remote_sent) = true;'
-            # Lift the targets to Remote TTS Volume now, as late as possible: any earlier trigger
+            # The answer replaces the hold clip on every held target, so the hold ends here.
+            - lambda: 'id(hold_active) = false;'
+            - script.stop: interaction_hold_loop
+            # Lift the targets to Remote Announcement Volume now, as late as possible: any earlier trigger
             # (it used to be on_intent_start, in area_ducking.yaml) leaves a music-playing target
             # blasting at the response's level for however long generation takes before the response
             # arrives. The script no-ops at slider 0 and on the sign-in prompt path, where no
             # snapshot was taken. Defined in area_ducking.yaml, which always merges alongside this
             # package (satellite1.base.yaml lists both).
-            - script.execute: tts_targets_volume_apply
+            - script.execute: announce_targets_volume_apply
             # Slack for that lift. Dispatch order is not the worry, application is: a networked
             # speaker takes a round trip to accept a volume, and a response that starts at the old
             # level and jumps is what this prevents.
             - if:
                 condition:
-                  lambda: 'return id(remote_tts_volume).state > 0;'
+                  lambda: 'return id(remote_announcement_volume).state > 0;'
                 then:
                   - delay: 250ms
+            # At least 500ms between the last hold clip and the answer. Home Assistant may run two
+            # calls from this device concurrently, so a hold clip sent just before could reach a
+            # target after the answer and cut it off. Usually nothing to wait: a send lands in the
+            # last half second of a 3.5s cycle about one answer in seven.
+            - if:
+                condition:
+                  lambda: 'return id(hold_sent) && millis() - id(hold_last_send_ms) < 500;'
+                then:
+                  - delay: !lambda |-
+                      const uint32_t since = millis() - id(hold_last_send_ms);
+                      return since < 500 ? 500 - since : 0;
             # The call written out as the action it will become, so it can be pasted into Developer
             # Tools > Actions unchanged. One line per key: the logger's tx_buffer_size is 512 bytes.
-            - script.execute: tts_targets_parse
+            - script.execute: announce_targets_parse
             - lambda: |-
                 ESP_LOGD("tts_routing", "routing response: volume %d%%, codec %s",
-                         (int) id(remote_tts_volume).state,
+                         (int) id(remote_announcement_volume).state,
                          id(tts_announce_format_mp3) ? "mp3" : "flac");
             # One call, to every target. No guard on the list: an empty entity_id is a no-op rather
             # than an error, and on_start has already logged that nothing is set.
@@ -992,10 +1074,10 @@ script:
             # reasoning use_pre_announce already rides on, so it is sent unconditionally and costs
             # a user nothing until they install that integration and pick its entity in the tree.
             - lambda: |-
-                const int vol = (int) id(remote_tts_volume).state;
+                const int vol = (int) id(remote_announcement_volume).state;
                 ESP_LOGD("tts_routing", "action: media_player.play_media");
                 ESP_LOGD("tts_routing", "data:");
-                ESP_LOGD("tts_routing", "  entity_id: %s", id(tts_targets_literal).c_str());
+                ESP_LOGD("tts_routing", "  entity_id: %s", id(announce_targets_literal).c_str());
                 ESP_LOGD("tts_routing", "  media_content_id: %s", url.c_str());
                 ESP_LOGD("tts_routing", "  media_content_type: music");
                 ESP_LOGD("tts_routing", "  announce: true");
@@ -1015,7 +1097,7 @@ script:
                 data_template:
                   entity_id: >-
                     ${self_area_jinja}
-                    ${tts_targets_jinja}
+                    ${announce_targets_jinja}
                   media_content_id: "{{ tts_url }}"
                   extra: >-
                     {{ {'use_pre_announce': false, 'play_on_bonded': true, 'volume': vol | int}
@@ -1026,7 +1108,7 @@ script:
                   sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
                   sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
                   tts_url: !lambda 'return url;'
-                  vol: !lambda 'return (int) id(remote_tts_volume).state;'
+                  vol: !lambda 'return (int) id(remote_announcement_volume).state;'
                 on_success:
                   - script.execute:
                       id: tts_call_ok
@@ -1086,8 +1168,41 @@ script:
               - switch.is_on: remote_wake_chime
               - lambda: 'return ${tts_routing_active};'
           then:
+            # Read by interaction_hold_loop's first cycle, which skips the targets this hands the
+            # tailed chime: theirs is already a hold clip.
+            - lambda: |-
+                id(hold_chime_ms) = millis();
+                id(hold_chime_sent) = true;
             # No guard on the target list: an empty entity_id is a no-op, so every target being a
             # Sonos, or every target's chime being off, costs one ignored call.
+            #
+            # Two calls per kind of target from here on: the targets interaction_hold_loop is about
+            # to hold get the chime with a silent tail (media_player.yaml), so the chime itself is
+            # the first hold clip and the music does not come back up between it and the loop's
+            # first send. Everyone else gets the plain chime.
+            - homeassistant.action:
+                action: media_player.play_media
+                data:
+                  media_content_type: music
+                  announce: "true"
+                  media_content_id: "audio-file://wake_word_triggered_hold_sound"
+                data_template:
+                  entity_id: >-
+                    ${self_area_jinja}
+                    ${announce_targets_resolve}
+                    ${wake_chime_targets_jinja}
+                    ${hold_targets_jinja}
+                    {{ chime_players | select('in', hold_peers) | list }}
+                  extra: "{{ {'bypass_proxy': true} }}"
+                variables:
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
+                on_error:
+                  - script.execute:
+                      id: remote_wake_chime_error
+                      reason: !lambda 'return error;'
             - homeassistant.action:
                 action: media_player.play_media
                 data:
@@ -1097,9 +1212,10 @@ script:
                 data_template:
                   entity_id: >-
                     ${self_area_jinja}
-                    ${tts_targets_resolve}
+                    ${announce_targets_resolve}
                     ${wake_chime_targets_jinja}
-                    {{ chime_players }}
+                    ${hold_targets_jinja}
+                    {{ chime_players | reject('in', hold_peers) | list }}
                   extra: "{{ {'bypass_proxy': true} }}"
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
@@ -1118,7 +1234,7 @@ script:
             # local chime (the caller's ordering) plus a small file is the best available, and the
             # docs say so rather than letting it read as a bug. No per-target Wake sound test
             # either: only a Satellite1 has that switch, so for these targets Remote Wake Chime
-            # alone decides.
+            # alone decides. The held Sonos get the tailed chime, the same split as above.
             - homeassistant.action:
                 action: media_player.play_media
                 data:
@@ -1127,16 +1243,47 @@ script:
                 data_template:
                   entity_id: >-
                     ${self_area_jinja}
-                    ${tts_targets_resolve}
+                    ${announce_targets_resolve}
                     ${non_sat1_targets_jinja}
-                    {{ other_players }}
+                    ${hold_targets_jinja}
+                    {{ other_players | select('in', hold_sonos) | list }}
+                  media_content_id: "{{ chime_url }}"
+                  extra: >-
+                    {{ {'use_pre_announce': false, 'play_on_bonded': true, 'volume': vol | int}
+                       if vol | int > 0
+                       else {'use_pre_announce': false, 'play_on_bonded': true} }}
+                variables:
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
+                  chime_url: !lambda |-
+                    ${sat1_sounds_url_lambda}
+                    return "http://" + sat1_ip + "/api/sat1/sounds/wake_word_triggered_hold.mp3";
+                  vol: !lambda 'return (int) id(remote_announcement_volume).state;'
+                on_error:
+                  - script.execute:
+                      id: remote_wake_chime_error
+                      reason: !lambda 'return error;'
+            - homeassistant.action:
+                action: media_player.play_media
+                data:
+                  media_content_type: music
+                  announce: "true"
+                data_template:
+                  entity_id: >-
+                    ${self_area_jinja}
+                    ${announce_targets_resolve}
+                    ${non_sat1_targets_jinja}
+                    ${hold_targets_jinja}
+                    {{ other_players | reject('in', hold_sonos) | list }}
                   media_content_id: "{{ chime_url }}"
                   # play_on_bonded: the sonos_cloud fan-out to bonded surrounds; everyone else
                   # ignores it. See tts_route_response for the full reasoning.
                   #
                   # volume rides along exactly as it does on the response and the timer ring -
                   # found missing on hardware September 20 2026, when the response honoured Remote
-                  # TTS Volume and the chime in front of it played at a level of its own. Only
+                  # Announcement Volume and the chime in front of it played at a level of its own. Only
                   # Sonos (native and cloud) reads it, per clip, so no snapshot is needed and
                   # nothing has to be put back.
                   extra: >-
@@ -1151,7 +1298,7 @@ script:
                   chime_url: !lambda |-
                     ${sat1_sounds_url_lambda}
                     return "http://" + sat1_ip + "/api/sat1/sounds/wake_word_triggered.mp3";
-                  vol: !lambda 'return (int) id(remote_tts_volume).state;'
+                  vol: !lambda 'return (int) id(remote_announcement_volume).state;'
                 on_error:
                   - script.execute:
                       id: remote_wake_chime_error
@@ -1168,25 +1315,213 @@ script:
           id(ha_action_replies_seen) = true;
           ESP_LOGE("tts_routing", "wake chime call failed: %s", reason.c_str());
 
+  # Keeps the routed Sonos and Satellite1 speakers ducked from the wake word to the answer. A
+  # routed speaker only lowers its own music while something is playing on it, so between the chime
+  # and the answer - the person talking, the assistant thinking - its music came back up. This
+  # plays a silent clip on them every ${interaction_hold_interval_ms}ms; each one replaces the clip
+  # still playing, the speaker never leaves its announcement state, and the answer replaces the last
+  # one (tts_route_response stops the loop). No level is touched, so nothing has to be put back:
+  # if this device drops off the network, the last clip runs out and the music returns by itself.
+  # Generic players cannot be held this way and are volume-ducked instead (area_ducking.yaml).
+  #
+  # Peers play the clip from their own flash, as they do the wake chime - no audio crosses the
+  # network, and an audio-file:// announcement does not arm their stop word the way the HTTP ring
+  # does on purpose. A Sonos fetches it from this device, the only way it can get a sound.
+  #
+  # Started from on_listening, so it restarts with each turn of a continued conversation - after
+  # the remote echo guard, by which time the targets have finished the previous answer. The first
+  # cycle skips the targets that just got the tailed chime, whose chime is already a hold clip, and
+  # the second lands an interval after that chime. No sends while a timer rings: the ring loop owns
+  # the targets then.
+  #
+  # No on_error on the calls, for the reason timer_remote_ring_loop gives: this repeats every few
+  # seconds, and a pending-response callback per call would leak against a silent Home Assistant.
+  - id: interaction_hold_loop
+    mode: restart
+    then:
+      - lambda: 'id(hold_active) = true;'
+      - while:
+          condition:
+            and:
+              - api.connected:
+              - voice_assistant.is_running:
+              - switch.is_off: timer_ringing
+              - lambda: 'return ${tts_routing_active} && id(hold_active);'
+          then:
+            - lambda: |-
+                id(hold_sent) = true;
+                id(hold_last_send_ms) = millis();
+            - homeassistant.action:
+                action: media_player.play_media
+                data:
+                  media_content_type: music
+                  announce: "true"
+                  media_content_id: "audio-file://hold_silence_sound"
+                data_template:
+                  entity_id: >-
+                    ${self_area_jinja}
+                    ${announce_targets_resolve}
+                    ${wake_chime_targets_jinja}
+                    ${hold_targets_jinja}
+                    {{ (hold_peers | reject('in', chime_players) | list)
+                       if fresh_chime | int > 0 else hold_peers }}
+                  extra: "{{ {'bypass_proxy': true} }}"
+                variables:
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
+                  fresh_chime: !lambda |-
+                    return id(hold_chime_sent) &&
+                           millis() - id(hold_chime_ms) < ${interaction_hold_interval_ms} ? 1 : 0;
+            - homeassistant.action:
+                action: media_player.play_media
+                data:
+                  media_content_type: music
+                  announce: "true"
+                data_template:
+                  entity_id: >-
+                    ${self_area_jinja}
+                    ${announce_targets_resolve}
+                    ${hold_targets_jinja}
+                    {{ [] if fresh_chime | int > 0 else hold_sonos }}
+                  media_content_id: "{{ hold_url }}"
+                  # The ring's extras without its volume: there is nothing to hear.
+                  extra: "{{ {'use_pre_announce': false, 'bypass_proxy': true, 'play_on_bonded': true} }}"
+                variables:
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
+                  fresh_chime: !lambda |-
+                    return id(hold_chime_sent) &&
+                           millis() - id(hold_chime_ms) < ${interaction_hold_interval_ms} ? 1 : 0;
+                  hold_url: !lambda |-
+                    ${sat1_sounds_url_lambda}
+                    return "http://" + sat1_ip + "/api/sat1/sounds/hold_silence.mp3";
+            # A full interval, except after a first cycle that skipped the chimed targets: then the
+            # next send is due an interval after the chime went out, inside its silent tail.
+            - delay: !lambda |-
+                const uint32_t interval = ${interaction_hold_interval_ms};
+                if (id(hold_chime_sent)) {
+                  const uint32_t since = millis() - id(hold_chime_ms);
+                  if (since < interval) {
+                    return interval - since;
+                  }
+                }
+                return interval;
+
+  # Ends the hold early when "stop" cuts this device off before the answer went out - after that,
+  # the answer has replaced the hold and tts_remote_stop owns the targets. The same platform split
+  # as tts_remote_stop, aimed at the held targets only: their Stop Announcement buttons for the
+  # peers, the preempt clip for Sonos. Gated on the loop having sent something and nothing since,
+  # so a press never reaches a peer that is not playing a hold clip - its button would stop
+  # whatever it is announcing instead.
+  - id: interaction_hold_stop
+    mode: single
+    then:
+      - if:
+          condition:
+            and:
+              - api.connected:
+              - lambda: 'return id(hold_sent) && !id(tts_remote_sent);'
+          then:
+            - lambda: |-
+                id(hold_active) = false;
+                id(hold_sent) = false;
+                ESP_LOGI("tts_routing", "stopping the routed-speaker hold");
+            - script.stop: interaction_hold_loop
+            - homeassistant.action:
+                action: button.press
+                data_template:
+                  entity_id: >-
+                    ${self_area_jinja}
+                    ${announce_targets_resolve}
+                    ${hold_targets_jinja}
+                    {% set bns = namespace(b=[]) %}
+                    {% for t in hold_peers %}
+                      {% set bns.b = bns.b + (device_entities(device_id(t))
+                                              | select('search', 'stop_announcement') | list) %}
+                    {% endfor %}
+                    {{ bns.b }}
+                variables:
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
+                on_error:
+                  - script.execute:
+                      id: tts_remote_stop_error
+                      reason: !lambda 'return error;'
+            - homeassistant.action:
+                action: media_player.play_media
+                data:
+                  media_content_type: music
+                  announce: "true"
+                data_template:
+                  entity_id: >-
+                    ${self_area_jinja}
+                    ${announce_targets_resolve}
+                    ${hold_targets_jinja}
+                    {{ hold_sonos }}
+                  media_content_id: "{{ stop_url }}"
+                  extra: "{{ {'use_pre_announce': false, 'bypass_proxy': true, 'play_on_bonded': true} }}"
+                variables:
+                  mac: !lambda 'return esphome::get_mac_address_pretty();'
+                  sel_areas: !lambda 'return id(web_ui_app)->selection().routing().areas.c_str();'
+                  sel_extra: !lambda 'return id(web_ui_app)->selection().routing().extra.c_str();'
+                  sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
+                  stop_url: !lambda |-
+                    ${sat1_sounds_url_lambda}
+                    return "http://" + sat1_ip + "/api/sat1/sounds/stop_clip.mp3";
+                on_error:
+                  - script.execute:
+                      id: tts_remote_stop_error
+                      reason: !lambda 'return error;'
+
   # Mirrors a ringing timer onto the routing targets, one device-served MP3 announcement per ring
   # cycle. Started and stopped by timer_ringing's own turn handlers in timer.yaml; gated by the
   # Remote Timer Ring switch above.
   #
-  # One call to the WHOLE resolved list, Satellite1 peers included, rather than audio-file:// to
-  # the peers: an HTTP announcement is what arms a target's stop word (announce_stop_word_arm in
-  # voice_assistant.yaml keys on http_announcement_source), so "stop" spoken next to any target
-  # works with no target-side changes - and the relay closes at the origin, whose Stop Announcement
-  # button now also silences a ringing timer. bypass_proxy keeps Home Assistant from substituting
-  # its ffmpeg proxy on the ESPHome targets; every other integration ignores the key.
+  # HTTP to the Satellite1 peers too, rather than audio-file://: an HTTP announcement is what arms
+  # a target's stop word (announce_stop_word_arm in voice_assistant.yaml keys on
+  # http_announcement_source), so "stop" spoken next to any target works with no target-side
+  # changes - and the relay closes at the origin, whose Stop Announcement button now also silences
+  # a ringing timer. bypass_proxy keeps Home Assistant from substituting its ffmpeg proxy on the
+  # ESPHome targets; every other integration ignores the key.
   #
   # A re-fire loop rather than a repeat on the targets, because no repeat mode crosses the wire and
-  # Sonos could not honour one anyway - an AudioClip cannot be cancelled, so short clips re-sent
-  # until the ring ends ARE the stop story for Sonos: ending the loop stops it, one clip tail at
-  # most. The volume rides extra.volume exactly as a routed response's does, and only Sonos reads
-  # it; a Satellite1 target plays the ring at its own Voice Override like any HTTP announcement.
+  # Sonos could not honour one anyway - an AudioClip cannot be cancelled, so ending the loop and the
+  # stop preempt are the stop story for Sonos.
+  #
+  # Every target gets timer_finished_remote.mp3, which outlasts the interval (see
+  # timer_remote_ring_interval), so each re-fire replaces a clip that is still playing and nothing
+  # goes idle between rings. A Satellite1 stays announcing from the first ring to the stop, keeping
+  # its music ducked and its stop word armed; a Sonos keeps its own music ducked. With the plain
+  # 2.73s clip both lifted their music back up between every ring (October 2026, by ear, Satellite1
+  # and the Master Bathroom Sonos).
+  #
+  # The volume rides extra.volume exactly as a routed response's does, and only Sonos reads
+  # it. A Satellite1 target plays the ring at its own Announcement Volume like any HTTP
+  # announcement, which is why the ring takes a hold on it first: above 0, Remote Announcement
+  # Volume is the level the ring plays at everywhere. timer_remote_ring_stop releases it.
   - id: timer_remote_ring_loop
     mode: restart
     then:
+      - if:
+          condition:
+            and:
+              - api.connected:
+              - switch.is_on: timer_ringing
+              - switch.is_on: remote_timer_ring
+              - lambda: 'return ${tts_routing_active} && id(remote_announcement_volume).state > 0;'
+          then:
+            - script.execute:
+                id: peer_av_hold
+                holder: ring
+                hold: true
+            # The same slack tts_route_response gives a level before the call that plays at it.
+            - delay: 250ms
       - while:
           condition:
             and:
@@ -1204,7 +1539,7 @@ script:
                 data_template:
                   entity_id: >-
                     ${self_area_jinja}
-                    ${tts_targets_jinja}
+                    ${announce_targets_jinja}
                   media_content_id: "{{ ring_url }}"
                   # play_on_bonded: the sonos_cloud fan-out to bonded surrounds; everyone else
                   # ignores it. See tts_route_response for the full reasoning.
@@ -1220,8 +1555,8 @@ script:
                   sel_cut: !lambda 'return id(web_ui_app)->selection().routing().excluded.c_str();'
                   ring_url: !lambda |-
                     ${sat1_sounds_url_lambda}
-                    return "http://" + sat1_ip + "/api/sat1/sounds/timer_finished.mp3";
-                  vol: !lambda 'return (int) id(remote_tts_volume).state;'
+                    return "http://" + sat1_ip + "/api/sat1/sounds/timer_finished_remote.mp3";
+                  vol: !lambda 'return (int) id(remote_announcement_volume).state;'
             # The call above deliberately carries no on_error, and the absence is load-bearing. An
             # on_error (or on_success) makes the call register a pending response callback in the
             # API server, and that vector's entries are only ever erased when Home Assistant
@@ -1244,6 +1579,12 @@ script:
   - id: timer_remote_ring_stop
     mode: single
     then:
+      # The ring's claim on the peers' Announcement Volume, released whether or not the loop sent
+      # anything; a hold it never took is a no-op.
+      - script.execute:
+          id: peer_av_hold
+          holder: ring
+          hold: false
       - if:
           condition:
             and:
@@ -1257,7 +1598,7 @@ script:
                 data_template:
                   entity_id: >-
                     ${self_area_jinja}
-                    ${tts_targets_resolve}
+                    ${announce_targets_resolve}
                     ${tts_stop_buttons_jinja}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
@@ -1273,7 +1614,7 @@ script:
                 data_template:
                   entity_id: >-
                     ${self_area_jinja}
-                    ${tts_targets_resolve}
+                    ${announce_targets_resolve}
                     ${tts_stop_players_jinja}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
@@ -1294,7 +1635,7 @@ script:
                 data_template:
                   entity_id: >-
                     ${self_area_jinja}
-                    ${tts_targets_resolve}
+                    ${announce_targets_resolve}
                     ${tts_stop_sonos_jinja}
                   media_content_id: "{{ stop_url }}"
                   extra: "{{ {'use_pre_announce': false, 'bypass_proxy': true, 'play_on_bonded': true} }}"
@@ -1321,8 +1662,8 @@ script:
   #
   # The guard is what keeps this honest. tts_remote_sent means this turn's play_media actually went
   # out, and tts_routing_to_remote is cleared once the local pipeline drains - and the local
-  # pipeline always receives the response, ducked to silence when Local Speaker is off, so its
-  # lifetime tracks the remote playback closely enough to gate on. After it clears, a wake word is
+  # pipeline always receives the response, silenced when "Play responses on this device" is off,
+  # so its lifetime tracks the remote playback closely enough to gate on. After it clears, a wake word is
   # a new conversation, not an interruption, and stopping targets then could cut off resumed music.
   #
   # Three calls because the targets split by platform - see tts_stop_buttons_jinja,
@@ -1345,7 +1686,7 @@ script:
                 data_template:
                   entity_id: >-
                     ${self_area_jinja}
-                    ${tts_targets_resolve}
+                    ${announce_targets_resolve}
                     ${tts_stop_buttons_jinja}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
@@ -1361,7 +1702,7 @@ script:
                 data_template:
                   entity_id: >-
                     ${self_area_jinja}
-                    ${tts_targets_resolve}
+                    ${announce_targets_resolve}
                     ${tts_stop_players_jinja}
                 variables:
                   mac: !lambda 'return esphome::get_mac_address_pretty();'
@@ -1386,7 +1727,7 @@ script:
                 data_template:
                   entity_id: >-
                     ${self_area_jinja}
-                    ${tts_targets_resolve}
+                    ${announce_targets_resolve}
                     ${tts_stop_sonos_jinja}
                   media_content_id: "{{ stop_url }}"
                   extra: "{{ {'use_pre_announce': false, 'bypass_proxy': true, 'play_on_bonded': true} }}"
@@ -1454,8 +1795,11 @@ script:
 
 voice_assistant:
   on_start:
-    # Whichever trigger sends this turn's response, it has not been sent yet.
-    - lambda: 'id(tts_remote_sent) = false;'
+    # Whichever trigger sends this turn's response, it has not been sent yet - and no hold clip
+    # either, the last turn's having been replaced by its answer.
+    - lambda: |-
+        id(tts_remote_sent) = false;
+        id(hold_sent) = false;
     # One question now, not two: anything chosen means routing. The old pairing could be half-set -
     # switch on with an empty list - which is the warning that used to live in the else branch and can
     # no longer happen, because the switch is a projection of the selection rather than a separate
@@ -1464,15 +1808,19 @@ voice_assistant:
         condition:
           lambda: 'return ${tts_routing_active};'
         then:
-          # Whether this device also plays the response is the app's "Local Speaker" row, and
-          # audio_gain_reconcile's to carry out.
-          - script.execute: tts_targets_parse
+          # Whether this device also plays the response is the app's "Play responses on this
+          # device" switch, and audio_gain_reconcile's to carry out.
+          - script.execute: announce_targets_parse
           - lambda: |-
               id(tts_routing_to_remote) = true;
               ESP_LOGI("tts_routing", "Remote TTS routing enabled, chosen: %s",
-                       id(tts_targets_literal).c_str());
+                       id(announce_targets_literal).c_str());
         else:
           - lambda: 'id(tts_routing_to_remote) = false;'
+
+  # Every turn, continued conversations included; the loop gates itself on routing.
+  on_listening:
+    - script.execute: interaction_hold_loop
 
   # The response, handed on as soon as Home Assistant has a URL for it. `x` is empty on every
   # intent-progress event but the first.
@@ -1536,12 +1884,12 @@ voice_assistant:
           - script.execute:
               id: tts_route_response
               url: !lambda 'return x;'
-    # The sign-in prompt's sync guard (see the on_tts_start comment for why on_end's guard cannot
+    # The sign-in prompt's echo guard (see the on_tts_start comment for why on_end's guard cannot
     # cover this). The prompt was just routed; the local copy is about to start playing, and the
     # mic opens the moment the announcement pipeline drains. So: wait for the local player to be
     # ANNOUNCING - the enqueue must land BEHIND the playing prompt, and enqueueing before the
     # component's own play call would be cleared by it - then append one 0.2s silence clip per
-    # step of the Remote Sync Guard select, exactly the on_end guard's arithmetic. The mic then
+    # step of the Remote Echo Guard select, exactly the on_end guard's arithmetic. The mic then
     # opens after prompt + guard, past the lagging targets' recital of the code. Runs once per
     # prompt, re-prompts included, because each turn's announce passes through here. The prompt is
     # ~8s of audio, so the ANNOUNCING wait cannot miss it; login_voice_pending in the condition
@@ -1574,15 +1922,17 @@ voice_assistant:
                           .set_announcement(true)
                           .perform();
                     }
-                    ESP_LOGD("tts_routing", "sign-in sync guard: %d x 0.2s silence enqueued behind the prompt", n);
+                    ESP_LOGD("tts_routing", "sign-in echo guard: %d x 0.2s silence enqueued behind the prompt", n);
 
   on_end:
+    # The tailed chime belongs to the turn it opened.
+    - lambda: 'id(hold_chime_sent) = false;'
     - if:
         condition:
           lambda: 'return id(tts_routing_to_remote);'
         then:
-          # The remote sync guard: 0.2s of embedded silence enqueued once per step of the Remote
-          # Sync Guard select (see the select above for the whole design), so the announcement
+          # The remote echo guard: 0.2s of embedded silence enqueued once per step of the Remote
+          # Echo Guard select (see the select above for the whole design), so the announcement
           # pipeline stays in ANNOUNCING past the targets' playback skew. The continued-conversation
           # listen, the un-duck and the stop windows all gate on that state, so this one enqueue
           # delays them together - the lead device can no longer hear its own response off a
@@ -1627,7 +1977,7 @@ voice_assistant:
                           .set_announcement(true)
                           .perform();
                     }
-                    ESP_LOGD("tts_routing", "remote sync guard: %d x 0.2s silence enqueued", n);
+                    ESP_LOGD("tts_routing", "remote echo guard: %d x 0.2s silence enqueued", n);
           # The local pipeline still received the TTS URL, so wait for it to drain before clearing
           # the flag or the tail of the response leaks out at chime level.
           - wait_until:
@@ -1639,6 +1989,11 @@ voice_assistant:
           - script.execute: audio_gain_reconcile
 
   on_error:
+    # No answer is coming, so no more hold clips: the last one runs out and the music returns.
+    - lambda: |-
+        id(hold_active) = false;
+        id(hold_chime_sent) = false;
+    - script.stop: interaction_hold_loop
     - if:
         condition:
           lambda: 'return id(tts_routing_to_remote);'

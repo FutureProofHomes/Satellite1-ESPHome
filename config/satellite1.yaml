@@ -113,7 +113,7 @@ external_components:
       - ethernet
       - tas2780
       # Vendored from the pinned ESPHome release for one public getter (the continue-conversation
-      # flag the remote sync guard gates on). See its FPH_VENDOR.md for the re-sync procedure and
+      # flag the remote echo guard gates on). See its FPH_VENDOR.md for the re-sync procedure and
       # the upstream exit plan.
       - voice_assistant
 
