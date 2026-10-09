@@ -6,7 +6,9 @@
 
 #include <freertos/event_groups.h>
 #include <freertos/queue.h>
+#include <freertos/semphr.h>
 #include <freertos/FreeRTOS.h>
+#include <memory>
 
 #include "esphome/components/audio/audio.h"
 #include "esphome/components/speaker/speaker.h"
@@ -64,6 +66,8 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   void set_mute_state(bool mute_state) override;
 
  protected:
+  std::shared_ptr<ring_buffer::RingBuffer> get_audio_ring_buffer_() const;
+
   /// @brief Function for the FreeRTOS task handling audio output.
   /// Task creation authorizes startup: allocates space for the buffers, starts the I2S driver, and reads
   /// audio from the ring buffer and writes audio to the I2S port. Stops immmiately after receiving the COMMAND_STOP
@@ -118,6 +122,8 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   EventGroupHandle_t event_group_{nullptr};
 
   uint8_t *data_buffer_{nullptr};
+  StaticSemaphore_t audio_ring_buffer_mutex_buffer_{};
+  SemaphoreHandle_t audio_ring_buffer_mutex_{nullptr};
   std::shared_ptr<ring_buffer::RingBuffer> audio_ring_buffer_;
 
   uint32_t buffer_duration_ms_;
