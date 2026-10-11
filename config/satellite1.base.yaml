@@ -129,7 +129,8 @@ packages:
   # After web_ui, which declares the component this calls into, and after area_ducking, whose
   # self_area_jinja it shares so the app and ducking cannot disagree about this device's area.
   web_ui_ha: !include common/web_ui_ha.yaml
-  # After web_ui_ha, whose rung global and connect gating it rides. The media footer's Music
+  # After web_ui_ha, whose rung global and connect gating it rides, and after area_ducking,
+  # whose self_area_jinja it opens with for this device's name. The media footer's Music
   # Assistant half: the group-members sync and the relayed commands.
   web_ui_media: !include common/web_ui_media.yaml
   # The Home page's orb tap and typed messages, and the press-to-talk start the action button

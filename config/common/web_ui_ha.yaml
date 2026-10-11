@@ -144,7 +144,10 @@ substitutions:
   # software version and one entity - so filtering on the absence of a MAC would key on an accident
   # of how an integration registers itself. The frontend renders the models it understands, which
   # makes recognising another product later a change there rather than here, and means an unknown
-  # one appears in the payload the day Home Assistant learns about it.
+  # one appears in the payload the day Home Assistant learns about it. One row is dropped: a device
+  # carrying a MAC that one of the esphome integration's own devices also carries is another
+  # integration's copy of a Satellite1 (one device per config entry since Home Assistant 2026.8),
+  # and keeping it would list the same speaker twice in the switcher.
   #
   # The URL and availability fields exist for the device switcher, which turns each row into a jump.
   # The URL is
@@ -282,7 +285,8 @@ substitutions:
   # the MAC ("upe4b0639109d8"), so stage one tests containment - case folded, separators stripped,
   # on both identifiers and connections - and catches those installs exactly.
   #
-  # Stage two, after the device walk below has run, is the name: a Sendspin player enters MA named
+  # Stage two is the name, read off this device's own registry entry (self_area_jinja's `ns.dev`,
+  # so it works whether or not the device is assigned to an area): a Sendspin player enters MA named
   # by its hello, which is this device's friendly name, and both renames (HA's name_by_user, MA's
   # player name) are the same person naming the same speaker. Verified on the live install, where
   # "Dev12 Satellite1" appears on both sides while the identifier is random. A device whose two
@@ -352,11 +356,17 @@ substitutions:
            0 if states(e) in ['unavailable', 'unknown'] else 1]] %}
       {% endif %}
     {% endfor %}
+    {% set em = namespace(m=[]) %}
+    {% for d in esp_devs %}
+      {% set em.m = em.m + (device_attr(d, 'connections')
+                            | selectattr(0, 'eq', 'mac') | map(attribute=1) | list) %}
+    {% endfor %}
     {% for a in areas() %}
       {% for d in area_devices(a) %}
-        {% if device_attr(d, 'manufacturer') == 'FutureProofHomes' %}
-          {% set macs = device_attr(d, 'connections')
-                        | selectattr(0, 'eq', 'mac') | map(attribute=1) | list %}
+        {% set macs = device_attr(d, 'connections')
+                      | selectattr(0, 'eq', 'mac') | map(attribute=1) | list %}
+        {% if device_attr(d, 'manufacturer') == 'FutureProofHomes'
+              and (d in esp_devs or not macs | select('in', em.m) | list) %}
           {% set live = expand(device_entities(d)
                         | select('match', '(sensor|binary_sensor|switch|number|light|media_player|assist_satellite|event)\.')
                         | list)
@@ -396,12 +406,9 @@ substitutions:
       {% endfor %}
     {% endfor %}
     {% if not out.me %}
-      {% set sn = namespace(n='') %}
-      {% for r in out.dev %}
-        {% if not sn.n and (r[3] or '') == mac | lower %}
-          {% set sn.n = (r[1] or '') | lower | trim %}
-        {% endif %}
-      {% endfor %}
+      {% set sn = namespace(n=((device_attr(ns.dev, 'name_by_user')
+                                or device_attr(ns.dev, 'name')) or '') | lower | trim
+                              if ns.dev else '') %}
       {% if sn.n %}
         {% for c in out.cand %}
           {% if not out.me and (c[1] | lower | trim) == sn.n %}

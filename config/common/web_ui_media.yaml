@@ -33,6 +33,10 @@ substitutions:
   web_ui_media_max_pages: "8"
   # Expects `mac` and `pg`, prepended by the boot lambda below exactly as web_ui_ha_template's
   # builder does and for the same reasons. Rendered with strict=True like everything on this path.
+  # Starts with area_ducking's self_area_jinja - the ESPHome-only self lookup - whose `ns.dev`
+  # supplies this device's display name for Music Assistant's name match, rather than keeping a
+  # second walk here that could disagree with it (or, as the area-first walk it replaced did,
+  # find another integration's device carrying the same MAC).
   #
   # The document is built as a list of pieces - the head with the scalars, one piece per member
   # row, the closing bracket - and sliced into pages by the same S-namespace walk web_ui_ha_jinja
@@ -73,18 +77,11 @@ substitutions:
   # without its token). Worst-case rows take a page each, so the byte cap is what keeps them to
   # four pages; a typical row is a fifth of that.
   web_ui_media_jinja: >-
+    ${self_area_jinja}
     {% set my = mac | lower | replace(':', '') %}
-    {% set sn = namespace(n='') %}
-    {% for a in areas() %}
-      {% for d in area_devices(a) %}
-        {% if not sn.n and device_attr(d, 'manufacturer') == 'FutureProofHomes'
-           and my in (device_attr(d, 'connections') | selectattr(0, 'eq', 'mac')
-                      | map(attribute=1) | map('lower') | map('replace', ':', '') | list) %}
-          {% set sn.n = ((device_attr(d, 'name_by_user') or device_attr(d, 'name')) or '')
-                        | lower | trim %}
-        {% endif %}
-      {% endfor %}
-    {% endfor %}
+    {% set sn = namespace(n=((device_attr(ns.dev, 'name_by_user')
+                              or device_attr(ns.dev, 'name')) or '') | lower | trim
+                            if ns.dev else '') %}
     {% set f = namespace(e='', byname='') %}
     {% for e in integration_entities('music_assistant')
                 | select('match', 'media_player\.') %}

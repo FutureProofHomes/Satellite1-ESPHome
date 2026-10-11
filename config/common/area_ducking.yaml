@@ -9,43 +9,35 @@ substitutions:
   # `ns.area`, and its own entities as `mine`. Expects `mac`. Identity has to travel in the payload,
   # and the MAC is the handle that survives a rename.
   #
-  # Shared with common/web_ui.yaml, which is always included, so the on-device web app and ducking
-  # cannot disagree about which area this device is in. That file cannot send `mac` as a variable,
-  # because a response_template is rendered with only the response in scope, so it prepends its own
-  # `{% set mac = ... %}` - which is why this expects a variable rather than reading one itself.
+  # Shared with common/web_ui_ha.yaml and common/web_ui_media.yaml, which are always included, so
+  # the on-device web app and ducking cannot disagree about which area this device is in. Those
+  # files cannot send `mac` as a variable, because a response_template is rendered with only the
+  # response in scope, so they prepend their own `{% set mac = ... %}` - which is why this expects
+  # a variable rather than reading one itself.
   #
-  # The area walk cannot find a device that is in no area, and for a long time that blind spot only
-  # cost the area name (`ha_no_area` copy). It cost more than that: `mine` came back empty, so a
-  # no-area Satellite1 failed to reject its own media player everywhere `mine` is read - it offered
-  # itself in its own target trees, and the duck walk could duck the very device that was talking.
-  # Hence the second walk, over the esphome integration's entities, which finds the device wherever
-  # it lives; the area genuinely stays empty in that case, which is what ha_no_area is for. One
-  # entity is enough to find the device, so devices already seen are skipped rather than re-walked -
-  # the same shape as tts_stop_all_jinja.
+  # Only the esphome integration's devices are searched, and the restriction is the point. Since
+  # Home Assistant 2026.8 a device belongs to one config entry, so another integration that knows
+  # this device by its MAC - a router's client tracker, say - registers a *separate* device
+  # carrying the same connection. An earlier version walked areas first and took the first device
+  # anywhere whose connections held the MAC; a UniFi device_tracker for a Satellite1 won that race,
+  # and `mine` filled with the tracker's entities - the assistant selects came back empty, and the
+  # self-exclusions everywhere `mine` is read stopped excluding. Only the esphome integration's
+  # device for this MAC is this firmware's registry entry, so the walk runs over its devices alone.
+  # The area is read off the found device rather than by walking areas, which also finds a device
+  # that is in no area - the area genuinely stays empty in that case, which is what the ha_no_area
+  # copy is for. `esp_devs` - every device the esphome integration owns - is left in scope for the
+  # templates that need to tell an ESPHome-backed FutureProofHomes device from another
+  # integration's copy of one.
   self_area_jinja: >-
+    {% set esp_devs = integration_entities('esphome')
+                      | map('device_id') | reject('none') | unique | list %}
     {% set ns = namespace(dev='', area='') %}
-    {% for a in areas() %}
-      {% if not ns.dev %}
-        {% for d in area_devices(a) %}
-          {% if not ns.dev and (mac | lower) in device_attr(d, 'connections') | map(attribute=1) | list %}
-            {% set ns.dev = d %}
-            {% set ns.area = a %}
-          {% endif %}
-        {% endfor %}
+    {% for d in esp_devs %}
+      {% if not ns.dev and (mac | lower) in device_attr(d, 'connections') | map(attribute=1) | list %}
+        {% set ns.dev = d %}
       {% endif %}
     {% endfor %}
-    {% if not ns.dev %}
-      {% set sns = namespace(seen=[]) %}
-      {% for e in integration_entities('esphome') %}
-        {% set d = device_id(e) %}
-        {% if not ns.dev and d and d not in sns.seen %}
-          {% set sns.seen = sns.seen + [d] %}
-          {% if (mac | lower) in device_attr(d, 'connections') | map(attribute=1) | list %}
-            {% set ns.dev = d %}
-          {% endif %}
-        {% endif %}
-      {% endfor %}
-    {% endif %}
+    {% set ns.area = (device_attr(ns.dev, 'area_id') or '') if ns.dev else '' %}
     {% set mine = device_entities(ns.dev) if ns.dev else [] %}
 
   # The chosen players worth ducking, split into `players` and `tts_players`. Expects `mac`, `duck`,
