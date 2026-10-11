@@ -522,6 +522,10 @@ JSON in a mutex-guarded PSRAM string, rebuilt only when the hub reports a change
 rides atomics, so the httpd task never blocks the audio path. Shuffle and repeat are commands on
 `POST /api/sat1/media` dispatched to the Sendspin player. Seek is the one thing this tier cannot do:
 the hub exposes no seek passthrough, so the scrubber is read-only until a higher tier answers.
+A pause is a stop on the Sendspin wire, and Music Assistant clears a stopped player's metadata
+(2.11, PR #6271), so a clear from a connected server leaves the cached track in place: it is the
+track a resume continues, and the bar shows it only while a pause holds the card up. Only a lost
+connection empties the cache.
 
 **Tier 1 — relayed through Home Assistant.** What must round-trip (the favorite button, group
 membership, another member's volume, seek) goes through the same machinery as the big Home Assistant

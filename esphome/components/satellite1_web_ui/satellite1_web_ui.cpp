@@ -71,7 +71,17 @@ void Satellite1WebUI::setup() {
     //
     // Metadata replaces the whole state per message, absent field meaning cleared - and the hub
     // fans out a lost connection as an all-empty object, so one path covers updates and the clear.
+    //
+    // Except a connected server's own clear, which keeps the track. Music Assistant clears a
+    // Sendspin player's metadata when it stops it (2.11, PR #6271), and a pause is a stop - the
+    // protocol has no paused state - so that clear drops exactly the track a resume continues.
+    // Whether a stopped stream's track shows is the bar's call (mediaView in the frontend). The
+    // hub's lost-connection clear carries timestamp 0, and that one still empties the cache: the
+    // server that sent the track is gone.
     this->sendspin_hub_->add_metadata_update_callback([this](const sendspin::ServerMetadataStateObject &md) {
+      if (md.timestamp != 0 && !md.title && !md.artist && !md.album_artist && !md.album && !md.artwork_url &&
+          !md.year && !md.track && !md.progress)
+        return;
       this->handler_.media_set_meta(
           md.title.has_value() ? md.title->c_str() : nullptr, md.artist.has_value() ? md.artist->c_str() : nullptr,
           md.album.has_value() ? md.album->c_str() : nullptr,
