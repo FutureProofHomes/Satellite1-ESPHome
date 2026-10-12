@@ -1,6 +1,7 @@
 #include "satellite1.h"
 #include <cstdio>
 #include "esp_rom_gpio.h"
+#include "esphome/core/application.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
@@ -95,14 +96,15 @@ void Satellite1::loop() {
     return;
   }
 
-  if (static_cast<int32_t>(millis() - this->xmos_boot_ready_timestamp_) < 0) {
+  const uint32_t now = App.get_loop_component_start_time();
+  if (this->is_xmos_boot_settling_(now)) {
     return;
   }
 
   switch (this->state) {
     case SAT_DETACHED_STATE:
       if ((this->connection_attempts <= MAX_CONNECTION_ATTEMPTS || this->xmos_booting_) &&
-          (millis() - this->last_attempt_timestamp_) > 1000) {
+          (now - this->last_attempt_timestamp_) > 1000) {
         if (!this->xmos_booting_ && this->connection_attempts == MAX_CONNECTION_ATTEMPTS) {
           ESP_LOGW(TAG, "XMOS did not respond after %u connection attempts",
                    static_cast<unsigned>(MAX_CONNECTION_ATTEMPTS));
@@ -114,14 +116,14 @@ void Satellite1::loop() {
           ESP_LOGI(TAG, "XMOS Firmware Version: %s", this->status_string().c_str());
           this->state_callback_.call();
         }
-        this->last_attempt_timestamp_ = millis();
+        this->last_attempt_timestamp_ = now;
         if (!this->xmos_booting_)
           this->connection_attempts++;
       }
       break;
     case SAT_XMOS_CONNECTED_STATE:
       if (!this->status_refresh_attempted_ ||
-          static_cast<uint32_t>(millis() - this->status_refresh_timestamp_) >= STATUS_REFRESH_INTERVAL_MS) {
+          static_cast<uint32_t>(now - this->status_refresh_timestamp_) >= STATUS_REFRESH_INTERVAL_MS) {
         this->request_status_register_update(false);
       }
       break;
@@ -186,9 +188,21 @@ bool Satellite1::get_cached_dc_status(DC_STATUS_REGISTER::register_id reg, uint8
   return true;
 }
 
+bool Satellite1::is_xmos_boot_settling_(uint32_t now) {
+  if (!this->xmos_boot_settle_pending_) {
+    return false;
+  }
+  if (static_cast<int32_t>(now - this->xmos_boot_ready_timestamp_) < 0) {
+    return true;
+  }
+  // Retire the deadline so long uptime cannot make the signed comparison block SPI again.
+  this->xmos_boot_settle_pending_ = false;
+  return false;
+}
+
 bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload, uint8_t payload_len,
                           bool *status_report_received, bool retry) {
-  if (this->spi_flash_direct_access_enabled_ || static_cast<int32_t>(millis() - this->xmos_boot_ready_timestamp_) < 0) {
+  if (this->spi_flash_direct_access_enabled_ || this->is_xmos_boot_settling_(millis())) {
     return false;
   }
 
@@ -291,6 +305,7 @@ void Satellite1::set_spi_flash_direct_access_mode(bool enable) {
     this->connection_attempts = 0;
     this->xmos_booting_ = true;
     this->xmos_boot_ready_timestamp_ = millis() + XMOS_BOOT_SETTLE_TIME_MS;
+    this->xmos_boot_settle_pending_ = true;
   }
   this->spi_flash_direct_access_enabled_ = enable;
   this->state_callback_.call();
