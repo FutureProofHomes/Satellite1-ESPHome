@@ -74,6 +74,7 @@ static const std::vector<int16_t> Q15_VOLUME_SCALING_FACTORS = {
 void I2SAudioSpeaker::setup() {
   ESP_LOGCONFIG(TAG, "Setting up I2S Audio Speaker...");
 
+  this->audio_ring_buffer_mutex_ = xSemaphoreCreateMutexStatic(&this->audio_ring_buffer_mutex_buffer_);
   this->event_group_ = xEventGroupCreate();
 
   if (this->event_group_ == nullptr) {
@@ -254,7 +255,7 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t tick
 
   size_t bytes_written = 0;
   if (this->state_ == speaker::STATE_RUNNING) {
-    auto rb = this->audio_ring_buffer_;
+    auto rb = this->get_audio_ring_buffer_();
     if (rb) {
       bytes_written = rb->write_without_replacement((void *) data, length, ticks_to_wait, true);
     }
@@ -264,10 +265,21 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t tick
 }
 
 bool I2SAudioSpeaker::has_buffered_data() const {
-  if (this->audio_ring_buffer_ != nullptr) {
-    return this->audio_ring_buffer_->available() > 0;
+  auto rb = this->get_audio_ring_buffer_();
+  if (rb != nullptr) {
+    return rb->available() > 0;
   }
   return false;
+}
+
+std::shared_ptr<ring_buffer::RingBuffer> I2SAudioSpeaker::get_audio_ring_buffer_() const {
+  if (this->audio_ring_buffer_mutex_ == nullptr) {
+    return nullptr;
+  }
+  xSemaphoreTake(this->audio_ring_buffer_mutex_, portMAX_DELAY);
+  auto rb = this->audio_ring_buffer_;
+  xSemaphoreGive(this->audio_ring_buffer_mutex_);
+  return rb;
 }
 
 void I2SAudioSpeaker::speaker_task(void *params) {
@@ -373,7 +385,12 @@ void I2SAudioSpeaker::speaker_task(void *params) {
 
       size_t bytes_read = 0;
       const size_t to_read = read_buffer_size;
-      bytes_read = this_speaker->audio_ring_buffer_->read((void *) this_speaker->data_buffer_, to_read, 0);
+      {
+        auto rb = this_speaker->get_audio_ring_buffer_();
+        if (rb != nullptr) {
+          bytes_read = rb->read((void *) this_speaker->data_buffer_, to_read, 0);
+        }
+      }
 
       // Apply software volume control if needed (from upstream - works with all bit depths)
       if (bytes_read > 0 && (this_speaker->q15_volume_factor_ < INT16_MAX)) {
@@ -558,13 +575,15 @@ esp_err_t I2SAudioSpeaker::allocate_buffers_(size_t data_buffer_size, size_t rin
     return ESP_ERR_NO_MEM;
   }
 
-  if (this->audio_ring_buffer_.use_count() == 0) {
-    // Allocate ring buffer. Uses a shared_ptr to ensure it isn't improperly deallocated.
-    this->audio_ring_buffer_ = ring_buffer::RingBuffer::create(ring_buffer_size);
-  }
-
-  if (this->audio_ring_buffer_ == nullptr) {
-    return ESP_ERR_NO_MEM;
+  auto rb = this->get_audio_ring_buffer_();
+  if (rb == nullptr) {
+    rb = ring_buffer::RingBuffer::create(ring_buffer_size);
+    if (rb == nullptr) {
+      return ESP_ERR_NO_MEM;
+    }
+    xSemaphoreTake(this->audio_ring_buffer_mutex_, portMAX_DELAY);
+    this->audio_ring_buffer_.swap(rb);
+    xSemaphoreGive(this->audio_ring_buffer_mutex_);
   }
 
   return ESP_OK;
@@ -613,7 +632,12 @@ esp_err_t I2SAudioSpeaker::start_i2s_driver_(audio::AudioStreamInfo &audio_strea
 }
 
 void I2SAudioSpeaker::delete_task_(size_t buffer_size) {
-  this->audio_ring_buffer_.reset();  // Releases ownership of the shared_ptr
+  std::shared_ptr<ring_buffer::RingBuffer> retired_buffer;
+  xSemaphoreTake(this->audio_ring_buffer_mutex_, portMAX_DELAY);
+  this->audio_ring_buffer_.swap(retired_buffer);
+  xSemaphoreGive(this->audio_ring_buffer_mutex_);
+  // Release outside the lock and before parking, since loop() deletes this task without unwinding its stack.
+  retired_buffer.reset();
 
   if (this->data_buffer_ != nullptr) {
     ExternalRAMAllocator<uint8_t> allocator;
