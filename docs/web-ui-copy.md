@@ -1197,6 +1197,10 @@ count.
 | `updating` | The audio chip's firmware is updating. Your EQ is saved and comes back when it finishes. |
 | `offline` | The audio chip isn't answering right now. Your changes are saved and sent when it's back. |
 | `overload` | The EQ switched itself off: the audio chip ran short of time to run it. Remove a filter or two and it comes back on. |
+| `view`, `views` | View (the switch's screen-reader name); Basic, Advanced |
+| `basic_hint` | Bass, Midrange and Treble adjust this output's sound on top of its preset, and the curve shows the result. Advanced has the filters, preamp and limiter. (Basic's Tone card) |
+| `basic_over` | Too much boost for the audio chip. It keeps playing the previous sound until you turn a slider down. |
+| `basic_no_stages` | This preset's filters fill the audio chip, so that slider can't move off 0 dB. Turn a filter off in Advanced to make room. |
 
 **The bar: outputs, the switch, compare and presets.**
 

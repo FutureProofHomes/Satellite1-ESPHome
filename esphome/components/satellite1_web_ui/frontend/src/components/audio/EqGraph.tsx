@@ -89,25 +89,30 @@ function useWidth(ref: React.RefObject<HTMLElement>) {
  * since raising everything by 10 dB is the same as bringing the ceiling 10 dB closer. Wherever the
  * curve is above that line, loud music reaches the limiter.
  *
+ * `readOnly` is Basic's: the total curve alone, shorter, with no dots, no limiter line and nothing
+ * to drag, since there the tone sliders are the only controls.
+ *
  * Drawn at the container's own pixel width rather than scaled, so labels stay legible on a phone.
  */
 export function EqGraph({
   p,
-  sel,
-  onSelect,
-  onChange,
-  onAdd
+  sel = null,
+  onSelect = () => {},
+  onChange = () => {},
+  onAdd = () => {},
+  readOnly = false
 }: {
   p: Profile;
-  sel: number | null;
-  onSelect: (i: number | null) => void;
-  onChange: (i: number, patch: Partial<Filter>) => void;
-  onAdd: (hz: number, db: number) => void;
+  sel?: number | null;
+  onSelect?: (i: number | null) => void;
+  onChange?: (i: number, patch: Partial<Filter>) => void;
+  onAdd?: (hz: number, db: number) => void;
+  readOnly?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const svg = useRef<SVGSVGElement>(null);
   const width = useWidth(box) || 640;
-  const height = width < 480 ? 220 : 270;
+  const height = readOnly ? (width < 480 ? 150 : 180) : width < 480 ? 220 : 270;
   const pad = { l: 34, r: 10, t: 14, b: 24 };
   const iw = width - pad.l - pad.r;
   const ih = height - pad.t - pad.b;
@@ -125,7 +130,7 @@ export function EqGraph({
   const size = `${width}x${height}`;
   if (cache.current?.key !== size) cache.current = { key: size, curve: new WeakMap(), path: new WeakMap() };
   const memo = cache.current;
-  const curves = p.f.map(f => {
+  const curves = readOnly ? [] : p.f.map(f => {
     let c = memo.curve.get(f);
     if (!c) memo.curve.set(f, c = filterCurve({ ...f, on: true }, freqs));
     return c;
@@ -212,10 +217,17 @@ export function EqGraph({
   };
 
   const wide = iw >= 420;
-  return <div ref={box} className="eq-graph">
-      <svg ref={svg} width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="group" aria-label={DSP.graph} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onDblClick={add} onPointerDown={e => {
+  const events = readOnly ? {} : {
+    onPointerMove: move,
+    onPointerUp: up,
+    onPointerCancel: up,
+    onDblClick: add,
+    onPointerDown: (e: RPointerEvent<SVGSVGElement>) => {
       if (!(e.target as Element).closest('.eq-handle')) onSelect(null);
-    }}>
+    }
+  };
+  return <div ref={box} className="eq-graph">
+      <svg ref={svg} width={width} height={height} viewBox={`0 0 ${width} ${height}`} role={readOnly ? 'img' : 'group'} aria-label={DSP.graph} {...events}>
         <defs>
           <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--orb-ink)" stopOpacity=".28" />
@@ -230,10 +242,10 @@ export function EqGraph({
           </g>)}
         {GRID_DB.map(db => <g key={db}>
             <line className={db === 0 ? 'eq-zero' : 'eq-grid'} x1={pad.l} x2={pad.l + iw} y1={y(db)} y2={y(db)} />
-            <text className="eq-axis" x={pad.l - 6} y={y(db) + 3.5} textAnchor="end">{dbLabel(db)}</text>
+            {(!readOnly || db % 12 === 0) && <text className="eq-axis" x={pad.l - 6} y={y(db) + 3.5} textAnchor="end">{dbLabel(db)}</text>}
           </g>)}
         <g clipPath={`url(#${plotId})`}>
-          {!bypassed && limDb > -DB_SPAN && limDb < DB_SPAN && <g className="eq-limit">
+          {!readOnly && !bypassed && limDb > -DB_SPAN && limDb < DB_SPAN && <g className="eq-limit">
               <rect x={pad.l} y={pad.t} width={iw} height={Math.max(0, y(limDb) - pad.t)} />
               <line x1={pad.l} x2={pad.l + iw} y1={y(limDb)} y2={y(limDb)} />
               <text x={pad.l + 4} y={y(limDb) - 5}>{DSP.limiter_line}</text>
@@ -249,7 +261,7 @@ export function EqGraph({
         }} />
           <path className="eq-total" d={line(total)} />
         </g>
-        {p.f.map((f, i) => {
+        {!readOnly && p.f.map((f, i) => {
         const hy = clamp(y(handleDb(f)), pad.t, pad.t + ih);
         const color = filterColor(i);
         const say = sayFilter(f);

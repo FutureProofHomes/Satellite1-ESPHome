@@ -1663,6 +1663,14 @@ export const DSP = {
   offline: "The audio chip isn't answering right now. Your changes are saved and sent when it's back.",
   overload: "The EQ switched itself off: the audio chip ran short of time to run it. Remove a filter or two and it comes back on.",
 
+  // The page's two views, switched beside the title and remembered in this browser.
+  view: "View",
+  views: { basic: "Basic", advanced: "Advanced" },
+  // Basic's Tone card: the curve and the three tone sliders.
+  basic_hint: "Bass, Midrange and Treble adjust this output's sound on top of its preset, and the curve shows the result. Advanced has the filters, preamp and limiter.",
+  basic_over: "Too much boost for the audio chip. It keeps playing the previous sound until you turn a slider down.",
+  basic_no_stages: "This preset's filters fill the audio chip, so that slider can't move off 0 dB. Turn a filter off in Advanced to make room.",
+
   // The output being edited, and the one playing.
   output: "Output",
   outputs: ["Built-in Speaker", "Line-out"],

@@ -18,6 +18,19 @@
   --eq-on: #fff;
 }
 
+/* The title's row, with Basic | Advanced at its end. The switch takes the title's own margins so the
+   two centre on each other; on a phone, where they don't fit side by side, it gets its own line
+   under the title, full width like the output picker. */
+.dsp-head { display: flex; align-items: center; justify-content: space-between; column-gap: 16px; }
+.dsp-view { flex: none; display: flex; gap: 2px; margin: 8px 0 22px; padding: 3px; border: 1px solid var(--line); border-radius: 12px; background: var(--fill-hover); }
+.dsp-view-btn { flex: 1; min-height: 32px; padding: 4px 14px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; transition: background .15s, color .15s; }
+.dsp-view-btn.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .25); }
+@media (max-width: 639px) {
+  .dsp-head { flex-direction: column; align-items: stretch; }
+  .dsp-view { margin: -8px 0 16px; }
+  .dsp-view-btn { min-height: 38px; }
+}
+
 /* One column in reading order on a phone; on a wide window (DspPage's useWide) the graph and the
    filters it draws take the left, and the controls that are set once and left take the right. */
 .dsp-grid { display: flex; flex-direction: column; min-width: 0; }

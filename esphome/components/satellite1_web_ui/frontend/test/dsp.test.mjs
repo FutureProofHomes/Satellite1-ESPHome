@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { hasDevTools } from "../src/lib/devtools.js";
-import { dspRecheckDue, dspRedirect, dspSupport, dspVisible, isXmosVersion, navSubs } from "../src/lib/dsp.js";
+import { dspRecheckDue, dspRedirect, dspSupport, dspVisible, eqView, isXmosVersion, navSubs, setEqView } from "../src/lib/dsp.js";
 
 const AUDIO = [{ slug: "routing" }, { slug: "dsp" }];
 const SETTINGS = [{ slug: "device-info" }, { slug: "security" }, { slug: "developer" }];
@@ -66,6 +66,32 @@ test("progress updates and repeats of the same version do not re-check", () => {
   assert.equal(dspRecheckDue("Flashing... (10%)", "Flashing... (20%)", 1), false);
   assert.equal(dspRecheckDue("v1.1.0-dev.8", "Flashing Mode", 1), false);
   assert.equal(dspRecheckDue("v1.1.0-dev.8", "v1.1.0-dev.8", 1), false);
+});
+
+const memory = () => {
+  const m = new Map();
+  return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), m };
+};
+
+test("the Equalizer opens Basic until this browser chooses Advanced", () => {
+  const s = memory();
+  assert.equal(eqView(s), "basic");
+  setEqView("advanced", s);
+  assert.equal(eqView(s), "advanced");
+  assert.equal(s.m.get("sat1.eq.view"), "advanced");
+  setEqView("basic", s);
+  assert.equal(eqView(s), "basic");
+});
+
+test("an unknown stored view, or storage that throws, reads as Basic", () => {
+  const s = memory();
+  s.m.set("sat1.eq.view", "expert");
+  assert.equal(eqView(s), "basic");
+  setEqView("expert", s);
+  assert.equal(s.m.get("sat1.eq.view"), "basic");
+  const blocked = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
+  assert.equal(eqView(blocked), "basic");
+  assert.doesNotThrow(() => setEqView("advanced", blocked));
 });
 
 test("page load re-checks only when the state payload could not answer", () => {

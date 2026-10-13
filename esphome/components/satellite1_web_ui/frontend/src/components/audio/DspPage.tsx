@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { DSP, HINTS } from '../../copy.js';
 import { apiUrl, entity, pathFor, post, request, requestJson } from '../../lib/device.js';
+import { eqView, setEqView } from '../../lib/dsp.js';
 import { DEFAULT_Q, KINDS, MAX_FILTERS, MAX_SECTIONS, RANGE, SLOPES, T, TONE, analyse, autoPreamp, clamp, exportText, fmtDb, fmtHz, fromWire, importText, kindOf, logTrackValue, profileBody, profileSections, sameSound, slopeOf, typeOf, usesGain, usesQ } from '../../lib/eq.js';
 import { toast } from '../../lib/toast.js';
 import { HintBtn } from '../bits';
@@ -454,23 +455,40 @@ function FilterEditor({
     </div>;
 }
 
-/** The speaker EQ. Shown only while the running XMOS has it (src/lib/dsp.js). */
+/**
+ * The speaker EQ. Shown only while the running XMOS has it (src/lib/dsp.js). Basic, the default, is
+ * the outputs, presets and tone controls; Advanced adds the filters, preamp and limiter. Both are
+ * views of the same state, and the choice is this browser's, never part of the URL.
+ */
 export function DspPage({
   ctx
 }: {
   ctx: Ctx;
 }) {
+  const [view, setView] = useState(() => eqView());
+  const pick = (v: string) => {
+    setView(v);
+    setEqView(v);
+  };
+  const ready = ctx.dsp === 1;
   return <section className="control au-tab dsp-tab">
       <span className="eyebrow">{DSP.eyebrow}</span>
-      <h1><span>{DSP.title_a}</span><em>{DSP.title_b}</em></h1>
-      {ctx.dsp === 1 ? <DspEditor ctx={ctx} /> : <p className="au-missing">{DSP.waiting}</p>}
+      <div className="dsp-head">
+        <h1><span>{DSP.title_a}</span><em>{DSP.title_b}</em></h1>
+        {ready && <div className="dsp-view" role="group" aria-label={DSP.view}>
+            {(['basic', 'advanced'] as const).map(v => <button key={v} aria-pressed={view === v} className={`dsp-view-btn${view === v ? ' on' : ''}`} onClick={() => pick(v)}>{DSP.views[v]}</button>)}
+          </div>}
+      </div>
+      {ready ? <DspEditor ctx={ctx} advanced={view === 'advanced'} /> : <p className="au-missing">{DSP.waiting}</p>}
     </section>;
 }
 
 function DspEditor({
-  ctx
+  ctx,
+  advanced
 }: {
   ctx: Ctx;
+  advanced: boolean;
 }) {
   const [drafts, setDrafts] = useState<Profile[] | null>(null);
   const [presets, setPresets] = useState<Preset[]>([]);
@@ -587,6 +605,12 @@ function DspEditor({
   useEffect(() => {
     if (naming) nameRef.current?.focus();
   }, [!!naming]);
+  // Basic has neither the name field nor the filter list.
+  useEffect(() => {
+    if (advanced) return;
+    setNaming(null);
+    setSel(null);
+  }, [advanced]);
 
   const o = out ?? 0;
   const draft = drafts?.[o] ?? null;
@@ -818,22 +842,22 @@ function DspEditor({
             <DxSelect value={draft.preset} label={DSP.preset} buttonRef={presetRef} options={[...(current ? [] : [['', DSP.custom] as [string, string]]), ...presets.map(x => x.name)]} onChange={v => v && load_(v)} />
             {modified && <span className="dsp-tag">{DSP.modified}</span>}
           </div>
-          <div className="dsp-preset-actions">
-            {current && !current.builtin && modified && <button className="dx-btn sm solid" onClick={async () => {
+          {(advanced || modified) && <div className="dsp-preset-actions">
+            {advanced && current && !current.builtin && modified && <button className="dx-btn sm solid" onClick={async () => {
             if (await presetOp('save', {
               name: draft.preset
             })) okToast(fill(DSP.saved, {
               name: draft.preset
             }));
           }}>{DSP.save}</button>}
-            <button className="dx-btn sm" onClick={() => setNaming({
+            {advanced && <button className="dx-btn sm" onClick={() => setNaming({
             mode: 'save',
             text: ''
-          })}>{DSP.save_as}</button>
+          })}>{DSP.save_as}</button>}
             {modified && <button className="dx-btn sm" onClick={() => presetOp('load', {
             name: draft.preset
           })}>{DSP.revert}</button>}
-            <Menu label={DSP.more} buttonRef={moreRef} items={[[DSP.import, () => setImporting(true)], [DSP.export, () => setExporting(true)], current && !current.builtin && !modified ? [DSP.rename, () => setNaming({
+            {advanced && <Menu label={DSP.more} buttonRef={moreRef} items={[[DSP.import, () => setImporting(true)], [DSP.export, () => setExporting(true)], current && !current.builtin && !modified ? [DSP.rename, () => setNaming({
             mode: 'rename',
             text: draft.preset
           })] : null, current && !current.builtin ? [DSP.delete, () => setConfirm({
@@ -858,9 +882,9 @@ function DspEditor({
             danger: true,
             back: moreRef,
             run: () => presetOp('reset')
-          })]]} />
-          </div>
-          {naming && <form className="dsp-name" onSubmit={e => {
+          })]]} />}
+          </div>}
+          {advanced && naming && <form className="dsp-name" onSubmit={e => {
           e.preventDefault();
           submitName();
         }}>
@@ -875,7 +899,8 @@ function DspEditor({
         </div>
       </div>;
 
-  const graph = <DxCard title={DSP.graph} hint={DSP.graph_hint} right={<span className={`dsp-sync s${sync}${playingHere ? '' : ' idle'}`}>{syncText}</span>}>
+  const syncPill = <span className={`dsp-sync s${sync}${playingHere ? '' : ' idle'}`}>{syncText}</span>;
+  const graph = <DxCard title={DSP.graph} hint={DSP.graph_hint} right={syncPill}>
         <div className="dsp-graph">
           <EqGraph p={draft} sel={sel} onSelect={setSel} onChange={patch} onAdd={add} />
         </div>
@@ -902,38 +927,35 @@ function DspEditor({
           </ul>}
       </DxCard>;
 
+  const toneRow = (k: 'bass' | 'mid' | 'tre', label: string, hz: number) => <div className="dsp-tone-row">
+        <span className="dsp-edit-label">{label} <small>{fmtHz(hz)}</small></span>
+        <MSlider value={draft[k]} min={-TONE.max} max={TONE.max} step={0.5} snap={0} format={v => fmtDb(v)} ariaLabel={label} onPreview={v => edit({
+        ...draft,
+        [k]: v
+      })} onCommit={v => edit({
+        ...draft,
+        [k]: v
+      })} />
+      </div>;
+  const toneRows = <>
+      {toneRow('bass', DSP.bass, TONE.bassHz)}
+      {toneRow('mid', DSP.mid, TONE.midHz)}
+      {toneRow('tre', DSP.treble, TONE.trebleHz)}
+    </>;
+
+  const basicTone = <DxCard title={DSP.tone} hint={DSP.basic_hint} right={syncPill}>
+        <div className="dsp-graph">
+          <EqGraph p={draft} readOnly />
+        </div>
+        <div className="dsp-tone">{toneRows}</div>
+        {a.overCap && <p className="dsp-note t-err">{DSP.basic_over}</p>}
+        {!a.overCap && status.sy[o] === 2 && <p className="dsp-note t-err">{DSP.refused}</p>}
+        {noStages && <p className="dsp-note t-warn">{DSP.basic_no_stages}</p>}
+      </DxCard>;
+
   const tone = <DxCard title={DSP.tone}>
         <div className="dsp-tone">
-          <div className="dsp-tone-row">
-            <span className="dsp-edit-label">{DSP.bass} <small>{fmtHz(TONE.bassHz)}</small></span>
-            <MSlider value={draft.bass} min={-TONE.max} max={TONE.max} step={0.5} snap={0} format={v => fmtDb(v)} ariaLabel={DSP.bass} onPreview={bass => edit({
-            ...draft,
-            bass
-          })} onCommit={bass => edit({
-            ...draft,
-            bass
-          })} />
-          </div>
-          <div className="dsp-tone-row">
-            <span className="dsp-edit-label">{DSP.mid} <small>{fmtHz(TONE.midHz)}</small></span>
-            <MSlider value={draft.mid} min={-TONE.max} max={TONE.max} step={0.5} snap={0} format={v => fmtDb(v)} ariaLabel={DSP.mid} onPreview={mid => edit({
-            ...draft,
-            mid
-          })} onCommit={mid => edit({
-            ...draft,
-            mid
-          })} />
-          </div>
-          <div className="dsp-tone-row">
-            <span className="dsp-edit-label">{DSP.treble} <small>{fmtHz(TONE.trebleHz)}</small></span>
-            <MSlider value={draft.tre} min={-TONE.max} max={TONE.max} step={0.5} snap={0} format={v => fmtDb(v)} ariaLabel={DSP.treble} onPreview={tre => edit({
-            ...draft,
-            tre
-          })} onCommit={tre => edit({
-            ...draft,
-            tre
-          })} />
-          </div>
+          {toneRows}
           <div className="dsp-tone-row">
             <span className="dsp-edit-label">{DSP.preamp}<HintBtn text={DSP.preamp_hint} /></span>
             <MSlider value={draft.pre} min={RANGE.pre[0]} max={RANGE.pre[1]} step={0.1} snap={0} format={v => fmtDb(v)} ariaLabel={DSP.preamp} onPreview={pre => edit({
@@ -1002,13 +1024,18 @@ function DspEditor({
       </DxCard>;
 
   // Two independent columns on a wide window, so neither waits on the other's row heights; one
-  // list in reading order on a phone, so focus order matches what is on screen.
-  return <div ref={gridRef} className={`dsp-grid${wide ? ' wide' : ''}`}>
-      {banner}
-      {wide ? <>
+  // list in reading order on a phone, so focus order matches what is on screen. The curve is on the
+  // left in both views.
+  const layout = advanced ? wide ? <>
           <div className="dsp-col">{graph}{filters}</div>
           <div className="dsp-col">{bar}{tone}{limiter}</div>
-        </> : <>{bar}{graph}{tone}{filters}{limiter}</>}
+        </> : <>{bar}{graph}{tone}{filters}{limiter}</> : wide ? <>
+          <div className="dsp-col">{basicTone}</div>
+          <div className="dsp-col">{bar}</div>
+        </> : <>{bar}{basicTone}</>;
+  return <div ref={gridRef} className={`dsp-grid${wide ? ' wide' : ''}`}>
+      {banner}
+      {layout}
 
       <ImportDialog open={importing} onClose={() => setImporting(false)} onImport={r => {
       setImporting(false);

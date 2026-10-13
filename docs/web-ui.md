@@ -61,7 +61,7 @@ Five tabs, all on the hash, in this nav order:
 | `#/home` | The voice orb (assistant phase, mute, voice volume) and its Customize drawer - the orb's colors, and the LED ring's color, brightness, style and per-moment animations - sensor readings with sparklines and calibration, timers, and the transcript per wake word |
 | `#/wake-word` | Which wake words the device answers to, each with its sensitivity tuner, voice pipeline and Finished Speaking Detection; the wake chime and the stop word |
 | `#/presence` | Live radar plot with zones, or gate energies, and the radar's own settings |
-| `#/audio/<page>` | `announcement-routing` (plain `#/audio` lands here): one Announcement Routing card: the three announcement and ducking levels, then one list of your Home Assistant areas and speakers with an Announce and a Duck box on each row (this device's own row holds "Announce on this device"), then the wake chime, timer ring and echo guard for the speakers ticked to Announce; a Speaker card with the speaker's Channel beside it only while Equalizer isn't listed. `equalizer`, listed only while the running XMOS has the speaker EQ: the speaker EQ, described below, with the speaker's Channel under Built-in Speaker |
+| `#/audio/<page>` | `announcement-routing` (plain `#/audio` lands here): one Announcement Routing card: the three announcement and ducking levels, then one list of your Home Assistant areas and speakers with an Announce and a Duck box on each row (this device's own row holds "Announce on this device"), then the wake chime, timer ring and echo guard for the speakers ticked to Announce; a Speaker card with the speaker's Channel beside it only while Equalizer isn't listed. `equalizer`, listed only while the running XMOS has the speaker EQ: the speaker EQ, described below, with the speaker's Channel under Built-in Speaker; Basic by default, Advanced on the same URL |
 | `#/settings/<page>` | `device` (facts and buttons), `updates`, `security` (auth token, password), `logs` (live logs, crash reports), `integrations` (Home Assistant side panel), `recovery` (ESP32, XMOS and radar maintenance), `developer` (developer builds only: the XMOS firmware picker, the mic monitor, the TAS2780 amplifier, logs from several devices, the system monitor), `community` |
 
 When the device has a media player, the media bar rides along the bottom of every tab.
@@ -838,6 +838,16 @@ a 2.
   outputs on the preset follow it. Renamed onto another user preset, that one is replaced, as a
   `save` over it would, and any output on it becomes Custom.
 
+**Basic and Advanced.** The page opens on Basic, which is what most people need: the bar (outputs,
+Channel, the EQ switch, Hold to hear it flat, and the preset menu with Revert once the output is
+Modified) and a Tone card with the curve, read-only, over the Bass, Midrange and Treble sliders.
+Its notes speak in sliders: too much boost says to turn one down, and a preset whose filters fill
+the chip points to Advanced. Advanced, described next, is the full editor. Basic | Advanced sits at
+the end of the title's row, or on its own line under the title on a phone. The choice is kept in
+this browser (`sat1.eq.view`, `eqView` in `src/lib/dsp.js`) and is never part of the URL, so
+switching doesn't navigate and a link opens whichever view was last chosen here. Both are views of
+the same state, so an edit in one shows in the other.
+
 **The page** (`src/components/audio/DspPage.tsx`, the graph in `EqGraph.tsx`, the maths in
 `src/lib/eq.js`). `eq.js` mirrors the XMOS design — same biquads, same section order, same +18 dB
 check, tested against coefficients from lib_audio_dsp's own Python — so the page can refuse an
@@ -866,11 +876,12 @@ reads the text REW, Equalizer APO and Music Assistant export (`Preamp:` and `Fil
 decimals too) and says what it skipped or approximated; Export writes the same format, Bass and
 Treble as shelves and Midrange as a peak (each left out at 0 dB), 24 dB/oct cuts as two lines. On
 import, a shelf or peak at exactly one of the three tone controls' frequency and Q becomes that
-control. The Tone card has the three tone sliders, then the preamp. The banner over the page says when the audio chip
-is updating or not answering, and when the EQ switched itself off for want of time. Two
-independent columns once the page itself is 820 px wide (the graph and filters left, the rest right), measured on the page rather
-than the window because the sidebar arrives at 1024 px; one list in reading order below that, with
-the bottom bar's Announcement Routing and Equalizer pills.
+control. The Tone card has the three tone sliders, then the preamp. The banner over the page says
+when the audio chip is updating or not answering, and when the EQ switched itself off for want of
+time. Two independent columns once the page itself is 820 px wide (Advanced: the graph and filters
+left, the rest right; Basic: the Tone card left, the bar right), measured on the page rather than
+the window because the sidebar arrives at 1024 px; one list in reading order below that, with the
+bottom bar's Announcement Routing and Equalizer pills.
 
 ## Finished speaking detection, per wake word
 

@@ -38,6 +38,30 @@ export function dspRedirect(support) {
   return support === 0;
 }
 
+/**
+ * The Equalizer's view, "basic" (the default) or "advanced". Kept in this browser rather than the
+ * URL, so switching is never a navigation and a link opens whichever view the person here last
+ * chose. Guarded like every localStorage touch in the app: with site data blocked the choice lasts
+ * for the page's life only.
+ */
+const VIEW_KEY = "sat1.eq.view";
+
+export function eqView(storage) {
+  try {
+    return (storage ?? localStorage).getItem(VIEW_KEY) === "advanced" ? "advanced" : "basic";
+  } catch {
+    return "basic";
+  }
+}
+
+export function setEqView(view, storage) {
+  try {
+    (storage ?? localStorage).setItem(VIEW_KEY, view === "advanced" ? "advanced" : "basic");
+  } catch {
+    /* kept for this page's life only */
+  }
+}
+
 /** What the ESP32 publishes for a connected XMOS: "v1.1.0", "v1.1.0-dev.8". */
 export function isXmosVersion(value) {
   return /^v\d+\.\d+\.\d+/.test(String(value ?? ""));
