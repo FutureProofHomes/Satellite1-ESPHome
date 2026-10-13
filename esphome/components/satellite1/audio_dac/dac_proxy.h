@@ -6,6 +6,9 @@
 #include "esphome/core/preferences.h"
 #include "esphome/core/entity_base.h"
 
+#include <array>
+#include <functional>
+
 namespace esphome {
 namespace satellite1 {
 
@@ -29,6 +32,17 @@ struct DACProxyRoutingPreferences {
   uint8_t dac_output{LINE_OUT};
 };
 
+struct DACVolumeLimits {
+  float min_db;
+  float max_db;
+};
+
+struct DACProxyVolumeLimitPreferences {
+  uint8_t version{1};
+  DACVolumeLimits speaker{-70.0f, 0.0f};
+  DACVolumeLimits line_out{-52.5f, 0.0f};
+};
+
 class DACOutputVolumeState;
 
 class DACProxy : public audio_dac::AudioDac, public Component, public Satellite1SPIService, public EntityBase {
@@ -37,7 +51,7 @@ class DACProxy : public audio_dac::AudioDac, public Component, public Satellite1
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
 
-  // True accepts runtime intent; it does not acknowledge hardware application.
+  // Retains runtime intent and reports reconciliation write success, not playback readiness.
   bool set_mute_off() override;
   bool set_mute_on() override;
   bool set_volume(float volume) override;
@@ -50,6 +64,10 @@ class DACProxy : public audio_dac::AudioDac, public Component, public Satellite1
   DacOutput requested_output() const { return this->requested_dac_; }
   // Accepts logical routing before asynchronous hardware preparation; does not physically select it.
   bool request_output(DacOutput output);
+  bool set_volume_limits(DacOutput output, float min_db, float max_db);
+  void set_volume_limits_callback(DacOutput output, std::function<void(float, float)> callback) {
+    this->volume_limits_callbacks_[output] = std::move(callback);
+  }
   void set_audio_ready(bool ready);
   // Closes permission and forces fresh child mute writes; true confirms those calls only.
   bool force_safety_mute();
@@ -91,6 +109,10 @@ class DACProxy : public audio_dac::AudioDac, public Component, public Satellite1
   bool setup_was_called_{false};
   ESPPreferenceObject pref_;
   DACProxyRoutingPreferences restore_state_{};
+  ESPPreferenceObject volume_limits_pref_;
+  DACProxyVolumeLimitPreferences volume_limits_{};
+  std::array<std::function<void(float, float)>, 2> volume_limits_callbacks_;
+  void apply_volume_limits_(DacOutput output);
   bool reconcile_();
   bool receiving_current_output_() const;
   void notify_requested_output_();

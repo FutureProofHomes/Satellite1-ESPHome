@@ -58,7 +58,7 @@ media_player:
     name: Media Player
     volume_increment: ${physical_volume_step}
     volume_state: audio_volume_state
-    volume_min: 0.1
+    volume_min: 0.0
     volume_max: 1.0
     announcement_pipeline:
       speaker: announcement_resampling_speaker
@@ -139,10 +139,15 @@ script:
           condition:
             lambda: return increase_volume;
           then:
-            - media_player.volume_up:
-                id: external_media_player
-            - media_player.unmute:
-                id: external_media_player
+            - if:
+                condition:
+                  media_player.is_muted: external_media_player
+                then:
+                  - media_player.unmute:
+                      id: external_media_player
+                else:
+                  - media_player.volume_up:
+                      id: external_media_player
           else:
             - if:
                 condition:
@@ -157,6 +162,7 @@ script:
                 else:
                   - media_player.mute:
                       id: external_media_player
+                  - lambda: id(volume_buttons_touched) = false;
       - script.execute: control_leds
       - delay: 2s
       - lambda: id(volume_buttons_touched) = false;

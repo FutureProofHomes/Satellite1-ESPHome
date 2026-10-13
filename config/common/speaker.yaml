@@ -184,6 +184,28 @@ api:
       then:
         - script.execute: activate_line_out
 
+    - action: set_speaker_volume_limits
+      variables:
+        min_db: float
+        max_db: float
+      then:
+        - dac_proxy.set_volume_limits:
+            id: dac_proxy
+            output: speaker
+            min_db: !lambda return min_db;
+            max_db: !lambda return max_db;
+
+    - action: set_lineout_volume_limits
+      variables:
+        min_db: float
+        max_db: float
+      then:
+        - dac_proxy.set_volume_limits:
+            id: dac_proxy
+            output: line_out
+            min_db: !lambda return min_db;
+            max_db: !lambda return max_db;
+
 binary_sensor:
   - platform: gpio
     id: line_out_sensor

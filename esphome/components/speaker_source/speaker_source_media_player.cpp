@@ -783,10 +783,7 @@ void SpeakerSourceMediaPlayer::handle_volume_state_(const VolumeMuteState &state
   const bool initial_sync = !this->volume_state_initialized_;
   const bool source_sync = !this->source_volume_state_initialized_;
 
-  const bool custom_zero = this->volume_state_ != &this->default_volume_state_ && volume == 0.0f;
-  const float bounded_volume =
-      custom_zero ? 0.0f : remap<float, float>(volume, 0.0f, 1.0f, this->volume_min_, this->volume_max_);
-  const bool output_muted = is_muted || custom_zero;
+  const float bounded_volume = remap<float, float>(volume, 0.0f, 1.0f, this->volume_min_, this->volume_max_);
 
   // Commit the pair before any observer can see it. The controller owns mute independently of volume.
   this->volume = volume;
@@ -806,7 +803,7 @@ void SpeakerSourceMediaPlayer::handle_volume_state_(const VolumeMuteState &state
       if (state != this->volume_state_->state()) {
         return;
       }
-      ps.speaker->set_mute_state(output_muted);
+      ps.speaker->set_mute_state(is_muted);
     }
   }
 

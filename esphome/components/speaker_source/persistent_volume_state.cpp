@@ -23,12 +23,11 @@ bool PersistentVolumeState::set_volume(float volume) {
   if (!this->is_initialized() || !std::isfinite(volume) || volume < 0.0f || volume > 1.0f) {
     return false;
   }
-  const bool muted = volume < 0.001f;
   const auto current = this->state();
-  if (current.volume != volume || current.muted != muted) {
-    const VolumeRestoreState restored{volume, muted};
+  if (current.volume != volume) {
+    const VolumeRestoreState restored{volume, current.muted};
     this->preference_.save(&restored);
-    this->publish_state_(volume, muted);
+    this->publish_state_(volume, current.muted);
   }
   return true;
 }

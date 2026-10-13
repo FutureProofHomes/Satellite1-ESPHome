@@ -163,7 +163,7 @@ light:
               mark_mic_positions(mic_centers, 4);
             }
 
-            if (id(external_media_player).volume == 0.0f || id(external_media_player).is_muted()) {
+            if (id(external_media_player).is_muted()) {
               const int quadrant_starts[] = {1, 7, 13, 19};
               mark_quadrants(quadrant_starts, 4);
             }
@@ -175,7 +175,7 @@ light:
             auto light_color = id(led_ring).current_values;
             Color color(light_color.get_red() * 255, light_color.get_green() * 255,
                   light_color.get_blue() * 255);
-            Color silenced_color(255, 0, 0);
+            Color muted_color(255, 0, 0);
             auto volume_ratio = 24.0f * id(external_media_player).volume;
             for (int i = 0; i < 24; i++) {
               if (i <= volume_ratio) {
@@ -184,8 +184,8 @@ light:
                 it[(0+i)%24] = Color::BLACK;
               }
             }
-            if (id(external_media_player).volume == 0.0f) {
-              it[0] = silenced_color;
+            if (id(external_media_player).is_muted()) {
+              it[0] = muted_color;
             }
       - addressable_lambda:
           name: "Action Button Touched"
@@ -505,7 +505,7 @@ script:
             id(control_leds_timer_ticking).execute();
           } else if (id(master_mute_switch).state) {
             id(control_leds_muted_or_silent).execute();
-          } else if (id(external_media_player).volume == 0.0f || id(external_media_player).is_muted()) {
+          } else if (id(external_media_player).is_muted()) {
             id(control_leds_muted_or_silent).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_idle_phase_id}) {
             id(control_leds_voice_assistant_idle_phase).execute();

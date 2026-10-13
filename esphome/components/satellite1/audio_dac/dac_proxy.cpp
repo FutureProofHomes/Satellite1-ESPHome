@@ -9,11 +9,28 @@ namespace esphome {
 namespace satellite1 {
 
 static const char *const TAG = "dac_proxy";
+static constexpr uint8_t DAC_WRITE_ATTEMPTS = 3;
 
 static bool valid_volume(float volume) { return std::isfinite(volume) && volume >= 0.0f && volume <= 1.0f; }
 static bool valid_output(uint8_t output) { return output == SPEAKER || output == LINE_OUT; }
+static bool valid_volume_limits(DacOutput output, float min_db, float max_db) {
+  return valid_output(output) && std::isfinite(min_db) && std::isfinite(max_db) && min_db < max_db &&
+         min_db >= (output == SPEAKER ? -100.0f : -103.0f) && max_db <= (output == SPEAKER ? 0.0f : 24.0f);
+}
 
 void DACProxy::setup() {
+  this->volume_limits_pref_ = global_preferences->make_preference<DACProxyVolumeLimitPreferences>(
+      fnv1_hash("satellite1.dac_proxy.volume_limits.v1"));
+  DACProxyVolumeLimitPreferences limits{};
+  if (this->volume_limits_pref_.load(&limits) && limits.version == 1 &&
+      valid_volume_limits(SPEAKER, limits.speaker.min_db, limits.speaker.max_db) &&
+      valid_volume_limits(LINE_OUT, limits.line_out.min_db, limits.line_out.max_db)) {
+    this->volume_limits_ = limits;
+  } else if (!this->volume_limits_pref_.save(&this->volume_limits_)) {
+    ESP_LOGW(TAG, "Failed to save default DAC volume limits");
+  }
+  this->apply_volume_limits_(SPEAKER);
+  this->apply_volume_limits_(LINE_OUT);
   this->pref_ =
       global_preferences->make_preference<DACProxyRoutingPreferences>(fnv1_hash("satellite1.dac_proxy.routing.v1"));
   DACProxyRoutingPreferences restored{};
@@ -52,21 +69,59 @@ void DACProxy::dump_config() {
   ESP_LOGCONFIG(TAG, "DAC Proxy: selected=%s, target volume=%.2f, target muted=%s, audio ready=%s",
                 this->active_dac == SPEAKER ? "speaker" : "line-out", this->target_volume_, YESNO(this->target_muted_),
                 YESNO(this->audio_ready()));
+  ESP_LOGCONFIG(TAG, "  Speaker volume limits: %.1f to %.1f dB", this->volume_limits_.speaker.min_db,
+                this->volume_limits_.speaker.max_db);
+  ESP_LOGCONFIG(TAG, "  Line-out volume limits: %.1f to %.1f dB", this->volume_limits_.line_out.min_db,
+                this->volume_limits_.line_out.max_db);
+}
+
+void DACProxy::apply_volume_limits_(DacOutput output) {
+  if (this->volume_limits_callbacks_[output]) {
+    const auto &limits = output == SPEAKER ? this->volume_limits_.speaker : this->volume_limits_.line_out;
+    this->volume_limits_callbacks_[output](limits.min_db, limits.max_db);
+  }
+}
+
+bool DACProxy::set_volume_limits(DacOutput output, float min_db, float max_db) {
+  if (!this->setup_was_called_ || !valid_volume_limits(output, min_db, max_db)) {
+    ESP_LOGW(TAG, "Rejected invalid or premature DAC volume-limit request");
+    return false;
+  }
+  if (!(output == SPEAKER ? this->tas2780_ : this->pcm5122_) || !this->volume_limits_callbacks_[output]) {
+    ESP_LOGW(TAG, "Rejected volume limits for an unavailable DAC");
+    return false;
+  }
+  auto updated = this->volume_limits_;
+  auto &limits = output == SPEAKER ? updated.speaker : updated.line_out;
+  if (limits.min_db != min_db || limits.max_db != max_db) {
+    limits = {min_db, max_db};
+    if (!this->volume_limits_pref_.save(&updated)) {
+      ESP_LOGW(TAG, "Failed to save DAC volume limits; limits unchanged");
+      return false;
+    }
+    this->volume_limits_ = updated;
+  }
+  this->apply_volume_limits_(output);
+  (output == SPEAKER ? this->speaker_applied_ : this->lineout_applied_).volume_valid = false;
+  // A non-selected or suspended output receives its gain when normal routing permits it.
+  return output != this->active_dac || !this->audio_ready() || this->reconcile_();
 }
 
 bool DACProxy::apply_mute_(audio_dac::AudioDac *dac, AppliedState &state, bool muted) {
   if (state.mute_valid && state.muted == muted && dac->is_muted() == muted)
     return true;
   state.mute_valid = false;
-  if (!(muted ? dac->set_mute_on() : dac->set_mute_off())) {
+  for (uint8_t attempt = 0; attempt < DAC_WRITE_ATTEMPTS; ++attempt) {
+    if (muted ? dac->set_mute_on() : dac->set_mute_off()) {
+      state.muted = muted;
+      state.mute_valid = true;
+      return true;
+    }
     // Mute may share volume registers; a failed write confirms neither value.
     state.volume_valid = false;
-    ESP_LOGW(TAG, "DAC %s failed", muted ? "mute" : "unmute");
-    return false;
   }
-  state.muted = muted;
-  state.mute_valid = true;
-  return true;
+  ESP_LOGW(TAG, "DAC %s failed after %u attempts", muted ? "mute" : "unmute", DAC_WRITE_ATTEMPTS);
+  return false;
 }
 
 bool DACProxy::reconcile_() {
@@ -83,7 +138,7 @@ bool DACProxy::reconcile_() {
       state.volume_valid = false;
     if (state.mute_valid && dac->is_muted() != state.muted)
       state.mute_valid = false;
-    if (dac != selected || muted || !state.mute_valid)
+    if (dac != selected || muted)
       success = this->apply_mute_(dac, state, true) && success;
   }
   // A requested destination's target must never be written to the old physical route.
@@ -91,20 +146,23 @@ bool DACProxy::reconcile_() {
       this->fresh_mute_received_) {
     auto &state = selected == this->tas2780_ ? this->speaker_applied_ : this->lineout_applied_;
     if (!state.volume_valid || state.volume != this->target_volume_ || selected->volume() != this->target_volume_) {
+      this->apply_volume_limits_(this->active_dac);
       state.volume_valid = false;
-      if (selected->set_volume(this->target_volume_)) {
-        state.volume = this->target_volume_;
-        state.volume_valid = true;
-      } else {
+      for (uint8_t attempt = 0; attempt < DAC_WRITE_ATTEMPTS; ++attempt) {
+        if (selected->set_volume(this->target_volume_)) {
+          state.volume = this->target_volume_;
+          state.volume_valid = true;
+          break;
+        }
+      }
+      if (!state.volume_valid) {
         state.mute_valid = false;
-        ESP_LOGW(TAG, "Selected DAC volume write failed");
+        ESP_LOGW(TAG, "Selected DAC volume write failed after %u attempts", DAC_WRITE_ATTEMPTS);
         success = false;
       }
     }
     if (success && !muted)
       success = this->apply_mute_(selected, state, false);
-    if (!success && !this->apply_mute_(selected, state, true))
-      ESP_LOGW(TAG, "Selected DAC fallback mute failed");
   }
   return success;
 }
@@ -236,16 +294,14 @@ bool DACProxy::set_mute_off() {
     return false;
   this->target_muted_ = false;
   this->fresh_mute_received_ = this->receiving_current_output_();
-  this->reconcile_();
-  return true;
+  return this->reconcile_();
 }
 bool DACProxy::set_mute_on() {
   if (!this->setup_was_called_)
     return false;
   this->target_muted_ = true;
   this->fresh_mute_received_ = this->receiving_current_output_();
-  this->reconcile_();
-  return true;
+  return this->reconcile_();
 }
 bool DACProxy::is_muted() { return this->target_muted_; }
 bool DACProxy::set_volume(float volume) {
@@ -253,8 +309,7 @@ bool DACProxy::set_volume(float volume) {
     return false;
   this->target_volume_ = volume;
   this->fresh_volume_received_ = this->receiving_current_output_();
-  this->reconcile_();
-  return true;
+  return this->reconcile_();
 }
 float DACProxy::volume() { return this->target_volume_; }
 

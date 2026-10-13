@@ -198,9 +198,9 @@ void I2SAudioSpeaker::process_volume_state_() {
   bool success = true;
   if (change_mute && muted)
     success = this->audio_dac_->set_mute_on();
-  if (change_volume && success)
-    success = this->audio_dac_->set_volume(volume);
-  if (change_mute && !muted && success) {
+  if (change_volume)
+    success = this->audio_dac_->set_volume(volume) && success;
+  if (change_mute && !muted) {
     if (this->has_pending_volume_ || this->has_pending_mute_) {
       // A newer gain must reach the DAC before releasing a queued unmute.
       if (!this->has_pending_mute_) {
@@ -208,13 +208,11 @@ void I2SAudioSpeaker::process_volume_state_() {
         this->has_pending_mute_ = true;
       }
     } else {
-      success = this->audio_dac_->set_mute_off();
+      success = this->audio_dac_->set_mute_off() && success;
     }
   }
-  if (!success) {
-    this->audio_dac_->set_mute_on();
-    ESP_LOGW(TAG, "DAC control write failed; output remains safety-muted where possible");
-  }
+  if (!success)
+    ESP_LOGW(TAG, "DAC control write failed");
 #endif
 }
 
