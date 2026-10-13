@@ -30,7 +30,12 @@ namespace sensor {
 enum StateClass { STATE_CLASS_NONE, STATE_CLASS_MEASUREMENT };
 class Sensor : public EntityBase {
  public:
-  void publish_state(float) {}
+  float state = 0;
+  unsigned publishes = 0;
+  void publish_state(float value) {
+    state = value;
+    ++publishes;
+  }
   void set_state_class(StateClass) {}
   void set_accuracy_decimals(int8_t) {}
 };
@@ -38,7 +43,12 @@ class Sensor : public EntityBase {
 namespace binary_sensor {
 class BinarySensor : public EntityBase {
  public:
-  void publish_state(bool) {}
+  bool state = false;
+  unsigned publishes = 0;
+  void publish_state(bool value) {
+    state = value;
+    ++publishes;
+  }
 };
 }  // namespace binary_sensor
 namespace text_sensor {

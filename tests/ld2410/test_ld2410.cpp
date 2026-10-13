@@ -24,6 +24,7 @@ class TestHandler : public LD2410Handler {
   }
   bool waiting() const { return waiting_for_ack_; }
   bool readback_pending() const { return bt_readback_pending_; }
+  size_t buffered() const { return buf_pos_; }
 };
 
 static bool equal(const Config &a, const Config &b) {
@@ -38,9 +39,12 @@ struct Fixture {
   uart::UARTDevice uart;
   TestHandler handler{uart};
   text_sensor::TextSensor version;
+  text_sensor::TextSensor target;
+  sensor::Sensor moving_distance, still_distance, detection_distance, moving_energy, still_energy, light;
+  binary_sensor::BinarySensor presence;
   Config initial;
-  Fixture() {
-    fake_now = 100;
+  explicit Fixture(uint32_t now = 100) {
+    fake_now = now;
     preference_state = {};
     handler.prepare();
     initial.timeout_seconds = 4321;
@@ -55,6 +59,14 @@ struct Fixture {
     assert(handler.set_backend_config(initial));
     preference_state = {};
     handler.version_text_sensor = &version;
+    handler.target_state_text_sensor = &target;
+    handler.moving_distance = &moving_distance;
+    handler.still_distance = &still_distance;
+    handler.detection_distance = &detection_distance;
+    handler.moving_energy = &moving_energy;
+    handler.still_energy = &still_energy;
+    handler.light_sensor = &light;
+    handler.presence_sensor = &presence;
   }
   void parse(const Bytes &frame) {
     // Exact allocation makes sanitizer checks effective for every truncated prefix.
@@ -84,6 +96,24 @@ struct Fixture {
   void feed(const Bytes &frame) {
     uart.inject(frame);
     handler.loop();
+  }
+  void telemetry(unsigned count, unsigned engineer_count, bool engineer_values = false) {
+    assert(moving_distance.publishes == count && still_distance.publishes == count);
+    assert(detection_distance.publishes == count && moving_energy.publishes == count &&
+           still_energy.publishes == count);
+    assert(presence.publishes == count && presence.state == (count != 0));
+    assert(target.publishes == (count ? 1U : 0U));
+    assert(light.publishes == engineer_count);
+    if (count) {
+      assert(moving_distance.state == 0x1234 && still_distance.state == 0x2345);
+      assert(detection_distance.state == 0x3456 && moving_energy.state == 41 && still_energy.state == 63);
+      assert(target.state == "Moving");
+    }
+    assert(light.state == (engineer_count ? 87 : 0));
+    for (size_t g = 0; g < 9; ++g) {
+      assert(handler.get_gate_move_energy(g) == (engineer_values ? 11 + g : 0));
+      assert(handler.get_gate_still_energy(g) == (engineer_values ? 51 + g : 0));
+    }
   }
 };
 
@@ -130,6 +160,37 @@ static Config parameters(const Config &initial) {
 static Bytes join(Bytes first, const Bytes &second) {
   first.insert(first.end(), second.begin(), second.end());
   return first;
+}
+
+static Bytes telemetry_frame(bool engineer) {
+  Bytes frame(engineer ? 45 : 23, 0);
+  const Bytes header{0xF4, 0xF3, 0xF2, 0xF1}, footer{0xF8, 0xF7, 0xF6, 0xF5};
+  std::copy(header.begin(), header.end(), frame.begin());
+  std::copy(footer.begin(), footer.end(), frame.end() - 4);
+  length(frame);
+  frame[6] = engineer ? 1 : 2;
+  frame[7] = 0xAA;
+  frame[8] = 3;
+  frame[9] = 0x34;
+  frame[10] = 0x12;
+  frame[11] = 41;
+  frame[12] = 0x45;
+  frame[13] = 0x23;
+  frame[14] = 63;
+  frame[15] = 0x56;
+  frame[16] = 0x34;
+  if (engineer) {
+    frame[17] = 8;
+    frame[18] = 8;
+    for (size_t g = 0; g < 9; ++g) {
+      frame[19 + g] = 11 + g;
+      frame[28 + g] = 51 + g;
+    }
+    frame[37] = 87;
+    frame[38] = 1;
+  }
+  frame[frame.size() - 6] = 0x55;
+  return frame;
 }
 
 using Test = std::pair<std::string, std::function<void()>>;
@@ -392,6 +453,198 @@ static std::vector<Test> tests() {
     f.uart.inject(ack(0x62, 256));
     f.handler.loop();
     assert(f.uart.available() == 128 && f.handler.waiting());
+    f.handler.loop();
+    assert(f.uart.available() == 0);
+    f.accepted(f.initial, 0);
+    f.feed(params());
+    f.accepted(parameters(f.initial));
+  });
+  for (bool engineer : {false, true}) {
+    const std::string kind = engineer ? "engineer45" : "normal23";
+    cases.emplace_back("telemetry_" + kind, [engineer] {
+      Fixture f;
+      f.feed(telemetry_frame(engineer));
+      f.telemetry(1, engineer, engineer);
+      f.feed(params());
+      f.accepted(parameters(f.initial));
+      f.telemetry(1, engineer, engineer);
+      f.feed(ack(0x62, 14));
+      f.telemetry(1, engineer, engineer);
+    });
+    for (size_t split = 1; split < telemetry_frame(engineer).size(); ++split) {
+      cases.emplace_back("telemetry_" + kind + "_fragment_" + std::to_string(split), [engineer, split] {
+        Fixture f;
+        const auto frame = telemetry_frame(engineer);
+        f.feed(Bytes(frame.begin(), frame.begin() + split));
+        f.telemetry(0, 0);
+        f.feed(Bytes(frame.begin() + split, frame.end()));
+        f.telemetry(1, engineer, engineer);
+      });
+    }
+    cases.emplace_back("telemetry_" + kind + "_consecutive_interleaved_budget", [engineer] {
+      Fixture f;
+      const auto frame = telemetry_frame(engineer);
+      const auto stream = join(join(join(join(frame, params()), frame), ack(0x62, 14)), join(frame, frame));
+      assert(stream.size() > 128);
+      f.uart.inject(stream);
+      f.handler.loop();
+      assert(f.uart.reads == 128 && f.uart.available() == stream.size() - 128);
+      while (f.uart.available())
+        f.handler.loop();
+      f.accepted(parameters(f.initial));
+      f.telemetry(4, engineer ? 4 : 0, engineer);
+    });
+  }
+  cases.emplace_back("telemetry_normal_preserves_engineer_arrays", [] {
+    Fixture f;
+    f.feed(telemetry_frame(true));
+    f.telemetry(1, 1, true);
+    f.feed(params());
+    f.telemetry(1, 1, true);
+    f.feed(telemetry_frame(false));
+    f.telemetry(2, 1, true);
+    f.feed(ack(0x62, 14));
+    f.telemetry(2, 1, true);
+  });
+  cases.emplace_back("telemetry_target_debounce_three_events", [] {
+    Fixture f;
+    f.feed(telemetry_frame(false));
+    f.telemetry(1, 0);
+    auto still = telemetry_frame(true);
+    still[8] = 2;
+    for (unsigned event = 1; event <= 3; ++event) {
+      f.feed(still);
+      assert(f.target.publishes == (event == 3 ? 2U : 1U));
+      assert(f.target.state == (event == 3 ? "Still" : "Moving"));
+      f.feed(ack(0x62, 14));
+      assert(f.target.publishes == (event == 3 ? 2U : 1U));
+    }
+    auto clear = telemetry_frame(false);
+    clear[8] = 0;
+    for (unsigned event = 1; event <= 3; ++event) {
+      f.feed(clear);
+      assert(!f.presence.state && f.presence.publishes == 4 + event);
+      assert(f.target.publishes == (event == 3 ? 3U : 2U));
+      assert(f.target.state == (event == 3 ? "Clear" : "Still"));
+    }
+  });
+  cases.emplace_back("parameters_extended40", [] {
+    Fixture f;
+    auto frame = params();
+    frame.insert(frame.end() - 4, {0xD7, 0xE9});
+    length(frame);
+    f.parse(frame);
+    f.accepted(parameters(f.initial));
+  });
+  cases.emplace_back("stream_accepted_extended_parameters_owns_embedded_ack", [] {
+    Fixture f;
+    auto frame = params();
+    auto inner = ack(0xA0, 22);
+    inner[12] = 0x23;
+    inner[13] = 4;
+    frame.insert(frame.end() - 4, inner.begin(), inner.end());
+    length(frame);
+    f.feed(frame);
+    f.accepted(parameters(f.initial));
+    assert(f.version.publishes == 0);
+  });
+  for (bool rollover : {false, true}) {
+    cases.emplace_back(rollover ? "stream_idle_recovery246_rollover" : "stream_idle_recovery246", [rollover] {
+      Fixture f(rollover ? UINT32_MAX - 49 : 100);
+      auto bad = ack(0x61, 14);
+      bad[4] = 246;
+      f.feed(join(bad, params()));
+      assert(equal(f.handler.get_backend_config(), f.initial));
+      assert(preference_state.saves == 0 && f.handler.waiting());
+      fake_now += 99;
+      f.handler.loop();
+      assert(equal(f.handler.get_backend_config(), f.initial));
+      assert(preference_state.saves == 0 && f.handler.waiting());
+      fake_now += 1;
+      f.handler.loop();
+      f.accepted(parameters(f.initial));
+    });
+    cases.emplace_back(rollover ? "stream_fragment_before_timeout_rollover" : "stream_fragment_before_timeout",
+                       [rollover] {
+                         Fixture f(rollover ? UINT32_MAX - 49 : 100);
+                         const auto frame = params();
+                         f.feed(Bytes(frame.begin(), frame.begin() + 20));
+                         fake_now += 98;
+                         f.handler.loop();
+                         assert(f.handler.buffered() == 20);
+                         fake_now += 1;
+                         f.handler.loop();
+                         assert(f.handler.buffered() == 20 && preference_state.saves == 0);
+                         f.feed(Bytes(frame.begin() + 20, frame.end()));
+                         f.accepted(parameters(f.initial));
+                       });
+    cases.emplace_back(rollover ? "stream_expired_prefix_rollover" : "stream_expired_prefix", [rollover] {
+      Fixture f(rollover ? UINT32_MAX - 49 : 100);
+      const auto frame = params();
+      f.feed(Bytes(frame.begin(), frame.begin() + 20));
+      fake_now += 100;
+      f.handler.loop();
+      assert(f.handler.buffered() == 0 && preference_state.saves == 0);
+      f.feed(frame);
+      f.accepted(parameters(f.initial));
+    });
+  }
+  cases.emplace_back("stream_rejected_outer52_footer_coincidence", [] {
+    Fixture f;
+    auto bad = ack(0x61, 14);
+    bad[4] = 42;
+    // Its declared footer coincides with the inner reply's footer, but fields are invalid.
+    const auto stream = join(bad, params());
+    assert(stream.size() == 52);
+    f.feed(stream);
+    f.accepted(parameters(f.initial));
+  });
+  cases.emplace_back("stream_rejected_data_outer_footer_coincidence", [] {
+    Fixture f;
+    auto bad = telemetry_frame(false);
+    bad[7] = 0;
+    auto stream = join(bad, telemetry_frame(true));
+    length(stream);
+    f.feed(stream);
+    f.telemetry(1, 1, true);
+    assert(equal(f.handler.get_backend_config(), f.initial));
+    assert(preference_state.saves == 0 && f.handler.waiting());
+  });
+  for (size_t prefix = 1; prefix <= 5; ++prefix) {
+    cases.emplace_back("stream_expired_partial_header_" + std::to_string(prefix), [prefix] {
+      Fixture f;
+      const auto frame = params();
+      f.feed(Bytes(frame.begin(), frame.begin() + prefix));
+      fake_now += 100;
+      f.handler.loop();
+      assert(f.handler.buffered() == 0 && preference_state.saves == 0);
+      f.feed(frame);
+      f.accepted(parameters(f.initial));
+    });
+  }
+  cases.emplace_back("stream_idle_recovery_nested_incomplete_candidates", [] {
+    Fixture f;
+    auto bad = ack(0x61, 14);
+    bad[4] = 246;
+    f.feed(join(join(join(bad, bad), params()), ack(0xAB, 16)));
+    assert(equal(f.handler.get_backend_config(), f.initial) && preference_state.saves == 0);
+    fake_now += 100;
+    f.handler.loop();
+    auto expected = parameters(f.initial);
+    expected.distance_resolution = 0;
+    f.accepted(expected, 2);
+    assert(f.handler.buffered() == 0);
+  });
+  cases.emplace_back("stream_budget_backlog_not_idle_timeout", [] {
+    Fixture f;
+    f.uart.inject(join(Bytes(127, 0), ack(0x62, 256)));
+    f.handler.loop();
+    assert(f.uart.reads == 128 && f.uart.available() == 255);
+    fake_now += 100;
+    f.handler.loop();
+    assert(f.uart.reads == 256 && f.uart.available() == 127 && f.handler.waiting());
+    assert(f.handler.buffered() == 129);
+    fake_now += 100;
     f.handler.loop();
     assert(f.uart.available() == 0);
     f.accepted(f.initial, 0);
