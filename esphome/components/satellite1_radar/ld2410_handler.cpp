@@ -150,39 +150,13 @@ void LD2410Handler::loop() {
       buf_[buf_pos_++] = byte;
     else
       buf_pos_ = 0;
-
-    while (buf_pos_ >= 4) {
-      const bool is_data = memcmp(buf_.get(), DATA_HEADER, sizeof(DATA_HEADER)) == 0;
-      const bool is_cmd = memcmp(buf_.get(), CMD_HEADER, sizeof(CMD_HEADER)) == 0;
-      if (is_data || is_cmd) {
-        if (buf_pos_ < 6)
-          break;
-
-        const uint16_t data_len = to_uint16_(buf_[4], buf_[5]);
-        const size_t frame_len = 4u + 2u + data_len + 4u;
-        if (data_len >= (is_cmd ? 4u : 11u) && frame_len <= MAX_BUF) {
-          if (buf_pos_ < frame_len)
-            break;
-
-          const uint8_t *footer = is_cmd ? CMD_FOOTER : DATA_FOOTER;
-          if (memcmp(buf_.get() + frame_len - 4, footer, 4) == 0) {
-            if (is_cmd)
-              handle_ack_frame_(buf_.get(), frame_len);
-            else
-              parse_data_frame_(buf_.get(), frame_len);
-            buf_pos_ -= frame_len;
-            memmove(buf_.get(), buf_.get() + frame_len, buf_pos_);
-            continue;
-          }
-        }
-      }
-
-      // A bad length/footer may have swallowed the next header. Recheck buffered bytes,
-      // retaining a partial header at the end rather than discarding the entire buffer.
-      memmove(buf_.get(), buf_.get() + 1, buf_pos_ - 1);
-      buf_pos_--;
-    }
+    last_rx_ms_ = millis();
+    process_rx_buffer_(false);
   }
+
+  // Do not expire data still waiting in UART after the per-loop input budget.
+  if (buf_pos_ != 0 && !uart_.available() && millis() - last_rx_ms_ >= RX_FRAME_IDLE_TIMEOUT_MS)
+    process_rx_buffer_(true);
 
   process_queue_();
 
@@ -191,6 +165,45 @@ void LD2410Handler::loop() {
     this->query_params();
     ESP_LOGI(TAG_LD2410, "Queued parameter readback after Bluetooth restart");
   }
+}
+
+void LD2410Handler::process_rx_buffer_(bool expired) {
+  while (buf_pos_ >= 4) {
+    const bool is_data = memcmp(buf_.get(), DATA_HEADER, sizeof(DATA_HEADER)) == 0;
+    const bool is_cmd = memcmp(buf_.get(), CMD_HEADER, sizeof(CMD_HEADER)) == 0;
+    if (is_data || is_cmd) {
+      if (buf_pos_ < 6) {
+        if (!expired)
+          break;
+      } else {
+        const uint16_t data_len = to_uint16_(buf_[4], buf_[5]);
+        const size_t frame_len = 4u + 2u + data_len + 4u;
+        if (data_len >= (is_cmd ? 4u : 11u) && frame_len <= MAX_BUF) {
+          if (buf_pos_ < frame_len) {
+            if (!expired)
+              break;
+          } else {
+            const uint8_t *footer = is_cmd ? CMD_FOOTER : DATA_FOOTER;
+            if (memcmp(buf_.get() + frame_len - 4, footer, 4) == 0) {
+              const bool accepted =
+                  is_cmd ? handle_ack_frame_(buf_.get(), frame_len) : parse_data_frame_(buf_.get(), frame_len);
+              if (accepted) {
+                buf_pos_ -= frame_len;
+                memmove(buf_.get(), buf_.get() + frame_len, buf_pos_);
+                continue;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Rejected/expired candidates may contain a subsequent complete frame.
+    memmove(buf_.get(), buf_.get() + 1, buf_pos_ - 1);
+    buf_pos_--;
+  }
+  if (expired)
+    buf_pos_ = 0;
 }
 
 void LD2410Handler::factory_reset() {
@@ -420,17 +433,17 @@ void LD2410Handler::queue_config_command_(uint16_t command, const uint8_t *data,
   enqueue_frame_(cmd);
 }
 
-void LD2410Handler::parse_data_frame_(const uint8_t *buf, size_t len) {
+bool LD2410Handler::parse_data_frame_(const uint8_t *buf, size_t len) {
   // Frame layout: 4(header) + 2(length) + payload_len + 4(footer)
   // payload_len_min = 11 -> len >= 21
   if (buf == nullptr || len < 21)
-    return;
+    return false;
 
   uint8_t data_type = buf[6];
   uint8_t head_byte = buf[7];
 
   if (head_byte != 0xAA)
-    return;
+    return false;
 
   uint8_t target_state = buf[8];
 
@@ -474,15 +487,16 @@ void LD2410Handler::parse_data_frame_(const uint8_t *buf, size_t len) {
       publish_sensor_(light_sensor, static_cast<float>(buf[offset]));
     }
   }
+  return true;
 }
 
-void LD2410Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
+bool LD2410Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
   // ACK payloads contain a two-byte command and a two-byte status, followed by
   // command-specific data. The declared length excludes the header/length/footer.
   if (buf == nullptr || len < 14 || len > MAX_BUF || memcmp(buf, CMD_HEADER, sizeof(CMD_HEADER)) != 0 ||
       to_uint16_(buf[4], buf[5]) != len - 10 || memcmp(buf + len - 4, CMD_FOOTER, sizeof(CMD_FOOTER)) != 0 ||
       buf[7] != 0x01)
-    return;
+    return false;
 
   const uint16_t cmd_word = to_uint16_(buf[6], buf[7]);
   const uint16_t status = to_uint16_(buf[8], buf[9]);
@@ -491,16 +505,16 @@ void LD2410Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
     ESP_LOGW(TAG_LD2410, "Command 0x%04X failed (status=%u)", static_cast<unsigned int>(cmd_word),
              static_cast<unsigned int>(status));
     on_ack_received_();
-    return;
+    return true;
   }
 
   // Successful configuration entry also reports protocol version and buffer size.
   if (cmd_word == 0x01FF && len < 18)
-    return;
+    return false;
 
   if (cmd_word == 0x01A0) {
     if (len < 22)
-      return;
+      return false;
     char ver[32];
     snprintf(ver, sizeof(ver), "V%u.%02X.%02X%02X%02X%02X", static_cast<unsigned int>(buf[13]),
              static_cast<unsigned int>(buf[12]), static_cast<unsigned int>(buf[17]), static_cast<unsigned int>(buf[16]),
@@ -512,7 +526,7 @@ void LD2410Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
 
   if (cmd_word == 0x0161) {
     if (len < 38 || buf[10] != 0xAA || buf[11] >= NUM_GATES)
-      return;
+      return false;
 
     // Bytes 10/11 are the marker/supported gate, not configured gates.
     LD2410BackendConfig candidate = config_;
@@ -524,7 +538,7 @@ void LD2410Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
     }
     candidate.timeout_seconds = to_uint16_(buf[32], buf[33]);
     if (!validate_backend_config_(candidate) || candidate.max_move_gate > buf[11] || candidate.max_still_gate > buf[11])
-      return;
+      return false;
 
     config_ = candidate;
     save_backend_config_();
@@ -543,10 +557,10 @@ void LD2410Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
 
   if (cmd_word == 0x01AB) {
     if (len < 16)
-      return;
+      return false;
     const uint16_t res = to_uint16_(buf[10], buf[11]);
     if (res > 1)
-      return;
+      return false;
     bool fine = (res == 0x0001);
     config_.distance_resolution = fine ? 1 : 0;
     save_backend_config_();
@@ -555,7 +569,7 @@ void LD2410Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
 
   if (cmd_word == 0x01A5) {
     if (len < 20)
-      return;
+      return false;
     const bool has_bt_mac = memcmp(&buf[10], LD2410_NO_BT_MAC, sizeof(LD2410_NO_BT_MAC)) != 0;
     config_.bluetooth_enabled = has_bt_mac;
     save_backend_config_();
@@ -569,6 +583,7 @@ void LD2410Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
   }
 
   on_ack_received_();
+  return true;
 }
 
 void LD2410Handler::publish_sensor_(sensor::Sensor *s, float val) {

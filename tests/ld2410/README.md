@@ -43,8 +43,33 @@ configuration, and release the wait without requiring successful-response data o
 delaying the next queued command. Valid successful replies
 must adopt the expected complete configuration and persist exactly once where
 appropriate. Stream cases cover every two-part split, bytewise input, noise/partial
-header retention, malformed candidates consuming subsequent header bytes, oversize
-and impossible lengths, consecutive frames, and the 128-byte loop budget.
+header retention, malformed candidates consuming subsequent header bytes, coincident
+footers, in-range corrupted lengths, oversize/impossible lengths, nested candidates,
+idle-timeout boundaries and clock rollover, consecutive frames, and the 128-byte loop
+budget. Normal and engineering telemetry fixtures verify presence/target publication,
+distances, energies, light, and all 18 gate energies across fragmentation and
+interleaved ACKs.
+
+## Recovery Policy
+
+An incomplete candidate is abandoned after the loop observes an empty UART and
+at least 100 ms since the last consumed byte. Buffered data is rescanned first so
+complete replies hidden behind the expired candidate can still be decoded. Remaining
+incomplete bytes, including partial headers, are then discarded. Fragmentation within
+this observed idle bound is preserved. The bound is independent of command ACK timing;
+it is an input-recovery policy, not a module restart/readiness guarantee. Queued UART
+bytes left by the per-loop budget are drained without premature expiry.
+
+Complete candidates rejected by the ACK/data decoder are rescanned bytewise rather
+than consuming their entire declared extent. Accepted candidates, including complete
+failed ACKs, retain ownership of all their payload bytes and are consumed as a whole.
+
+Known successful replies intentionally accept trailing payload bytes beyond their
+minimum complete length, up to the 256-byte buffer limit, if framing and all decoded
+fields are valid. Extra bytes are ignored, not recursively interpreted as new frames.
+Fixtures cover a 40-byte parameter reply and an accepted extension containing a
+complete embedded ACK. This tolerance does not relax declared/actual length checks
+or permit incomplete required fields.
 
 Successful valid readback still overwrites desired configuration: these tests
 intentionally preserve that current behavior. A5b desired-vs-observed separation,
@@ -63,7 +88,7 @@ esphome compile config/satellite1.yaml
 ```
 
 The A5a branch was checked with ESPHome 2026.9.1: the full firmware compiled and
-393 host cases passed under AddressSanitizer/UndefinedBehaviorSanitizer.
+482 host cases passed under AddressSanitizer/UndefinedBehaviorSanitizer.
 No hardware was flashed or tested as part of this validation.
 
 Before hardware sign-off, capture a real parameter response from an LD2410 with
