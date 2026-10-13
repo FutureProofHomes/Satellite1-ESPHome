@@ -13,6 +13,10 @@ namespace satellite1_radar {
 static const char *const TAG_LD2410 = "satellite1_radar.ld2410";
 static constexpr size_t MAX_UART_BYTES_PER_LOOP = 128;
 static constexpr uint8_t LD2410_NO_BT_MAC[6] = {0x08, 0x05, 0x04, 0x03, 0x02, 0x01};
+static constexpr uint8_t CMD_HEADER[4] = {0xFD, 0xFC, 0xFB, 0xFA};
+static constexpr uint8_t CMD_FOOTER[4] = {0x04, 0x03, 0x02, 0x01};
+static constexpr uint8_t DATA_HEADER[4] = {0xF4, 0xF3, 0xF2, 0xF1};
+static constexpr uint8_t DATA_FOOTER[4] = {0xF8, 0xF7, 0xF6, 0xF5};
 
 void LD2410Handler::setup() {
   ESP_LOGI(TAG_LD2410, "Initializing LD2410 handler");
@@ -147,48 +151,36 @@ void LD2410Handler::loop() {
     else
       buf_pos_ = 0;
 
-    if (buf_pos_ < 4)
-      continue;
+    while (buf_pos_ >= 4) {
+      const bool is_data = memcmp(buf_.get(), DATA_HEADER, sizeof(DATA_HEADER)) == 0;
+      const bool is_cmd = memcmp(buf_.get(), CMD_HEADER, sizeof(CMD_HEADER)) == 0;
+      if (is_data || is_cmd) {
+        if (buf_pos_ < 6)
+          break;
 
-    bool is_data = (buf_[0] == 0xF4 && buf_[1] == 0xF3 && buf_[2] == 0xF2 && buf_[3] == 0xF1);
-    bool is_cmd = (buf_[0] == 0xFD && buf_[1] == 0xFC && buf_[2] == 0xFB && buf_[3] == 0xFA);
+        const uint16_t data_len = to_uint16_(buf_[4], buf_[5]);
+        const size_t frame_len = 4u + 2u + data_len + 4u;
+        if (data_len >= (is_cmd ? 4u : 11u) && frame_len <= MAX_BUF) {
+          if (buf_pos_ < frame_len)
+            break;
 
-    if (!is_data && !is_cmd) {
+          const uint8_t *footer = is_cmd ? CMD_FOOTER : DATA_FOOTER;
+          if (memcmp(buf_.get() + frame_len - 4, footer, 4) == 0) {
+            if (is_cmd)
+              handle_ack_frame_(buf_.get(), frame_len);
+            else
+              parse_data_frame_(buf_.get(), frame_len);
+            buf_pos_ -= frame_len;
+            memmove(buf_.get(), buf_.get() + frame_len, buf_pos_);
+            continue;
+          }
+        }
+      }
+
+      // A bad length/footer may have swallowed the next header. Recheck buffered bytes,
+      // retaining a partial header at the end rather than discarding the entire buffer.
       memmove(buf_.get(), buf_.get() + 1, buf_pos_ - 1);
       buf_pos_--;
-      continue;
-    }
-
-    if (is_data && buf_pos_ >= 8) {
-      uint16_t data_len = to_uint16_(buf_[4], buf_[5]);
-      size_t frame_len = 4u + 2u + data_len + 4u;
-
-      if (buf_pos_ >= frame_len) {
-        if (buf_[frame_len - 4] == 0xF8 && buf_[frame_len - 3] == 0xF7 && buf_[frame_len - 2] == 0xF6 &&
-            buf_[frame_len - 1] == 0xF5) {
-          parse_data_frame_(buf_.get(), frame_len);
-        }
-        buf_pos_ = 0;
-        continue;
-      }
-    }
-
-    if (is_cmd && buf_pos_ >= 8) {
-      uint16_t data_len = to_uint16_(buf_[4], buf_[5]);
-      size_t frame_len = 4u + 2u + data_len + 4u;
-
-      if (buf_pos_ >= frame_len) {
-        if (buf_[frame_len - 4] == 0x04 && buf_[frame_len - 3] == 0x03 && buf_[frame_len - 2] == 0x02 &&
-            buf_[frame_len - 1] == 0x01) {
-          handle_ack_frame_(buf_.get(), frame_len);
-        }
-        buf_pos_ = 0;
-        continue;
-      }
-    }
-
-    if (buf_pos_ >= MAX_BUF - 1) {
-      buf_pos_ = 0;
     }
   }
 
@@ -485,18 +477,30 @@ void LD2410Handler::parse_data_frame_(const uint8_t *buf, size_t len) {
 }
 
 void LD2410Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
-  if (len < 10)
+  // ACK payloads contain a two-byte command and a two-byte status, followed by
+  // command-specific data. The declared length excludes the header/length/footer.
+  if (buf == nullptr || len < 14 || len > MAX_BUF || memcmp(buf, CMD_HEADER, sizeof(CMD_HEADER)) != 0 ||
+      to_uint16_(buf[4], buf[5]) != len - 10 || memcmp(buf + len - 4, CMD_FOOTER, sizeof(CMD_FOOTER)) != 0 ||
+      buf[7] != 0x01)
     return;
 
-  uint16_t cmd_word = to_uint16_(buf[6], buf[7]);
-  uint8_t status = buf[8];
+  const uint16_t cmd_word = to_uint16_(buf[6], buf[7]);
+  const uint16_t status = to_uint16_(buf[8], buf[9]);
 
   if (status != 0) {
     ESP_LOGW(TAG_LD2410, "Command 0x%04X failed (status=%u)", static_cast<unsigned int>(cmd_word),
              static_cast<unsigned int>(status));
+    on_ack_received_();
+    return;
   }
 
-  if (cmd_word == 0x01A0 && status == 0 && len >= 18) {
+  // Successful configuration entry also reports protocol version and buffer size.
+  if (cmd_word == 0x01FF && len < 18)
+    return;
+
+  if (cmd_word == 0x01A0) {
+    if (len < 22)
+      return;
     char ver[32];
     snprintf(ver, sizeof(ver), "V%u.%02X.%02X%02X%02X%02X", static_cast<unsigned int>(buf[13]),
              static_cast<unsigned int>(buf[12]), static_cast<unsigned int>(buf[17]), static_cast<unsigned int>(buf[16]),
@@ -506,63 +510,59 @@ void LD2410Handler::handle_ack_frame_(const uint8_t *buf, size_t len) {
     ESP_LOGI(TAG_LD2410, "Firmware version: %s", ver);
   }
 
-  if (cmd_word == 0x0161 && status == 0 && len >= 32) {
-    uint8_t max_move = buf[10];
-    uint8_t max_still = buf[11];
+  if (cmd_word == 0x0161) {
+    if (len < 38 || buf[10] != 0xAA || buf[11] >= NUM_GATES)
+      return;
 
-    config_.max_move_gate = (max_move > 8) ? 8 : max_move;
-    config_.max_still_gate = (max_still > 8) ? 8 : max_still;
-
-    for (size_t g = 0; g < NUM_GATES && (12 + g) < (len - 4); g++) {
-      uint8_t gate_val = (buf[12 + g] > 100) ? 100 : buf[12 + g];
-      config_.gate_move_threshold[g] = gate_val;
+    // Bytes 10/11 are the marker/supported gate, not configured gates.
+    LD2410BackendConfig candidate = config_;
+    candidate.max_move_gate = buf[12];
+    candidate.max_still_gate = buf[13];
+    for (size_t g = 0; g < NUM_GATES; g++) {
+      candidate.gate_move_threshold[g] = buf[14 + g];
+      candidate.gate_still_threshold[g] = buf[23 + g];
     }
-    for (size_t g = 0; g < NUM_GATES && (21 + g) < (len - 4); g++) {
-      uint8_t gate_val = (buf[21 + g] > 100) ? 100 : buf[21 + g];
-      config_.gate_still_threshold[g] = gate_val;
-    }
+    candidate.timeout_seconds = to_uint16_(buf[32], buf[33]);
+    if (!validate_backend_config_(candidate) || candidate.max_move_gate > buf[11] || candidate.max_still_gate > buf[11])
+      return;
 
-    if (len > 31) {
-      uint16_t timeout = to_uint16_(buf[30], buf[31]);
-      config_.timeout_seconds = timeout;
-    }
-
+    config_ = candidate;
     save_backend_config_();
 
-    ESP_LOGI(TAG_LD2410, "Parameters: max_move=%u max_still=%u", static_cast<unsigned int>(max_move),
-             static_cast<unsigned int>(max_still));
+    ESP_LOGI(TAG_LD2410, "Parameters: max_move=%u max_still=%u", static_cast<unsigned int>(candidate.max_move_gate),
+             static_cast<unsigned int>(candidate.max_still_gate));
   }
 
   if (cmd_word == 0x0162) {
-    if (status == 0) {
-      ESP_LOGI(TAG_LD2410, "Engineering mode enabled");
-    } else {
-      ESP_LOGW(TAG_LD2410, "Failed to enable engineering mode");
-    }
+    ESP_LOGI(TAG_LD2410, "Engineering mode enabled");
   }
 
   if (cmd_word == 0x0163) {
-    if (status == 0) {
-      ESP_LOGI(TAG_LD2410, "Engineering mode disabled");
-    }
+    ESP_LOGI(TAG_LD2410, "Engineering mode disabled");
   }
 
-  if (cmd_word == 0x01AB && status == 0 && len >= 12) {
-    uint16_t res = to_uint16_(buf[10], buf[11]);
+  if (cmd_word == 0x01AB) {
+    if (len < 16)
+      return;
+    const uint16_t res = to_uint16_(buf[10], buf[11]);
+    if (res > 1)
+      return;
     bool fine = (res == 0x0001);
     config_.distance_resolution = fine ? 1 : 0;
     save_backend_config_();
     ESP_LOGI(TAG_LD2410, "Distance resolution: %s", fine ? "0.2m" : "0.75m");
   }
 
-  if (cmd_word == 0x01A5 && status == 0 && len >= 16) {
+  if (cmd_word == 0x01A5) {
+    if (len < 20)
+      return;
     const bool has_bt_mac = memcmp(&buf[10], LD2410_NO_BT_MAC, sizeof(LD2410_NO_BT_MAC)) != 0;
     config_.bluetooth_enabled = has_bt_mac;
     save_backend_config_();
     ESP_LOGI(TAG_LD2410, "Bluetooth state from MAC query: %s", has_bt_mac ? "enabled" : "disabled");
   }
 
-  if (cmd_word == 0x01A4 && status == 0) {
+  if (cmd_word == 0x01A4) {
     bt_readback_pending_ = true;
     bt_readback_due_ms_ = millis() + BT_READBACK_DELAY_MS;
     ESP_LOGI(TAG_LD2410, "Bluetooth command acknowledged, scheduling readback");
