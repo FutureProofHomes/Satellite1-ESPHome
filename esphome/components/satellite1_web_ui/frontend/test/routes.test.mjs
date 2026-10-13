@@ -11,8 +11,18 @@ test("each tab parses from its own hash", () => {
   assert.deepEqual(parseRoute("#/home"), { tab: "NOW", sub: null });
   assert.deepEqual(parseRoute("#/wake-word"), { tab: "WAKE", sub: null });
   assert.deepEqual(parseRoute("#/presence"), { tab: "PRESENCE", sub: null });
-  assert.deepEqual(parseRoute("#/audio"), { tab: "AUDIO", sub: null });
+  assert.deepEqual(parseRoute("#/audio/routing"), { tab: "AUDIO", sub: "routing" });
   assert.deepEqual(parseRoute("#/settings/logs"), { tab: "SETTINGS", sub: "logs" });
+});
+
+test("audio has a routing page and a DSP page, routing first", () => {
+  assert.deepEqual(parseRoute("#/audio/dsp"), { tab: "AUDIO", sub: "dsp" });
+  // The Audio page's old address shows Routing, as it always did, under its new name.
+  assert.deepEqual(parseRoute("#/audio"), { tab: "AUDIO", sub: "routing" });
+  assert.deepEqual(parseRoute("#/audio/nope"), { tab: "AUDIO", sub: "routing" });
+  assert.equal(routeHash("AUDIO"), "#/audio/routing");
+  assert.equal(routeHash("AUDIO", "dsp"), "#/audio/dsp");
+  assert.equal(routeHash("AUDIO", "device-info"), "#/audio/routing");
 });
 
 test("the device page's URL name differs from the design's slug", () => {
@@ -27,7 +37,7 @@ test("the developer page has its own hash", () => {
 
 test("pre-redesign hashes land on their successors", () => {
   assert.deepEqual(parseRoute("#/controls"), { tab: "NOW", sub: null });
-  assert.deepEqual(parseRoute("#/config"), { tab: "AUDIO", sub: null });
+  assert.deepEqual(parseRoute("#/config"), { tab: "AUDIO", sub: "routing" });
   assert.deepEqual(parseRoute("#/diagnostics"), { tab: "SETTINGS", sub: "device-info" });
   // The amplifier card moved to Developer; a release build then sends this on to Device Info.
   assert.deepEqual(parseRoute("#/settings/amp"), { tab: "SETTINGS", sub: "developer" });
@@ -46,7 +56,7 @@ test("unknown, empty and decorated hashes fall back sensibly", () => {
 });
 
 test("every route survives a round trip", () => {
-  for (const h of ["#/home", "#/wake-word", "#/presence", "#/audio"]) {
+  for (const h of ["#/home", "#/wake-word", "#/presence", "#/audio/routing", "#/audio/dsp"]) {
     const { tab, sub } = parseRoute(h);
     assert.equal(routeHash(tab, sub), h);
   }
@@ -66,4 +76,8 @@ test("the page slides the way the nav reads", () => {
   assert.equal(routeDir(r("#/settings/updates"), r("#/settings/community")), "fwd");
   assert.equal(routeDir(r("#/settings"), r("#/settings/device")), null);
   assert.equal(routeDir(r("#/controls"), r("#/home")), null);
+  assert.equal(routeDir(r("#/audio/routing"), r("#/audio/dsp")), "fwd");
+  assert.equal(routeDir(r("#/audio/dsp"), r("#/presence")), "back");
+  assert.equal(routeDir(r("#/audio/dsp"), r("#/settings/device")), "fwd");
+  assert.equal(routeDir(r("#/audio"), r("#/audio/routing")), null);
 });

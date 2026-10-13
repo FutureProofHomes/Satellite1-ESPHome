@@ -40,7 +40,10 @@ export type Ctx = {
   /** Opens the Home Assistant actions walk-through. On the ctx so any tab's "Show fix" link can open
    *  it without threading a prop through every card in between. */
   onShowFix: () => void;
-  /** The open tab and, on Settings, the open page (a SETTINGS_ROUTES slug). */
+  /** Whether the running XMOS has the speaker EQ (src/lib/dsp.js): 1, 0, 2 (not known yet), or null
+   *  before the state has loaded. Audio shows its DSP page only on 1. */
+  dsp: number | null;
+  /** The open tab and, on Settings and Audio, the open page (a SETTINGS_ROUTES or AUDIO_ROUTES slug). */
   tab: Tab;
   sub: string | null;
   /** Navigates by hash, so the back button and bookmarks work. */

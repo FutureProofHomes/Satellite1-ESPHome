@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { TEXT } from '../copy.js';
 import { logout, peerLogin, primeOtherOrigin, probePeer, putPanelHandoff } from '../lib/auth.js';
-import { deviceIdentity, entity, haBlocked, onLogAlert, onWriteError, peerOrigin, proxied, useDeviceState, useEvents, useHaData, useSelection } from '../lib/device.js';
+import { deviceIdentity, entity, haBlocked, onLogAlert, onWriteError, peerOrigin, proxied, useDeviceState, useDspSupport, useEvents, useHaData, useSelection } from '../lib/device.js';
 import { hasDevTools } from '../lib/devtools.js';
+import { dspVisible, navSubs } from '../lib/dsp.js';
 import { micActive, subscribe as subscribeMic } from '../lib/micmon.js';
 import { tipDone } from '../lib/tips.js';
 import { watchKeyboard } from '../lib/keyboard.js';
@@ -12,7 +13,7 @@ import { dismissToast, subscribeToasts, tapToast, toast, toastIntent } from '../
 import type { Ctx, Orb, Tab } from '../ctx';
 import { AlertTriangle, AudioLines, ChevronLeft, ChevronRight, Clock, House, Info, LogOut, RadarIcon, Settings, Volume2, X, XCircle } from '../icons';
 import { parseRoute, routeDir, routeHash } from '../lib/routes.js';
-import { AudioTab } from './AudioTab';
+import { AUDIO_ROUTES, AudioTab } from './AudioTab';
 import { Icon, ORB_KEY, ThemeMenu, paintOrb, readOrb, reduceMotion } from './bits';
 import { DiagnosticsTab, SETTINGS_ROUTES } from './DiagnosticsTab';
 import { Drawer, Presence } from './Drawer';
@@ -331,13 +332,13 @@ export function Satellite1Now({
   }, []);
   const tab = route.tab as Tab;
   const sub: string | null = route.sub;
-  // Settings remembers its page across a trip to another tab, as the design's own state did.
-  const lastSub = useRef('device-info');
-  if (sub) lastSub.current = sub;
+  // Settings and Audio remember their page across a trip to another tab, as the design's own state
+  // did for Settings.
+  const lastSub = useRef<Partial<Record<Tab, string>>>({});
+  if (sub) lastSub.current[tab] = sub;
   const go = useCallback((t: Tab, s?: string) => {
     location.hash = routeHash(t, s);
   }, []);
-  const navLayer = tab === 'SETTINGS' ? 1 : 0;
   const [sheet, setSheet] = useState<Sheet>(null);
   // The gate is up from the first signed-in render - the first authenticated moment, whether the
   // session came from the sign-in screen a second ago or from a 90-day cookie - and gone for good
@@ -357,6 +358,15 @@ export function Satellite1Now({
   useEffect(() => subscribeMic(() => setMicOn(micActive())), []);
   const subLabel = (r: { slug: string; label: string }) => (r.slug === 'developer' && micOn ? <>{r.label}<span className="dev-dot" aria-hidden="true" /></> : r.label);
   const events = useEvents();
+  // Audio's DSP page exists only while the running XMOS has the speaker EQ. Without it Audio has
+  // Routing alone: no sub-items, no sub-layer, exactly the page it was before.
+  const dsp = useDspSupport(device, entity({ device, states: events.states }, 'xmos_firmware')?.value);
+  const subRoutes = navSubs(tab, dsp, settingsRoutes, AUDIO_ROUTES);
+  const navLayer = subRoutes.length > 0 ? 1 : 0;
+  const tabSub = (t: Tab) => (t === 'AUDIO' && !dspVisible(dsp) ? undefined : lastSub.current[t]);
+  // The mobile sub-layer keeps its pills while it slides away, rather than emptying mid-animation.
+  const subLayer = useRef({ tab, routes: subRoutes });
+  if (subRoutes.length > 0) subLayer.current = { tab, routes: subRoutes };
   const ha = useHaData();
   const selection = useSelection();
 
@@ -391,6 +401,7 @@ export function Satellite1Now({
     ...ha,
     ...selection,
     onShowFix: () => setFixOpen(true),
+    dsp,
     tab,
     sub,
     go
@@ -496,19 +507,25 @@ export function Satellite1Now({
             }} />}</div></div><div className="header-actions"><button className="icon-button" onClick={() => setSheet('notice')} aria-label={bellLabel} title={bellLabel}><Icon name="bell" size={20} />{notifN > 0 && <b>{notifN > 99 ? '99+' : notifN}</b>}</button><ThemeMenu className="theme-toggle" /></div></header>
     <div key={tab} className="tab-content-enter">{tab === 'NOW' && <HomeTab ctx={ctx} orb={orb} onOrbColor={onOrbColor} />}
     {tab !== 'NOW' && <ControlPanel key={tab} tab={tab} sub={sub} ctx={ctx} />}</div>
+    {/* A section's pages sit right under it - Audio's above Settings, not after it. With pages,
+        the page is the current one and its section only contains it. */}
     <nav className="side-nav" aria-label="Sections">{TABS.map(item => {
       const I = TAB_ICON[item];
-      return <button key={item} className={tab === item ? 'selected' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => go(item, item === 'SETTINGS' ? lastSub.current : undefined)}><I size={18} strokeWidth={1.9} aria-hidden="true" /><span>{TAB_LABEL[item]}</span></button>;
-    })}{tab === 'SETTINGS' && <div className="side-sub" role="list">{settingsRoutes.map(r => <button key={r.slug} role="listitem" className={'side-sub-item' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{subLabel(r)}</button>)}</div>}<div className="side-nav-foot"><button type="button" className="signout" onClick={signOut}><LogOut size={14} aria-hidden="true" /><span>{TEXT.logout}</span></button></div></nav>
+      const open = tab === item && subRoutes.length > 0;
+      return <Fragment key={item}>
+          <button className={tab === item ? 'selected' : ''} aria-current={tab === item ? open ? 'true' : 'page' : undefined} onClick={() => go(item, tabSub(item))}><I size={18} strokeWidth={1.9} aria-hidden="true" /><span>{TAB_LABEL[item]}</span></button>
+          {open && <div className="side-sub" role="group" aria-label={TAB_LABEL[item]}>{subRoutes.map(r => <button key={r.slug} className={'side-sub-item' + (sub === r.slug ? ' on' : '')} aria-current={sub === r.slug ? 'page' : undefined} onClick={() => go(tab, r.slug)}>{subLabel(r)}</button>)}</div>}
+        </Fragment>;
+    })}<div className="side-nav-foot"><button type="button" className="signout" onClick={signOut}><LogOut size={14} aria-hidden="true" /><span>{TEXT.logout}</span></button></div></nav>
     <nav className="tabs" data-tab={tab} aria-label="Sections"><div className="tabs-track" style={{
         transform: navLayer === 0 ? 'translateX(0%)' : 'translateX(-50%)'
       }}><div className="tabs-layer tabs-main">{TABS.map(item => {
           const I = TAB_ICON[item];
-          return <button key={item} className={tab === item ? 'selected' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => go(item, item === 'SETTINGS' ? lastSub.current : undefined)}><span className="tab-ico"><I size={20} strokeWidth={1.9} aria-hidden="true" /></span><span className="tab-lbl">{TAB_LABEL[item]}</span></button>;
+          return <button key={item} className={tab === item ? 'selected' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => go(item, tabSub(item))}><span className="tab-ico"><I size={20} strokeWidth={1.9} aria-hidden="true" /></span><span className="tab-lbl">{TAB_LABEL[item]}</span></button>;
         })}</div><div className="tabs-layer tabs-sub"><button className="tabs-back" aria-label="Back to main menu" onClick={() => {
-            lastSub.current = 'device-info';
+            delete lastSub.current[tab];
             go('NOW');
-          }}><ChevronLeft size={20} strokeWidth={2} aria-hidden="true" /></button><div className="tabs-sub-scroll">{settingsRoutes.map(r => <button key={r.slug} className={'tabs-sub-pill' + (sub === r.slug ? ' on' : '')} onClick={() => go('SETTINGS', r.slug)}>{subLabel(r)}</button>)}</div></div></div></nav><MediaBar ctx={ctx} peerFor={peerFor} />
+          }}><ChevronLeft size={20} strokeWidth={2} aria-hidden="true" /></button><div className="tabs-sub-scroll">{subLayer.current.routes.map(r => <button key={r.slug} className={'tabs-sub-pill' + (subLayer.current.tab === tab && sub === r.slug ? ' on' : '')} onClick={() => go(subLayer.current.tab, r.slug)}>{subLabel(r)}</button>)}</div></div></div></nav><MediaBar ctx={ctx} peerFor={peerFor} />
     <Presence>{sheet === 'device' && <Drawer label={TEXT.switcher_label} onClose={() => setSheet(null)}><DeviceSheet ctx={ctx} label={label} area={area} remote={remote} localMac={localMac} onRemote={onRemote} onLocal={onLocal} onSignOut={signOut} /></Drawer>}</Presence>
     <Presence>{sheet === 'notice' && <Drawer label={TEXT.notif_title} onClose={() => setSheet(null)}><Notice onAct={t => {
           setSheet(null);
@@ -830,6 +847,6 @@ function ControlPanel({
 }) {
   if (tab === 'WAKE') return <WakeTab ctx={ctx} />;
   if (tab === 'PRESENCE') return <PresenceTab ctx={ctx} onGoDevice={() => ctx.go('SETTINGS', 'device-info')} />;
-  if (tab === 'AUDIO') return <AudioTab ctx={ctx} />;
+  if (tab === 'AUDIO') return <AudioTab ctx={ctx} sub={sub} />;
   return <DiagnosticsTab ctx={ctx} subRoute={sub || 'device-info'} />;
 }
