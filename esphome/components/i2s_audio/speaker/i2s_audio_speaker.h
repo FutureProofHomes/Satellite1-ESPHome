@@ -14,6 +14,8 @@
 #include "esphome/components/speaker/speaker.h"
 #include "esphome/components/ring_buffer/ring_buffer.h"
 
+#include <atomic>
+
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/helpers.h"
@@ -81,6 +83,8 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   /// @brief Sends a stop command to the speaker task via event_group_.
   /// @param wait_on_empty If false, sends the COMMAND_STOP signal. If true, sends the COMMAND_STOP_GRACEFULLY signal.
   void stop_(bool wait_on_empty);
+  void process_volume_state_();
+  void update_software_volume_();
 
   /// @brief Sets the corresponding ERR_ESP event group bits.
   /// @param err esp_err_t error code.
@@ -132,7 +136,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
 
   bool pause_state_{false};
 
-  int16_t q15_volume_factor_{INT16_MAX};
+  std::atomic<int16_t> q15_volume_factor_{INT16_MAX};
 
   // Deferred volume/mute operations to avoid I2C conflicts with I2S task
   float pending_volume_{-1.0f};

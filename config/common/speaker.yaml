@@ -27,6 +27,14 @@ audio_dac:
     id: dac_proxy
     speaker_dac: speaker_dac
     line_out_dac: line_out_dac
+    volume_state:
+      id: audio_volume_state
+    on_state_change:
+      - lambda: |-
+          if (!id(audio_output_initialized)) {
+            id(audio_output_speaker_requested) = id(dac_proxy).requested_output() == satellite1::SPEAKER;
+            id(audio_output_initialized) = true;
+          }
 
 speaker:
   - platform: i2s_audio
@@ -102,29 +110,46 @@ script:
   - id: activate_audio_output
     mode: restart
     then:
+      # Suspend hardware output without changing the user's mute intent.
+      - lambda: id(dac_proxy).set_audio_ready(false);
       - wait_until:
-          lambda: return id(xmos_audio_ready);
+          lambda: return id(xmos_audio_ready) && id(audio_output_initialized);
       # A restored line-out selection is invalid when no jack is connected.
       - if:
           condition:
             lambda: |-
-              return !id(audio_output_speaker_requested) && !id(line_out_sensor).state &&
-                     id(dac_proxy).active_dac == 1;
+              return !id(audio_output_speaker_requested) && !id(line_out_sensor).state;
           then:
             - lambda: id(audio_output_speaker_requested) = true;
       - if:
           condition:
             lambda: return id(audio_output_speaker_requested);
           then:
+            - lambda: id(dac_proxy).request_output(satellite1::SPEAKER);
             - script.execute: tas2780_ensure_active
             - script.wait: tas2780_ensure_active
             - if:
                 condition:
-                  lambda: return id(tas2780_active);
+                  lambda: |-
+                    return id(xmos_audio_ready) && id(audio_output_speaker_requested) &&
+                           id(tas2780_active);
                 then:
                   - dac_proxy.activate_speaker:
+                  - lambda: |-
+                      if (id(xmos_audio_ready) && id(dac_proxy).requested_output() == satellite1::SPEAKER) {
+                        id(dac_proxy).set_audio_ready(true);
+                      }
           else:
-            - dac_proxy.activate_line_out:
+            - lambda: id(dac_proxy).request_output(satellite1::LINE_OUT);
+            - if:
+                condition:
+                  lambda: return id(xmos_audio_ready);
+                then:
+                  - dac_proxy.activate_line_out:
+                  - lambda: |-
+                      if (id(xmos_audio_ready) && id(dac_proxy).requested_output() == satellite1::LINE_OUT) {
+                        id(dac_proxy).set_audio_ready(true);
+                      }
 
   - id: refresh_audio_output
     mode: restart
@@ -135,14 +160,18 @@ script:
     mode: single
     then:
       - logger.log: "Activating internal speaker"
-      - lambda: id(audio_output_speaker_requested) = true;
+      - lambda: |-
+          id(audio_output_speaker_requested) = true;
+          id(dac_proxy).request_output(satellite1::SPEAKER);
       - script.execute: activate_audio_output
 
   - id: activate_line_out
     mode: single
     then:
       - logger.log: "Activating line-out audio"
-      - lambda: id(audio_output_speaker_requested) = false;
+      - lambda: |-
+          id(audio_output_speaker_requested) = false;
+          id(dac_proxy).request_output(satellite1::LINE_OUT);
       - script.execute: activate_audio_output
 
 api:

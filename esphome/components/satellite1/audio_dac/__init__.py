@@ -15,8 +15,11 @@ from ..satellite1 import (
 
 CODEOWNERS = ["@gnumpi"]
 DEPENDENCIES = ["satellite1"]
+AUTO_LOAD = ["speaker_source"]
 
 DACProxy = sat1_ns.class_("DACProxy", AudioDac, Satellite1SPIService, cg.Component)
+VolumeState = cg.esphome_ns.namespace("speaker_source").class_("VolumeState")
+DACOutputVolumeState = sat1_ns.class_("DACOutputVolumeState", VolumeState)
 
 ActivateAction = sat1_ns.class_(
     "ActivateAction", automation.Action, cg.Parented.template(DACProxy)
@@ -39,6 +42,7 @@ LineOutActivatedTrigger = sat1_ns.class_("LineOutActivatedTrigger", automation.T
 
 CONF_SPEAKER_DAC = "speaker_dac"
 CONF_LINE_OUT_DAC = "line_out_dac" 
+CONF_VOLUME_STATE = "volume_state"
 
 CONF_ON_STATE_CHANGE = "on_state_change"
 CONF_ON_SPEAKER_ACTIVATED = "on_speaker_activated"
@@ -51,6 +55,9 @@ CONFIG_SCHEMA = (
             cv.GenerateID(CONF_SATELLITE1): cv.use_id(Satellite1),
             cv.Optional(CONF_SPEAKER_DAC) : cv.use_id(AudioDac),
             cv.Optional(CONF_LINE_OUT_DAC) : cv.use_id(AudioDac),
+            cv.Optional(CONF_VOLUME_STATE): cv.Schema(
+                {cv.GenerateID(): cv.declare_id(DACOutputVolumeState)}
+            ),
 
             cv.Optional(CONF_ON_STATE_CHANGE): automation.validate_automation({
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(StateTrigger),
@@ -78,6 +85,10 @@ async def to_code(config):
         lineout_dac = await cg.get_variable(config[CONF_LINE_OUT_DAC])
         cg.add( var.set_lineout_dac(lineout_dac) )
     
+    if CONF_VOLUME_STATE in config:
+        volume_state = cg.new_Pvariable(config[CONF_VOLUME_STATE][CONF_ID])
+        cg.add(volume_state.set_parent(var))
+
     for conf in config.get(CONF_ON_STATE_CHANGE, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [], conf)

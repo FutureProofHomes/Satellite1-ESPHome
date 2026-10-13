@@ -2,7 +2,7 @@
 
 #include "esphome/core/defines.h"
 
-#ifdef USE_ESP32
+#if defined(USE_ESP32) && defined(USE_SPEAKER_SOURCE_MEDIA_PLAYER)
 
 #include "esphome/core/automation.h"
 #include "speaker_source_media_player.h"

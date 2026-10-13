@@ -20,6 +20,8 @@ from esphome.core import ID
 from esphome.cpp_generator import MockObj, TemplateArgsType
 from esphome.types import ConfigType
 
+from . import VolumeState, speaker_source_ns
+
 AUTO_LOAD = ["audio"]
 DEPENDENCIES = ["media_source", "speaker"]
 
@@ -32,8 +34,7 @@ CONF_PIPELINE = "pipeline"
 CONF_ON_UNMUTE = "on_unmute"
 CONF_ON_VOLUME = "on_volume"
 CONF_SOURCES = "sources"
-
-speaker_source_ns = cg.esphome_ns.namespace("speaker_source")
+CONF_VOLUME_STATE = "volume_state"
 
 SpeakerSourceMediaPlayer = speaker_source_ns.class_(
     "SpeakerSourceMediaPlayer", cg.Component, media_player.MediaPlayer
@@ -136,6 +137,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_VOLUME_INITIAL, default=0.5): cv.percentage,
             cv.Optional(CONF_VOLUME_MAX, default=1.0): cv.percentage,
             cv.Optional(CONF_VOLUME_MIN, default=0.0): cv.percentage,
+            cv.Optional(CONF_VOLUME_STATE): cv.use_id(VolumeState),
             cv.Optional(CONF_ANNOUNCEMENT_PIPELINE): PIPELINE_SCHEMA,
             cv.Optional(CONF_MEDIA_PIPELINE): PIPELINE_SCHEMA,
             cv.Optional(CONF_ON_MUTE): automation.validate_automation(single=True),
@@ -172,6 +174,7 @@ FINAL_VALIDATE_SCHEMA = cv.All(
 
 
 async def to_code(config: ConfigType) -> None:
+    cg.add_define("USE_SPEAKER_SOURCE_MEDIA_PLAYER")
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await media_player.register_media_player(var, config)
@@ -180,6 +183,8 @@ async def to_code(config: ConfigType) -> None:
     cg.add(var.set_volume_initial(config[CONF_VOLUME_INITIAL]))
     cg.add(var.set_volume_max(config[CONF_VOLUME_MAX]))
     cg.add(var.set_volume_min(config[CONF_VOLUME_MIN]))
+    if CONF_VOLUME_STATE in config:
+        cg.add(var.set_volume_state(await cg.get_variable(config[CONF_VOLUME_STATE])))
 
     for pipeline_key, (pipeline_enum, purpose) in _PIPELINE_INFO.items():
         if pipeline_config := config.get(pipeline_key):

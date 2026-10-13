@@ -1,6 +1,6 @@
 #include "speaker_source_media_player.h"
 
-#ifdef USE_ESP32
+#if defined(USE_ESP32) && defined(USE_SPEAKER_SOURCE_MEDIA_PLAYER)
 
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
@@ -59,19 +59,24 @@ void SpeakerSourceMediaPlayer::dump_config() {
 }
 
 void SpeakerSourceMediaPlayer::setup() {
+  if (this->setup_complete_) {
+    return;
+  }
+  this->setup_complete_ = true;
   this->state = media_player::MEDIA_PLAYER_STATE_IDLE;
 
   this->media_control_command_queue_ = xQueueCreate(MEDIA_CONTROLS_QUEUE_LENGTH, sizeof(MediaPlayerControlCommand));
 
-  this->pref_ = this->make_entity_preference<VolumeRestoreState>();
-
-  VolumeRestoreState volume_restore_state;
-  if (this->pref_.load(&volume_restore_state)) {
-    this->set_volume_(volume_restore_state.volume);
-    this->set_mute_state_(volume_restore_state.is_muted);
+  if (this->volume_state_ == &this->default_volume_state_) {
+    this->default_volume_state_.set_preference(this->make_entity_preference<VolumeRestoreState>());
+  }
+  this->volume_state_->add_on_state_callback(
+      [this](const VolumeMuteState &state) { this->handle_volume_state_(state); });
+  if (this->volume_state_->is_initialized()) {
+    const auto current = this->volume_state_->state();
+    this->handle_volume_state_(current);
   } else {
-    this->set_volume_(this->volume_initial_);
-    this->set_mute_state_(false);
+    this->volume_state_->initialize();
   }
 
   // Register callbacks to receive playback notifications from speakers
@@ -110,18 +115,10 @@ void SpeakerSourceMediaPlayer::handle_speaker_playback_callback_(uint32_t frames
 }
 
 // THREAD CONTEXT: Called from main loop via defer()
-void SpeakerSourceMediaPlayer::handle_volume_request_(float volume) {
-  // Update the media player's volume
-  this->set_volume_(volume);
-  this->publish_state();
-}
+void SpeakerSourceMediaPlayer::handle_volume_request_(float volume) { this->volume_state_->set_volume(volume); }
 
 // THREAD CONTEXT: Called from main loop via defer()
-void SpeakerSourceMediaPlayer::handle_mute_request_(bool is_muted) {
-  // Update the media player's mute state
-  this->set_mute_state_(is_muted);
-  this->publish_state();
-}
+void SpeakerSourceMediaPlayer::handle_mute_request_(bool is_muted) { this->volume_state_->set_muted(is_muted); }
 
 // THREAD CONTEXT: Called from main loop via defer()
 void SpeakerSourceMediaPlayer::handle_play_uri_request_(uint8_t pipeline, const std::string &uri) {
@@ -721,8 +718,7 @@ void SpeakerSourceMediaPlayer::control(const media_player::MediaPlayerCall &call
 
   auto volume = call.get_volume();
   if (volume.has_value()) {
-    this->set_volume_(volume.value());
-    this->publish_state();
+    this->volume_state_->set_volume(volume.value());
     return;
   }
 
@@ -730,16 +726,22 @@ void SpeakerSourceMediaPlayer::control(const media_player::MediaPlayerCall &call
   if (cmd.has_value()) {
     switch (cmd.value()) {
       case media_player::MEDIA_PLAYER_COMMAND_MUTE:
-        this->set_mute_state_(true);
+        this->volume_state_->set_muted(true);
         break;
       case media_player::MEDIA_PLAYER_COMMAND_UNMUTE:
-        this->set_mute_state_(false);
+        this->volume_state_->set_muted(false);
         break;
       case media_player::MEDIA_PLAYER_COMMAND_VOLUME_UP:
-        this->set_volume_(std::min(1.0f, this->volume + this->volume_increment_));
+        if (this->volume_state_->is_initialized()) {
+          this->volume_state_->set_volume(
+              std::min(1.0f, this->volume_state_->state().volume + this->volume_increment_));
+        }
         break;
       case media_player::MEDIA_PLAYER_COMMAND_VOLUME_DOWN:
-        this->set_volume_(std::max(0.0f, this->volume - this->volume_increment_));
+        if (this->volume_state_->is_initialized()) {
+          this->volume_state_->set_volume(
+              std::max(0.0f, this->volume_state_->state().volume - this->volume_increment_));
+        }
         break;
       default:
         // Queue command for processing in loop()
@@ -750,7 +752,6 @@ void SpeakerSourceMediaPlayer::control(const media_player::MediaPlayerCall &call
         }
         return;
     }
-    this->publish_state();
   }
 }
 
@@ -770,79 +771,106 @@ media_player::MediaPlayerTraits SpeakerSourceMediaPlayer::get_traits() {
   return traits;
 }
 
-void SpeakerSourceMediaPlayer::save_volume_restore_state_() {
-  VolumeRestoreState volume_restore_state;
-  volume_restore_state.volume = this->volume;
-  volume_restore_state.is_muted = this->is_muted_;
-  this->pref_.save(&volume_restore_state);
-}
+// THREAD CONTEXT: Provider publications run on the main loop, including deferred initialization.
+void SpeakerSourceMediaPlayer::handle_volume_state_(const VolumeMuteState &state) {
+  if (state != this->volume_state_->state()) {
+    return;
+  }
+  const float volume = state.volume;
+  const bool is_muted = state.muted;
+  const bool volume_changed = this->volume != volume;
+  const bool mute_changed = this->is_muted_ != is_muted;
+  const bool initial_sync = !this->volume_state_initialized_;
+  const bool source_sync = !this->source_volume_state_initialized_;
 
-void SpeakerSourceMediaPlayer::set_mute_state_(bool mute_state, bool publish) {
-  if (this->is_muted_ == mute_state) {
+  const bool custom_zero = this->volume_state_ != &this->default_volume_state_ && volume == 0.0f;
+  const float bounded_volume =
+      custom_zero ? 0.0f : remap<float, float>(volume, 0.0f, 1.0f, this->volume_min_, this->volume_max_);
+  const bool output_muted = is_muted || custom_zero;
+
+  // Commit the pair before any observer can see it. The controller owns mute independently of volume.
+  this->volume = volume;
+  this->is_muted_ = is_muted;
+  this->volume_state_initialized_ = true;
+  if (initial_sync || volume_changed || mute_changed) {
+    // An interrupted delivery must resynchronize sources, even if the next intent changes only one field.
+    this->source_volume_state_initialized_ = false;
+  }
+
+  for (auto &ps : this->pipelines_) {
+    if (state != this->volume_state_->state()) {
+      return;
+    }
+    if (ps.is_configured()) {
+      ps.speaker->set_volume(bounded_volume);
+      if (state != this->volume_state_->state()) {
+        return;
+      }
+      ps.speaker->set_mute_state(output_muted);
+    }
+  }
+
+  // Route refreshes still forward to speakers without duplicating logical notifications.
+  if (state != this->volume_state_->state() || (!initial_sync && !source_sync && !volume_changed && !mute_changed)) {
     return;
   }
 
   for (auto &ps : this->pipelines_) {
-    if (ps.is_configured()) {
-      ps.speaker->set_mute_state(mute_state);
-    }
-  }
-
-  this->is_muted_ = mute_state;
-
-  if (publish) {
-    this->save_volume_restore_state_();
-  }
-
-  // Notify all media sources about the mute state change
-  for (auto &ps : this->pipelines_) {
     for (auto &binding : ps.sources) {
-      binding->source->notify_mute_changed(mute_state);
+      if (state != this->volume_state_->state()) {
+        return;
+      }
+      if (source_sync || initial_sync || volume_changed) {
+        binding->source->notify_volume_changed(volume);
+      }
+      if (state != this->volume_state_->state()) {
+        return;
+      }
+      if (source_sync || initial_sync || mute_changed) {
+        binding->source->notify_mute_changed(is_muted);
+      }
     }
   }
 
-  if (mute_state) {
-    this->defer([this]() { this->mute_trigger_.trigger(); });
-  } else {
-    this->defer([this]() { this->unmute_trigger_.trigger(); });
+  if (state != this->volume_state_->state()) {
+    return;
   }
+  this->source_volume_state_initialized_ = true;
+  const bool publish = !this->completed_volume_state_initialized_ || this->completed_volume_state_ != state;
+  this->completed_volume_state_ = state;
+  this->completed_volume_state_initialized_ = true;
+  if (publish) {
+    this->publish_state();
+  }
+  this->queue_volume_notifications_();
 }
 
-void SpeakerSourceMediaPlayer::set_volume_(float volume, bool publish) {
-  // Remap the volume to fit within the configured limits
-  float bounded_volume = remap<float, float>(volume, 0.0f, 1.0f, this->volume_min_, this->volume_max_);
-
-  for (auto &ps : this->pipelines_) {
-    if (ps.is_configured()) {
-      ps.speaker->set_volume(bounded_volume);
+void SpeakerSourceMediaPlayer::queue_volume_notifications_() {
+  if (this->volume_notifications_queued_ || !this->completed_volume_state_initialized_ ||
+      !this->source_volume_state_initialized_ || this->completed_volume_state_ != this->volume_state_->state() ||
+      this->notified_volume_state_ == this->completed_volume_state_) {
+    return;
+  }
+  this->volume_notifications_queued_ = true;
+  this->defer([this]() {
+    if (this->source_volume_state_initialized_ && this->completed_volume_state_ == this->volume_state_->state() &&
+        this->notified_volume_state_.volume != this->completed_volume_state_.volume) {
+      this->notified_volume_state_.volume = this->completed_volume_state_.volume;
+      this->volume_trigger_.trigger(this->notified_volume_state_.volume);
     }
-  }
-
-  if (publish) {
-    this->volume = volume;
-  }
-
-  // Notify all media sources about the volume change
-  for (auto &ps : this->pipelines_) {
-    for (auto &binding : ps.sources) {
-      binding->source->notify_volume_changed(volume);
+    // Volume automations can change the provider; never emit the old opposite mute event.
+    if (this->source_volume_state_initialized_ && this->completed_volume_state_ == this->volume_state_->state() &&
+        this->notified_volume_state_.muted != this->completed_volume_state_.muted) {
+      this->notified_volume_state_.muted = this->completed_volume_state_.muted;
+      if (this->notified_volume_state_.muted) {
+        this->mute_trigger_.trigger();
+      } else {
+        this->unmute_trigger_.trigger();
+      }
     }
-  }
-
-  // Turn on the mute state if the volume is effectively zero, off otherwise.
-  // Pass publish=false to avoid saving twice.
-  if (volume < 0.001f) {
-    this->set_mute_state_(true, false);
-  } else {
-    this->set_mute_state_(false, false);
-  }
-
-  // Save after mute mutation so the restored state has the correct is_muted_ value
-  if (publish) {
-    this->save_volume_restore_state_();
-  }
-
-  this->defer([this, volume]() { this->volume_trigger_.trigger(volume); });
+    this->volume_notifications_queued_ = false;
+    this->queue_volume_notifications_();
+  });
 }
 
 size_t SpeakerSourceMediaPlayer::get_playlist_position_(uint8_t pipeline) const {

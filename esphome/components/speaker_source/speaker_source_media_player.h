@@ -2,12 +2,13 @@
 
 #include "esphome/core/defines.h"
 
-#ifdef USE_ESP32
+#if defined(USE_ESP32) && defined(USE_SPEAKER_SOURCE_MEDIA_PLAYER)
 
 #include "esphome/components/audio/audio.h"
 #include "esphome/components/media_source/media_source.h"
 #include "esphome/components/media_player/media_player.h"
 #include "esphome/components/speaker/speaker.h"
+#include "persistent_volume_state.h"
 
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
@@ -28,8 +29,8 @@ namespace esphome::speaker_source {
 //
 // - Main loop task: setup(), loop(), dump_config(), handle_media_state_changed_(),
 //   handle_volume_request_(), handle_mute_request_(), handle_play_uri_request_(),
-//   set_volume_(), set_mute_state_(), control(), get_source_state_(),
-//   find_source_for_uri_(), try_execute_play_uri_(), save_volume_restore_state_(),
+//   handle_volume_state_(), control(), get_source_state_(),
+//   find_source_for_uri_(), try_execute_play_uri_(),
 //   process_control_queue_(), handle_player_command_(), queue_command_(), queue_play_current_()
 //
 // - Media source task(s): handle_media_output_() via SourceBinding::write_audio().
@@ -141,11 +142,6 @@ struct MediaPlayerControlCommand {
   } data;
 };
 
-struct VolumeRestoreState {
-  float volume;
-  bool is_muted;
-};
-
 class SpeakerSourceMediaPlayer final : public Component, public media_player::MediaPlayer {
   friend struct SourceBinding;
 
@@ -163,10 +159,12 @@ class SpeakerSourceMediaPlayer final : public Component, public media_player::Me
   void set_volume_increment(float volume_increment) { this->volume_increment_ = volume_increment; }
 
   // Volume used initially on first boot when no volume had been previously saved
-  void set_volume_initial(float volume_initial) { this->volume_initial_ = volume_initial; }
+  void set_volume_initial(float volume_initial) { this->default_volume_state_.set_initial_volume(volume_initial); }
 
   void set_volume_max(float volume_max) { this->volume_max_ = volume_max; }
   void set_volume_min(float volume_min) { this->volume_min_ = volume_min; }
+
+  void set_volume_state(VolumeState *volume_state) { this->volume_state_ = volume_state; }
 
   /// @brief Adds a media source to a pipeline and registers this player as its listener
   void add_media_source(uint8_t pipeline, media_source::MediaSource *media_source);
@@ -198,16 +196,8 @@ class SpeakerSourceMediaPlayer final : public Component, public media_player::Me
   // Sends commands to the media_control_command_queue_
   void control(const media_player::MediaPlayerCall &call) override;
 
-  /// @brief Updates this->volume and saves volume/mute state to flash for restoration if publish is true.
-  void set_volume_(float volume, bool publish = true);
-
-  /// @brief Sets the mute state.
-  /// @param mute_state If true, audio will be muted. If false, audio will be unmuted
-  /// @param publish If true, saves volume/mute state to flash for restoration
-  void set_mute_state_(bool mute_state, bool publish = true);
-
-  /// @brief Saves the current volume and mute state to the flash for restoration.
-  void save_volume_restore_state_();
+  void handle_volume_state_(const VolumeMuteState &state);
+  void queue_volume_notifications_();
 
   /// @brief Determine media player state from a pipeline's active source
   /// @param media_source Active source (may be nullptr)
@@ -239,8 +229,8 @@ class SpeakerSourceMediaPlayer final : public Component, public media_player::Me
   // See THREADING MODEL at top of namespace for access rules.
   std::array<PipelineContext, 2> pipelines_;
 
-  // Used to save volume/mute state for restoration on reboot
-  ESPPreferenceObject pref_;
+  PersistentVolumeState default_volume_state_;
+  VolumeState *volume_state_{&this->default_volume_state_};
 
   Trigger<> mute_trigger_;
   Trigger<> unmute_trigger_;
@@ -249,13 +239,17 @@ class SpeakerSourceMediaPlayer final : public Component, public media_player::Me
   // The amount to change the volume on volume up/down commands
   float volume_increment_;
 
-  // The initial volume used by Setup when no previous volume was saved
-  float volume_initial_;
-
   float volume_max_;
   float volume_min_;
 
   bool is_muted_{false};
+  bool volume_state_initialized_{false};
+  bool source_volume_state_initialized_{false};
+  VolumeMuteState completed_volume_state_{1.0f, false};
+  VolumeMuteState notified_volume_state_{1.0f, false};
+  bool completed_volume_state_initialized_{false};
+  bool volume_notifications_queued_{false};
+  bool setup_complete_{false};
 };
 
 }  // namespace esphome::speaker_source

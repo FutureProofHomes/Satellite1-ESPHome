@@ -46,6 +46,10 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: audio_output_initialized
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
 esphome:
   name: ${node_name}
@@ -65,7 +69,6 @@ esphome:
         - script.execute: control_leds
         - delay: 1s
 
-        - lambda: id(audio_output_speaker_requested) = id(dac_proxy).active_dac == 0;
         - script.execute: refresh_audio_output
 
         # If after 10 minutes, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
@@ -140,7 +143,9 @@ satellite1:
 
   on_xmos_no_response:
     then:
-      - lambda: id(xmos_audio_ready) = false;
+      - lambda: |-
+          id(xmos_audio_ready) = false;
+          id(dac_proxy).set_audio_ready(false);
       - text_sensor.template.publish:
           id: xmos_firmware_version_text
           state: !lambda 'return id(satellite1_id).status_string();'
@@ -156,7 +161,9 @@ satellite1:
 
   on_xmos_connected:
     then:
-      - lambda: id(xmos_audio_ready) = false;
+      - lambda: |-
+          id(xmos_audio_ready) = false;
+          id(dac_proxy).set_audio_ready(false);
       - text_sensor.template.publish:
           id: xmos_firmware_version_text
           state: !lambda 'return id(satellite1_id).status_string();'
@@ -193,7 +200,9 @@ memory_flasher:
 
     on_flashing_start:
       then:
-        - lambda: id(xmos_audio_ready) = false;
+        - lambda: |-
+            id(xmos_audio_ready) = false;
+            id(dac_proxy).set_audio_ready(false);
         - text_sensor.template.publish:
             id: xmos_firmware_version_text
             state: "Flashing... (0%)"
