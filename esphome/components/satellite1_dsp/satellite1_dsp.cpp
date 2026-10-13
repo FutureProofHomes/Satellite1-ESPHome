@@ -34,16 +34,16 @@ static uint8_t profile_id(uint8_t output) { return output == 1 ? eq::PROFILE_LIN
 
 // ---- Presets ----
 
-static void make_fph(Profile &p) {
-  // The 2026-10-10 tuning, exported from Music Assistant. Its net response peaks at +14.8 dB at
-  // 5.7 kHz, so it leans on the limiter.
+static void make_sat1_speaker(Profile &p) {
+  // The 2026-10-10 tuning, exported from Music Assistant, played 2 dB below the export's +10 dB
+  // preamp. Its net response peaks at +12.8 dB at 5.7 kHz, so it still leans on the limiter.
   static const Filter FILTERS[] = {
       {eq::FILTER_PEAK, 1, 138.0f, -3.0f, 1.93f},       {eq::FILTER_PEAK, 1, 1600.0f, -4.5f, 4.0f},
       {eq::FILTER_PEAK, 1, 3455.0f, -8.0f, 2.66f},      {eq::FILTER_PEAK, 1, 5700.0f, 7.0f, 3.42f},
       {eq::FILTER_PEAK, 1, 13700.0f, -10.0f, 1.0f},     {eq::FILTER_HIGHPASS_Q, 1, 60.0f, 0.0f, 1.0f},
   };
   p = Profile{};
-  p.preamp = 10.0f;
+  p.preamp = 8.0f;
   p.count = sizeof(FILTERS) / sizeof(FILTERS[0]);
   memcpy(p.filters, FILTERS, sizeof(FILTERS));
 }
@@ -56,7 +56,7 @@ struct Builtin {
 };
 
 static const Builtin BUILTINS[] = {
-    {"FPH Large Desk Smart Speaker", make_fph},
+    {"Sat1.2 Smart Speaker (10/26)", make_sat1_speaker},
     {"Flat", make_flat},
 };
 static constexpr uint8_t NUM_BUILTINS = sizeof(BUILTINS) / sizeof(BUILTINS[0]);

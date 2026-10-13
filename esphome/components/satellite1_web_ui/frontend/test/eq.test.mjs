@@ -14,9 +14,10 @@ import {
 
 const close = (a, b, eps, what) => assert.ok(Math.abs(a - b) <= eps, `${what}: ${a} vs ${b}`);
 
-/** "FPH Large Desk Smart Speaker", as satellite1_dsp.cpp's make_fph() builds it. */
-const FPH = {
-  pre: 10, bass: 0, tre: 0, lim: -1, atk: 1, rel: 100, preset: "FPH Large Desk Smart Speaker",
+/** "Sat1.2 Smart Speaker (10/26)", as satellite1_dsp.cpp's make_sat1_speaker() builds it: the Music
+ *  Assistant tuning below, 2 dB quieter. */
+const SPEAKER = {
+  pre: 8, bass: 0, tre: 0, lim: -1, atk: 1, rel: 100, preset: "Sat1.2 Smart Speaker (10/26)",
   f: [
     { t: T.PEAK, on: true, hz: 138, db: -3, q: 1.93 },
     { t: T.PEAK, on: true, hz: 1600, db: -4.5, q: 4 },
@@ -28,7 +29,7 @@ const FPH = {
 };
 const FLAT = { pre: 0, bass: 0, tre: 0, lim: -1, atk: 1, rel: 100, preset: "Flat", f: [] };
 
-/** music_assistant_eq_settings_2026-10-10.txt, the tuning FPH was made from, byte for byte. */
+/** music_assistant_eq_settings_2026-10-10.txt, the tuning the speaker preset was made from, byte for byte. */
 const MA_EXPORT = `Preamp: 10.00 dB
 Filter 1: ON PK Fc 138.0 Hz Gain -3.00 dB Q 1.930
 Filter 2: ON PK Fc 1600.0 Hz Gain -4.50 dB Q 4.000
@@ -62,21 +63,21 @@ test("section budget follows the XMOS: off and 0 dB cost nothing, 24 dB/oct cuts
   assert.equal(sectionsOf({ t: T.LOW_SHELF, on: true, hz: 100, db: 0, q: 0.7 }), 0);
   assert.equal(sectionsOf({ t: T.HP_BW12, on: true, hz: 60, db: 0, q: 0.7 }), 1, "a cut has no gain to be flat");
   for (const t of [T.HP_BW24, T.HP_LR24, T.LP_BW24, T.LP_LR24]) assert.equal(sectionsOf({ t, on: true, hz: 100, db: 0, q: 0.7 }), 2);
-  assert.equal(profileSections(FPH), 6, "Bass and Treble at 0 dB cost nothing");
-  assert.equal(profileSections({ ...FPH, bass: 3, tre: -2 }), 8);
+  assert.equal(profileSections(SPEAKER), 6, "Bass and Treble at 0 dB cost nothing");
+  assert.equal(profileSections({ ...SPEAKER, bass: 3, tre: -2 }), 8);
 });
 
-test("the FPH net curve peaks at +14.8 dB near 5.7 kHz, so the limiter is in play", () => {
-  const a = analyse(FPH);
-  close(a.maxGain, 14.8, 0.1, "net maximum");
+test("the speaker preset's net curve peaks at +12.8 dB near 5.7 kHz, so the limiter is in play", () => {
+  const a = analyse(SPEAKER);
+  close(a.maxGain, 12.8, 0.1, "net maximum");
   assert.equal(a.limiter, true);
   assert.equal(a.overCap, false);
   assert.equal(a.sections, 6);
   const freqs = [5700, 600, 60, 20];
-  const curve = profileCurve(FPH, freqs);
-  close(curve[0], 14.8, 0.15, "at 5.7 kHz");
-  close(curve[1], 10, 0.15, "about the preamp alone at 600 Hz, between the cuts");
-  close(curve[2], 10, 0.3, "a Q 1 high-pass is 0 dB at its own frequency (less the 138 Hz cut's skirt)");
+  const curve = profileCurve(SPEAKER, freqs);
+  close(curve[0], 12.8, 0.15, "at 5.7 kHz");
+  close(curve[1], 8, 0.15, "about the preamp alone at 600 Hz, between the cuts");
+  close(curve[2], 8, 0.3, "a Q 1 high-pass is 0 dB at its own frequency (less the 138 Hz cut's skirt)");
   assert.ok(curve[3] < 0, "20 Hz is cut");
 });
 
@@ -102,9 +103,9 @@ test("the +18 dB cap: a positive preamp counts after the filters, cuts run befor
 });
 
 test("Auto preamp puts the loudest frequency on the limiter's ceiling", () => {
-  const pre = autoPreamp(FPH);
-  close(pre, -5.9, 1e-9, "10 - 14.84 - 1, rounded down");
-  const a = analyse({ ...FPH, pre });
+  const pre = autoPreamp(SPEAKER);
+  close(pre, -5.9, 1e-9, "8 - 12.84 - 1, rounded down");
+  const a = analyse({ ...SPEAKER, pre });
   assert.ok(a.maxGain <= -1 && a.maxGain > -1.1, `net ${a.maxGain}`);
   assert.equal(a.limiter, false);
   assert.equal(autoPreamp({ ...FLAT, f: [{ t: T.PEAK, on: true, hz: 100, db: -30, q: 1 }], pre: 0, lim: -12 }), -12);
@@ -140,19 +141,19 @@ test("the graph's handle sits on the filter's own curve", () => {
   close(curve[1], 0, 0.01, "far below");
 });
 
-test("Music Assistant's export imports as exactly the FPH preset", () => {
+test("Music Assistant's export imports as exactly the speaker preset's filters, 2 dB louder", () => {
   const r = importText(MA_EXPORT);
   assert.deepEqual(r.notes, []);
   assert.equal(r.pre, 10);
   assert.equal(r.bass, 0);
   assert.equal(r.tre, 0);
-  assert.ok(sameSound({ ...FPH, ...r }, FPH), JSON.stringify(r.f));
+  assert.ok(sameSound({ ...SPEAKER, ...r, pre: SPEAKER.pre }, SPEAKER), JSON.stringify(r.f));
 });
 
 test("export writes Music Assistant's own line format, and reads back the same sound", () => {
-  const text = exportText(FPH);
+  const text = exportText({ ...SPEAKER, pre: 10 });
   assert.equal(text, MA_EXPORT);
-  const toned = { ...FPH, bass: 3, tre: -2.5, f: [...FPH.f, { t: T.LP_LR24, on: false, hz: 16000, db: 0, q: 0.707 }, { t: T.HP_BW24, on: true, hz: 40, db: 0, q: 0.707 }] };
+  const toned = { ...SPEAKER, bass: 3, tre: -2.5, f: [...SPEAKER.f, { t: T.LP_LR24, on: false, hz: 16000, db: 0, q: 0.707 }, { t: T.HP_BW24, on: true, hz: 40, db: 0, q: 0.707 }] };
   const back = importText(exportText(toned));
   assert.deepEqual(back.notes, []);
   assert.equal(back.bass, 3);
@@ -241,7 +242,7 @@ test("an import that overflows keeps what fits", () => {
 });
 
 test("the device's JSON in, its form body out, always inside its ranges", () => {
-  const p = fromWire({ pre: 10, bass: 0, tre: 0, lim: -1, atk: 1, rel: 100, preset: "FPH Large Desk Smart Speaker", f: [[1, 1, 138, -3, 1.93], [4, 1, 60, 0, 1], [99, 1, 1, 1, 1], "junk"] });
+  const p = fromWire({ pre: 8, bass: 0, tre: 0, lim: -1, atk: 1, rel: 100, preset: "Sat1.2 Smart Speaker (10/26)", f: [[1, 1, 138, -3, 1.93], [4, 1, 60, 0, 1], [99, 1, 1, 1, 1], "junk"] });
   assert.equal(p.f.length, 2, "unknown types and malformed rows are dropped");
   assert.deepEqual(p.f[1], { t: T.HP_Q, on: true, hz: 60, db: 0, q: 1 });
   assert.equal(filtersParam(p.f), "1,1,138,-3,1.93;4,1,60,0,1");
@@ -251,12 +252,12 @@ test("the device's JSON in, its form body out, always inside its ranges", () => 
   assert.equal(wild.lim, 0);
   assert.deepEqual(wild.f[0], { t: T.PEAK, on: true, hz: 20, db: -30, q: 0.1 });
   assert.deepEqual(wild.f[1], { t: T.HP_BW12, on: true, hz: 20000, db: 0, q: 0.707 }, "a fixed-shape cut has no gain or Q");
-  assert.deepEqual(profileBody(FPH), { pre: "10", bass: "0", tre: "0", lim: "-1", atk: "1", rel: "100", f: "1,1,138,-3,1.93;1,1,1600,-4.5,4;1,1,3455,-8,2.66;1,1,5700,7,3.42;1,1,13700,-10,1;4,1,60,0,1" });
+  assert.deepEqual(profileBody(SPEAKER), { pre: "8", bass: "0", tre: "0", lim: "-1", atk: "1", rel: "100", f: "1,1,138,-3,1.93;1,1,1600,-4.5,4;1,1,3455,-8,2.66;1,1,5700,7,3.42;1,1,13700,-10,1;4,1,60,0,1" });
 });
 
 test("sameSound ignores the preset's name and what a filter type does not use", () => {
-  assert.ok(sameSound(FPH, { ...FPH, preset: "" }));
-  assert.ok(!sameSound(FPH, { ...FPH, pre: 9.5 }));
+  assert.ok(sameSound(SPEAKER, { ...SPEAKER, preset: "" }));
+  assert.ok(!sameSound(SPEAKER, { ...SPEAKER, pre: 9.5 }));
   const cut = { ...FLAT, f: [{ t: T.HP_BW12, on: true, hz: 60, db: 0, q: 0.707 }] };
   assert.ok(sameSound(cut, { ...cut, f: [{ ...cut.f[0], db: 3, q: 2 }] }));
   assert.ok(!sameSound(cut, { ...cut, f: [{ ...cut.f[0], on: false }] }));

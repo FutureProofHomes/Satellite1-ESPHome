@@ -791,8 +791,9 @@ can exceed its ceiling. Resource 231's commands are in Satellite1-XMOS
 
 **What the ESP32 keeps** (`satellite1_dsp`). Everything is stored in flash and uploaded: two profiles,
 **Built-in Speaker** and **Line-out**, one per output, with the XMOS told which to play as the jack
-switches; the on/off switch; and up to eight user presets beside the built-ins ("FPH Large Desk Smart
-Speaker", the speaker's default, and "Flat", the line-out's). A profile is a preamp, Bass and Treble
+switches; the on/off switch; and up to eight user presets beside the built-ins ("Sat1.2 Smart Speaker
+(10/26)", the speaker's default, and "Flat", the line-out's). The speaker's default is the October
+2026 Music Assistant tuning at a +8 dB preamp, 2 dB below the export's own. A profile is a preamp, Bass and Treble
 (fixed shelves at 120 Hz and 8 kHz, Q 0.707, ±9 dB, counted against the 16 sections), up to twelve
 filters, and the limiter's ceiling, attack and release (−1 dBFS, 1 ms, 100 ms by default). Both
 profiles go to the XMOS on every connect, and a profile again after each edit to it, at most ten
