@@ -22,6 +22,17 @@ template<typename... Ts> class ActivateSpeakerAction : public Action<Ts...>, pub
   void play(const Ts &...x) override { this->parent_->activate_speaker(); }
 };
 
+template<typename... Ts> class SetVolumeLimitsAction : public Action<Ts...>, public Parented<DACProxy> {
+ public:
+  TEMPLATABLE_VALUE(DacOutput, output)
+  TEMPLATABLE_VALUE(float, min_db)
+  TEMPLATABLE_VALUE(float, max_db)
+
+  void play(const Ts &...x) override {
+    this->parent_->set_volume_limits(this->output_.value(x...), this->min_db_.value(x...), this->max_db_.value(x...));
+  }
+};
+
 class StateTrigger : public Trigger<> {
  public:
   explicit StateTrigger(DACProxy *proxy) {
@@ -32,8 +43,8 @@ class StateTrigger : public Trigger<> {
 template<DacOutput output_dac> class DACProxyStateTrigger : public Trigger<> {
  public:
   explicit DACProxyStateTrigger(DACProxy *proxy) {
-    proxy->add_on_state_callback([this, proxy]() {
-      if (proxy->active_dac == output_dac)
+    proxy->add_on_selection_callback([this, proxy]() {
+      if (proxy->selected_output() == output_dac)
         this->trigger();
     });
   }

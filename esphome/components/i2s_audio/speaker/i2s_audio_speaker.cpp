@@ -11,6 +11,8 @@
 
 #include "esp_timer.h"
 
+#include <cmath>
+
 namespace esphome {
 namespace i2s_audio {
 
@@ -97,23 +99,7 @@ void I2SAudioSpeaker::loop() {
     return;
   }
 
-  // Process deferred volume/mute changes in main loop to avoid I2C conflicts with I2S task
-#ifdef USE_AUDIO_DAC
-  if (this->audio_dac_ != nullptr) {
-    if (this->has_pending_mute_) {
-      this->has_pending_mute_ = false;
-      if (this->pending_mute_state_) {
-        this->audio_dac_->set_mute_on();
-      } else {
-        this->audio_dac_->set_mute_off();
-      }
-    }
-    if (this->has_pending_volume_) {
-      this->has_pending_volume_ = false;
-      this->audio_dac_->set_volume(this->pending_volume_);
-    }
-  }
-#endif
+  this->process_volume_state_();
 
   // Atomically capture all bits, acknowledging non-terminal reports only. Leave STOPPING/STOPPED latched until
   // their public state is published so start() cannot mistake a winding-down worker for a healthy one.
@@ -198,39 +184,68 @@ void I2SAudioSpeaker::loop() {
   }
 }
 
+void I2SAudioSpeaker::process_volume_state_() {
+#ifdef USE_AUDIO_DAC
+  const bool change_volume = this->has_pending_volume_;
+  const bool change_mute = this->has_pending_mute_;
+  const float volume = this->pending_volume_;
+  const bool muted = this->pending_mute_state_;
+  // Clear before backend calls so reentrant setters can queue the latest controls.
+  this->has_pending_volume_ = false;
+  this->has_pending_mute_ = false;
+  if (this->audio_dac_ == nullptr || (!change_volume && !change_mute))
+    return;
+  bool success = true;
+  if (change_mute && muted)
+    success = this->audio_dac_->set_mute_on();
+  if (change_volume)
+    success = this->audio_dac_->set_volume(volume) && success;
+  if (change_mute && !muted) {
+    if (this->has_pending_volume_ || this->has_pending_mute_) {
+      // A newer gain must reach the DAC before releasing a queued unmute.
+      if (!this->has_pending_mute_) {
+        this->pending_mute_state_ = this->mute_state_;
+        this->has_pending_mute_ = true;
+      }
+    } else {
+      success = this->audio_dac_->set_mute_off() && success;
+    }
+  }
+  if (!success)
+    ESP_LOGW(TAG, "DAC control write failed");
+#endif
+}
+
+void I2SAudioSpeaker::update_software_volume_() {
+  const ssize_t index = remap<ssize_t, float>(this->volume_, 0.0f, 1.0f, 0, Q15_VOLUME_SCALING_FACTORS.size() - 1);
+  this->q15_volume_factor_.store(this->mute_state_ ? 0 : Q15_VOLUME_SCALING_FACTORS[index], std::memory_order_relaxed);
+}
+
 void I2SAudioSpeaker::set_volume(float volume) {
+  if (!std::isfinite(volume) || volume < 0.0f || volume > 1.0f)
+    return;
   this->volume_ = volume;
 #ifdef USE_AUDIO_DAC
   if (this->audio_dac_ != nullptr) {
-    // Defer I2C operations to loop() to avoid conflicts with I2S speaker task
     this->pending_volume_ = volume;
     this->has_pending_volume_ = true;
   } else
 #endif
   {
-    // Fallback to software volume control by using a Q15 fixed point scaling factor
-    ssize_t decibel_index = remap<ssize_t, float>(volume, 0.0f, 1.0f, 0, Q15_VOLUME_SCALING_FACTORS.size() - 1);
-    this->q15_volume_factor_ = Q15_VOLUME_SCALING_FACTORS[decibel_index];
+    this->update_software_volume_();
   }
 }
 
 void I2SAudioSpeaker::set_mute_state(bool mute_state) {
   this->mute_state_ = mute_state;
 #ifdef USE_AUDIO_DAC
-  if (this->audio_dac_) {
-    // Defer I2C operations to loop() to avoid conflicts with I2S speaker task
+  if (this->audio_dac_ != nullptr) {
     this->pending_mute_state_ = mute_state;
     this->has_pending_mute_ = true;
   } else
 #endif
   {
-    if (mute_state) {
-      // Fallback to software volume control and scale by 0
-      this->q15_volume_factor_ = 0;
-    } else {
-      // Revert to previous volume when unmuting
-      this->set_volume(this->volume_);
-    }
+    this->update_software_volume_();
   }
 }
 
@@ -393,13 +408,14 @@ void I2SAudioSpeaker::speaker_task(void *params) {
       }
 
       // Apply software volume control if needed (from upstream - works with all bit depths)
-      if (bytes_read > 0 && (this_speaker->q15_volume_factor_ < INT16_MAX)) {
+      const int16_t software_gain = this_speaker->q15_volume_factor_.load(std::memory_order_relaxed);
+      if (bytes_read > 0 && software_gain < INT16_MAX) {
         const size_t bytes_per_sample = audio_stream_info.samples_to_bytes(1);
         const uint32_t len = bytes_read / bytes_per_sample;
 
         // Use Q16 for samples with 1 or 2 bytes: shifted_sample * gain_factor is Q16 * Q15 -> Q31
-        int32_t shift = 15;                                      // Q31 -> Q16
-        int32_t gain_factor = this_speaker->q15_volume_factor_;  // Q15
+        int32_t shift = 15;                   // Q31 -> Q16
+        int32_t gain_factor = software_gain;  // Q15
 
         if (bytes_per_sample >= 3) {
           // Use Q23 for samples with 3 or 4 bytes: shifted_sample * gain_factor is Q23 * Q8 -> Q31
