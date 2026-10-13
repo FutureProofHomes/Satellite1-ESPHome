@@ -755,10 +755,6 @@ function DspEditor({
   const limiting = playingHere && status.limPct > 0;
   const outName = DSP.outputs[o];
   const fileName = `satellite1-eq-${(draft.preset || outName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}.txt`;
-  const cells = Array.from({
-    length: MAX_SECTIONS
-  }, (_, i) => i < a.sections);
-  const toneSections = (Math.abs(draft.bass) >= 0.01 ? 1 : 0) + (Math.abs(draft.tre) >= 0.01 ? 1 : 0);
 
   const bannerText = flashing ? DSP.updating : !status.online ? DSP.offline : status.byp === 4 ? DSP.overload : null;
   const banner = bannerText && <div className="dsp-banner" role="status">{bannerText}</div>;
@@ -884,14 +880,6 @@ function DspEditor({
           ...draft,
           pre: autoPreamp(draft)
         })}>{DSP.auto}</button>}
-        </div>
-        <div className="dsp-stages">
-          <div className="dsp-cells" aria-hidden="true">
-            {cells.map((on, i) => <i key={i} className={on ? i < toneSections ? 'tone' : 'on' : ''} />)}
-          </div>
-          <span className="dsp-strip-label">{fill(DSP.stages, {
-            n: a.sections
-          })}<HintBtn text={DSP.stages_hint} /></span>
         </div>
         {a.overCap && <p className="dsp-note t-err">{DSP.over_cap}</p>}
         {!a.overCap && status.sy[o] === 2 && <p className="dsp-note t-err">{DSP.refused}</p>}

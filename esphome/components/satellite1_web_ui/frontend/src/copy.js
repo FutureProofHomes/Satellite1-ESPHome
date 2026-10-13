@@ -1719,7 +1719,7 @@ export const DSP = {
     approx: "Line {line}: the {type} shelf has no Q, so it came in at Q 0.707.",
     clamp: "Line {line}: a value was outside the speaker's range and was brought inside it.",
     many: "Only the first {kept} filters fit.",
-    budget: "Only the first {kept} filters fit in the audio chip's 16 stages.",
+    budget: "Only the first {kept} filters fit in the audio chip.",
   },
   export_title: "Export as a filter file",
   export_body: "The REW / Equalizer APO format, which Music Assistant imports too. Bass and Treble come along as shelves; the limiter doesn't.",
@@ -1740,8 +1740,6 @@ export const DSP = {
   over_cap: "Too much boost. The audio chip keeps playing the previous EQ until the loudest point is under +18 dB. Lower the preamp or the boosts.",
   refused: "The audio chip refused this EQ: too much boost. It's still playing the previous one.",
   auto: "Auto preamp",
-  stages: "{n} of 16 stages",
-  stages_hint: "The audio chip runs up to 16 filter stages. Most filters take one; 24 dB/oct cuts take two. Filters that are off, and boosts or cuts of 0 dB, take none.",
   sync: ["Playing", "Sending…", "Refused", "Saved"],
   // In sync, for the output that isn't playing or while the EQ is off.
   ready: "Ready",
@@ -1758,7 +1756,7 @@ export const DSP = {
   add: "Add filter",
   none: "No filters yet. Add one here, or double-click the graph.",
   full: "All {n} filters are in use.",
-  no_stages: "No stages left for another filter.",
+  no_stages: "The audio chip has no room for that. Turn a filter off or remove one.",
   kinds: { peak: "Peak", lowshelf: "Low shelf", highshelf: "High shelf", lowcut: "Low cut", highcut: "High cut" },
   slopes: { bw12: "12 dB/oct · Butterworth", bw24: "24 dB/oct · Butterworth", lr12: "12 dB/oct · Linkwitz-Riley", lr24: "24 dB/oct · Linkwitz-Riley", q: "12 dB/oct · custom Q" },
   say: {

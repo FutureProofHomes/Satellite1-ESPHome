@@ -1237,7 +1237,7 @@ count.
 | `notes.approx` | Line {line}: the {type} shelf has no Q, so it came in at Q 0.707. |
 | `notes.clamp` | Line {line}: a value was outside the speaker's range and was brought inside it. |
 | `notes.many` | Only the first {kept} filters fit. |
-| `notes.budget` | Only the first {kept} filters fit in the audio chip's 16 stages. |
+| `notes.budget` | Only the first {kept} filters fit in the audio chip. |
 | `export_title` | Export as a filter file |
 | `export_body` | The REW / Equalizer APO format, which Music Assistant imports too. Bass and Treble come along as shelves; the limiter doesn't. |
 | `copy`, `copied`, `download`, `close` | Copy, Copied, Download, Close |
@@ -1255,7 +1255,6 @@ count.
 | `over_cap` | Too much boost. The audio chip keeps playing the previous EQ until the loudest point is under +18 dB. Lower the preamp or the boosts. |
 | `refused` | The audio chip refused this EQ: too much boost. It's still playing the previous one. |
 | `auto` | Auto preamp |
-| `stages` / `stages_hint` | {n} of 16 stages / The audio chip runs up to 16 filter stages. Most filters take one; 24 dB/oct cuts take two. Filters that are off, and boosts or cuts of 0 dB, take none. |
 | `sync` | Playing, Sending…, Refused, Saved (the graph card's status, by sync state) |
 | `ready` | Ready (in sync, but not the output playing, or the EQ is off) |
 
@@ -1268,7 +1267,7 @@ count.
 | `filters`, `add` | Filters, Add filter |
 | `none` | No filters yet. Add one here, or double-click the graph. |
 | `full` | All {n} filters are in use. |
-| `no_stages` | No stages left for another filter. |
+| `no_stages` | The audio chip has no room for that. Turn a filter off or remove one. (an edit that would need more than the chip's 16 sections; there is no meter for them, owner call, October 2026) |
 | `kinds` | Peak, Low shelf, High shelf, Low cut, High cut |
 | `slopes` | 12 dB/oct · Butterworth, 24 dB/oct · Butterworth, 12 dB/oct · Linkwitz-Riley, 24 dB/oct · Linkwitz-Riley, 12 dB/oct · custom Q |
 | `say` | Boost at {hz}, Cut at {hz}, Nothing at {hz}, More below {hz}, Less below {hz}, More above {hz}, Less above {hz}, Remove below {hz}, Remove above {hz} |

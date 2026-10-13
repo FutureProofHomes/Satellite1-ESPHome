@@ -848,8 +848,9 @@ comes from `--eq-c0`…`--eq-c11` in `styles/dsp.css`, darker on the light theme
 corner says Playing, Sending…, Refused or Saved for the output shown, and Ready for one that is in
 sync but not the one playing (or with the EQ off). Under the graph: the loudest point (between
 stages, when that is what breaks the +18 dB cap), the limiter's state ("Limiting now" from the live
-stats), Auto preamp (lowers the preamp until the loudest point sits on the ceiling and no stage
-passes +18 dB) and the 16-section budget. Edits go out latest-wins with one request in flight, the
+stats) and Auto preamp (lowers the preamp until the loudest point sits on the ceiling and no stage
+passes +18 dB). The 16-section budget has no meter: an edit that would need a seventeenth section is
+not made, and a note under the graph says so. Edits go out latest-wins with one request in flight, the
 two outputs taking turns, so a drag costs a handful of writes; one that doesn't get through is
 retried, backing off to every 5 s, until a newer edit replaces it, and a refused one reloads the
 device's copy once nothing else is on its way. A read that set out before an edit never puts the
