@@ -623,11 +623,9 @@ float TAS2780::volume() { return this->volume_; }
 
 bool TAS2780::write_mute_() {
   if (this->is_muted_) {
-    this->reg(TAS2780_DVC) = 0xC9;
-  } else {
-    this->write_volume_();
+    return this->write_byte(TAS2780_PAGE_SELECT, 0x00) && this->write_byte(TAS2780_DVC, 0xC9);
   }
-  return true;
+  return this->write_volume_();
 }
 
 bool TAS2780::write_volume_() {
@@ -647,9 +645,7 @@ bool TAS2780::write_volume_() {
   float attenuation = (1. - volume) * 100.f;
   ESP_LOGD(TAG, "Setting attenuation to: %4.2f", attenuation);
   uint8_t dvc = clamp<uint8_t>(attenuation, 0, 0xC8);
-  this->reg(TAS2780_DVC) = dvc;
-
-  return true;
+  return this->write_byte(TAS2780_PAGE_SELECT, 0x00) && this->write_byte(TAS2780_DVC, this->is_muted_ ? 0xC9 : dvc);
 }
 
 void TAS2780::update_register() {
