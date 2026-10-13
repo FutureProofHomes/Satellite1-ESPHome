@@ -79,6 +79,7 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   /// `quiet` suppresses the per-sample debug line - the loop() reconcile polls every 5 s, and a
   /// standing debug drumbeat would bury the log; the activation path keeps its sample visible.
   bool read_supply_voltages_(SupplyVoltages *voltages, bool quiet = false);
+  void recover_from_protection_shutdown_();
   bool write_mute_();
   bool write_volume_();
 
@@ -90,6 +91,11 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   /// The loop() reconcile's clock and debounce - see the comment there.
   uint32_t supply_check_ms_{0};
   uint8_t supply_mismatches_{0};
+  /// Protection-shutdown recovery - see recover_from_protection_shutdown_().
+  uint32_t protection_window_ms_{0};
+  uint8_t protection_trips_{0};
+  bool protection_lockout_{false};
+  float protection_volume_{0};
   uint8_t power_mode_{2};
   uint8_t amp_level_{8};
   float vol_range_min_{.3};
