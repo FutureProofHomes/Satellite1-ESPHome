@@ -16,6 +16,11 @@ packages:
     ref: &repo_ref "staging"
     refresh: 1s
     files:
+      # OPTION 1 (default): provision WiFi using BLE or USB Improv.
+      # Do not configure wifi.ssid or wifi.networks with this package enabled.
+      # Keep this before the base config so its voice-assistant wait runs first.
+      - config/common/wifi_provisioning.yaml
+
       # Main config files, don't remove
       - config/satellite1.base.yaml
       - config/common/dashboard_build.yaml
@@ -24,9 +29,10 @@ packages:
           ext_comp_repo_url: *repo_url
           ext_comp_repo_ref: *repo_ref
 
+# yamllint disable rule:comments-indentation
       ## OPTIONALLY, uncomment if want extra memory, wifi and xmos control of the device.
       # - config/common/debug.yaml
-      # yamllint enable rule:comments-indentation
+# yamllint enable rule:comments-indentation
 
 logger:
   level: ${log_level}
@@ -41,10 +47,9 @@ logger:
 #   encryption:
 #     key: REPLACE_BY_32_BIT_RANDOM_KEY
 
-## OPTIONALLY, override the default Wi-Fi credentials provisioned on the Satellite1 device
-## during setup by using your Wi-Fi credentials stored in the `secrets.yaml` file of the
-## ESPHome dashboard. Uncomment the below lines to enable this feature, allowing you
-## to manage Wi-Fi credentials centrally for all your devices.
+## OPTION 2: centrally managed WiFi credentials, without BLE/USB Improv.
+## Comment out config/common/wifi_provisioning.yaml in the file list above, then
+## uncomment these credentials. Choose exactly one of these two options.
 
 # wifi:
 #   ssid: !secret wifi_ssid
