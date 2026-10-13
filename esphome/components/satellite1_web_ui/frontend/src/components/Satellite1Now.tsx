@@ -358,8 +358,8 @@ export function Satellite1Now({
   useEffect(() => subscribeMic(() => setMicOn(micActive())), []);
   const subLabel = (r: { slug: string; label: string }) => (r.slug === 'developer' && micOn ? <>{r.label}<span className="dev-dot" aria-hidden="true" /></> : r.label);
   const events = useEvents();
-  // Audio's DSP page exists only while the running XMOS has the speaker EQ. Without it Audio has
-  // Routing alone: no sub-items, no sub-layer, exactly the page it was before.
+  // Audio's Equalizer page exists only while the running XMOS has the speaker EQ. Without it Audio
+  // has Announcement Routing alone: no sub-items, no sub-layer, exactly the page it was before.
   const dsp = useDspSupport(device, entity({ device, states: events.states }, 'xmos_firmware')?.value);
   const subRoutes = navSubs(tab, dsp, settingsRoutes, AUDIO_ROUTES);
   const navLayer = subRoutes.length > 0 ? 1 : 0;

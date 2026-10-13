@@ -603,7 +603,7 @@ class WebUIHandler : public AsyncWebHandler {
 
 #ifdef USE_SAT1_WEB_UI_DSP
   /// Set from generated code, before the listener accepts anything. The speaker EQ's profiles and
-  /// presets have no entity; the Audio > DSP page reads and edits them through /api/sat1/dsp.
+  /// presets have no entity; the Audio > Equalizer page reads and edits them through /api/sat1/dsp.
   void set_dsp(satellite1_dsp::SpeakerDsp *dsp) { this->dsp_ = dsp; }
 #endif
 
@@ -820,13 +820,13 @@ class WebUIHandler : public AsyncWebHandler {
   void handle_ring_preview_(AsyncWebServerRequest *request);
 #endif
 #ifdef USE_SAT1_WEB_UI_DSP
-  /// GET /api/sat1/dsp: everything the DSP page shows - both profiles, every preset, the limits it
+  /// GET /api/sat1/dsp: everything the Equalizer page shows - both profiles, every preset, the limits it
   /// edits within, and the XMOS's latest info and stats. Starts the once-a-second live reads.
   void handle_dsp_(AsyncWebServerRequest *request);
   /// GET /api/sat1/dsp/caps: {"dsp":N} alone, the Audio page's one re-check after an XMOS connects.
   void handle_dsp_caps_(AsyncWebServerRequest *request);
   /// GET /api/sat1/dsp/live: the switch, sync and XMOS info and stats without the profiles, for the
-  /// open DSP page's poll. Keeps the live reads going.
+  /// open Equalizer page's poll. Keeps the live reads going.
   void handle_dsp_live_(AsyncWebServerRequest *request);
   /// POST /api/sat1/dsp with form fields: en=0|1, cmp=0|1 (hold-to-compare), and/or out=0|1 with
   /// any of pre, bass, tre, lim, atk, rel, preset and f (every filter, "type,on,hz,db,q;...").

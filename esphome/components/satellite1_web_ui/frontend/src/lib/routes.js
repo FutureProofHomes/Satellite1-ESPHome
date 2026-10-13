@@ -33,11 +33,12 @@ const SETTINGS_SUBS = [
   ["community", "community"],
 ];
 
-/** URL name -> Audio's page slug. Routing is the default, and the only page while the running XMOS
- *  has no speaker EQ: the shell then hides DSP, and Audio sends #/audio/dsp on to Routing. */
+/** URL name -> Audio's page slug. Announcement Routing is the default, and the only page while the
+ *  running XMOS has no speaker EQ: the shell then hides the Equalizer, and Audio sends
+ *  #/audio/equalizer on to Announcement Routing. */
 const AUDIO_SUBS = [
-  ["routing", "routing"],
-  ["dsp", "dsp"],
+  ["announcement-routing", "routing"],
+  ["equalizer", "dsp"],
 ];
 
 /** The tabs that have pages of their own. */
@@ -47,7 +48,7 @@ const SUBS_OF = { SETTINGS: SETTINGS_SUBS, AUDIO: AUDIO_SUBS };
  *  #/diagnostics, whose cards became the Settings pages, and #/settings/amp, whose amplifier card
  *  moved to Developer in October 2026. Bookmarks outlive firmware updates by design, so they must
  *  keep landing somewhere better than the default. */
-const LEGACY = { controls: "home", config: "audio/routing", diagnostics: "settings/device", "settings/amp": "settings/developer" };
+const LEGACY = { controls: "home", config: "audio/announcement-routing", diagnostics: "settings/device", "settings/amp": "settings/developer" };
 
 /**
  * `#/settings/logs?x=1` -> { tab: "SETTINGS", sub: "logs" }. Anything unknown is Home; a Settings

@@ -1,5 +1,6 @@
 /**
- * Whether the Audio tab has its DSP page: exactly when the running XMOS firmware has the speaker EQ.
+ * Whether the Audio tab has its Equalizer page: exactly when the running XMOS firmware has the
+ * speaker EQ.
  *
  * The ESP32 asks the XMOS while it connects, before it publishes the XMOS version (satellite1_dsp's
  * connected hook), and serves the answer as GET /api/sat1/state's "dsp" field. So the first paint
@@ -22,17 +23,17 @@ export function dspVisible(support) {
   return support === 1;
 }
 
-/** The sub-pages the nav lists for a tab. Settings' are whatever the caller passes, so the DSP
- *  answer never touches them; Audio lists its pages only while DSP is visible, because Routing
- *  alone is nothing to choose between. */
+/** The sub-pages the nav lists for a tab. Settings' are whatever the caller passes, so the speaker
+ *  EQ answer never touches them; Audio lists its pages only while the Equalizer is visible, because
+ *  Announcement Routing alone is nothing to choose between. */
 export function navSubs(tab, support, settingsRoutes, audioRoutes) {
   if (tab === "SETTINGS") return settingsRoutes;
   if (tab === "AUDIO" && dspVisible(support)) return audioRoutes;
   return [];
 }
 
-/** #/audio/dsp is sent on to Routing only on a definite no. While the answer is 2 the page waits
- *  for the connect, and while it is null for the state. */
+/** #/audio/equalizer is sent on to Announcement Routing only on a definite no. While the answer is 2
+ *  the page waits for the connect, and while it is null for the state. */
 export function dspRedirect(support) {
   return support === 0;
 }

@@ -61,7 +61,7 @@ Five tabs, all on the hash, in this nav order:
 | `#/home` | The voice orb (assistant phase, mute, voice volume) and its Customize drawer - the orb's colors, and the LED ring's color, brightness, style and per-moment animations - sensor readings with sparklines and calibration, timers, and the transcript per wake word |
 | `#/wake-word` | Which wake words the device answers to, each with its sensitivity tuner, voice pipeline and Finished Speaking Detection; the wake chime and the stop word |
 | `#/presence` | Live radar plot with zones, or gate energies, and the radar's own settings |
-| `#/audio` | One Audio Routing card: the three announcement and ducking levels, then one list of your Home Assistant areas and speakers with an Announce and a Duck box on each row (this device's own row holds "Announce on this device"), then the wake chime, timer ring and echo guard for the speakers ticked to Announce; the speaker's Channel below |
+| `#/audio/<page>` | `announcement-routing` (plain `#/audio` lands here): one Announcement Routing card: the three announcement and ducking levels, then one list of your Home Assistant areas and speakers with an Announce and a Duck box on each row (this device's own row holds "Announce on this device"), then the wake chime, timer ring and echo guard for the speakers ticked to Announce; the speaker's Channel below. `equalizer`, listed only while the running XMOS has the speaker EQ: the speaker EQ, described below |
 | `#/settings/<page>` | `device` (facts and buttons), `updates`, `security` (auth token, password), `logs` (live logs, crash reports), `integrations` (Home Assistant side panel), `recovery` (ESP32, XMOS and radar maintenance), `developer` (developer builds only: the XMOS firmware picker, the mic monitor, the TAS2780 amplifier, logs from several devices, the system monitor), `community` |
 
 When the device has a media player, the media bar rides along the bottom of every tab.
@@ -729,9 +729,10 @@ entities. [TTS-Routing.md](TTS-Routing.md) has the upgrade notes.
 
 ### The Audio page's layout
 
-Audio > Routing (`#/audio/routing`; plain `#/audio` lands here too). Audio > DSP is the next section.
+Audio > Announcement Routing (`#/audio/announcement-routing`; plain `#/audio` lands here too).
+Audio > Equalizer is the next section.
 
-One card, **Audio Routing**, with "Route assistant responses, announcements, timer rings and wake
+One card, **Announcement Routing**, with "Route assistant responses, announcements, timer rings and wake
 chimes to selected speakers" under the title, then the Speaker card with the Channel select (October
 2026; until then routing and ducking were two cards, each with its own tree).
 
@@ -772,10 +773,11 @@ page served by one firmware version reads the entity keys of devices on another 
 switcher. Announcement Volume keeps its name because peers find it by an entity id ending in
 `_announcement_volume`. [TTS-Routing.md](TTS-Routing.md) has what the renames do to Home Assistant.
 
-## The speaker EQ (Audio > DSP)
+## The speaker EQ (Audio > Equalizer)
 
 Built October 2026 (plan file `speaker_dsp_equalizer_41c2d2e4`): a parametric EQ and a safety limiter
-for the speaker, run by the XMOS, set from `#/audio/dsp`.
+for the speaker, run by the XMOS, set from `#/audio/equalizer`. The page is called Equalizer because
+more people know the word than "DSP"; the code and the API keep `dsp`.
 
 **Where the sound is shaped.** On the XMOS, tile 1, with lib_audio_dsp v1.5.1: in the speaker
 pipeline, just before the DAC, at 48 kHz, with the echo canceller's reference taken after the EQ, so the
@@ -809,7 +811,8 @@ the state payload carries the answer as `dsp`: 1 supported, 0 not, 2 not known y
 boot); a firmware without the component sends no field, which reads as 0. The app asks again, at
 `/api/sat1/dsp/caps`, when `xmos_firmware` publishes a new version (`useDspSupport` in
 `src/lib/device.js`, the rule in `dspRecheckDue`, `src/lib/dsp.js`). Audio lists its two pages only
-on a 1; `#/audio/dsp` goes on to Routing only on a definite 0, and waits through a 2.
+on a 1; `#/audio/equalizer` goes on to Announcement Routing only on a definite 0, and waits through
+a 2.
 
 **The API**, all session-gated:
 
@@ -857,7 +860,7 @@ Treble as shelves, 24 dB/oct cuts as two lines. The banner over the page says wh
 is updating or not answering, and when the EQ switched itself off for want of time. Two
 independent columns once the page itself is 820 px wide (the graph and filters left, the rest right), measured on the page rather
 than the window because the sidebar arrives at 1024 px; one list in reading order below that, with
-the bottom bar's Routing and DSP pills.
+the bottom bar's Announcement Routing and Equalizer pills.
 
 ## Finished speaking detection, per wake word
 

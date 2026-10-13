@@ -395,7 +395,7 @@ function AudioRouting({
   const ring = has(ctx, 'remote_timer_ring');
   const levels = has(ctx, 'announcement_volume') || has(ctx, 'remote_announcement_volume') || has(ctx, 'duck_volume');
   return <div className="au-card">
-      <div className="au-card-head"><span className="au-card-title">Audio Routing</span><HintBtn text={HINTS.audio_routing} /></div>
+      <div className="au-card-head"><span className="au-card-title">Announcement Routing</span><HintBtn text={HINTS.audio_routing} /></div>
       <p className="au-tree-title">Route assistant responses, announcements, timer rings and wake chimes to selected speakers</p>
       {levels && <div className="au-vols">
           {has(ctx, 'announcement_volume') && <VolumeHead ctx={ctx} k="announcement_volume" label="Announcement Volume" hint={HINTS.announcement_volume} zero="Follow speaker volume" />}
@@ -459,7 +459,7 @@ export function RoutingPage({
   // The selection gates the routing card. A missing one is reported apart from a missing device:
   // the shell is up, so it is the selection specifically.
   return <section className="control au-tab au-route">
-      <span className="eyebrow">AUDIO · ROUTING</span>
+      <span className="eyebrow">AUDIO · ANNOUNCEMENT ROUTING</span>
       <h1><span>Sound, </span><em>directed.</em></h1>
       {!ctx.device ? <p className="au-missing">The device is not available on this firmware build.</p> : <>
           {!sel && <p className="au-missing">{ctx.selError ? 'The saved selection' : 'Settings'} is not available on this firmware build.</p>}

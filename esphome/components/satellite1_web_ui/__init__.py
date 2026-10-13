@@ -328,7 +328,7 @@ CONFIG_SCHEMA = cv.All(
                 else {}
             ),
             # The speaker EQ (satellite1_dsp), behind /api/sat1/dsp. Its profiles and presets have
-            # no entity; the Audio > DSP page reads and edits them here.
+            # no entity; the Audio > Equalizer page reads and edits them here.
             **(
                 {cv.Optional(CONF_DSP_ID): cv.use_id(SpeakerDsp)}
                 if SpeakerDsp is not None

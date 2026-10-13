@@ -533,7 +533,7 @@ void SpeakerDsp::loop() {
     return;
   }
 
-  // Info and stats every second while the DSP page is open, INFO alone every HEARTBEAT_MS otherwise.
+  // Info and stats every second while the Equalizer is open, INFO alone every HEARTBEAT_MS otherwise.
   const bool live_due = live && now - this->live_read_at_ >= LIVE_READ_MS;
   if (live_due || static_cast<int32_t>(now - this->heartbeat_at_) >= 0) {
     Info info;

@@ -1645,14 +1645,14 @@ export const WW_ERR = {
 };
 
 /**
- * Audio > DSP, the speaker EQ.
+ * Audio > Equalizer, the speaker EQ.
  *
  * A filter is named by what it does to the sound ("Cut at 3.46 kHz", "Remove below 60 Hz"), with
  * its technical name underneath for people who tune by REW. The XMOS is "the audio chip", as in
  * CONFIRM. {hz} is a formatted frequency, {name} a preset's name, {n} a count.
  */
 export const DSP = {
-  eyebrow: "AUDIO · DSP",
+  eyebrow: "AUDIO · EQUALIZER",
   title_a: "Sound, ",
   title_b: "shaped.",
   waiting: "Waiting for the audio chip to connect.",
@@ -1667,7 +1667,7 @@ export const DSP = {
   outputs: ["Built-in Speaker", "Line-out"],
   playing: "PLAYING",
   output_hint: "Each output has its own EQ. Your Satellite1 switches between them by itself when something is plugged into the line-out jack. Edit either one at any time.",
-  eq_on: "Speaker EQ",
+  eq_on: "Equalizer",
   eq_hint: "Off plays everything flat on both outputs. Your settings stay saved.",
   compare: "Hold to hear it flat",
   comparing: "Playing flat",

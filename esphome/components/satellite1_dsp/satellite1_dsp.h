@@ -178,7 +178,7 @@ class SpeakerDsp : public Component {
   // preset is replaced, as a save over it would.
   bool web_rename_preset(const std::string &from, const std::string &to);
   bool web_reset(uint8_t output);
-  // The web UI's DSP page is open: read the XMOS's info and stats every second for a while.
+  // The web UI's Equalizer page is open: read the XMOS's info and stats every second for a while.
   void web_want_live();
 
  protected:

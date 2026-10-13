@@ -437,7 +437,7 @@ volume left for the home page, the wake words card became the Wake Word route ab
 speaker's own wiring - the old Audio Output card, grown into Speaker amplifier - moved to
 Diagnostics under the Device card (owner call, September 2026), where it sits beside the USB-C
 Power Supply reading that decides the amp's gain mode. What remains here is where sound goes: one
-Audio Routing card holding the levels, the speaker list, and the three settings that follow a
+Announcement Routing card holding the levels, the speaker list, and the three settings that follow a
 response to the speakers ticked to Announce (October 2026; until then routing and ducking were two
 cards with a tree each).
 
@@ -451,7 +451,7 @@ it writes the device's own selection at `/api/sat1/sel`, and it is the only face
 
 | Key | Where | Text |
 | --- | --- | --- |
-| `audio_routing` | Audio Routing card title | Pick which speakers play this device's responses, and which turn down while you talk to it. A speaker that plays responses is always turned down as well. Tick a room to cover every speaker in it, including ones added later, or open the room and pick speakers. |
+| `audio_routing` | Announcement Routing card title | Pick which speakers play this device's responses, and which turn down while you talk to it. A speaker that plays responses is always turned down as well. Tick a room to cover every speaker in it, including ones added later, or open the room and pick speakers. |
 | `announcement_volume` | Announcement Volume, first in the levels panel | How loud this device plays assistant replies, timers, chimes and announcements, separate from the media volume. At 0 it follows the media player volume. The volume buttons change only the media volume. |
 | `remote_announcement_volume` | Remote Announcement Volume, second in the levels panel | How loud this device's responses and timer rings play on the speakers ticked to Announce. Above 0, each plays at this level and gets its own level back afterwards. At 0 each speaker follows its own volume, so a Satellite1 whose volume is 0 stays silent. |
 | `duck_volume` | Remote Ducking Volume, third in the levels panel | The level speakers ticked to Duck drop to. Players already quieter than this are left alone, so a whole-house group does not get turned up. A Sonos or Satellite1 ticked to Announce lowers its own music instead. |
@@ -1181,7 +1181,7 @@ on the live ring.
 
 ## The speaker EQ (`DSP`)
 
-Audio > DSP (October 2026). A filter is named by what it does to the sound ("Cut at 3.46 kHz",
+Audio > Equalizer (October 2026). A filter is named by what it does to the sound ("Cut at 3.46 kHz",
 "Remove below 60 Hz"), with its technical name underneath for people who tune by REW; the XMOS is
 "the audio chip", as in `CONFIRM`. `{hz}` is a formatted frequency, `{name}` a preset's name, `{n}` a
 count.
@@ -1190,7 +1190,7 @@ count.
 
 | Key | Text |
 | --- | --- |
-| `eyebrow`, `title_a` + `title_b` | AUDIO · DSP — Sound, shaped. |
+| `eyebrow`, `title_a` + `title_b` | AUDIO · EQUALIZER — Sound, shaped. |
 | `waiting` | Waiting for the audio chip to connect. |
 | `load_failed` / `retry` | Couldn't load the EQ from your Satellite1. / Try again |
 | `updating` | The audio chip's firmware is updating. Your EQ is saved and comes back when it finishes. |
@@ -1204,7 +1204,7 @@ count.
 | `output`, `outputs` | Output (the picker's screen-reader name); Built-in Speaker, Line-out |
 | `playing` | PLAYING (badge on the output playing now) |
 | `output_hint` | Each output has its own EQ. Your Satellite1 switches between them by itself when something is plugged into the line-out jack. Edit either one at any time. |
-| `eq_on` / `eq_hint` | Speaker EQ / Off plays everything flat on both outputs. Your settings stay saved. |
+| `eq_on` / `eq_hint` | Equalizer / Off plays everything flat on both outputs. Your settings stay saved. |
 | `compare` / `comparing` | Hold to hear it flat / Playing flat |
 | `preset`, `custom`, `modified` | PRESET, Custom (no preset matches), Modified (tag beside the menu) |
 | `save`, `save_as`, `revert`, `more` | Save, Save as…, Revert, More |
@@ -1305,15 +1305,17 @@ edit:
   its column's name (`Announce 1/10 · Duck 1/11`; a column with nothing to count is left out). All
   three are structure rather than explanation - the first is a row label and the last two are state
   readouts.
-- `Audio Routing`, the card's title, and `Route assistant responses, announcements, timer rings and
-  wake chimes to selected speakers` directly under it, which says what the card does and leaves the
-  rest to the card's ⓘ. Until the two cards merged (October 2026) this was the routing card, titled
+- `Announcement Routing`, the card's title, and `Route assistant responses, announcements, timer
+  rings and wake chimes to selected speakers` directly under it, which says what the card does and
+  leaves the rest to the card's ⓘ. The title was `Audio Routing` until Audio gained its Equalizer
+  page, when "audio" stopped saying which of the two pages this is (owner call, October 2026).
+  Until the two cards merged (October 2026) this was the routing card, titled
   `Route Announcement and Assistant Responses`, and the ducking card carried `Lower the volume on
   selected players upon wake word detection`; that line was `Quieten while talking` before it, which
   was inaccurate because the duck also covers the listening half of the interaction. The routing card
   was `Voice Response Routing` over `Route the assistant voice response to selected speakers` before
   that, renamed when its first box gained this device's own level (owner call, October 2026).
-- The Audio Routing card's labels, which are the Home Assistant entities' names (October 2026): the
+- The Announcement Routing card's labels, which are the Home Assistant entities' names (October 2026): the
   three levels `Announcement Volume`, `Remote Announcement Volume` and `Remote Ducking Volume`, and
   `Remote Wake Chime`, `Remote Timer Ring` and `Remote Echo Guard` under the speaker list. They were
   `Device Announcement & Response Volume`, `Remote Announcement & Response Volume`, `Area Ducking
@@ -1321,8 +1323,9 @@ edit:
   this device` switch that is now this device's own Announce box.
 - The five route names in the nav drawer — `Home`, `Wake Word`, `Audio`, `Presence`, `Diagnostics`, in
   that order — which are the same strings as the routes themselves. The drawer has no heading; the
-  device name is in the bar above it. Audio's two pages, `Routing` and `DSP`, are named the same way
-  (`AUDIO_ROUTES` in `AudioTab.tsx`), listed only while the running XMOS has the speaker EQ.
+  device name is in the bar above it. Audio's two pages, `Announcement Routing` and `Equalizer`, are
+  named the same way (`AUDIO_ROUTES` in `AudioTab.tsx`), listed only while the running XMOS has the
+  speaker EQ. Equalizer rather than DSP because more people know the word (owner call, October 2026).
 - `Connected` and `Nothing plugged in` on Speaker amplifier's Line out row, and the three volume sliders'
   zero readouts: `Follow speaker volume` on both Announcement Volume and Remote Announcement Volume
   (on the remote one, zero means "leave every target's volume alone", per tts_routing.yaml), and

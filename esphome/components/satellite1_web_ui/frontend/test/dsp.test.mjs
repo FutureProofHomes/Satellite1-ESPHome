@@ -1,5 +1,5 @@
 /**
- * When the Audio tab has its DSP page (src/lib/dsp.js): only on XMOS firmware with the speaker EQ,
+ * When the Audio tab has its Equalizer page (src/lib/dsp.js): only on XMOS firmware with the speaker EQ,
  * decided from the state payload plus one re-check per XMOS connect, never by polling.
  */
 import assert from "node:assert/strict";
@@ -26,20 +26,20 @@ test("firmware without the component reads as unsupported, a loading state as un
   assert.equal(dspSupport({ dsp: 2 }), 2);
 });
 
-test("a bookmark to the DSP page is bounced only on a definite no", () => {
+test("a bookmark to the Equalizer is bounced only on a definite no", () => {
   assert.equal(dspRedirect(0), true);
   assert.equal(dspRedirect(1), false);
   assert.equal(dspRedirect(2), false);
   assert.equal(dspRedirect(null), false);
 });
 
-test("Audio lists its pages only while DSP is visible", () => {
+test("Audio lists its pages only while the Equalizer is visible", () => {
   assert.deepEqual(navSubs("AUDIO", 1, SETTINGS, AUDIO), AUDIO);
   for (const s of [0, 2, null]) assert.deepEqual(navSubs("AUDIO", s, SETTINGS, AUDIO), [], String(s));
   for (const tab of ["NOW", "PRESENCE", "WAKE"]) assert.deepEqual(navSubs(tab, 1, SETTINGS, AUDIO), [], tab);
 });
 
-test("Settings > Developer follows hasDevTools whatever the DSP answer", () => {
+test("Settings > Developer follows hasDevTools whatever the speaker EQ answer", () => {
   const dev = { mic: 1, dsp: 1 };
   const release = { e: {}, dsp: 1 };
   for (const s of [0, 1, 2, null]) {

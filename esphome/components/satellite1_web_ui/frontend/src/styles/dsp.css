@@ -1,6 +1,6 @@
-/* ===== Audio > DSP, the speaker EQ ===== */
+/* ===== Audio > Equalizer, the speaker EQ ===== */
 
-/* Full width on a wide window, as Routing is (styles/audio.css). */
+/* Full width on a wide window, as Announcement Routing is (styles/audio.css). */
 @media (min-width: 1024px) {
   .app > .tab-content-enter > section.control.dsp-tab { max-width: none; }
 }
