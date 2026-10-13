@@ -15,6 +15,8 @@
 .ww-card { padding: 18px; }
 .dx-card-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); border-radius: 20px 20px 0 0; overflow: hidden; cursor: default; }
 .dx-card-head.clickable:hover { background: var(--fill-hover); }
+/* A collapsed card is all head: its divider would square off the card's rounded bottom. */
+.dx-card-head:last-child { border-bottom: none; border-radius: 20px; }
 
 /* ----- Rows ----- */
 .pr-row, .au-row, .dx-row { display: flex; align-items: center; gap: 12px; font-size: 14px; }

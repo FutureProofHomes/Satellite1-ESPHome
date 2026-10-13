@@ -1639,3 +1639,150 @@ export const WW_ERR = {
   9: "The device refused the model.",
   10: "Not enough free memory for this model right now. Restart the device and try again.",
 };
+
+/**
+ * Audio > DSP, the speaker EQ.
+ *
+ * A filter is named by what it does to the sound ("Cut at 3.46 kHz", "Remove below 60 Hz"), with
+ * its technical name underneath for people who tune by REW. The XMOS is "the audio chip", as in
+ * CONFIRM. {hz} is a formatted frequency, {name} a preset's name, {n} a count.
+ */
+export const DSP = {
+  eyebrow: "AUDIO · DSP",
+  title_a: "Sound, ",
+  title_b: "shaped.",
+  waiting: "Waiting for the audio chip to connect.",
+  load_failed: "Couldn't load the EQ from your Satellite1.",
+  retry: "Try again",
+  updating: "The audio chip's firmware is updating. Your EQ is saved and comes back when it finishes.",
+  offline: "The audio chip isn't answering right now. Your changes are saved and sent when it's back.",
+  overload: "The EQ switched itself off: the audio chip ran short of time to run it. Remove a filter or two and it comes back on.",
+
+  // The output being edited, and the one playing.
+  output: "Output",
+  outputs: ["Built-in Speaker", "Line-out"],
+  playing: "PLAYING",
+  output_hint: "Each output has its own EQ. Your Satellite1 switches between them by itself when something is plugged into the line-out jack. Edit either one at any time.",
+  eq_on: "Speaker EQ",
+  eq_hint: "Off plays everything flat on both outputs. Your settings stay saved.",
+  compare: "Hold to hear it flat",
+  comparing: "Playing flat",
+
+  // Presets.
+  preset: "PRESET",
+  custom: "Custom",
+  modified: "Modified",
+  save: "Save",
+  save_as: "Save as…",
+  revert: "Revert",
+  more: "More",
+  rename: "Rename…",
+  delete: "Delete preset",
+  import: "Import a filter file…",
+  export: "Export as a filter file",
+  reset: "Reset to default",
+  name: "Preset name",
+  name_placeholder: "Living room",
+  name_save: "Save",
+  name_cancel: "Cancel",
+  name_short: "Give it a name.",
+  name_long: "That name is too long.",
+  name_builtin: "That name belongs to a built-in preset.",
+  name_replace: "Replaces your preset “{name}”.",
+  name_full: "You have 8 presets already. Delete one to save another.",
+  saved: "Saved “{name}”.",
+  renamed: "Renamed to “{name}”.",
+  op_failed: "Your Satellite1 didn't take that. Try again.",
+  confirm_load: { t: "Discard your changes?", b: "Loading “{name}” replaces the changes you've made to this output's EQ." },
+  confirm_load_go: "Load it",
+  confirm_delete: { t: "Delete “{name}”?", b: "The preset is gone for good. Any output using it keeps its sound, now as Custom." },
+  confirm_delete_go: "Delete",
+  confirm_reset: { t: "Reset this output's EQ?", b: "{output} goes back to “{name}”. Your saved presets aren't touched." },
+  confirm_reset_go: "Reset",
+
+  // Import and export.
+  import_title: "Import a filter file",
+  import_body: "Paste an export from REW, Equalizer APO or Music Assistant, or choose the file. It replaces this output's filters, Bass, Treble and preamp; the limiter stays as it is.",
+  import_choose: "Choose a file…",
+  import_go: "Import",
+  import_text: "Filter file text",
+  import_none: "That doesn't look like a filter file. It needs Preamp or Filter lines.",
+  imported: "Imported.",
+  notes: {
+    skip: "Line {line}: {type} filters aren't available here, so it was left out.",
+    unread: "Line {line}: its frequency couldn't be read, so it was left out.",
+    nogain: "Line {line}: its gain couldn't be read, so it came in at 0 dB.",
+    approx: "Line {line}: the {type} shelf has no Q, so it came in at Q 0.707.",
+    clamp: "Line {line}: a value was outside the speaker's range and was brought inside it.",
+    many: "Only the first {kept} filters fit.",
+    budget: "Only the first {kept} filters fit in the audio chip's 16 stages.",
+  },
+  export_title: "Export as a filter file",
+  export_body: "The REW / Equalizer APO format, which Music Assistant imports too. Bass and Treble come along as shelves; the limiter doesn't.",
+  copy: "Copy",
+  copied: "Copied",
+  download: "Download",
+  close: "Close",
+
+  // The graph and what it says about level.
+  graph: "Frequency response",
+  graph_hint: "Drag a numbered dot to move a filter: sideways for its frequency, up and down for its boost or cut. Pick a dot, then scroll on it to make it wider or narrower. Double-click an empty spot to add a filter there. From the keyboard, Tab to a dot, then use the arrow keys, and Page Up or Page Down for the width.",
+  limiter_line: "LIMITER",
+  loudest: "Loudest point",
+  loudest_hint: "The most this EQ lifts any frequency, preamp included. Above the limiter's ceiling, loud music is held down by the limiter rather than clipping.",
+  limiter_on: "Limiter active",
+  limiter_working: "Limiting now",
+  limiter_hint: "With this much boost, loud passages reach the limiter. It keeps them clean, but they won't get any louder. Auto preamp lowers everything until the limiter has nothing to do.",
+  over_cap: "Too much boost. The audio chip keeps playing the previous EQ until the loudest point is under +18 dB. Lower the preamp or the boosts.",
+  refused: "The audio chip refused this EQ: too much boost. It's still playing the previous one.",
+  auto: "Auto preamp",
+  stages: "{n} of 16 stages",
+  stages_hint: "The audio chip runs up to 16 filter stages. Most filters take one; 24 dB/oct cuts take two. Filters that are off, and boosts or cuts of 0 dB, take none.",
+  sync: ["Playing", "Sending…", "Refused", "Saved"],
+  // In sync, for the output that isn't playing or while the EQ is off.
+  ready: "Ready",
+
+  // Bass, Treble and preamp.
+  tone: "Tone",
+  bass: "Bass",
+  treble: "Treble",
+  preamp: "Preamp",
+  preamp_hint: "Raises or lowers everything before the volume control. Lower it to make room for boosts; raise it to make a quiet speaker louder, with the limiter catching the peaks.",
+
+  // Filters.
+  filters: "Filters",
+  add: "Add filter",
+  none: "No filters yet. Add one here, or double-click the graph.",
+  full: "All {n} filters are in use.",
+  no_stages: "No stages left for another filter.",
+  kinds: { peak: "Peak", lowshelf: "Low shelf", highshelf: "High shelf", lowcut: "Low cut", highcut: "High cut" },
+  slopes: { bw12: "12 dB/oct · Butterworth", bw24: "24 dB/oct · Butterworth", lr12: "12 dB/oct · Linkwitz-Riley", lr24: "24 dB/oct · Linkwitz-Riley", q: "12 dB/oct · custom Q" },
+  say: {
+    boost: "Boost at {hz}",
+    cut: "Cut at {hz}",
+    flat: "Nothing at {hz}",
+    more_below: "More below {hz}",
+    less_below: "Less below {hz}",
+    more_above: "More above {hz}",
+    less_above: "Less above {hz}",
+    lowcut: "Remove below {hz}",
+    highcut: "Remove above {hz}",
+  },
+  on: "On",
+  type: "Type",
+  slope: "Slope",
+  freq: "Frequency",
+  gain: "Boost / cut",
+  q: "Width (Q)",
+  q_hint: "Higher Q is narrower. For a cut's custom Q, values above 0.7 add a small bump just above the cut-off.",
+  remove: "Remove",
+  // The handle's screen-reader name: {i} its number, {say} the plain label.
+  handle: "Filter {i}, {say}",
+
+  // The limiter.
+  limiter: "Limiter",
+  limiter_card_hint: "The safety net after the EQ: it holds peaks under the ceiling so boosts never clip. The defaults suit almost everything.",
+  ceiling: "Ceiling",
+  attack: "Attack",
+  release: "Release",
+};
