@@ -4,7 +4,6 @@
 @media (min-width: 1024px) {
   .app > .tab-content-enter > section.control.dsp-tab { max-width: none; }
 }
-.dsp-tab > .dsp-grid, .dsp-tab > .au-missing, .dsp-tab > .dsp-fail { grid-column: 1 / -1; }
 
 /* Each filter's colour (EqGraph's filterColor), light enough to read on the dark theme and dark
    enough on the light one. --eq-on is the number's ink on a filled dot or chip. */
