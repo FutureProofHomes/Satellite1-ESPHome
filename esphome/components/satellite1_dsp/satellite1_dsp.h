@@ -32,13 +32,15 @@
 namespace esphome::satellite1_dsp {
 
 static constexpr uint8_t NUM_PROFILES = 2;  // 0 = built-in speaker, 1 = line-out
-// Two of the XMOS's 14 filter records carry Bass and Treble.
-static constexpr uint8_t MAX_FILTERS = eq::MAX_FILTERS - 2;
+// Three of the XMOS's 14 filter records carry Bass, Midrange and Treble.
+static constexpr uint8_t MAX_FILTERS = eq::MAX_FILTERS - 3;
 static constexpr uint8_t MAX_USER_PRESETS = 8;
 static constexpr uint8_t NAME_LEN = 32;  // including the terminator
 
-// Bass and Treble are shelves at fixed corners; the web UI's lib/eq.js draws the same ones.
+// Bass and Treble are shelves at fixed corners, and Midrange a peak about midway between them on a
+// log scale; the web UI's lib/eq.js draws the same ones.
 static constexpr float BASS_HZ = 120.0f;
+static constexpr float MID_HZ = 1000.0f;
 static constexpr float TREBLE_HZ = 8000.0f;
 static constexpr float TONE_Q = 0.707f;
 static constexpr float TONE_MAX_DB = 9.0f;
@@ -68,6 +70,7 @@ struct Filter {
 struct Profile {
   float preamp{0.0f};
   float bass{0.0f};
+  float mid{0.0f};
   float treble{0.0f};
   float limiter{-1.0f};
   float attack{1.0f};
@@ -126,7 +129,7 @@ void default_profile(uint8_t output, Profile &out);
 // Clamps nothing: false when any field is outside what the XMOS accepts, or the filters need more
 // than its 16 biquad sections. Normalizes the fields a filter type does not use.
 bool validate_profile(Profile &p);
-// Biquad sections the profile costs, Bass and Treble included.
+// Biquad sections the profile costs, Bass, Midrange and Treble included.
 uint8_t profile_sections(const Profile &p);
 // 1 to NAME_LEN - 1 bytes of well-formed UTF-8 with no control characters: a name that survives the
 // JSON round trip, so the web UI can load or delete the preset by it.
@@ -195,8 +198,8 @@ class SpeakerDsp : public Component {
   // The flash records are raw copies, and a record of another size fails to load: a layout change
   // would silently lose both profiles and every preset. A new layout needs a new key, and a load of
   // the old one to convert.
-  static_assert(sizeof(Settings) == 508, "Settings layout changed: add a new preference key");
-  static_assert(sizeof(UserPresets) == 2276, "UserPresets layout changed: add a new preference key");
+  static_assert(sizeof(Settings) == 484, "Settings layout changed: add a new preference key");
+  static_assert(sizeof(UserPresets) == 2180, "UserPresets layout changed: add a new preference key");
 
   void on_connected_();
   bool read_info_(Info &info);

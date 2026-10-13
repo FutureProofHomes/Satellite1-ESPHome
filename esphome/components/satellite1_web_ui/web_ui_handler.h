@@ -829,7 +829,7 @@ class WebUIHandler : public AsyncWebHandler {
   /// open Equalizer page's poll. Keeps the live reads going.
   void handle_dsp_live_(AsyncWebServerRequest *request);
   /// POST /api/sat1/dsp with form fields: en=0|1, cmp=0|1 (hold-to-compare), and/or out=0|1 with
-  /// any of pre, bass, tre, lim, atk, rel, preset and f (every filter, "type,on,hz,db,q;...").
+  /// any of pre, bass, mid, tre, lim, atk, rel, preset and f (every filter, "type,on,hz,db,q;...").
   void handle_dsp_set_(AsyncWebServerRequest *request);
   /// POST /api/sat1/dsp/preset with op=load|save|delete|rename|reset, name and out; rename's new
   /// name in to.

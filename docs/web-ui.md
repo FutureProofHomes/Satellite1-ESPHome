@@ -793,9 +793,10 @@ can exceed its ceiling. Resource 231's commands are in Satellite1-XMOS
 **Built-in Speaker** and **Line-out**, one per output, with the XMOS told which to play as the jack
 switches; the on/off switch; and up to eight user presets beside the built-ins ("Sat1.2 Smart Speaker
 (10/26)", the speaker's default, and "Flat", the line-out's). The speaker's default is the October
-2026 Music Assistant tuning at a +8 dB preamp, 2 dB below the export's own. A profile is a preamp, Bass and Treble
-(fixed shelves at 120 Hz and 8 kHz, Q 0.707, ±9 dB, counted against the 16 sections), up to twelve
-filters, and the limiter's ceiling, attack and release (−1 dBFS, 1 ms, 100 ms by default). Both
+2026 Music Assistant tuning at a +8 dB preamp, 2 dB below the export's own. A profile is a preamp;
+Bass, Midrange and Treble (shelves at 120 Hz and 8 kHz and a peak at 1 kHz, all Q 0.707 and ±9 dB,
+sent as the slot's first three records and counted against the 16 sections); up to eleven filters;
+and the limiter's ceiling, attack and release (−1 dBFS, 1 ms, 100 ms by default). Both
 profiles go to the XMOS on every connect, and a profile again after each edit to it, at most ten
 uploads a second while a slider moves. An upload counts once INFO shows the XMOS designed it (its
 design count moved on); one it did not take is re-sent twice and then held, reported as refused,
@@ -823,7 +824,7 @@ a 2.
   `GET /api/sat1/dsp/caps`: `{"dsp":N}` alone.
 - `POST /api/sat1/dsp`, form fields: `en=0|1`; `cmp=0|1`, hold-to-compare, which lapses on its own
   15 seconds after the last renewal so a browser that goes away mid-hold cannot leave the EQ off; or
-  `out=0|1` with any of `pre`, `bass`, `tre`, `lim`, `atk`, `rel`, `preset` and `f`, the filters as
+  `out=0|1` with any of `pre`, `bass`, `mid`, `tre`, `lim`, `atk`, `rel`, `preset` and `f`, the filters as
   `type,on,hz,db,q` joined by `;`. `en` and `cmp` take only `0` or `1`, and `preset` only `""` or a
   name a preset could hold. Values outside what the XMOS accepts, or more than 16 sections, answer
   400 and change nothing, the switches included; nothing is clamped.

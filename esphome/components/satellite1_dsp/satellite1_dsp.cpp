@@ -92,6 +92,7 @@ static bool in_range(float v, float lo, float hi) { return v >= lo && v <= hi; }
 
 uint8_t profile_sections(const Profile &p) {
   unsigned n = eq::filter_sections(eq::FILTER_LOW_SHELF, true, p.bass) +
+               eq::filter_sections(eq::FILTER_PEAK, true, p.mid) +
                eq::filter_sections(eq::FILTER_HIGH_SHELF, true, p.treble);
   for (uint8_t i = 0; i < p.count && i < MAX_FILTERS; i++)
     n += eq::filter_sections(p.filters[i].type, p.filters[i].enabled != 0, p.filters[i].gain);
@@ -101,7 +102,8 @@ uint8_t profile_sections(const Profile &p) {
 bool validate_profile(Profile &p) {
   p.preset[NAME_LEN - 1] = '\0';
   if (!in_range(p.preamp, eq::PREAMP_MIN_DB, eq::PREAMP_MAX_DB) || !in_range(p.bass, -TONE_MAX_DB, TONE_MAX_DB) ||
-      !in_range(p.treble, -TONE_MAX_DB, TONE_MAX_DB) || !in_range(p.limiter, eq::LIMITER_MIN_DB, eq::LIMITER_MAX_DB) ||
+      !in_range(p.mid, -TONE_MAX_DB, TONE_MAX_DB) || !in_range(p.treble, -TONE_MAX_DB, TONE_MAX_DB) ||
+      !in_range(p.limiter, eq::LIMITER_MIN_DB, eq::LIMITER_MAX_DB) ||
       !in_range(p.attack, eq::ATTACK_MIN_MS, eq::ATTACK_MAX_MS) ||
       !in_range(p.release, eq::RELEASE_MIN_MS, eq::RELEASE_MAX_MS) || p.count > MAX_FILTERS) {
     return false;
@@ -339,8 +341,8 @@ bool SpeakerDsp::read_stats_(Stats &stats) {
 bool SpeakerDsp::push_slot_(uint8_t output, const Profile &p) {
   uint8_t b[eq::SLOT_BYTES] = {0};
   uint8_t n = 0;
-  // Bass and Treble take the first two records, so adding or removing a filter does not renumber
-  // them and the XMOS can glide them rather than crossfade.
+  // Bass, Midrange and Treble take the first three records, so adding or removing a filter does not
+  // renumber them and the XMOS can glide them rather than crossfade.
   auto put_filter = [&b, &n](uint8_t type, bool enabled, float freq, float gain, float q) {
     uint8_t *r = &b[eq::SLOT_HEADER_BYTES + n * eq::FILTER_RECORD_BYTES];
     r[0] = type;
@@ -357,6 +359,7 @@ bool SpeakerDsp::push_slot_(uint8_t output, const Profile &p) {
   put_f32(&b[9], p.attack);
   put_f32(&b[13], p.release);
   put_filter(eq::FILTER_LOW_SHELF, true, BASS_HZ, p.bass, TONE_Q);
+  put_filter(eq::FILTER_PEAK, true, MID_HZ, p.mid, TONE_Q);
   put_filter(eq::FILTER_HIGH_SHELF, true, TREBLE_HZ, p.treble, TONE_Q);
   for (uint8_t i = 0; i < p.count && i < MAX_FILTERS; i++) {
     const Filter &f = p.filters[i];

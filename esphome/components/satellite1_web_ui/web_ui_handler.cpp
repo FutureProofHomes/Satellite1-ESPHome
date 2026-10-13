@@ -2935,10 +2935,10 @@ namespace dsp = satellite1_dsp;
 // JSON has no NaN or infinity; the XMOS's analysis of an empty slot is not guaranteed finite.
 double dsp_num(float v) { return std::isfinite(v) ? v : 0.0; }
 
-// {"pre":..,"bass":..,"tre":..,"lim":..,"atk":..,"rel":..,"preset":"..","f":[[type,on,hz,db,q],..]}
+// {"pre":..,"bass":..,"mid":..,"tre":..,"lim":..,"atk":..,"rel":..,"preset":"..","f":[[type,on,hz,db,q],..]}
 void write_dsp_profile(ChunkWriter &w, const dsp::Profile &p) {
-  w.printf(R"({"pre":%.6g,"bass":%.6g,"tre":%.6g,"lim":%.6g,"atk":%.6g,"rel":%.6g,"preset":)", p.preamp, p.bass,
-           p.treble, p.limiter, p.attack, p.release);
+  w.printf(R"({"pre":%.6g,"bass":%.6g,"mid":%.6g,"tre":%.6g,"lim":%.6g,"atk":%.6g,"rel":%.6g,"preset":)", p.preamp,
+           p.bass, p.mid, p.treble, p.limiter, p.attack, p.release);
   write_json_string(w, p.preset);
   w.print(R"(,"f":[)");
   for (uint8_t i = 0; i < p.count && i < dsp::MAX_FILTERS; i++) {
@@ -3067,11 +3067,11 @@ void WebUIHandler::handle_dsp_(AsyncWebServerRequest *request) {
   ChunkWriter w{*request};
   w.print("{");
   write_dsp_status(w, this->dsp_);
-  w.printf(R"(,"caps":{"maxf":%u,"maxs":%u,"maxu":%u,"name":%u,"bass_hz":%.6g,"tre_hz":%.6g,"tone_q":%.6g,)",
+  w.printf(R"(,"caps":{"maxf":%u,"maxs":%u,"maxu":%u,"name":%u,"bass_hz":%.6g,"mid_hz":%.6g,"tre_hz":%.6g,)",
            static_cast<unsigned>(dsp::MAX_FILTERS), static_cast<unsigned>(dsp::eq::MAX_SECTIONS),
            static_cast<unsigned>(dsp::MAX_USER_PRESETS), static_cast<unsigned>(dsp::NAME_LEN - 1), dsp::BASS_HZ,
-           dsp::TREBLE_HZ, dsp::TONE_Q);
-  w.printf(R"("tone_max":%.6g},"p":[)", dsp::TONE_MAX_DB);
+           dsp::MID_HZ, dsp::TREBLE_HZ);
+  w.printf(R"("tone_q":%.6g,"tone_max":%.6g},"p":[)", dsp::TONE_Q, dsp::TONE_MAX_DB);
   // One profile or preset on this stack at a time: the httpd task has 4352 bytes in all.
   dsp::Preset item;
   for (uint8_t o = 0; o < dsp::NUM_PROFILES; o++) {
@@ -3135,8 +3135,9 @@ void WebUIHandler::handle_dsp_set_(AsyncWebServerRequest *request) {
     if (ok) {
       this->dsp_->get_profile(out[0] - '0', p);
       ok = dsp_float(request, "pre", p.preamp, present) && dsp_float(request, "bass", p.bass, present) &&
-           dsp_float(request, "tre", p.treble, present) && dsp_float(request, "lim", p.limiter, present) &&
-           dsp_float(request, "atk", p.attack, present) && dsp_float(request, "rel", p.release, present);
+           dsp_float(request, "mid", p.mid, present) && dsp_float(request, "tre", p.treble, present) &&
+           dsp_float(request, "lim", p.limiter, present) && dsp_float(request, "atk", p.attack, present) &&
+           dsp_float(request, "rel", p.release, present);
     }
     if (ok && request->getParam("f") != nullptr) {
       present = true;
