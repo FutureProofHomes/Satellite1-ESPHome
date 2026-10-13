@@ -7,7 +7,7 @@
  * the speaker plays, and the page can tell before the XMOS does that a design will be refused. The
  * XMOS stays the authority; this is the preview.
  *
- * A profile here is { pre, bass, tre, lim, atk, rel, preset, f }: the device's JSON
+ * A profile here is { pre, bass, mid, tre, lim, atk, rel, preset, f }: the device's JSON
  * (GET /api/sat1/dsp), with each filter an object { t, on, hz, db, q } rather than its
  * [type, on, hz, db, q] array.
  */
@@ -43,13 +43,14 @@ export const RANGE = Object.freeze({
   db: [-30, 12],
   q: [0.1, 10],
 });
-/** Filters a profile can hold: the XMOS's 14 less the two Bass and Treble occupy. */
-export const MAX_FILTERS = 12;
+/** Filters a profile can hold: the XMOS's 14 less the three Bass, Midrange and Treble occupy. */
+export const MAX_FILTERS = 11;
 export const MAX_SECTIONS = 16;
 /** The worst level allowed between sections; a design over it is refused. */
 export const HEADROOM_CAP_DB = 18;
-/** Bass and Treble: fixed shelves, sent as every slot's first two records (satellite1_dsp.h). */
-export const TONE = Object.freeze({ bassHz: 120, trebleHz: 8000, q: 0.707, max: 9 });
+/** Bass, Midrange and Treble: two shelves and a peak at fixed frequencies, sent as every slot's
+ *  first three records (satellite1_dsp.h). */
+export const TONE = Object.freeze({ bassHz: 120, midHz: 1000, trebleHz: 8000, q: 0.707, max: 9 });
 /** A new filter, and the shape a cut's Q takes when it has none of its own. */
 export const DEFAULT_Q = 0.707;
 
@@ -77,9 +78,10 @@ export function sectionsOf(f) {
   return f.t === T.HP_BW24 || f.t === T.HP_LR24 || f.t === T.LP_BW24 || f.t === T.LP_LR24 ? 2 : 1;
 }
 
-/** Bass and Treble as the slot's first two records, the way satellite1_dsp sends them. */
+/** Bass, Midrange and Treble as the slot's first three records, the way satellite1_dsp sends them. */
 export const toneFilters = p => [
   { t: T.LOW_SHELF, on: true, hz: TONE.bassHz, db: p.bass, q: TONE.q },
+  { t: T.PEAK, on: true, hz: TONE.midHz, db: p.mid, q: TONE.q },
   { t: T.HIGH_SHELF, on: true, hz: TONE.trebleHz, db: p.tre, q: TONE.q },
 ];
 export const slotFilters = p => [...toneFilters(p), ...p.f];
@@ -199,7 +201,7 @@ export function filterCurve(f, freqs, fs = FS) {
   });
 }
 
-/** The whole profile's gain in dB at each frequency: preamp, Bass, Treble and every filter. */
+/** The whole profile's gain in dB at each frequency: preamp, Bass, Midrange, Treble and every filter. */
 export function profileCurve(p, freqs, fs = FS) {
   const secs = slotFilters(p).flatMap(f => biquads(f, fs));
   return freqs.map(hz => {
@@ -351,6 +353,7 @@ export function fromWire(w) {
   return {
     pre: num(w?.pre),
     bass: num(w?.bass),
+    mid: num(w?.mid),
     tre: num(w?.tre),
     lim: num(w?.lim, -1),
     atk: num(w?.atk, 1),
@@ -368,6 +371,7 @@ export function clampProfile(p) {
     ...p,
     pre: clamp(p.pre, ...RANGE.pre),
     bass: clamp(p.bass, -TONE.max, TONE.max),
+    mid: clamp(p.mid, -TONE.max, TONE.max),
     tre: clamp(p.tre, -TONE.max, TONE.max),
     lim: clamp(p.lim, ...RANGE.lim),
     atk: clamp(p.atk, ...RANGE.atk),
@@ -392,6 +396,7 @@ export function profileBody(p) {
   return {
     pre: wireNum(c.pre),
     bass: wireNum(c.bass),
+    mid: wireNum(c.mid),
     tre: wireNum(c.tre),
     lim: wireNum(c.lim),
     atk: wireNum(c.atk),
@@ -405,7 +410,7 @@ const near = (a, b) => Math.abs(a - b) < 0.005;
 /** Whether two profiles sound the same: everything but the preset's name. */
 export function sameSound(a, b) {
   if (!a || !b || a.f.length !== b.f.length) return false;
-  for (const k of ['pre', 'bass', 'tre', 'lim', 'atk', 'rel']) if (!near(a[k], b[k])) return false;
+  for (const k of ['pre', 'bass', 'mid', 'tre', 'lim', 'atk', 'rel']) if (!near(a[k], b[k])) return false;
   return a.f.every((f, i) => {
     const g = b.f[i];
     return f.t === g.t && f.on === g.on && near(f.hz, g.hz) && near(usesGain(f.t) ? f.db : 0, usesGain(g.t) ? g.db : 0) && near(usesQ(f.t) ? f.q : 0, usesQ(g.t) ? g.q : 0);
@@ -436,14 +441,12 @@ function exportQs(f) {
 
 /**
  * The profile as a REW / Equalizer APO filter file, in the exact line format Music Assistant
- * exports and imports: Bass and Treble first as Q shelves at their fixed frequencies, then every
- * filter. The limiter has no place in the format and stays behind.
+ * exports and imports: Bass, Midrange and Treble first, as a Q shelf, a peak and a Q shelf at their
+ * fixed frequencies, then every filter. Any of the three at 0 dB is left out. The limiter has no
+ * place in the format and stays behind.
  */
 export function exportText(p) {
-  const recs = [];
-  const tone = toneFilters(p);
-  if (Math.abs(p.bass) >= 0.01) recs.push(tone[0]);
-  if (Math.abs(p.tre) >= 0.01) recs.push(tone[1]);
+  const recs = toneFilters(p).filter(f => Math.abs(f.db) >= 0.01);
   for (const f of p.f) for (const q of exportQs(f)) recs.push({ ...f, q });
   const lines = [`Preamp: ${p.pre.toFixed(2)} dB`];
   recs.forEach((f, i) => {
@@ -468,13 +471,13 @@ const octToQ = n => Math.sqrt(2 ** n) / (2 ** n - 1);
 
 /**
  * A REW / Equalizer APO / Music Assistant filter file as a profile's sound:
- * { pre, bass, tre, f, notes } or null when the text has no preamp or filter line at all.
+ * { pre, bass, mid, tre, f, notes } or null when the text has no preamp or filter line at all.
  *
  * Peaks, Q shelves and 12 dB/oct cuts carry over exactly. A cut line with a Q is "12 dB/oct, custom
  * Q", one without is Butterworth, and one at Butterworth's or Linkwitz-Riley's own Q is that slope;
  * two cut lines at one frequency with a Butterworth or Linkwitz-Riley 24 dB/oct pair of Qs become
- * that one filter, as exportText writes it. A Q shelf at Bass's or Treble's own frequency and Q
- * becomes that control.
+ * that one filter, as exportText writes it. A Q shelf at Bass's or Treble's own frequency and Q, or
+ * a peak at Midrange's, becomes that control.
  *
  * `notes` says what did not carry over exactly, as codes the page words:
  *   { k: 'skip', line, type }    a filter type the speaker doesn't have (notch, all-pass, 6 dB/oct...)
@@ -533,7 +536,7 @@ export function importText(text) {
     if (usesGain(t) && q == null && t !== T.PEAK) notes.push({ k: 'approx', line, type: m[2] });
     const hz = dec(fc[1]) * (fc[2] ? 1000 : 1);
     const f = { t, on, hz, db: gain ? signed(gain[1], gain[2]) : 0, q: q ?? (t === T.PEAK ? 1 : DEFAULT_Q), line };
-    const c = clampProfile({ pre: 0, bass: 0, tre: 0, lim: -1, atk: 1, rel: 100, f: [f] }).f[0];
+    const c = clampProfile({ pre: 0, bass: 0, mid: 0, tre: 0, lim: -1, atk: 1, rel: 100, f: [f] }).f[0];
     if (c.hz !== f.hz || (usesGain(t) && c.db !== f.db) || (usesQ(t) && c.q !== f.q)) notes.push({ k: 'clamp', line });
     raw.push({ ...c, line });
   });
@@ -555,25 +558,26 @@ export function importText(text) {
     }
   }
 
-  let bass = 0;
-  let tre = 0;
   const isTone = (f, t, hz) => f.t === t && f.on && Math.abs(f.hz - hz) < 0.5 && Math.abs(f.q - TONE.q) < 0.005 && Math.abs(f.db) <= TONE.max;
-  const bi = filters.findIndex(f => isTone(f, T.LOW_SHELF, TONE.bassHz));
-  if (bi >= 0) bass = filters.splice(bi, 1)[0].db;
-  const ti = filters.findIndex(f => isTone(f, T.HIGH_SHELF, TONE.trebleHz));
-  if (ti >= 0) tre = filters.splice(ti, 1)[0].db;
+  const tone = (t, hz) => {
+    const i = filters.findIndex(f => isTone(f, t, hz));
+    return i >= 0 ? filters.splice(i, 1)[0].db : 0;
+  };
+  const bass = tone(T.LOW_SHELF, TONE.bassHz);
+  const mid = tone(T.PEAK, TONE.midHz);
+  const tre = tone(T.HIGH_SHELF, TONE.trebleHz);
 
   let f = filters;
   if (f.length > MAX_FILTERS) {
     f = f.slice(0, MAX_FILTERS);
     notes.push({ k: 'many', kept: MAX_FILTERS });
   }
-  const out = { pre, bass, tre, lim: -1, atk: 1, rel: 100, preset: '', f };
+  const out = { pre, bass, mid, tre, lim: -1, atk: 1, rel: 100, preset: '', f };
   if (profileSections(out) > MAX_SECTIONS) {
     while (f.length && profileSections({ ...out, f }) > MAX_SECTIONS) f = f.slice(0, -1);
     notes.push({ k: 'budget', kept: f.length });
   }
-  return { pre, bass, tre, f, notes };
+  return { pre, bass, mid, tre, f, notes };
 }
 
 function near2(a, b) {

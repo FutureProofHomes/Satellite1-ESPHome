@@ -859,7 +859,9 @@ device's copy once nothing else is on its way. A read that set out before an edi
 older profile back. Preset operations wait for pending edits to land first (up to 10 s). Import
 reads the text REW, Equalizer APO and Music Assistant export (`Preamp:` and `Filter N:` lines, comma
 decimals too) and says what it skipped or approximated; Export writes the same format, Bass and
-Treble as shelves, 24 dB/oct cuts as two lines. The banner over the page says when the audio chip
+Treble as shelves and Midrange as a peak (each left out at 0 dB), 24 dB/oct cuts as two lines. On
+import, a shelf or peak at exactly one of the three tone controls' frequency and Q becomes that
+control. The Tone card has the three tone sliders, then the preamp. The banner over the page says when the audio chip
 is updating or not answering, and when the EQ switched itself off for want of time. Two
 independent columns once the page itself is 820 px wide (the graph and filters left, the rest right), measured on the page rather
 than the window because the sidebar arrives at 1024 px; one list in reading order below that, with

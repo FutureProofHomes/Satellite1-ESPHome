@@ -9,7 +9,7 @@ import test from "node:test";
 import {
   T, analyse, autoPreamp, biquads, clampProfile, exportText, filterCurve, filtersParam, fmtDb, fmtHz, fromWire,
   handleDb, importText, kindOf, logTrackValue, profileBody, profileCurve, profileSections, sameSound, sectionsOf, slopeOf,
-  typeOf,
+  toneFilters, typeOf,
 } from "../src/lib/eq.js";
 
 const close = (a, b, eps, what) => assert.ok(Math.abs(a - b) <= eps, `${what}: ${a} vs ${b}`);
@@ -17,7 +17,7 @@ const close = (a, b, eps, what) => assert.ok(Math.abs(a - b) <= eps, `${what}: $
 /** "Sat1.2 Smart Speaker (10/26)", as satellite1_dsp.cpp's make_sat1_speaker() builds it: the Music
  *  Assistant tuning below, 2 dB quieter. */
 const SPEAKER = {
-  pre: 8, bass: 0, tre: 0, lim: -1, atk: 1, rel: 100, preset: "Sat1.2 Smart Speaker (10/26)",
+  pre: 8, bass: 0, mid: 0, tre: 0, lim: -1, atk: 1, rel: 100, preset: "Sat1.2 Smart Speaker (10/26)",
   f: [
     { t: T.PEAK, on: true, hz: 138, db: -3, q: 1.93 },
     { t: T.PEAK, on: true, hz: 1600, db: -4.5, q: 4 },
@@ -27,7 +27,7 @@ const SPEAKER = {
     { t: T.HP_Q, on: true, hz: 60, db: 0, q: 1 },
   ],
 };
-const FLAT = { pre: 0, bass: 0, tre: 0, lim: -1, atk: 1, rel: 100, preset: "Flat", f: [] };
+const FLAT = { pre: 0, bass: 0, mid: 0, tre: 0, lim: -1, atk: 1, rel: 100, preset: "Flat", f: [] };
 
 /** music_assistant_eq_settings_2026-10-10.txt, the tuning the speaker preset was made from, byte for byte. */
 const MA_EXPORT = `Preamp: 10.00 dB
@@ -63,8 +63,19 @@ test("section budget follows the XMOS: off and 0 dB cost nothing, 24 dB/oct cuts
   assert.equal(sectionsOf({ t: T.LOW_SHELF, on: true, hz: 100, db: 0, q: 0.7 }), 0);
   assert.equal(sectionsOf({ t: T.HP_BW12, on: true, hz: 60, db: 0, q: 0.7 }), 1, "a cut has no gain to be flat");
   for (const t of [T.HP_BW24, T.HP_LR24, T.LP_BW24, T.LP_LR24]) assert.equal(sectionsOf({ t, on: true, hz: 100, db: 0, q: 0.7 }), 2);
-  assert.equal(profileSections(SPEAKER), 6, "Bass and Treble at 0 dB cost nothing");
-  assert.equal(profileSections({ ...SPEAKER, bass: 3, tre: -2 }), 8);
+  assert.equal(profileSections(SPEAKER), 6, "Bass, Midrange and Treble at 0 dB cost nothing");
+  assert.equal(profileSections({ ...SPEAKER, bass: 3, mid: 1.5, tre: -2 }), 9);
+});
+
+test("Bass, Midrange and Treble are the slot's first three records: two shelves and a 1 kHz peak", () => {
+  assert.deepEqual(toneFilters({ ...FLAT, bass: 1, mid: 2, tre: 3 }), [
+    { t: T.LOW_SHELF, on: true, hz: 120, db: 1, q: 0.707 },
+    { t: T.PEAK, on: true, hz: 1000, db: 2, q: 0.707 },
+    { t: T.HIGH_SHELF, on: true, hz: 8000, db: 3, q: 0.707 },
+  ]);
+  const curve = profileCurve({ ...FLAT, mid: 6 }, [1000, 120, 8000]);
+  close(curve[0], 6, 1e-6, "Midrange's centre");
+  assert.ok(curve[1] < 1 && curve[2] < 1, `it leaves Bass's and Treble's corners nearly alone: ${curve}`);
 });
 
 test("the speaker preset's net curve peaks at +12.8 dB near 5.7 kHz, so the limiter is in play", () => {
@@ -146,6 +157,7 @@ test("Music Assistant's export imports as exactly the speaker preset's filters, 
   assert.deepEqual(r.notes, []);
   assert.equal(r.pre, 10);
   assert.equal(r.bass, 0);
+  assert.equal(r.mid, 0);
   assert.equal(r.tre, 0);
   assert.ok(sameSound({ ...SPEAKER, ...r, pre: SPEAKER.pre }, SPEAKER), JSON.stringify(r.f));
 });
@@ -153,10 +165,13 @@ test("Music Assistant's export imports as exactly the speaker preset's filters, 
 test("export writes Music Assistant's own line format, and reads back the same sound", () => {
   const text = exportText({ ...SPEAKER, pre: 10 });
   assert.equal(text, MA_EXPORT);
-  const toned = { ...SPEAKER, bass: 3, tre: -2.5, f: [...SPEAKER.f, { t: T.LP_LR24, on: false, hz: 16000, db: 0, q: 0.707 }, { t: T.HP_BW24, on: true, hz: 40, db: 0, q: 0.707 }] };
-  const back = importText(exportText(toned));
+  const toned = { ...SPEAKER, bass: 3, mid: -1.5, tre: -2.5, f: [...SPEAKER.f, { t: T.LP_LR24, on: false, hz: 16000, db: 0, q: 0.707 }, { t: T.HP_BW24, on: true, hz: 40, db: 0, q: 0.707 }] };
+  const tonedText = exportText(toned);
+  assert.match(tonedText, /^Filter 2: ON PK Fc 1000\.0 Hz Gain -1\.50 dB Q 0\.707$/m, "Midrange as a peak, between Bass and Treble");
+  const back = importText(tonedText);
   assert.deepEqual(back.notes, []);
   assert.equal(back.bass, 3);
+  assert.equal(back.mid, -1.5);
   assert.equal(back.tre, -2.5);
   assert.ok(sameSound({ ...toned, ...back }, toned), JSON.stringify(back.f));
 });
@@ -232,8 +247,8 @@ test("a single cut at Butterworth's or Linkwitz-Riley's own Q comes in as that s
 test("an import that overflows keeps what fits", () => {
   const many = Array.from({ length: 14 }, (_, i) => `Filter ${i + 1}: ON PK Fc ${100 + i * 100} Hz Gain 1 dB Q 1`).join("\n");
   const r = importText(many);
-  assert.equal(r.f.length, 12);
-  assert.deepEqual(r.notes, [{ k: "many", kept: 12 }]);
+  assert.equal(r.f.length, 11);
+  assert.deepEqual(r.notes, [{ k: "many", kept: 11 }]);
   const cuts = Array.from({ length: 9 }, (_, i) => `Filter ${2 * i + 1}: ON HP Fc ${20 + i} Hz Gain 0 dB Q 0.541\nFilter ${2 * i + 2}: ON HP Fc ${20 + i} Hz Gain 0 dB Q 1.307`).join("\n");
   const c = importText(cuts);
   assert.equal(c.f.length, 8, "eight 24 dB/oct cuts are all 16 sections");
@@ -244,15 +259,17 @@ test("an import that overflows keeps what fits", () => {
 test("the device's JSON in, its form body out, always inside its ranges", () => {
   const p = fromWire({ pre: 8, bass: 0, tre: 0, lim: -1, atk: 1, rel: 100, preset: "Sat1.2 Smart Speaker (10/26)", f: [[1, 1, 138, -3, 1.93], [4, 1, 60, 0, 1], [99, 1, 1, 1, 1], "junk"] });
   assert.equal(p.f.length, 2, "unknown types and malformed rows are dropped");
+  assert.equal(p.mid, 0, "a missing field reads as flat");
   assert.deepEqual(p.f[1], { t: T.HP_Q, on: true, hz: 60, db: 0, q: 1 });
   assert.equal(filtersParam(p.f), "1,1,138,-3,1.93;4,1,60,0,1");
-  const wild = clampProfile({ ...p, pre: 40, bass: -20, lim: 3, f: [{ t: T.PEAK, on: true, hz: 5, db: -50, q: 0 }, { t: T.HP_BW12, on: true, hz: 30000, db: 6, q: 4 }] });
+  const wild = clampProfile({ ...p, pre: 40, bass: -20, mid: 20, lim: 3, f: [{ t: T.PEAK, on: true, hz: 5, db: -50, q: 0 }, { t: T.HP_BW12, on: true, hz: 30000, db: 6, q: 4 }] });
   assert.equal(wild.pre, 12);
   assert.equal(wild.bass, -9);
+  assert.equal(wild.mid, 9);
   assert.equal(wild.lim, 0);
   assert.deepEqual(wild.f[0], { t: T.PEAK, on: true, hz: 20, db: -30, q: 0.1 });
   assert.deepEqual(wild.f[1], { t: T.HP_BW12, on: true, hz: 20000, db: 0, q: 0.707 }, "a fixed-shape cut has no gain or Q");
-  assert.deepEqual(profileBody(SPEAKER), { pre: "8", bass: "0", tre: "0", lim: "-1", atk: "1", rel: "100", f: "1,1,138,-3,1.93;1,1,1600,-4.5,4;1,1,3455,-8,2.66;1,1,5700,7,3.42;1,1,13700,-10,1;4,1,60,0,1" });
+  assert.deepEqual(profileBody(SPEAKER), { pre: "8", bass: "0", mid: "0", tre: "0", lim: "-1", atk: "1", rel: "100", f: "1,1,138,-3,1.93;1,1,1600,-4.5,4;1,1,3455,-8,2.66;1,1,5700,7,3.42;1,1,13700,-10,1;4,1,60,0,1" });
 });
 
 test("sameSound ignores the preset's name and what a filter type does not use", () => {

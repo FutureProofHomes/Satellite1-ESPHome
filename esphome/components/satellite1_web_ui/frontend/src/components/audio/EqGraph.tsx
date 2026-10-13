@@ -13,6 +13,7 @@ export type Filter = {
 export type Profile = {
   pre: number;
   bass: number;
+  mid: number;
   tre: number;
   lim: number;
   atk: number;
@@ -83,8 +84,8 @@ function useWidth(ref: React.RefObject<HTMLElement>) {
 }
 
 /**
- * The response graph: 20 Hz-20 kHz on a log axis, ±18 dB. It draws the EQ itself - filters, Bass and
- * Treble - so each dot sits on the curve it shapes; the preamp instead moves the limiter's line,
+ * The response graph: 20 Hz-20 kHz on a log axis, ±18 dB. It draws the EQ itself - filters, Bass,
+ * Midrange and Treble - so each dot sits on the curve it shapes; the preamp instead moves the limiter's line,
  * since raising everything by 10 dB is the same as bringing the ceiling 10 dB closer. Wherever the
  * curve is above that line, loud music reaches the limiter.
  *
@@ -117,7 +118,7 @@ export function EqGraph({
 
   const n = clamp(Math.round(iw / 2.5), 120, 320);
   const freqs = useMemo(() => logFreqs(n), [n]);
-  const total = useMemo(() => profileCurve({ ...p, pre: 0 }, freqs), [p.bass, p.tre, p.f, freqs]);
+  const total = useMemo(() => profileCurve({ ...p, pre: 0 }, freqs), [p.bass, p.mid, p.tre, p.f, freqs]);
   // An edit replaces only the filter it touches, so the others' curves and paths are kept by
   // identity: a drag recomputes one curve, not twelve.
   const cache = useRef<{ key: string; curve: WeakMap<Filter, number[]>; path: WeakMap<number[], string> } | null>(null);

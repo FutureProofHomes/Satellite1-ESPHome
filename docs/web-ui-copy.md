@@ -1226,7 +1226,7 @@ count.
 | Key | Text |
 | --- | --- |
 | `import_title` | Import a filter file |
-| `import_body` | Paste an export from REW, Equalizer APO or Music Assistant, or choose the file. It replaces this output's filters, Bass, Treble and preamp; the limiter stays as it is. |
+| `import_body` | Paste an export from REW, Equalizer APO or Music Assistant, or choose the file. It replaces this output's filters, Bass, Midrange, Treble and preamp; the limiter stays as it is. |
 | `import_choose`, `import_go` | Choose a file…, Import |
 | `import_text` | Filter file text (the text box's screen-reader name) |
 | `import_none` | That doesn't look like a filter file. It needs Preamp or Filter lines. |
@@ -1239,7 +1239,7 @@ count.
 | `notes.many` | Only the first {kept} filters fit. |
 | `notes.budget` | Only the first {kept} filters fit in the audio chip. |
 | `export_title` | Export as a filter file |
-| `export_body` | The REW / Equalizer APO format, which Music Assistant imports too. Bass and Treble come along as shelves; the limiter doesn't. |
+| `export_body` | The REW / Equalizer APO format, which Music Assistant imports too. Bass, Midrange and Treble come along as filters at their own frequencies; the limiter doesn't. |
 | `copy`, `copied`, `download`, `close` | Copy, Copied, Download, Close |
 
 **The graph and what it says about level.**
@@ -1262,7 +1262,7 @@ count.
 
 | Key | Text |
 | --- | --- |
-| `tone`, `bass`, `treble`, `preamp` | Tone, Bass, Treble, Preamp |
+| `tone`, `bass`, `mid`, `treble`, `preamp` | Tone, Bass, Midrange, Treble, Preamp (each tone label followed by its frequency: 120 Hz, 1 kHz, 8 kHz) |
 | `preamp_hint` | Raises or lowers everything before the volume control. Lower it to make room for boosts; raise it to make a quiet speaker louder, with the limiter catching the peaks. |
 | `filters`, `add` | Filters, Add filter |
 | `none` | No filters yet. Add one here, or double-click the graph. |

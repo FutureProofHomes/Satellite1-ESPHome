@@ -1706,7 +1706,7 @@ export const DSP = {
 
   // Import and export.
   import_title: "Import a filter file",
-  import_body: "Paste an export from REW, Equalizer APO or Music Assistant, or choose the file. It replaces this output's filters, Bass, Treble and preamp; the limiter stays as it is.",
+  import_body: "Paste an export from REW, Equalizer APO or Music Assistant, or choose the file. It replaces this output's filters, Bass, Midrange, Treble and preamp; the limiter stays as it is.",
   import_choose: "Choose a file…",
   import_go: "Import",
   import_text: "Filter file text",
@@ -1722,7 +1722,7 @@ export const DSP = {
     budget: "Only the first {kept} filters fit in the audio chip.",
   },
   export_title: "Export as a filter file",
-  export_body: "The REW / Equalizer APO format, which Music Assistant imports too. Bass and Treble come along as shelves; the limiter doesn't.",
+  export_body: "The REW / Equalizer APO format, which Music Assistant imports too. Bass, Midrange and Treble come along as filters at their own frequencies; the limiter doesn't.",
   copy: "Copy",
   copied: "Copied",
   download: "Download",
@@ -1744,9 +1744,10 @@ export const DSP = {
   // In sync, for the output that isn't playing or while the EQ is off.
   ready: "Ready",
 
-  // Bass, Treble and preamp.
+  // Bass, Midrange, Treble and preamp.
   tone: "Tone",
   bass: "Bass",
+  mid: "Midrange",
   treble: "Treble",
   preamp: "Preamp",
   preamp_hint: "Raises or lowers everything before the volume control. Lower it to make room for boosts; raise it to make a quiet speaker louder, with the limiter catching the peaks.",

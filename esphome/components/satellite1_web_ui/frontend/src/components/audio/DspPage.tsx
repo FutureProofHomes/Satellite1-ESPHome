@@ -902,6 +902,16 @@ function DspEditor({
           })} />
           </div>
           <div className="dsp-tone-row">
+            <span className="dsp-edit-label">{DSP.mid} <small>{fmtHz(TONE.midHz)}</small></span>
+            <MSlider value={draft.mid} min={-TONE.max} max={TONE.max} step={0.5} snap={0} format={v => fmtDb(v)} ariaLabel={DSP.mid} onPreview={mid => edit({
+            ...draft,
+            mid
+          })} onCommit={mid => edit({
+            ...draft,
+            mid
+          })} />
+          </div>
+          <div className="dsp-tone-row">
             <span className="dsp-edit-label">{DSP.treble} <small>{fmtHz(TONE.trebleHz)}</small></span>
             <MSlider value={draft.tre} min={-TONE.max} max={TONE.max} step={0.5} snap={0} format={v => fmtDb(v)} ariaLabel={DSP.treble} onPreview={tre => edit({
             ...draft,
@@ -993,6 +1003,7 @@ function DspEditor({
         ...draft,
         pre: r.pre,
         bass: r.bass,
+        mid: r.mid,
         tre: r.tre,
         f: r.f,
         preset: ''
