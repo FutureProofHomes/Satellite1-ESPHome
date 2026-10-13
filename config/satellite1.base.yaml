@@ -102,6 +102,9 @@ packages:
   ## OPTIONAL COMPONENTS
   # debug: !include common/debug.yaml
   # developer: !include common/developer.yaml
+  # OpenAI Realtime conversations instead of the Assist pipeline - set the openai_* substitutions
+  # first (see the top of common/openai_realtime.yaml):
+  openai_realtime: !include common/openai_realtime.yaml
 
 fusb302b:
   id: pd_fusb302b

@@ -21,6 +21,17 @@ globals:
     type: int
     restore_value: no
     # initial_value: ${voice_assist_not_ready_phase_id}
+  # Hooks for the optional OpenAI Realtime package (common/openai_realtime.yaml). Without it they
+  # stay false and the wake word and action button start the Assist pipeline as always. With it,
+  # the first follows its "Use OpenAI Realtime" switch and the second tracks a live conversation.
+  - id: openai_realtime_selected
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: openai_realtime_running
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
 microphone:
   - platform: satellite1
@@ -65,9 +76,13 @@ micro_wake_word:
               else:
                 - if:
                     condition:
-                      voice_assistant.is_running:
+                      or:
+                        - voice_assistant.is_running:
+                        # A live OpenAI Realtime conversation: the wake word said again hangs up.
+                        - lambda: return id(openai_realtime_running);
                     then:
-                      voice_assistant.stop:
+                      - voice_assistant.stop:
+                      - script.execute: openai_realtime_stop
                     # Stop any other media player announcement
                     else:
                       - if:
@@ -90,8 +105,14 @@ micro_wake_word:
                                       priority: true
                                       sound_file: "wake_word_triggered_sound"
                                   - delay: 300ms
-                            - voice_assistant.start:
-                                wake_word: !lambda return wake_word;
+                            - if:
+                                condition:
+                                  lambda: return id(openai_realtime_selected);
+                                then:
+                                  - script.execute: openai_realtime_start
+                                else:
+                                  - voice_assistant.start:
+                                      wake_word: !lambda return wake_word;
 
 voice_assistant:
   id: va
@@ -208,6 +229,11 @@ voice_assistant:
     - script.execute: control_leds
 
 script:
+  # Filled in by common/openai_realtime.yaml (!extend); empty without it.
+  - id: openai_realtime_start
+    then: []
+  - id: openai_realtime_stop
+    then: []
   - id: start_micro_wake_word
     mode: restart
     then:

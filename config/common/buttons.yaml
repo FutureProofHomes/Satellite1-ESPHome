@@ -147,9 +147,12 @@ binary_sensor:
                     else:
                       - if:
                           condition:
-                            voice_assistant.is_running:
+                            or:
+                              - voice_assistant.is_running:
+                              - lambda: return id(openai_realtime_running);
                           then:
                             - voice_assistant.stop:
+                            - script.execute: openai_realtime_stop
                           else:
                             - if:
                                 condition:
@@ -173,13 +176,20 @@ binary_sensor:
                                               and:
                                                 - switch.is_off: master_mute_switch
                                                 - not: voice_assistant.is_running
+                                                - lambda: return !id(openai_realtime_running);
                                             then:
                                               - script.execute:
                                                   id: play_sound
                                                   priority: true
                                                   sound_file: "center_button_press_sound"
                                               - delay: 300ms
-                                              - voice_assistant.start:
+                                              - if:
+                                                  condition:
+                                                    lambda: return id(openai_realtime_selected);
+                                                  then:
+                                                    - script.execute: openai_realtime_start
+                                                  else:
+                                                    - voice_assistant.start:
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:

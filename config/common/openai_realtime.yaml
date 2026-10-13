@@ -1,0 +1,259 @@
+####################################################################################################
+# OpenAI Realtime (optional): a live, full-duplex voice conversation with a Realtime model, straight
+# from the device over a WebSocket - instead of the Home Assistant Assist pipeline.
+#
+# Works with OpenAI itself and with any server that speaks the Realtime protocol, including a
+# self-hosted one on the local network; the device detects whether a server speaks the current (GA)
+# format or the earlier beta one most self-hosted servers use. See docs/openai-realtime.md.
+#
+# Turning it on - in your device YAML (or satellite1.base.yaml's OPTIONAL COMPONENTS):
+#
+#   substitutions:
+#     openai_api_key: !secret openai_api_key      # not needed for a local server without auth
+#     # openai_base_url: http://192.168.1.20:8000/v1
+#     # openai_model: gpt-realtime-2.1
+#     # openai_voice: marin
+#     # openai_ca_certificate: !secret local_server_cert  # https:// server with its own certificate
+#     # openai_realtime_restore_mode: RESTORE_DEFAULT_OFF   # start on Assist after first flash
+#     # openai_full_duplex_restore_mode: RESTORE_DEFAULT_OFF # start turn-based after first flash
+#   packages:
+#     openai_realtime: !include common/openai_realtime.yaml
+#
+# The connection is configured here, at build time. Which engine runs is a switch: with the package
+# included, a "Use OpenAI Realtime" switch (on by default, also in Home Assistant) makes the wake
+# word and the action button start either a Realtime conversation or the Assist pipeline, without a
+# reboot. Without the package they start the Assist pipeline exactly as before (voice_assistant.yaml's
+# openai_realtime_* hooks stay empty) and nothing of this is built in.
+#
+# During a conversation:
+#   - Full duplex (the "OpenAI Realtime full duplex" switch, on by default): the device keeps
+#     listening while it speaks. Talking over the answer stops it at once and truncates the unheard
+#     part on the server, so the conversation matches what was heard. It relies on the XMOS echo
+#     canceller keeping the device's own voice out of the microphone.
+#   - Turn-based (that switch off): like the Assist pipeline - the microphone closes when you stop
+#     talking and reopens after the answer; use it if a setup hears itself (an external speaker on
+#     the line-out far from the device) or you simply prefer taking turns.
+#   - Device control goes through Home Assistant: the model gets a `home_assistant` tool answered by
+#     conversation.process (Assist's own intent handling). This needs "Allow the device to perform
+#     Home Assistant actions" on the device's ESPHome integration entry.
+#   - It ends on goodbye (the model's end_conversation tool), 20 s of silence, the wake word or the
+#     action button, or the mute switch.
+####################################################################################################
+
+substitutions:
+  # The OpenAI SDK's baseURL convention: the device connects to <base_url>/realtime?model=<model>.
+  # http:// or ws:// gives a plain ws:// connection, https:// or wss:// an encrypted wss:// one.
+  # For a server on your network, http:// is simplest; for https:// with a self-signed certificate
+  # see openai_ca_certificate.
+  openai_base_url: http://192.168.0.100:5015/openai-realtime-api/v1
+  openai_api_key: sk-1
+  openai_model: google/gemma-4-E2B-it
+  openai_voice: nexus
+  # An https:// server whose certificate is not from a public authority: its certificate (or the CA
+  # that signed it) in PEM, e.g. from secrets.yaml as a block scalar (local_server_cert: |-). Empty =
+  # only publicly trusted certificates.
+  openai_ca_certificate: ""
+  # false: accept that certificate whatever host name or IP address it names.
+  openai_verify_certificate_name: "true"
+  # The "Use OpenAI Realtime" switch's state on first boot (and after a flash erase); afterwards it
+  # keeps whatever it was last set to. RESTORE_DEFAULT_OFF starts on the Assist pipeline instead.
+  openai_realtime_restore_mode: RESTORE_DEFAULT_ON
+  # The "OpenAI Realtime full duplex" switch's state on first boot. RESTORE_DEFAULT_OFF starts
+  # turn-based, like the Assist pipeline.
+  openai_full_duplex_restore_mode: RESTORE_DEFAULT_OFF
+
+switch:
+  # Which engine the wake word and the action button start: on = OpenAI Realtime, off = the Home
+  # Assistant Assist pipeline. Takes effect at the next start, no reboot; a conversation already
+  # running finishes normally. Shown in Home Assistant, so automations can flip it too.
+  - platform: template
+    id: openai_realtime_switch
+    name: Use OpenAI Realtime
+    icon: mdi:account-voice
+    entity_category: config
+    optimistic: true
+    restore_mode: ${openai_realtime_restore_mode}
+    # Fired on every change, including the restore at boot, so the hook below always matches.
+    on_turn_on:
+      - lambda: id(openai_realtime_selected) = true;
+    on_turn_off:
+      - lambda: id(openai_realtime_selected) = false;
+
+  # How a Realtime conversation takes turns:
+  #   on  = full duplex: the microphone stays open while the model speaks, and talking over it
+  #         interrupts it (barge-in).
+  #   off = turn-based, like the Assist pipeline: the microphone closes when you stop talking and
+  #         reopens after the answer has played; only the wake word or the button interrupts.
+  # Applies from the next conversation; one already running keeps its mode.
+  - platform: template
+    id: openai_full_duplex_switch
+    name: OpenAI Realtime full duplex
+    icon: mdi:swap-horizontal
+    entity_category: config
+    optimistic: true
+    restore_mode: ${openai_full_duplex_restore_mode}
+    on_turn_on:
+      - openai_realtime.set_full_duplex:
+          full_duplex: true
+    on_turn_off:
+      - openai_realtime.set_full_duplex:
+          full_duplex: false
+
+script:
+  - id: !extend openai_realtime_start
+    then:
+      - openai_realtime.start:
+  - id: !extend openai_realtime_stop
+    then:
+      - openai_realtime.stop:
+
+speaker:
+  # A third mixer input for the model's voice, next to announcements and media.
+  - id: !extend mixing_speaker
+    source_speakers:
+      - id: realtime_mixing_input
+        timeout: 3s
+        buffer_duration: 100ms
+  # The model speaks 24 kHz mono PCM; the mixer runs at 48 kHz. 300 ms of buffer rides out a main
+  # loop stalled by a busy moment; playback_latency below accounts for it plus the mixer's and the
+  # I2S speaker's own buffers when estimating how much of an interrupted answer was heard.
+  - platform: resampler
+    id: realtime_resampling_speaker
+    output_speaker: realtime_mixing_input
+    sample_rate: 48000
+    bits_per_sample: 16
+    buffer_duration: 300ms
+
+openai_realtime:
+  id: oai_rt
+  base_url: ${openai_base_url}
+  api_key: ${openai_api_key}
+  model: ${openai_model}
+  voice: ${openai_voice}
+  ca_certificate: ${openai_ca_certificate}
+  verify_certificate_name: ${openai_verify_certificate_name}
+  microphone:
+    microphone: sat1_mics
+    channels: 0
+  speaker: realtime_resampling_speaker
+  muted: !lambda return id(master_mute_switch).state;
+  # Resampler (300 ms) + mixer input (100 ms) + I2S speaker (500 ms default) hold at most ~900 ms;
+  # in steady playback they sit around two thirds full.
+  playback_latency: 700ms
+  idle_timeout: 20s
+  turn_detection:
+    type: server_vad
+  instructions: >-
+    You are the voice assistant of a Satellite1 smart speaker in someone's home. Speak naturally and
+    briefly - one to three sentences unless asked for more. You are heard, not read: no lists,
+    markdown, URLs or emoji. For anything about the home - lights, climate, media, timers, sensors,
+    the state of devices, or anything Home Assistant knows - call the home_assistant tool with the
+    request in plain words and tell the user the outcome in your own words. When the user says
+    goodbye or that they are done, say a short goodbye and call end_conversation.
+  tools:
+    - name: home_assistant
+      description: >-
+        Send a request to the Home Assistant smart home (Assist). Use it to control devices, set
+        timers, or ask about the state of anything in the home. Returns Home Assistant's answer.
+      parameters:
+        type: object
+        properties:
+          command:
+            type: string
+            description: >-
+              The request in plain words, as the user would say it to a voice assistant, for
+              example "turn off the kitchen lights" or "what is the temperature in the bedroom".
+        required: [command]
+
+  on_start:
+    - lambda: id(openai_realtime_running) = true;
+    - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
+    - script.execute: control_leds
+    # Duck media under the conversation, as voice_assistant.yaml does for a response.
+    - mixer_speaker.apply_ducking:
+        id: media_mixing_input
+        decibel_reduction: 20
+        duration: 0.0s
+  on_listening:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
+    - script.execute: control_leds
+  on_speech_started:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
+    - script.execute: control_leds
+  on_speech_stopped:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_thinking_phase_id};
+    - script.execute: control_leds
+  on_response_started:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
+    - script.execute: control_leds
+  on_interrupted:
+    - lambda: id(voice_assistant_phase) = ${voice_assist_listening_for_command_phase_id};
+    - script.execute: control_leds
+  on_error:
+    - logger.log:
+        level: WARN
+        format: "OpenAI Realtime error %s: %s"
+        args: ['code.c_str()', 'message.c_str()']
+    - lambda: id(voice_assistant_phase) = ${voice_assist_error_phase_id};
+    - script.execute: control_leds
+    # A start that failed before on_start gets no on_end: clear the error phase here.
+    - if:
+        condition:
+          lambda: return !id(openai_realtime_running);
+        then:
+          - delay: 1s
+          - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+          - script.execute: control_leds
+  on_end:
+    - lambda: id(openai_realtime_running) = false;
+    - mixer_speaker.apply_ducking:
+        id: media_mixing_input
+        decibel_reduction: 0
+        duration: 1.0s
+    # If it ended on an error, keep the error phase on the ring for a second.
+    - if:
+        condition:
+          lambda: return id(voice_assistant_phase) == ${voice_assist_error_phase_id};
+        then:
+          - delay: 1s
+    - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+    - script.execute: control_leds
+
+  on_function_call:
+    - if:
+        condition:
+          lambda: return name == "home_assistant";
+        then:
+          - if:
+              condition: api.connected
+              then:
+                - homeassistant.action:
+                    action: conversation.process
+                    data:
+                      text: !lambda |-
+                        auto doc = esphome::json::parse_json(arguments);
+                        const char *command = doc["command"] | "";
+                        return std::string(command);
+                    capture_response: true
+                    on_success:
+                      - openai_realtime.send_function_result:
+                          call_id: !lambda return call_id;
+                          output: !lambda |-
+                            // Home Assistant's whole answer: the spoken reply under
+                            // response.speech.plain.speech, plus what it did (response_type, data
+                            // targets). The model reads the JSON and phrases the outcome itself.
+                            std::string out;
+                            serializeJson(response, out);
+                            return out;
+                    on_error:
+                      - openai_realtime.send_function_result:
+                          call_id: !lambda return call_id;
+                          output: '{"error":"Home Assistant could not handle the request"}'
+              else:
+                - openai_realtime.send_function_result:
+                    call_id: !lambda return call_id;
+                    output: '{"error":"Home Assistant is not connected right now"}'
+        else:
+          - openai_realtime.send_function_result:
+              call_id: !lambda return call_id;
+              output: '{"error":"Unknown tool"}'
