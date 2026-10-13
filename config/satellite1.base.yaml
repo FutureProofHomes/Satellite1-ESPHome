@@ -14,6 +14,12 @@ substitutions:
 
   esp32_fw_version: dev
   xmos_fw_version: "v1.1.0-alpha.0"
+  # Empty embeds the GitHub release named by xmos_fw_version. To embed a local XMOS build instead,
+  # pass absolute paths on the command line along with its version:
+  #   esphome -s xmos_fw_version v1.1.0-dev.8 -s xmos_fw_image /abs/x.factory.bin \
+  #           -s xmos_fw_md5 /abs/x.factory.md5 compile config/satellite1.dev.yaml
+  xmos_fw_image: ""
+  xmos_fw_md5: ""
   # Production configurations enable this; dashboard builds only wait for a responding XMOS.
   xmos_auto_flash_on_boot: "false"
 
@@ -236,8 +242,8 @@ memory_flasher:
     id: xflash
     embed_flash_image:
       image_version: ${xmos_fw_version}
-      image_file: https://github.com/FutureProofHomes/Satellite1-XMOS/releases/download/${xmos_fw_version}/satellite1_xmos.factory.bin
-      md5_file: https://github.com/FutureProofHomes/Satellite1-XMOS/releases/download/${xmos_fw_version}/satellite1_xmos.factory.md5
+      image_file: ${ xmos_fw_image or "https://github.com/FutureProofHomes/Satellite1-XMOS/releases/download/" ~ xmos_fw_version ~ "/satellite1_xmos.factory.bin" }
+      md5_file: ${ xmos_fw_md5 or "https://github.com/FutureProofHomes/Satellite1-XMOS/releases/download/" ~ xmos_fw_version ~ "/satellite1_xmos.factory.md5" }
 
     on_flashing_start:
       then:
