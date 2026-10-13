@@ -39,7 +39,7 @@ struct DACVolumeLimits {
 
 struct DACProxyVolumeLimitPreferences {
   uint8_t version{1};
-  DACVolumeLimits speaker{-70.0f, 0.0f};
+  DACVolumeLimits speaker{-52.5f, 0.0f};
   DACVolumeLimits line_out{-52.5f, 0.0f};
 };
 

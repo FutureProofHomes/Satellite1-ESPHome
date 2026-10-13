@@ -1,5 +1,7 @@
 #include "tas2780.h"
 
+#include <cmath>
+
 #include "esphome/core/defines.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
@@ -644,7 +646,8 @@ bool TAS2780::write_volume_() {
   float volume = this->volume_ * range_len + this->vol_range_min_;
   float attenuation = (1. - volume) * 100.f;
   ESP_LOGD(TAG, "Setting attenuation to: %4.2f", attenuation);
-  uint8_t dvc = clamp<uint8_t>(attenuation, 0, 0xC8);
+  // DVC uses 0.5 dB steps; clamp before narrowing to the register width.
+  uint8_t dvc = static_cast<uint8_t>(clamp<long>(std::lround(attenuation * 2.0f), 0, 0xC8));
   return this->write_byte(TAS2780_PAGE_SELECT, 0x00) && this->write_byte(TAS2780_DVC, this->is_muted_ ? 0xC9 : dvc);
 }
 
