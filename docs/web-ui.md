@@ -61,7 +61,7 @@ Five tabs, all on the hash, in this nav order:
 | `#/home` | The voice orb (assistant phase, mute, voice volume) and its Customize drawer - the orb's colors, and the LED ring's color, brightness, style and per-moment animations - sensor readings with sparklines and calibration, timers, and the transcript per wake word |
 | `#/wake-word` | Which wake words the device answers to, each with its sensitivity tuner, voice pipeline and Finished Speaking Detection; the wake chime and the stop word |
 | `#/presence` | Live radar plot with zones, or gate energies, and the radar's own settings |
-| `#/audio/<page>` | `announcement-routing` (plain `#/audio` lands here): one Announcement Routing card: the three announcement and ducking levels, then one list of your Home Assistant areas and speakers with an Announce and a Duck box on each row (this device's own row holds "Announce on this device"), then the wake chime, timer ring and echo guard for the speakers ticked to Announce; the speaker's Channel below. `equalizer`, listed only while the running XMOS has the speaker EQ: the speaker EQ, described below |
+| `#/audio/<page>` | `announcement-routing` (plain `#/audio` lands here): one Announcement Routing card: the three announcement and ducking levels, then one list of your Home Assistant areas and speakers with an Announce and a Duck box on each row (this device's own row holds "Announce on this device"), then the wake chime, timer ring and echo guard for the speakers ticked to Announce; a Speaker card with the speaker's Channel beside it only while Equalizer isn't listed. `equalizer`, listed only while the running XMOS has the speaker EQ: the speaker EQ, described below, with the speaker's Channel under Built-in Speaker |
 | `#/settings/<page>` | `device` (facts and buttons), `updates`, `security` (auth token, password), `logs` (live logs, crash reports), `integrations` (Home Assistant side panel), `recovery` (ESP32, XMOS and radar maintenance), `developer` (developer builds only: the XMOS firmware picker, the mic monitor, the TAS2780 amplifier, logs from several devices, the system monitor), `community` |
 
 When the device has a media player, the media bar rides along the bottom of every tab.
@@ -733,8 +733,11 @@ Audio > Announcement Routing (`#/audio/announcement-routing`; plain `#/audio` la
 Audio > Equalizer is the next section.
 
 One card, **Announcement Routing**, with "Route assistant responses, announcements, timer rings and wake
-chimes to selected speakers" under the title, then the Speaker card with the Channel select (October
-2026; until then routing and ducking were two cards, each with its own tree).
+chimes to selected speakers" under the title (October 2026; until then routing and ducking were two
+cards, each with its own tree). The speaker's Channel select is on the Equalizer, under Built-in
+Speaker. While the Equalizer isn't listed (an XMOS without the EQ, or none heard from since boot) a
+Speaker card holding it stands beside the routing card instead, so it is never out of reach; without
+it the routing card takes the row.
 
 - **The levels**, together in one tinted panel at the top:
   - **Announcement Volume** (`announcement_volume`, "Follow speaker volume" at 0). This device's own
@@ -839,7 +842,9 @@ a 2.
 `src/lib/eq.js`). `eq.js` mirrors the XMOS design — same biquads, same section order, same +18 dB
 check, tested against coefficients from lib_audio_dsp's own Python — so the page can refuse an
 impossible edit before sending it and draw exactly what will play. The bar at the top picks the output
-being edited (the one playing is marked), the EQ switch, Hold to hear it flat, and the preset menu
+being edited (the one playing is marked); under Built-in Speaker, the speaker's Channel
+(`speaker_channel`, the amplifier's select, which applies with the EQ off too); then the EQ switch,
+Hold to hear it flat, and the preset menu
 with Save, Save as, Revert, and More (Import, Export, Rename, Delete, Reset). Hold to hear it flat
 follows the pointer or Space/Enter; a screen reader's bare activation latches it instead, the next
 one letting go. Rename is the device's one-step `op=rename`. The graph draws each filter and the
@@ -1038,7 +1043,8 @@ its YAML lives inline in that file: the XMOS firmware catalog and picker entitie
 `satellite1_web_ui`. A release build compiles none of it — `USE_SAT1_MIC_MONITOR`,
 `USE_SAT1_SYSMON` and `USE_SAT1_WEB_UI_AMP` are absent from its `defines.h` — and the app hides
 Settings > Developer unless the state payload shows one of the tools (`src/lib/devtools.js`). The
-speaker's Channel select is the one amplifier control customers keep; it is on the Audio tab.
+speaker's Channel select is the one amplifier control customers keep; it is on Audio > Equalizer,
+under Built-in Speaker.
 CI's `build-dev-firmware` job compiles the dev config on every push so it cannot rot unseen.
 
 **Mic monitor, device side** (`mic_monitor.h/.cpp`). A passive tap: it registers a data callback on

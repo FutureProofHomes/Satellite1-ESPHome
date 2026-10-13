@@ -124,7 +124,7 @@ looking at a third of them was the more expensive problem.
 | `amp_mode` | TAS2780, Power gain mode (Developer) | Picked automatically from the measured power supply - it is a reading, not a setting. High gain: a 9 V or higher USB-PD supply is connected and the speaker can reach full loudness. Low gain: the device is on a plain 5 V supply, so maximum loudness is reduced. Off: the amplifier is shut down, normally because line out is selected. A supply that negotiates 9 V or more (the USB-C Power Supply row on Device Info) is what unlocks High gain. |
 | `amp_dvc` | TAS2780, Digital volume (Developer) | How far open the amplifier's digital volume control is right now - the level the firmware computes from the media volume and Announcement Volume. Shown so you can see what the amplifier is actually being fed; it is managed automatically and has no handle here. To change it, use the volume controls. |
 | `amp_gain` | TAS2780, Analog gain (Developer) | The amplifier's output-level ceiling, applied on top of the digital volume. The notch on the track is the factory default, 15 dBV - the right everyday setting, and the slider snaps to it. Higher values make everything louder but can add distortion, and on a 5 V supply the chip's built-in limiter will duck the sound to protect the power rail. Lower it if the speaker distorts at high volume. |
-| `speaker_channel` | Audio, Speaker card, Channel | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
+| `speaker_channel` | Audio > Equalizer, Channel under Built-in Speaker (Announcement Routing's Speaker card while the Equalizer isn't listed) | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
 | `launch` | Launch card title | Scan the code with a phone, or paste the link into a Home Assistant dashboard button, and that browser lands here already signed in - no password, no button press. The code carries the device's current network address, so any phone on your network can scan it; the link carries the device's permanent name, the right form to paste somewhere that keeps it. Anyone who has either can sign in with it, so treat them like the password. Sign out everywhere revokes them and every session, then issues a new one. |
 | `ha_ingress` | Home Assistant card title | Puts your Satellite1s in Home Assistant's sidebar, proxied through Home Assistant itself - so it works wherever Home Assistant does, on your local network or over a public https address. hass_ingress is a third-party integration, not part of this firmware. The YAML covers every Satellite1 Home Assistant knows about: this device is the one visible "Satellite1 Fleet" entry, the rest sit hidden behind it, and the device switcher reaches them all from inside the panel. Anyone who can open the panel reaches the devices' sign-in pages through it; the YAML limits the panel to admin users - remove the require_admin line to show it to everyone. |
 | `xmos` | XMOS Firmware on Device Info, Recovery and Developer, and the XMOS Recovery and XMOS Firmware card titles | The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's. |
@@ -243,7 +243,8 @@ The cards, top to bottom: **XMOS Firmware** (the picker described under Diagnost
 **Speaker EQ** (what the chip reports about its speaker EQ), then
 **Microphones**, so a firmware swap and what it does to the audio are on one screen, then **TAS2780
 Amplifier Control** (moved here from the old Audio settings page, without its Channel row, which
-went to the Audio tab's Speaker card), **Logs From Several Devices** and **System Monitor**.
+went to the Audio tab and is now on the Equalizer, under Built-in Speaker), **Logs From Several
+Devices** and **System Monitor**.
 
 **Microphones.** `mm_title` "Microphones"; the button is `mm_listen` "Listen" / `mm_stop` "Stop";
 the `mm_play_row` "Play" row picks `mm_ch_stt` "Speech-to-text", `mm_ch_ww` "Wake word" or
@@ -1204,6 +1205,7 @@ count.
 | `output`, `outputs` | Output (the picker's screen-reader name); Built-in Speaker, Line-out |
 | `playing` | PLAYING (badge on the output playing now) |
 | `output_hint` | Each output has its own EQ. Your Satellite1 switches between them by itself when something is plugged into the line-out jack. Edit either one at any time. |
+| `channel`, `channel_label` | Channel (shown under the outputs only while Built-in Speaker is picked; its hint is `speaker_channel`'s); Speaker channel (its screen-reader name) |
 | `eq_on` / `eq_hint` | Equalizer / Off plays everything flat on both outputs. Your settings stay saved. |
 | `compare` / `comparing` | Hold to hear it flat / Playing flat |
 | `preset`, `custom`, `modified` | PRESET, Custom (no preset matches), Modified (tag beside the menu) |

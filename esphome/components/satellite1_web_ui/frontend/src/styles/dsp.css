@@ -48,7 +48,7 @@
 /* Beside the switch, the spacer takes the free space; wrapped onto its own line (a narrow column),
    the button has the line to itself and fills it. */
 .dsp-bar-row > .dsp-grow { flex: 999 1 0; }
-.dsp-bar-row > .dsp-hold { flex: 1 0 auto; }
+.dsp-bar-row > .dsp-hold, .dsp-bar-row > .dx-sel { flex: 1 0 auto; }
 .dsp-preset { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
 .dsp-preset-row { display: flex; align-items: center; gap: 8px; }
 .dsp-preset-row .dx-sel { flex: 1; min-width: 0; }

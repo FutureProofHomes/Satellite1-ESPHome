@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { DSP } from '../../copy.js';
-import { apiUrl, entity, request, requestJson } from '../../lib/device.js';
+import { DSP, HINTS } from '../../copy.js';
+import { apiUrl, entity, pathFor, post, request, requestJson } from '../../lib/device.js';
 import { DEFAULT_Q, KINDS, MAX_FILTERS, MAX_SECTIONS, RANGE, SLOPES, T, TONE, analyse, autoPreamp, clamp, exportText, fmtDb, fmtHz, fromWire, importText, kindOf, logTrackValue, profileBody, profileSections, sameSound, slopeOf, typeOf, usesGain, usesQ } from '../../lib/eq.js';
 import { toast } from '../../lib/toast.js';
 import { HintBtn } from '../bits';
@@ -749,6 +749,14 @@ function DspEditor({
 
   const xmos = entity(ctx, 'xmos_firmware')?.value;
   const flashing = typeof xmos === 'string' && /^Flashing/i.test(xmos);
+  // The amplifier's own setting rather than the EQ's, so it applies with the EQ off too.
+  const chan = entity(ctx, 'speaker_channel');
+  const setChannel = (option: string) => {
+    const p = pathFor(ctx, 'speaker_channel', 'set', {
+      option
+    });
+    if (p) post(p).catch(() => {});
+  };
   const sync = writer.sending === o ? 1 : status.sy[o] ?? 0;
   const playingHere = status.en && status.out === o;
   const syncText = sync === 0 && !playingHere ? DSP.ready : DSP.sync[sync] ?? '';
@@ -774,6 +782,11 @@ function DspEditor({
           </div>
           <HintBtn text={DSP.output_hint} />
         </div>
+        {o === 0 && chan && <div className="dsp-bar-row dsp-channel">
+            <span className="dsp-bar-label">{DSP.channel}<HintBtn text={HINTS.speaker_channel} /></span>
+            <span className="dsp-grow" />
+            <DxSelect value={chan.value ?? ''} label={DSP.channel_label} options={chan.option || []} onChange={setChannel} />
+          </div>}
         <div className="dsp-bar-row">
           <span className="dsp-bar-label">{DSP.eq_on}<HintBtn text={DSP.eq_hint} /></span>
           <Switch on={status.en} label={DSP.eq_on} onChange={setEn} />

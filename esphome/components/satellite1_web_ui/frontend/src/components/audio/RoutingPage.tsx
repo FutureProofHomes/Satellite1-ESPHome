@@ -19,9 +19,10 @@ import type { Ctx } from '../../ctx';
  * "Duck All Area Players", are projections of the selection rather than separate settings: ticking
  * this device's own area's Announce or Duck box turns the matching switch on, and unticking any
  * single player in it turns the switch off (docs/web-ui.md, "The routing and ducking selection").
- * The speaker's channel is the one amplifier setting a customer gets, so it lives here; the
- * TAS2780's analog gain and live readings are developer tools on Settings > Developer (owner call,
- * October 2026).
+ * The speaker's channel, the one amplifier setting a customer gets, belongs to the Equalizer's
+ * Built-in Speaker output; it stands here as its own card only while the Equalizer isn't listed, so
+ * it is never out of reach. The TAS2780's analog gain and live readings are developer tools on
+ * Settings > Developer (owner call, October 2026).
  */
 
 /** [entity id, name, caps, available] - the /api/sat1/ha row. */
@@ -422,8 +423,9 @@ function AudioRouting({
     </div>;
 }
 
-/** Which side of a stereo source the built-in speaker plays. Needs no Home Assistant, so it shows
- *  even when the routing card above cannot. */
+/** Which side of a stereo source the built-in speaker plays, for an XMOS without the Equalizer
+ *  (or one not heard from yet). Needs no Home Assistant, so it shows even when the routing card
+ *  cannot. */
 function SpeakerChannel({
   ctx
 }: {
@@ -456,6 +458,7 @@ export function RoutingPage({
   const problem: Problem = haProblem(ctx.ha, ctx.device?.ha);
   const payload: Payload = treePayload(ctx.ha, problem);
   const sel: Selection | null = ctx.sel;
+  const channel = has(ctx, 'speaker_channel') && ctx.dsp !== 1;
   // The selection gates the routing card. A missing one is reported apart from a missing device:
   // the shell is up, so it is the selection specifically.
   return <section className="control au-tab au-route">
@@ -463,9 +466,9 @@ export function RoutingPage({
       <h1><span>Sound, </span><em>directed.</em></h1>
       {!ctx.device ? <p className="au-missing">The device is not available on this firmware build.</p> : <>
           {!sel && <p className="au-missing">{ctx.selError ? 'The saved selection' : 'Settings'} is not available on this firmware build.</p>}
-          <div className="au-route-cards">
+          <div className={`au-route-cards${channel ? '' : ' solo'}`}>
             {sel && <AudioRouting ctx={ctx} sel={sel} problem={problem} payload={payload} />}
-            {has(ctx, 'speaker_channel') && <SpeakerChannel ctx={ctx} />}
+            {channel && <SpeakerChannel ctx={ctx} />}
           </div>
         </>}
     </section>;

@@ -20,9 +20,11 @@
   .app > .tab-content-enter > section.control.au-route { max-width: none; }
 }
 
-/* The routing card carries two columns of boxes on every row, so it takes the wider share. */
+/* The routing card carries two columns of boxes on every row, so it takes the wider share. Alone -
+   the Speaker card shows only while the Equalizer isn't listed - it takes the row. */
 @media (min-width: 640px) {
   .au-route .au-route-cards { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+  .au-route .au-route-cards.solo { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* The three levels, grouped in one tinted box above the list and set a little apart from it. */

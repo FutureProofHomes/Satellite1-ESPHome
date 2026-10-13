@@ -194,7 +194,8 @@ export const HINTS = {
   finished_speaking:
     "How long the assistant waits after you stop talking before it answers. Aggressive answers fastest; Relaxed tolerates longer mid-sentence pauses. Each wake word has its own setting. Home Assistant keeps only one, so just before the assistant listens, the device copies the wake word's choice onto it - which is why Finished speaking detection on Home Assistant's device page changes as different wake words are used. A change made there only lasts until a wake word sets it again. The action button uses the Primary wake word's setting.",
 
-  /* Audio > Speaker, Channel: the one amplifier setting a customer gets. */
+  /* Audio > Equalizer, Channel under Built-in Speaker: the one amplifier setting a customer gets.
+     Announcement Routing's Speaker card carries it instead while the Equalizer isn't listed. */
   speaker_channel:
     "Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want.",
 
@@ -1667,6 +1668,9 @@ export const DSP = {
   outputs: ["Built-in Speaker", "Line-out"],
   playing: "PLAYING",
   output_hint: "Each output has its own EQ. Your Satellite1 switches between them by itself when something is plugged into the line-out jack. Edit either one at any time.",
+  // Shown under the outputs only while Built-in Speaker is picked; the hint is HINTS.speaker_channel.
+  channel: "Channel",
+  channel_label: "Speaker channel",
   eq_on: "Equalizer",
   eq_hint: "Off plays everything flat on both outputs. Your settings stay saved.",
   compare: "Hold to hear it flat",
