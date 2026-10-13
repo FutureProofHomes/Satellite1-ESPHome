@@ -1,0 +1,17 @@
+# The speaker EQ: the per-output profiles and presets the XMOS speaker EQ plays, edited on the web
+# UI's Audio > DSP page. The XMOS designs and runs the filters; satellite1_dsp keeps the settings in
+# flash and uploads them whenever an XMOS that supports the EQ connects. On XMOS firmware without
+# it, nothing is sent and the DSP page stays hidden. See
+# esphome/components/satellite1_dsp/satellite1_dsp.h.
+#
+# Included from satellite1.yaml, so every config built from it (dev and unified too) carries it.
+# The dashboard build fetches its components from GitHub and does not include this file.
+
+satellite1_dsp:
+  id: speaker_dsp
+  # The line-out profile plays while the jack is in.
+  dac_proxy_id: dac_proxy
+
+# Package merging unions this key into the satellite1_web_ui block in common/web_ui.yaml.
+satellite1_web_ui:
+  dsp_id: speaker_dsp
