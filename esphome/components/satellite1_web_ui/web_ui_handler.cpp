@@ -252,6 +252,12 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
     if (url == "/api/sat1/ring/preview/stop")
       return Route::RING_PREVIEW_STOP;
 #endif
+#ifdef USE_SAT1_WEB_UI_DSP
+    if (url == "/api/sat1/dsp")
+      return Route::DSP_SET;
+    if (url == "/api/sat1/dsp/preset")
+      return Route::DSP_PRESET;
+#endif
     return Route::NONE;
   }
 
@@ -313,6 +319,14 @@ WebUIHandler::Route WebUIHandler::match_route_(AsyncWebServerRequest *request) {
 #ifdef USE_SAT1_WEB_UI_RING
   if (url == "/api/sat1/ring")
     return Route::RING;
+#endif
+#ifdef USE_SAT1_WEB_UI_DSP
+  if (url == "/api/sat1/dsp")
+    return Route::DSP;
+  if (url == "/api/sat1/dsp/caps")
+    return Route::DSP_CAPS;
+  if (url == "/api/sat1/dsp/live")
+    return Route::DSP_LIVE;
 #endif
 #ifdef USE_SAT1_WEB_UI_SOUNDS
   // A prefix like MEDIA_SET's: the sound's name rides the path. Exempt in the session gate for the
@@ -515,6 +529,23 @@ void WebUIHandler::handleRequest(AsyncWebServerRequest *request) {
     case Route::RING_PREVIEW:
     case Route::RING_PREVIEW_STOP:
       this->handle_ring_preview_(request);
+      break;
+#endif
+#ifdef USE_SAT1_WEB_UI_DSP
+    case Route::DSP:
+      this->handle_dsp_(request);
+      break;
+    case Route::DSP_CAPS:
+      this->handle_dsp_caps_(request);
+      break;
+    case Route::DSP_LIVE:
+      this->handle_dsp_live_(request);
+      break;
+    case Route::DSP_SET:
+      this->handle_dsp_set_(request);
+      break;
+    case Route::DSP_PRESET:
+      this->handle_dsp_preset_(request);
       break;
 #endif
 #ifdef USE_SAT1_WEB_UI_SOUNDS
@@ -2895,6 +2926,271 @@ void WebUIHandler::handle_ring_preview_(AsyncWebServerRequest *request) {
 
 #endif  // USE_SAT1_WEB_UI_RING
 
+#ifdef USE_SAT1_WEB_UI_DSP
+
+namespace {
+
+namespace dsp = satellite1_dsp;
+
+// JSON has no NaN or infinity; the XMOS's analysis of an empty slot is not guaranteed finite.
+double dsp_num(float v) { return std::isfinite(v) ? v : 0.0; }
+
+// {"pre":..,"bass":..,"tre":..,"lim":..,"atk":..,"rel":..,"preset":"..","f":[[type,on,hz,db,q],..]}
+void write_dsp_profile(ChunkWriter &w, const dsp::Profile &p) {
+  w.printf(R"({"pre":%.6g,"bass":%.6g,"tre":%.6g,"lim":%.6g,"atk":%.6g,"rel":%.6g,"preset":)", p.preamp, p.bass,
+           p.treble, p.limiter, p.attack, p.release);
+  write_json_string(w, p.preset);
+  w.print(R"(,"f":[)");
+  for (uint8_t i = 0; i < p.count && i < dsp::MAX_FILTERS; i++) {
+    const dsp::Filter &f = p.filters[i];
+    w.printf(R"(%s[%u,%u,%.6g,%.6g,%.6g])", i == 0 ? "" : ",", static_cast<unsigned>(f.type),
+             static_cast<unsigned>(f.enabled), f.freq, f.gain, f.q);
+  }
+  w.print("]}");
+}
+
+// The fields GET /api/sat1/dsp and /live share, without the braces:
+//   dsp     support (1 yes, 0 no, 2 not known yet)
+//   online  supported and the XMOS connected (not booting or being flashed)
+//   en      the EQ switch; cmp a compare hold in progress; out the output playing (0 speaker, 1 line-out)
+//   sy      each profile's sync: 0 playing, 1 being sent, 2 refused (too much boost), 3 offline
+//   info    GET_INFO: api, the XMOS's own en and prof, byp (bypass reason), limreq, and per slot
+//           st (status), sec (sections), max (net peak dB) and peak (worst section boundary dB)
+//   stats   GET_STATS, read while the page is open; null until the first read
+void write_dsp_status(ChunkWriter &w, dsp::SpeakerDsp *d) {
+  w.printf(R"("dsp":%u,"online":%d,"en":%d,"cmp":%d,"out":%u,"sy":[%u,%u],)", static_cast<unsigned>(d->support()),
+           d->online() ? 1 : 0, d->enabled() ? 1 : 0, d->comparing() ? 1 : 0, static_cast<unsigned>(d->live_output()),
+           static_cast<unsigned>(d->sync(0)), static_cast<unsigned>(d->sync(1)));
+  dsp::Info info;
+  dsp::Stats stats;
+  d->get_live(info, stats);
+  if (info.valid) {
+    w.printf(R"("info":{"api":[%u,%u],"en":%u,"prof":%u,"byp":%u,"limreq":%u,"st":[%u,%u],"sec":[%u,%u],)",
+             info.api_major, info.api_minor, info.enabled, info.profile, info.bypass, info.limiter_required,
+             info.slot_status[0], info.slot_status[1], info.slot_sections[0], info.slot_sections[1]);
+    w.printf(R"("max":[%.4g,%.4g],"peak":[%.4g,%.4g],"designs":%u,"seq":%u},)", dsp_num(info.slot_max_gain[0]),
+             dsp_num(info.slot_max_gain[1]), dsp_num(info.slot_peak_gain[0]), dsp_num(info.slot_peak_gain[1]),
+             static_cast<unsigned>(info.design_count), static_cast<unsigned>(info.bank_seq));
+  } else {
+    w.print(R"("info":null,)");
+  }
+  if (stats.valid) {
+    w.printf(R"("stats":{"frames":%u,"us_max":[%u,%u],"us_avg":[%u,%u],"us_last":[%u,%u],"over":%u,"byp":%u,)",
+             static_cast<unsigned>(stats.frames), stats.us_max[0], stats.us_max[1], stats.us_avg[0], stats.us_avg[1],
+             stats.us_last[0], stats.us_last[1], static_cast<unsigned>(stats.overruns), stats.bypass);
+    w.printf(R"("trips":%u,"lim_pct":[%u,%u],"gr":%.3g,"lim_frames":%u,"heap_min":%u,"heap":%u,)",
+             stats.watchdog_trips, stats.limiter_pct[0], stats.limiter_pct[1], dsp_num(stats.limiter_max_gr),
+             static_cast<unsigned>(stats.limiter_frames), static_cast<unsigned>(stats.heap_min_free),
+             static_cast<unsigned>(stats.heap_free));
+    w.printf(R"("rejects":%u,"design_us":%u})", static_cast<unsigned>(stats.design_rejects),
+             static_cast<unsigned>(stats.design_us_last));
+  } else {
+    w.print(R"("stats":null)");
+  }
+}
+
+std::string dsp_param(AsyncWebServerRequest *request, const char *name) {
+  auto *p = request->getParam(name);
+  return p == nullptr ? std::string() : std::string(p->value().c_str());
+}
+
+// An optional 0/1 field: leaves out at -1 when it is absent; false when it is anything else.
+bool dsp_flag(AsyncWebServerRequest *request, const char *name, int &out) {
+  if (request->getParam(name) == nullptr)
+    return true;
+  const std::string v = dsp_param(request, name);
+  if (v != "0" && v != "1")
+    return false;
+  out = v[0] - '0';
+  return true;
+}
+
+// Leaves out alone when the field is absent; false when it is present but not a number. "nan" and
+// "inf" parse, and validate_profile's range checks turn them away.
+bool dsp_float(AsyncWebServerRequest *request, const char *name, float &out, bool &present) {
+  auto *p = request->getParam(name);
+  if (p == nullptr)
+    return true;
+  present = true;
+  const char *s = p->value().c_str();
+  char *end = nullptr;
+  const float v = strtof(s, &end);
+  if (end == s || *end != '\0')
+    return false;
+  out = v;
+  return true;
+}
+
+// "type,on,hz,db,q;type,on,hz,db,q;..." - every filter, in order. Empty means none. The ranges are
+// the component's to check.
+bool dsp_filters(const char *s, dsp::Profile &p) {
+  p.count = 0;
+  while (*s != '\0') {
+    if (p.count >= dsp::MAX_FILTERS)
+      return false;
+    char *end = nullptr;
+    const long type = strtol(s, &end, 10);
+    if (end == s || *end != ',' || type < 0 || type > 255)
+      return false;
+    s = end + 1;
+    const long on = strtol(s, &end, 10);
+    if (end == s || *end != ',')
+      return false;
+    s = end + 1;
+    float v[3];
+    for (int k = 0; k < 3; k++) {
+      v[k] = strtof(s, &end);
+      const char sep = k < 2 ? ',' : ';';
+      if (end == s || (*end != sep && !(k == 2 && *end == '\0')))
+        return false;
+      s = *end == '\0' ? end : end + 1;
+    }
+    dsp::Filter &f = p.filters[p.count++];
+    f.type = static_cast<uint8_t>(type);
+    f.enabled = on != 0 ? 1 : 0;
+    f.freq = v[0];
+    f.gain = v[1];
+    f.q = v[2];
+  }
+  return true;
+}
+
+}  // namespace
+
+void WebUIHandler::handle_dsp_(AsyncWebServerRequest *request) {
+  if (this->dsp_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  this->dsp_->web_want_live();
+  begin_chunked_json(*request);
+  ChunkWriter w{*request};
+  w.print("{");
+  write_dsp_status(w, this->dsp_);
+  w.printf(R"(,"caps":{"maxf":%u,"maxs":%u,"maxu":%u,"name":%u,"bass_hz":%.6g,"tre_hz":%.6g,"tone_q":%.6g,)",
+           static_cast<unsigned>(dsp::MAX_FILTERS), static_cast<unsigned>(dsp::eq::MAX_SECTIONS),
+           static_cast<unsigned>(dsp::MAX_USER_PRESETS), static_cast<unsigned>(dsp::NAME_LEN - 1), dsp::BASS_HZ,
+           dsp::TREBLE_HZ, dsp::TONE_Q);
+  w.printf(R"("tone_max":%.6g},"p":[)", dsp::TONE_MAX_DB);
+  // One profile or preset on this stack at a time: the httpd task has 4352 bytes in all.
+  dsp::Preset item;
+  for (uint8_t o = 0; o < dsp::NUM_PROFILES; o++) {
+    this->dsp_->get_profile(o, item.profile);
+    if (o > 0)
+      w.print(",");
+    write_dsp_profile(w, item.profile);
+  }
+  w.print(R"(],"presets":[)");
+  const uint8_t n = this->dsp_->preset_count();
+  for (uint8_t i = 0; i < n; i++) {
+    bool builtin = false;
+    if (!this->dsp_->get_preset(i, item, builtin))
+      break;
+    w.print(i == 0 ? R"({"name":)" : R"(,{"name":)");
+    write_json_string(w, item.name);
+    w.printf(R"(,"builtin":%d,"p":)", builtin ? 1 : 0);
+    write_dsp_profile(w, item.profile);
+    w.print("}");
+  }
+  w.print("]}");
+  w.finish();
+}
+
+void WebUIHandler::handle_dsp_caps_(AsyncWebServerRequest *request) {
+  char body[16];
+  snprintf(body, sizeof(body), R"({"dsp":%u})",
+           this->dsp_ == nullptr ? 0u : static_cast<unsigned>(this->dsp_->support()));
+  request->send(200, "application/json", body);
+}
+
+void WebUIHandler::handle_dsp_live_(AsyncWebServerRequest *request) {
+  if (this->dsp_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  this->dsp_->web_want_live();
+  begin_chunked_json(*request);
+  ChunkWriter w{*request};
+  w.print("{");
+  write_dsp_status(w, this->dsp_);
+  w.print("}");
+  w.finish();
+}
+
+void WebUIHandler::handle_dsp_set_(AsyncWebServerRequest *request) {
+  if (this->dsp_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  // Everything is parsed and checked before anything changes, so a 400 leaves the device as it was.
+  int en = -1;
+  int cmp = -1;
+  bool ok = dsp_flag(request, "en", en) && dsp_flag(request, "cmp", cmp);
+  int output = -1;
+  dsp::Profile p;
+  if (ok && request->getParam("out") != nullptr) {
+    const std::string out = dsp_param(request, "out");
+    ok = out == "0" || out == "1";
+    bool present = false;
+    if (ok) {
+      this->dsp_->get_profile(out[0] - '0', p);
+      ok = dsp_float(request, "pre", p.preamp, present) && dsp_float(request, "bass", p.bass, present) &&
+           dsp_float(request, "tre", p.treble, present) && dsp_float(request, "lim", p.limiter, present) &&
+           dsp_float(request, "atk", p.attack, present) && dsp_float(request, "rel", p.release, present);
+    }
+    if (ok && request->getParam("f") != nullptr) {
+      present = true;
+      ok = dsp_filters(dsp_param(request, "f").c_str(), p);
+    }
+    if (ok && request->getParam("preset") != nullptr) {
+      present = true;
+      // "" is a profile from no preset; anything else must be a name the presets could hold.
+      const std::string name = dsp_param(request, "preset");
+      ok = name.empty() || dsp::valid_preset_name(name);
+      if (ok)
+        memcpy(p.preset, name.c_str(), name.size() + 1);
+    }
+    if (ok && present) {
+      ok = dsp::validate_profile(p);
+      output = out[0] - '0';
+    }
+  }
+  ok = ok && (en >= 0 || cmp >= 0 || output >= 0);
+  if (ok && output >= 0)
+    ok = this->dsp_->web_set_profile(output, p);
+  if (ok && en >= 0)
+    this->dsp_->web_set_enabled(en == 1);
+  if (ok && cmp >= 0)
+    this->dsp_->web_compare(cmp == 1);
+  request->send(ok ? 200 : 400, "application/json", ok ? "{\"ok\":1}" : "{\"ok\":0}");
+}
+
+void WebUIHandler::handle_dsp_preset_(AsyncWebServerRequest *request) {
+  if (this->dsp_ == nullptr) {
+    request->send(404, "application/json", "{\"ok\":0}");
+    return;
+  }
+  const std::string op = dsp_param(request, "op");
+  const std::string name = dsp_param(request, "name");
+  const std::string out = dsp_param(request, "out");
+  const int output = out == "0" ? 0 : out == "1" ? 1 : -1;
+  bool ok = false;
+  if (op == "load") {
+    ok = output >= 0 && this->dsp_->web_load_preset(output, name);
+  } else if (op == "save") {
+    ok = output >= 0 && this->dsp_->web_save_preset(output, name);
+  } else if (op == "delete") {
+    ok = this->dsp_->web_delete_preset(name);
+  } else if (op == "rename") {
+    ok = this->dsp_->web_rename_preset(name, dsp_param(request, "to"));
+  } else if (op == "reset") {
+    ok = output >= 0 && this->dsp_->web_reset(output);
+  }
+  request->send(ok ? 200 : 400, "application/json", ok ? "{\"ok\":1}" : "{\"ok\":0}");
+}
+
+#endif  // USE_SAT1_WEB_UI_DSP
+
 #ifdef USE_SAT1_CRASH_REPORT
 
 /// The crash history: boot counter, dump presence, and the stored records newest-first.
@@ -3438,6 +3734,12 @@ void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
   // own - this endpoint is already the page's heartbeat.
   w.printf(R"("crash":%u,)",
                  this->crash_report_ == nullptr ? 0 : static_cast<unsigned>(this->crash_report_->record_count()));
+#endif
+
+#ifdef USE_SAT1_WEB_UI_DSP
+  // Whether the running XMOS has the speaker EQ: 1 yes, 0 no, 2 not known yet (no XMOS has
+  // connected since boot). The Audio page shows its DSP sub-page only on 1.
+  w.printf(R"("dsp":%u,)", this->dsp_ == nullptr ? 0u : static_cast<unsigned>(this->dsp_->support()));
 #endif
 
   // Whether Home Assistant is actually attached, so the UI can say so rather than leaving someone to

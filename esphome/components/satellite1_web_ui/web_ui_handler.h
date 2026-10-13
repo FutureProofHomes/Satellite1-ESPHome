@@ -45,6 +45,10 @@
 #include "esphome/components/satellite1_ring/ring_fx.h"
 #endif
 
+#ifdef USE_SAT1_WEB_UI_DSP
+#include "esphome/components/satellite1_dsp/satellite1_dsp.h"
+#endif
+
 #include "esphome/core/entity_base.h"
 // For millis_64() in wake_test_active() - the 64-bit clock every deadline here compares against.
 #include "esphome/core/hal.h"
@@ -597,6 +601,12 @@ class WebUIHandler : public AsyncWebHandler {
   void set_ring(satellite1_ring::RingFx *ring) { this->ring_ = ring; }
 #endif
 
+#ifdef USE_SAT1_WEB_UI_DSP
+  /// Set from generated code, before the listener accepts anything. The speaker EQ's profiles and
+  /// presets have no entity; the Audio > DSP page reads and edits them through /api/sat1/dsp.
+  void set_dsp(satellite1_dsp::SpeakerDsp *dsp) { this->dsp_ = dsp; }
+#endif
+
   // NOLINTNEXTLINE(readability-identifier-naming)
   bool canHandle(AsyncWebServerRequest *request) const override;
   // NOLINTNEXTLINE(readability-identifier-naming)
@@ -683,6 +693,13 @@ class WebUIHandler : public AsyncWebHandler {
     RING_RESET,
     RING_PREVIEW,
     RING_PREVIEW_STOP,
+#endif
+#ifdef USE_SAT1_WEB_UI_DSP
+    DSP,
+    DSP_CAPS,
+    DSP_LIVE,
+    DSP_SET,
+    DSP_PRESET,
 #endif
 #ifdef USE_SAT1_WEB_UI_SOUNDS
     SOUND,
@@ -801,6 +818,22 @@ class WebUIHandler : public AsyncWebHandler {
   /// POST /api/sat1/ring/preview?m=...&ms=... plays a moment or support signal on the device,
   /// optionally as an unsaved draft (the same style fields as an edit); /preview/stop ends it.
   void handle_ring_preview_(AsyncWebServerRequest *request);
+#endif
+#ifdef USE_SAT1_WEB_UI_DSP
+  /// GET /api/sat1/dsp: everything the DSP page shows - both profiles, every preset, the limits it
+  /// edits within, and the XMOS's latest info and stats. Starts the once-a-second live reads.
+  void handle_dsp_(AsyncWebServerRequest *request);
+  /// GET /api/sat1/dsp/caps: {"dsp":N} alone, the Audio page's one re-check after an XMOS connects.
+  void handle_dsp_caps_(AsyncWebServerRequest *request);
+  /// GET /api/sat1/dsp/live: the switch, sync and XMOS info and stats without the profiles, for the
+  /// open DSP page's poll. Keeps the live reads going.
+  void handle_dsp_live_(AsyncWebServerRequest *request);
+  /// POST /api/sat1/dsp with form fields: en=0|1, cmp=0|1 (hold-to-compare), and/or out=0|1 with
+  /// any of pre, bass, tre, lim, atk, rel, preset and f (every filter, "type,on,hz,db,q;...").
+  void handle_dsp_set_(AsyncWebServerRequest *request);
+  /// POST /api/sat1/dsp/preset with op=load|save|delete|rename|reset, name and out; rename's new
+  /// name in to.
+  void handle_dsp_preset_(AsyncWebServerRequest *request);
 #endif
 #ifdef USE_SAT1_CRASH_REPORT
   /// The crash history and its metadata as JSON; the two big payloads live on routes of their own.
@@ -1054,6 +1087,9 @@ class WebUIHandler : public AsyncWebHandler {
 #endif
 #ifdef USE_SAT1_WEB_UI_RING
   satellite1_ring::RingFx *ring_{nullptr};
+#endif
+#ifdef USE_SAT1_WEB_UI_DSP
+  satellite1_dsp::SpeakerDsp *dsp_{nullptr};
 #endif
 
 #ifdef USE_VOICE_ASSISTANT

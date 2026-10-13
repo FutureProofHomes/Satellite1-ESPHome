@@ -55,6 +55,13 @@ try:
     from esphome.components.satellite1_ring import RingFx
 except ImportError:
     RingFx = None
+
+# And the speaker EQ: without it /api/sat1/dsp does not exist, the state payload carries no "dsp"
+# field, and the Audio page has no DSP sub-page.
+try:
+    from esphome.components.satellite1_dsp import SpeakerDsp
+except ImportError:
+    SpeakerDsp = None
 from esphome.components.sendspin import (
     SendspinHub,
     request_controller_support,
@@ -104,6 +111,7 @@ CONF_SENDSPIN_MEDIA_PLAYER_ID = "sendspin_media_player_id"
 CONF_SENDSPIN_HUB_ID = "sendspin_hub_id"
 CONF_SPEAKER_AMP_ID = "speaker_amp_id"
 CONF_RING_ID = "ring_id"
+CONF_DSP_ID = "dsp_id"
 CONF_ON_HA_REFRESH = "on_ha_refresh"
 CONF_ON_HA_SELECT = "on_ha_select"
 CONF_ON_ASK = "on_ask"
@@ -317,6 +325,13 @@ CONFIG_SCHEMA = cv.All(
             **(
                 {cv.Optional(CONF_RING_ID): cv.use_id(RingFx)}
                 if RingFx is not None
+                else {}
+            ),
+            # The speaker EQ (satellite1_dsp), behind /api/sat1/dsp. Its profiles and presets have
+            # no entity; the Audio > DSP page reads and edits them here.
+            **(
+                {cv.Optional(CONF_DSP_ID): cv.use_id(SpeakerDsp)}
+                if SpeakerDsp is not None
                 else {}
             ),
             # The Sendspin hub itself, beyond the media_player entity above. The protocol carries
@@ -588,6 +603,10 @@ async def to_code(config):
         # in the build.
         cg.add_define("USE_SAT1_WEB_UI_RING", True)
         cg.add(var.set_ring(await cg.get_variable(config[CONF_RING_ID])))
+
+    if CONF_DSP_ID in config:
+        cg.add_define("USE_SAT1_WEB_UI_DSP", True)
+        cg.add(var.set_dsp(await cg.get_variable(config[CONF_DSP_ID])))
 
     if mic := config.get(CONF_MIC_MONITOR):
         cg.add_define("USE_SAT1_MIC_MONITOR", True)
