@@ -729,6 +729,8 @@ entities. [TTS-Routing.md](TTS-Routing.md) has the upgrade notes.
 
 ### The Audio page's layout
 
+Audio > Routing (`#/audio/routing`; plain `#/audio` lands here too). Audio > DSP is the next section.
+
 One card, **Audio Routing**, with "Route assistant responses, announcements, timer rings and wake
 chimes to selected speakers" under the title, then the Speaker card with the Channel select (October
 2026; until then routing and ducking were two cards, each with its own tree).
@@ -769,6 +771,93 @@ ids, and the app's keys for them (`duck_volume`, `remote_sync_guard`), stay as t
 page served by one firmware version reads the entity keys of devices on another through the device
 switcher. Announcement Volume keeps its name because peers find it by an entity id ending in
 `_announcement_volume`. [TTS-Routing.md](TTS-Routing.md) has what the renames do to Home Assistant.
+
+## The speaker EQ (Audio > DSP)
+
+Built October 2026 (plan file `speaker_dsp_equalizer_41c2d2e4`): a parametric EQ and a safety limiter
+for the speaker, run by the XMOS, set from `#/audio/dsp`.
+
+**Where the sound is shaped.** On the XMOS, tile 1, with lib_audio_dsp v1.5.1: in the speaker
+pipeline, just before the DAC, at 48 kHz, with the echo canceller's reference taken after the EQ, so the
+canceller hears what the speaker actually plays, curve and limiter included. The
+chip designs the filters itself (RBJ biquads, up to 16 sections a profile) and is the authority on
+headroom: a design whose gain at any point in the chain would pass +18 dB is rejected and the previous
+one keeps playing. Cuts run before boosts, a negative preamp before the filters and a positive one
+after, and a flat profile is bypassed bit-exact. The limiter runs whenever the profile's net response
+can exceed its ceiling. Resource 231's commands are in Satellite1-XMOS
+`docs/device-control-spi-protocol.md`.
+
+**What the ESP32 keeps** (`satellite1_dsp`). Everything is stored in flash and uploaded: two profiles,
+**Built-in Speaker** and **Line-out**, one per output, with the XMOS told which to play as the jack
+switches; the on/off switch; and up to eight user presets beside the built-ins ("FPH Large Desk Smart
+Speaker", the speaker's default, and "Flat", the line-out's). A profile is a preamp, Bass and Treble
+(fixed shelves at 120 Hz and 8 kHz, Q 0.707, ±9 dB, counted against the 16 sections), up to twelve
+filters, and the limiter's ceiling, attack and release (−1 dBFS, 1 ms, 100 ms by default). Both
+profiles go to the XMOS on every connect, and a profile again after each edit to it, at most ten
+uploads a second while a slider moves. An upload counts once INFO shows the XMOS designed it (its
+design count moved on); one it did not take is re-sent twice and then held, reported as refused,
+until the next edit. A ten-second heartbeat re-sends what an XMOS that restarted without the ESP32
+seeing it go has lost. Flash is written three seconds after the last edit, and at once on a safe
+reboot.
+
+**When the page exists.** An XMOS without the EQ (an older release, or one chosen in the developer
+firmware picker) answers `GET_INFO` on resource 231 with an error, and is then sent nothing else.
+The check runs in Satellite1's connected hook — after boot, a
+reflash or a picker install, never on a timer, and at once for a component set up after the XMOS
+connected — and
+the state payload carries the answer as `dsp`: 1 supported, 0 not, 2 not known yet (no XMOS since
+boot); a firmware without the component sends no field, which reads as 0. The app asks again, at
+`/api/sat1/dsp/caps`, when `xmos_firmware` publishes a new version (`useDspSupport` in
+`src/lib/device.js`, the rule in `dspRecheckDue`, `src/lib/dsp.js`). Audio lists its two pages only
+on a 1; `#/audio/dsp` goes on to Routing only on a definite 0, and waits through a 2.
+
+**The API**, all session-gated:
+
+- `GET /api/sat1/dsp`: the status, `caps` (the limits), both profiles as `p`, and `presets`
+  (built-ins first). `GET /api/sat1/dsp/live`: the status plus the XMOS's `info` and `stats`; asking
+  also keeps the ESP32 reading them every second for five seconds.
+  `GET /api/sat1/dsp/caps`: `{"dsp":N}` alone.
+- `POST /api/sat1/dsp`, form fields: `en=0|1`; `cmp=0|1`, hold-to-compare, which lapses on its own
+  15 seconds after the last renewal so a browser that goes away mid-hold cannot leave the EQ off; or
+  `out=0|1` with any of `pre`, `bass`, `tre`, `lim`, `atk`, `rel`, `preset` and `f`, the filters as
+  `type,on,hz,db,q` joined by `;`. `en` and `cmp` take only `0` or `1`, and `preset` only `""` or a
+  name a preset could hold. Values outside what the XMOS accepts, or more than 16 sections, answer
+  400 and change nothing, the switches included; nothing is clamped.
+- `POST /api/sat1/dsp/preset`: `op=load|save|delete|rename|reset` with `name` and `out`. Built-in
+  names are reserved, names are 1 to 31 bytes of well-formed UTF-8 without control characters, `save`
+  stores the profile the device holds now, and `reset` puts the output's built-in default back.
+  `rename` takes the new name in `to` and is one step, so a failure leaves the preset as it was;
+  outputs on the preset follow it. Renamed onto another user preset, that one is replaced, as a
+  `save` over it would, and any output on it becomes Custom.
+
+**The page** (`src/components/audio/DspPage.tsx`, the graph in `EqGraph.tsx`, the maths in
+`src/lib/eq.js`). `eq.js` mirrors the XMOS design — same biquads, same section order, same +18 dB
+check, tested against coefficients from lib_audio_dsp's own Python — so the page can refuse an
+impossible edit before sending it and draw exactly what will play. The bar at the top picks the output
+being edited (the one playing is marked), the EQ switch, Hold to hear it flat, and the preset menu
+with Save, Save as, Revert, and More (Import, Export, Rename, Delete, Reset). Hold to hear it flat
+follows the pointer or Space/Enter; a screen reader's bare activation latches it instead, the next
+one letting go. Rename is the device's one-step `op=rename`. The graph draws each filter and the
+total without the preamp, so the handles sit on the curve; the preamp moves the limiter's line
+instead. Handles drag (frequency and gain), take Page Up/Down — or the wheel, once picked — for Q
+and arrow keys for fine steps, and a double-click on empty graph adds a peak. Each filter's colour
+comes from `--eq-c0`…`--eq-c11` in `styles/dsp.css`, darker on the light theme. The graph card's
+corner says Playing, Sending…, Refused or Saved for the output shown, and Ready for one that is in
+sync but not the one playing (or with the EQ off). Under the graph: the loudest point (between
+stages, when that is what breaks the +18 dB cap), the limiter's state ("Limiting now" from the live
+stats), Auto preamp (lowers the preamp until the loudest point sits on the ceiling and no stage
+passes +18 dB) and the 16-section budget. Edits go out latest-wins with one request in flight, the
+two outputs taking turns, so a drag costs a handful of writes; one that doesn't get through is
+retried, backing off to every 5 s, until a newer edit replaces it, and a refused one reloads the
+device's copy once nothing else is on its way. A read that set out before an edit never puts the
+older profile back. Preset operations wait for pending edits to land first (up to 10 s). Import
+reads the text REW, Equalizer APO and Music Assistant export (`Preamp:` and `Filter N:` lines, comma
+decimals too) and says what it skipped or approximated; Export writes the same format, Bass and
+Treble as shelves, 24 dB/oct cuts as two lines. The banner over the page says when the audio chip
+is updating or not answering, and when the EQ switched itself off for want of time. Two
+independent columns once the page itself is 820 px wide (the graph and filters left, the rest right), measured on the page rather
+than the window because the sidebar arrives at 1024 px; one list in reading order below that, with
+the bottom bar's Routing and DSP pills.
 
 ## Finished speaking detection, per wake word
 
@@ -1008,6 +1097,12 @@ boot so the history exists before anyone opens the page. `GET /api/sat1/sysmon?b
 through it 720 samples at a time; `tasks=1` adds every FreeRTOS task's priority, state and stack
 high-water mark. The task table needs `CONFIG_FREERTOS_USE_TRACE_FACILITY`, which the component's
 codegen sets whenever `sysmon:` is present, so it is not repeated in `dev.yaml`.
+
+**Speaker EQ** (`src/components/settings/SpeakerEq.tsx`). The XMOS speaker EQ's own report, read
+from `GET /api/sat1/dsp/live` once a second: bypass reason, both slots, time per frame, overruns and
+watchdog trips, limiter activity, designs and tile 1 heap. It needs nothing in `dev.yaml`: the card
+shows whenever the state payload has a `dsp` field, but since release builds carry the EQ too, it
+never makes the page appear on its own.
 
 **Costs.** By construction: 128 KB of PSRAM for the mic ring once someone has listened, 8 KB of
 PSRAM per listener, about 100 KB of PSRAM for the system monitor, and no internal RAM beyond the
