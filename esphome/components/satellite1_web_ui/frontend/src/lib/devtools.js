@@ -8,6 +8,9 @@
  *     speaker_amp_id, so no probe of /api/sat1/amp is needed;
  *   - mic, sysmon: the state flags those two modules print.
  * Read from the key table rather than the entity values, which ride /events a beat later.
+ *
+ * `eq` is not one of them: the speaker EQ card shows on the page whenever the build has the speaker
+ * EQ (the state's "dsp" field), but release builds carry the EQ too, so it never makes the page.
  */
 
 const XMOS_KEYS = ["xmos_fw_choice", "xmos_fw_install", "xmos_fw_refresh", "xmos_fw_list", "xmos_fw_status"];
@@ -19,6 +22,7 @@ export function devTools(device) {
     amp: !!e.amp_gain,
     mic: !!device?.mic,
     sysmon: !!device?.sysmon,
+    eq: device?.dsp !== undefined,
   };
 }
 

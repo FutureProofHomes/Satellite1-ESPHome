@@ -25,5 +25,11 @@ test("each tool alone is enough for the page", () => {
   assert.equal(hasDevTools({ e: { amp_gain: 1 } }), true);
   assert.equal(hasDevTools({ e: {}, mic: { max: 2 } }), true);
   assert.equal(hasDevTools({ e: {}, sysmon: 1 }), true);
-  assert.deepEqual(devTools({ e: { amp_gain: 1 }, mic: { max: 2 } }), { xmos: false, amp: true, mic: true, sysmon: false });
+  assert.deepEqual(devTools({ e: { amp_gain: 1 }, mic: { max: 2 } }), { xmos: false, amp: true, mic: true, sysmon: false, eq: false });
+});
+
+test("the speaker EQ card follows the dsp field but never makes the page on its own", () => {
+  assert.equal(devTools({ e: {}, dsp: 0 }).eq, true);
+  assert.equal(devTools({ e: {} }).eq, false);
+  assert.equal(hasDevTools({ e: {}, dsp: 1 }), false);
 });

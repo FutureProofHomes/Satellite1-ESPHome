@@ -281,6 +281,10 @@ export const HINTS = {
     "Memory sampled every ten seconds for the last twelve hours, kept on the device so the history is there before you open this page. The shaded bands mark when the assistant was running, when the XMOS was not ready and when the mic monitor was streaming.",
   sysmon_tasks:
     "Every FreeRTOS task, sorted by the least stack it has ever had free. Under 512 bytes is a crash waiting for the wrong code path.",
+  speaker_eq:
+    "The speaker EQ's own report, read from the audio chip once a second: what it is playing, how long each frame takes and how hard the limiter is working. Check it after an XMOS firmware swap or a heavy preset.",
+  xmos_limiter:
+    "Left and right: how much of the last second and a half the limiter spent reducing gain. Deepest is the most it has ever pulled down since the chip started.",
 
   // xmos_erase was here. The row it explained is gone from the app: the full erase is a recovery
   // tool - it restarts the device, erases the audio chip's entire flash and reinstalls the embedded

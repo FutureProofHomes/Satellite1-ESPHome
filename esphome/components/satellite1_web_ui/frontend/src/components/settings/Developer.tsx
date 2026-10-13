@@ -10,6 +10,7 @@ import { DxCard, DxConfirmDialog, DxFact, DxFacts, DxRow, DxSelect } from './dx'
 import { MicMonitorCard } from './MicMonitor';
 import { MultiLogCard } from './MultiLog';
 import { SysMonCard } from './SysMon';
+import { SpeakerEqCard } from './SpeakerEq';
 
 /**
  * GET /api/sat1/amp every two seconds while on screen, each read chained to the last. An audio_dac
@@ -180,7 +181,7 @@ function XmosFirmwareRow({ ctx }: { ctx: Ctx }) {
  * Settings > Developer, drawn only for firmware built from config/satellite1.dev.yaml (lib/devtools.js
  * decides from what the device reports). Each card is gated on its own piece being present, so a
  * dev build with one piece removed still shows the rest. The XMOS picker comes first, then the
- * microphones it changes, so a firmware swap and its effect are on one screen.
+ * speaker EQ and the microphones it changes, so a firmware swap and its effect are on one screen.
  */
 export function DeveloperCards({ ctx }: { ctx: Ctx }) {
   const t = devTools(ctx.device);
@@ -192,6 +193,7 @@ export function DeveloperCards({ ctx }: { ctx: Ctx }) {
             </DxFacts>}
           <XmosFirmwareRow ctx={ctx} />
         </DxCard>}
+      {t.eq && <SpeakerEqCard />}
       {t.mic && <MicMonitorCard ctx={ctx} />}
       {t.amp && <SpeakerAmpCard ctx={ctx} />}
       <MultiLogCard ctx={ctx} />
