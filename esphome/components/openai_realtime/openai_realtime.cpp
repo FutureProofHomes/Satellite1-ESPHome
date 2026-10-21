@@ -350,7 +350,12 @@ void OpenAIRealtime::release_buffers_() {
 }
 
 void OpenAIRealtime::finish_session_() {
-  const bool unexpected = !this->stop_requested_;
+  // Expected ends: this client requested the stop (wake word, button, mute, max duration,
+  // idle timeout) - or the assistant's end_conversation flow completed, where the server's own
+  // graceful close fires the moment the farewell audio drains and naturally beats this side's
+  // end debounce. A close carrying a reason (a non-1000 code) is never expected.
+  const bool assistant_ended_cleanly = this->end_after_playback_ && this->close_reason_.empty();
+  const bool unexpected = !this->stop_requested_ && !assistant_ended_cleanly;
   this->accepting_mic_.store(false);
   if (this->mic_source_ != nullptr)
     this->mic_source_->stop();
