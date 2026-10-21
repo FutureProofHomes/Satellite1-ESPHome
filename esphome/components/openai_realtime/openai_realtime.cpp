@@ -49,6 +49,11 @@ static constexpr size_t PREBUFFER_BYTES = 150 * BYTES_PER_MS;
 // A server that never sends response.done: its answer counts as finished once its audio has played
 // and nothing about the response has arrived for this long.
 static constexpr uint32_t RESPONSE_SILENCE_MS = 5000;
+// The assistant-requested end (end_conversation) stops the session once everything has drained
+// AND stayed quiet for this long. The debounce covers a farewell the server starts speaking via
+// its own TTS right after the tool-call response's response.done: without it, the quiet window
+// between that done and the utterance's first audio would end the session mid-goodbye.
+static constexpr uint32_t END_QUIET_DEBOUNCE_MS = 300;
 // Turn-based mode: after an answer has played, the microphone stays closed this much longer, so the
 // tail of the speaker (I2S, room echo) is not sent as the person's next turn.
 static constexpr uint32_t TURN_TAIL_MS = 500;
@@ -260,6 +265,7 @@ void OpenAIRealtime::start_session_() {
   this->need_response_create_ = false;
   this->pending_calls_ = 0;
   this->end_after_playback_ = false;
+  this->end_quiet_since_ = 0;
   this->ready_fired_ = false;
   this->phase_ = Phase::NONE;
   this->session_started_ms_ = millis();
@@ -525,7 +531,9 @@ void OpenAIRealtime::handle_event_(Event &ev) {
       ESP_LOGD(TAG, "Function call %s(%s)", ev.a.c_str(), ev.b.c_str());
       if (this->end_tool_ && ev.a == "end_conversation") {
         // Answered without asking for another response: the goodbye was already spoken (or is
-        // playing), and the session closes once it has drained.
+        // playing) - or the server recovers it via its own TTS right after this response's done.
+        // Either way the session closes once everything has drained and stayed quiet (the
+        // debounce in check_timeouts_ covers an utterance starting just after the done).
         this->enqueue_(
             json::build_json([&ev](JsonObject root) { fill_function_output(root, ev.c, R"({"ok":true})"); }));
         this->end_after_playback_ = true;
@@ -679,6 +687,13 @@ void OpenAIRealtime::handle_barge_in_() {
 }
 
 void OpenAIRealtime::update_mic_gate_() {
+  if (this->end_after_playback_) {
+    // The conversation is over by the assistant's call: nothing said from here on can matter -
+    // keep the microphone closed (both modes) so no dead audio streams upstream during the end
+    // debounce window.
+    this->mic_open_.store(false);
+    return;
+  }
   if (this->session_full_duplex_.load()) {
     this->mic_open_.store(true);
     return;
@@ -729,10 +744,18 @@ void OpenAIRealtime::check_timeouts_() {
     return;
   }
   if (this->end_after_playback_ && quiet && this->phase_ != Phase::SPEAKING) {
-    ESP_LOGI(TAG, "Conversation ended by the assistant");
-    this->request_stop();
+    // The end holds only once the quiet has PERSISTED: a farewell the server starts speaking
+    // right after the tool-call response's done (its own TTS recovery) arrives as a fresh
+    // response within milliseconds - that resets the window instead of ending mid-goodbye.
+    if (this->end_quiet_since_ == 0) {
+      this->end_quiet_since_ = now;
+    } else if (now - this->end_quiet_since_ >= END_QUIET_DEBOUNCE_MS) {
+      ESP_LOGI(TAG, "Conversation ended by the assistant");
+      this->request_stop();
+    }
     return;
   }
+  this->end_quiet_since_ = 0;
   if (this->idle_timeout_ms_ > 0 && quiet && this->phase_ == Phase::LISTENING &&
       now - this->last_activity_ms_ > this->idle_timeout_ms_) {
     ESP_LOGI(TAG, "No speech for %" PRIu32 " s - ending the conversation", this->idle_timeout_ms_ / 1000);

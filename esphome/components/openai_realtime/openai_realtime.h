@@ -220,6 +220,7 @@ class OpenAIRealtime : public Component {
   bool need_response_create_{false};
   int pending_calls_{0};
   bool end_after_playback_{false};
+  uint32_t end_quiet_since_{0};
   bool ready_fired_{false};
   std::string session_update_;
   std::string ws_url_;
