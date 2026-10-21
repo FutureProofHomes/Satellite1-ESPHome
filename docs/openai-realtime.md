@@ -144,7 +144,9 @@ Without the package nothing changes: the component is not even compiled, and the
   talking, stays closed while the model thinks and answers, and reopens 500 ms after the answer has
   played (so the speaker's tail is not taken for your next turn). The answer always plays out;
   only the wake word or the button interrupts it.
-- **Ending.** Say goodbye (the model calls `end_conversation` after its farewell), say the wake word
+- **Ending.** Say goodbye (the model speaks its farewell aloud in the same response in which it
+  calls `end_conversation`, mirroring the text in the required `farewell_message` argument), say
+  the wake word
   again, press the action button, flip the mute switch, or stay silent for `idle_timeout` (20 s).
   `max_duration` (15 min) is a hard cap; OpenAI's own limit is 60 min.
 - **Home control.** "Turn off the kitchen lights" makes the model call `home_assistant`, which runs

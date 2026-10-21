@@ -72,14 +72,27 @@ static void fill_tools(JsonObject session, const SessionConfig &c) {
     JsonObject t = tools.add<JsonObject>();
     t["type"] = "function";
     t["name"] = "end_conversation";
+    // The canonical spec is mirrored in the Nexus server's local-audio
+    // integration and the Nexus UI's useRealtimeVoice.ts — keep all three in
+    // sync. The model speaks the farewell in the same response that carries
+    // the call and mirrors it in the required farewell_message argument.
     t["description"] =
         "End the current conversation. Call it when the user says goodbye or asks to stop, and "
         "also on your own whenever the conversation has naturally concluded: their request is "
         "fulfilled and nothing is pending, or the context makes clear they no longer want to "
-        "continue or need no further assistance. Act without waiting to be asked or nudged.";
+        "continue or need no further assistance. Act without waiting to be asked or nudged. In "
+        "this same response, say a brief, warm farewell aloud and pass the exact same text as "
+        "farewell_message.";
     JsonObject p = t["parameters"].to<JsonObject>();
     p["type"] = "object";
-    p["properties"].to<JsonObject>();
+    JsonObject props = p["properties"].to<JsonObject>();
+    JsonObject farewell = props["farewell_message"].to<JsonObject>();
+    farewell["type"] = "string";
+    farewell["description"] =
+        "The exact text of the farewell you speak in this same response, which will be the "
+        "last words of the conversation.";
+    JsonArray required = p["required"].to<JsonArray>();
+    required.add("farewell_message");
   }
   session["tool_choice"] = "auto";
 }

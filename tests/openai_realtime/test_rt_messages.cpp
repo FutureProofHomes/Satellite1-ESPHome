@@ -129,7 +129,8 @@ static void test_session_update_ga() {
   CHECK_EQ(tools[0]["parameters"]["required"][0] | "", "command");
   CHECK_EQ(tools[1]["name"] | "", "end_conversation");
   CHECK_EQ(tools[1]["parameters"]["type"] | "", "object");
-  CHECK(tools[1]["parameters"]["properties"].is<JsonObjectConst>());
+  CHECK_EQ(tools[1]["parameters"]["properties"]["farewell_message"]["type"] | "", "string");
+  CHECK_EQ(tools[1]["parameters"]["required"][0] | "", "farewell_message");
   CHECK_EQ(s["tool_choice"] | "", "auto");
   CHECK(s["modalities"].isNull() && s["input_audio_format"].isNull());
 
