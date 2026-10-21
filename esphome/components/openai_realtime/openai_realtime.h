@@ -264,6 +264,8 @@ class OpenAIRealtime : public Component {
   uint8_t *play_buf_{nullptr};
   size_t play_len_{0};
   size_t play_off_{0};
+  /// Sync trace: 0 = audio flowing, 1 = local buffers drained, 2 = speaker chain drained.
+  uint8_t drain_trace_{0};
   std::atomic<bool> playing_audio_{false};
   // The duplex mode this session started with (set by the loop before the worker starts; read by
   // the WebSocket task for barge-in) and, in turn-based mode, whether mic audio is sent now.

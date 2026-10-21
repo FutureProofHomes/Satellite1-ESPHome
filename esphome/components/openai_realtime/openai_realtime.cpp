@@ -382,6 +382,10 @@ void OpenAIRealtime::set_phase_(Phase p) {
   // Turn-based: back to listening after the model's turn - hold the mic closed a little longer.
   if (p == Phase::LISTENING && (this->phase_ == Phase::SPEAKING || this->phase_ == Phase::THINKING))
     this->mic_reopen_at_ = millis() + TURN_TAIL_MS;
+  // Sync trace (turn-based LED lag): every phase maps to a trigger the LED
+  // animations hook, so this line IS the LED timeline.  Pair it with the
+  // drain trace in check_timeouts_ to see where the 0.5-1 s goes.
+  ESP_LOGD(TAG, "Phase: %s -> %s (t=%u ms)", phase_name(this->phase_), phase_name(p), millis());
   this->phase_ = p;
   this->phase_since_ms_ = millis();
   switch (p) {
@@ -627,9 +631,29 @@ void OpenAIRealtime::feed_speaker_() {
     }
     this->last_activity_ms_ = millis();
     this->playing_audio_.store(true);
+    this->drain_trace_ = 0;  // sync trace: audio flowing again, re-arm the milestones
     if (this->phase_ != Phase::SPEAKING)
       this->set_phase_(Phase::SPEAKING);
     return;
+  }
+
+  // Sync trace (turn-based LED lag): one-shot milestones of the drain chain —
+  // local ring empty → speaker chain (resampler/mixer/DMA) empty → the
+  // response_finished trigger the LED animations hook.  The last delta is the
+  // number to compare against the server's "Bot stopped speaking" timestamp.
+  if (this->phase_ == Phase::SPEAKING) {
+    const bool local_empty = this->playback_ring_->available() == 0 && this->play_off_ >= this->play_len_;
+    if (!local_empty) {
+      this->drain_trace_ = 0;
+    } else if (this->drain_trace_ == 0) {
+      this->drain_trace_ = 1;
+      ESP_LOGD(TAG, "Drain: local buffers empty (t=%u ms)", millis());
+    }
+    if (local_empty && !this->speaker_->has_buffered_data() && this->drain_trace_ < 2) {
+      this->drain_trace_ = 2;
+      ESP_LOGD(TAG, "Drain: speaker chain empty -> response_finished (%u ms after last server response activity)",
+               millis() - this->last_response_ms_.load());
+    }
   }
 
   // Drained: nothing buffered here, nothing in the speaker chain, and the server is done talking.
