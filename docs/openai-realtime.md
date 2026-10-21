@@ -196,9 +196,9 @@ openai_realtime:
   api_version: auto                    # auto | ga | beta - wire format, normally detected
   instructions: "..."
   turn_detection:
-    type: semantic_vad                 # semantic_vad | server_vad | none
+    type: server_vad                 # semantic_vad | server_vad | none
     eagerness: auto                    # semantic_vad: auto | low | medium | high
-    threshold: 0.5                     # server_vad
+    threshold: 0.2                     # server_vad
     prefix_padding: 300ms              # server_vad
     silence_duration: 500ms            # server_vad
   noise_reduction: none                # none | near_field | far_field (XMOS already cleans ch0)

@@ -143,6 +143,9 @@ openai_realtime:
   idle_timeout: 20s
   turn_detection:
     type: server_vad
+    threshold: 0.2
+    prefix_padding: 300ms
+    silence_duration: 500ms
   instructions: >-
     You are the voice assistant of a Satellite1 smart speaker in someone's home. Speak naturally and
     briefly - one to three sentences unless asked for more. You are heard, not read: no lists,
@@ -150,20 +153,20 @@ openai_realtime:
     the state of devices, or anything Home Assistant knows - call the home_assistant tool with the
     request in plain words and tell the user the outcome in your own words. When the user says
     goodbye or that they are done, say a short goodbye and call end_conversation.
-  tools:
-    - name: home_assistant
-      description: >-
-        Send a request to the Home Assistant smart home (Assist). Use it to control devices, set
-        timers, or ask about the state of anything in the home. Returns Home Assistant's answer.
-      parameters:
-        type: object
-        properties:
-          command:
-            type: string
-            description: >-
-              The request in plain words, as the user would say it to a voice assistant, for
-              example "turn off the kitchen lights" or "what is the temperature in the bedroom".
-        required: [command]
+  # tools:
+  #   - name: home_assistant
+  #     description: >-
+  #       Send a request to the Home Assistant smart home (Assist). Use it to control devices, set
+  #       timers, or ask about the state of anything in the home. Returns Home Assistant's answer.
+  #     parameters:
+  #       type: object
+  #       properties:
+  #         command:
+  #           type: string
+  #           description: >-
+  #             The request in plain words, as the user would say it to a voice assistant, for
+  #             example "turn off the kitchen lights" or "what is the temperature in the bedroom".
+  #       required: [command]
 
   on_start:
     - lambda: id(openai_realtime_running) = true;

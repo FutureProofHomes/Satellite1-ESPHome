@@ -73,8 +73,10 @@ static void fill_tools(JsonObject session, const SessionConfig &c) {
     t["type"] = "function";
     t["name"] = "end_conversation";
     t["description"] =
-        "End the voice conversation. Call this when the user says goodbye, says they are done, or asks you to "
-        "stop listening. Say a short goodbye first.";
+        "End the current conversation. Call it when the user says goodbye or asks to stop, and "
+        "also on your own whenever the conversation has naturally concluded: their request is "
+        "fulfilled and nothing is pending, or the context makes clear they no longer want to "
+        "continue or need no further assistance. Act without waiting to be asked or nudged.";
     JsonObject p = t["parameters"].to<JsonObject>();
     p["type"] = "object";
     p["properties"].to<JsonObject>();
