@@ -24,6 +24,9 @@ namespace openai_realtime {
 /// A base given as ws:// / wss://, or already ending in /realtime, is accepted and mapped back, so a
 /// pasted Realtime URL works as well. Query parameters on the base (some relays and Azure use them)
 /// are kept on the Realtime URL; `model=` is only added when the base does not already carry one.
+/// With `noise_filter` set, `nexus_noise_filter=1` is appended the same way (Nexus's server-side
+/// capture denoise — a handshake parameter, outside the OpenAI Realtime protocol schemas) unless the
+/// base already pins an explicit value; a false `noise_filter` adds nothing.
 struct Endpoints {
   std::string realtime_url;
   std::string origin;  ///< http(s)://host[:port], lowercase host
@@ -35,7 +38,8 @@ std::string normalize_base_url(const std::string &base_url);
 
 /// Fills `out` and returns true, or returns false with a short reason in `error`
 /// ("empty", "scheme", "host", "chars").
-bool derive_endpoints(const std::string &base_url, const std::string &model, Endpoints &out, std::string &error);
+bool derive_endpoints(const std::string &base_url, const std::string &model, bool noise_filter,
+                      Endpoints &out, std::string &error);
 
 /// RFC 3986 percent-encoding of everything but unreserved characters.
 std::string url_encode_component(const std::string &value);

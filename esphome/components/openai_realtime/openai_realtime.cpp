@@ -130,7 +130,7 @@ void OpenAIRealtime::setup() {
 void OpenAIRealtime::dump_config() {
   Endpoints ep;
   std::string err;
-  const bool ok = derive_endpoints(this->base_url_, this->model_, ep, err);
+  const bool ok = derive_endpoints(this->base_url_, this->model_, this->noise_filter_, ep, err);
   ESP_LOGCONFIG(TAG,
                 "OpenAI Realtime:\n"
                 "  Base URL: %s\n"
@@ -140,17 +140,19 @@ void OpenAIRealtime::dump_config() {
                 "  API key: %s\n"
                 "  Turn detection: %s\n"
                 "  Duplex: %s\n"
+                "  Noise filter: %s\n"
                 "  Idle timeout: %" PRIu32 " ms",
                 this->base_url_.c_str(), ok ? ep.realtime_url.c_str() : "(invalid)", this->model_.c_str(),
                 this->voice_.c_str(), this->api_key_.empty() ? "not set" : "set", this->td_type_.c_str(),
-                this->full_duplex_.load() ? "full (barge-in)" : "turn-based", this->idle_timeout_ms_);
+                this->full_duplex_.load() ? "full (barge-in)" : "turn-based",
+                this->noise_filter_ ? "on (server-side RNNoise)" : "off", this->idle_timeout_ms_);
 }
 
 bool OpenAIRealtime::is_configured() const {
   // Validated at build time already (__init__.py); this guards against a lambda-set value.
   Endpoints ep;
   std::string err;
-  if (!derive_endpoints(this->base_url_, this->model_, ep, err) || this->model_.empty())
+  if (!derive_endpoints(this->base_url_, this->model_, this->noise_filter_, ep, err) || this->model_.empty())
     return false;
   // A local server may need no key; api.openai.com never accepts an unauthenticated session.
   return !this->api_key_.empty() || ep.origin != OPENAI_ORIGIN;
@@ -221,7 +223,7 @@ void OpenAIRealtime::build_session_update_() {
 void OpenAIRealtime::start_session_() {
   Endpoints ep;
   std::string why;
-  if (!derive_endpoints(this->base_url_, this->model_, ep, why)) {
+  if (!derive_endpoints(this->base_url_, this->model_, this->noise_filter_, ep, why)) {
     this->fail_("bad_url", "The base URL is not a valid http(s):// or ws(s):// address");
     return;
   }

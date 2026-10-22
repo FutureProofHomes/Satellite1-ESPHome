@@ -31,32 +31,50 @@ static int failures = 0;
 static void test_endpoints() {
   Endpoints ep;
   std::string err;
-  CHECK(derive_endpoints("https://api.openai.com/v1", "gpt-realtime-2.1", ep, err));
-  CHECK_EQ(ep.realtime_url, "wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1");
+  CHECK(derive_endpoints("https://api.openai.com/v1", "gpt-realtime-2.1", true, ep, err));
+  CHECK_EQ(ep.realtime_url,
+           "wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1&nexus_noise_filter=1");
   CHECK_EQ(ep.origin, "https://api.openai.com");
 
-  CHECK(derive_endpoints("  https://API.openai.com/v1/// ", "m", ep, err));
-  CHECK_EQ(ep.realtime_url, "wss://api.openai.com/v1/realtime?model=m");
+  CHECK(derive_endpoints("  https://API.openai.com/v1/// ", "m", true, ep, err));
+  CHECK_EQ(ep.realtime_url, "wss://api.openai.com/v1/realtime?model=m&nexus_noise_filter=1");
 
-  CHECK(derive_endpoints("wss://api.openai.com/v1/realtime", "gpt-realtime", ep, err));
-  CHECK_EQ(ep.realtime_url, "wss://api.openai.com/v1/realtime?model=gpt-realtime");
+  CHECK(derive_endpoints("wss://api.openai.com/v1/realtime", "gpt-realtime", true, ep, err));
+  CHECK_EQ(ep.realtime_url,
+           "wss://api.openai.com/v1/realtime?model=gpt-realtime&nexus_noise_filter=1");
 
-  CHECK(derive_endpoints("http://relay.lan:8080/v1?api-version=2025-08-28", "m x", ep, err));
-  CHECK_EQ(ep.realtime_url, "ws://relay.lan:8080/v1/realtime?api-version=2025-08-28&model=m%20x");
+  CHECK(derive_endpoints("http://relay.lan:8080/v1?api-version=2025-08-28", "m x", true, ep, err));
+  CHECK_EQ(ep.realtime_url,
+           "ws://relay.lan:8080/v1/realtime?api-version=2025-08-28&model=m%20x&nexus_noise_filter=1");
   CHECK_EQ(ep.origin, "http://relay.lan:8080");
 
-  CHECK(derive_endpoints("wss://x.example/openai/v1/realtime?model=fixed", "other", ep, err));
-  CHECK_EQ(ep.realtime_url, "wss://x.example/openai/v1/realtime?model=fixed");
+  CHECK(derive_endpoints("wss://x.example/openai/v1/realtime?model=fixed", "other", true, ep, err));
+  CHECK_EQ(ep.realtime_url,
+           "wss://x.example/openai/v1/realtime?model=fixed&nexus_noise_filter=1");
 
-  CHECK(derive_endpoints("https://host.example", "", ep, err));
-  CHECK_EQ(ep.realtime_url, "wss://host.example/realtime");
+  CHECK(derive_endpoints("https://host.example", "", true, ep, err));
+  CHECK_EQ(ep.realtime_url, "wss://host.example/realtime?nexus_noise_filter=1");
 
-  CHECK(!derive_endpoints("", "m", ep, err));
-  CHECK(!derive_endpoints("ftp://x", "m", ep, err));
+  // An explicit nexus_noise_filter= on the base URL always wins — a user pinning
+  // `=0` keeps it verbatim (and is not double-appended).
+  CHECK(derive_endpoints("wss://x.example/v1?nexus_noise_filter=0", "m", true, ep, err));
+  CHECK_EQ(ep.realtime_url, "wss://x.example/v1/realtime?nexus_noise_filter=0&model=m");
+  CHECK(derive_endpoints("wss://x.example/v1?nexus_noise_filter=1&model=m", "m", true, ep, err));
+  CHECK_EQ(ep.realtime_url, "wss://x.example/v1/realtime?nexus_noise_filter=1&model=m");
+
+  // Config off: nothing is appended (absent is server-off); an explicit value
+  // in the base URL is still the user's own and is left alone.
+  CHECK(derive_endpoints("https://api.openai.com/v1", "gpt-realtime-2.1", false, ep, err));
+  CHECK_EQ(ep.realtime_url, "wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1");
+  CHECK(derive_endpoints("wss://x.example/v1?nexus_noise_filter=1", "m", false, ep, err));
+  CHECK_EQ(ep.realtime_url, "wss://x.example/v1/realtime?nexus_noise_filter=1&model=m");
+
+  CHECK(!derive_endpoints("", "m", true, ep, err));
+  CHECK(!derive_endpoints("ftp://x", "m", true, ep, err));
   CHECK_EQ(err, "scheme");
-  CHECK(!derive_endpoints("https://", "m", ep, err));
-  CHECK(!derive_endpoints("https://user:pw@host/v1", "m", ep, err));
-  CHECK(!derive_endpoints("https://ho st/v1", "m", ep, err));
+  CHECK(!derive_endpoints("https://", "m", true, ep, err));
+  CHECK(!derive_endpoints("https://user:pw@host/v1", "m", true, ep, err));
+  CHECK(!derive_endpoints("https://ho st/v1", "m", true, ep, err));
 }
 
 static void test_json() {

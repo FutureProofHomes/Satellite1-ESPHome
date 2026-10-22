@@ -91,6 +91,10 @@ class OpenAIRealtime : public Component {
     this->td_silence_ms_ = silence_duration_ms;
   }
   void set_noise_reduction(const std::string &v) { this->noise_reduction_ = v; }
+  /// Server-side capture denoise (Nexus `?nexus_noise_filter=1`): the satellite's own DSP is work in
+  /// progress, so it asks the server to apply RNNoise to the uploaded audio. Config-time (the URL is
+  /// derived at each session start); an explicit `nexus_noise_filter=` in the base URL always wins.
+  void set_noise_filter(bool v) { this->noise_filter_ = v; }
   void set_input_transcription_model(const std::string &v) { this->transcription_model_ = v; }
   void set_tools_json(const std::string &v) { this->tools_json_ = v; }
   void set_end_conversation_tool(bool v) { this->end_tool_ = v; }
@@ -194,6 +198,7 @@ class OpenAIRealtime : public Component {
   uint32_t td_prefix_ms_{300};
   uint32_t td_silence_ms_{500};
   std::string noise_reduction_;
+  bool noise_filter_{true};
   std::string transcription_model_;
   std::string tools_json_;
   bool end_tool_{true};

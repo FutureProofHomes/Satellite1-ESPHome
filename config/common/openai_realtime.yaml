@@ -14,6 +14,7 @@
 #     # openai_model: gpt-realtime-2.1
 #     # openai_voice: marin
 #     # openai_ca_certificate: !secret local_server_cert  # https:// server with its own certificate
+#     # openai_noise_filter: "false"                       # no server-side capture denoise
 #     # openai_realtime_restore_mode: RESTORE_DEFAULT_OFF   # start on Assist after first flash
 #     # openai_full_duplex_restore_mode: RESTORE_DEFAULT_OFF # start turn-based after first flash
 #   packages:
@@ -55,6 +56,13 @@ substitutions:
   openai_ca_certificate: ""
   # false: accept that certificate whatever host name or IP address it names.
   openai_verify_certificate_name: "true"
+  # Server-side capture denoise (Nexus): the device asks the server to apply RNNoise to the
+  # uploaded audio (`?nexus_noise_filter=1` on the WebSocket URL — a handshake parameter, outside
+  # the OpenAI Realtime protocol schemas). Meant for servers whose capture needs help, e.g. a
+  # self-hosted Nexus with a satellite whose own DSP is still work in progress; a browser client
+  # must not send it (its WebRTC stack already denoises). An explicit `nexus_noise_filter=` in
+  # openai_base_url always wins; "false" adds nothing.
+  openai_noise_filter: "true"
   # The "Use OpenAI Realtime" switch's state on first boot (and after a flash erase); afterwards it
   # keeps whatever it was last set to. RESTORE_DEFAULT_OFF starts on the Assist pipeline instead.
   openai_realtime_restore_mode: RESTORE_DEFAULT_ON
@@ -132,6 +140,7 @@ openai_realtime:
   voice: ${openai_voice}
   ca_certificate: ${openai_ca_certificate}
   verify_certificate_name: ${openai_verify_certificate_name}
+  noise_filter: ${openai_noise_filter}
   microphone:
     microphone: sat1_mics
     channels: 0

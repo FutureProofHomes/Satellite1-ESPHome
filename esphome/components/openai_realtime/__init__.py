@@ -71,6 +71,7 @@ CONF_DESCRIPTION = "description"
 CONF_PARAMETERS = "parameters"
 CONF_END_CONVERSATION_TOOL = "end_conversation_tool"
 CONF_FULL_DUPLEX = "full_duplex"
+CONF_NOISE_FILTER = "noise_filter"
 CONF_API_VERSION = "api_version"
 CONF_IDLE_TIMEOUT = "idle_timeout"
 CONF_MAX_DURATION = "max_duration"
@@ -98,7 +99,6 @@ CONF_CALL_ID = "call_id"
 CONF_OUTPUT = "output"
 CONF_RESPOND = "respond"
 CONF_TEXT = "text"
-
 
 
 OPENAI_HOST = "api.openai.com"
@@ -149,7 +149,9 @@ _voice = _pattern(r"^[A-Za-z0-9._:/+-]{1,63}$", "voice")
 def _api_key(value):
     value = cv.string(value)
     if len(value) > 255 or any(ord(c) <= 0x20 or ord(c) >= 0x7F or c in '"\\' for c in value):
-        raise cv.Invalid("api_key must be at most 255 printable characters without spaces or quotes")
+        raise cv.Invalid(
+            "api_key must be at most 255 printable characters without spaces or quotes"
+        )
     return value
 
 
@@ -163,9 +165,7 @@ def _ca_certificate(value):
     if not value:
         return ""
     if _PEM_BEGIN not in value or _PEM_END not in value:
-        raise cv.Invalid(
-            f"ca_certificate must be a PEM certificate ({_PEM_BEGIN} ... {_PEM_END})"
-        )
+        raise cv.Invalid(f"ca_certificate must be a PEM certificate ({_PEM_BEGIN} ... {_PEM_END})")
     if any(ord(c) >= 0x7F or (ord(c) < 0x20 and c not in "\r\n") for c in value):
         raise cv.Invalid("ca_certificate contains characters a PEM certificate cannot have")
     return value + "\n"
@@ -185,7 +185,8 @@ def _key_required_for_openai(config):
     _, host, _, _ = _split_base_url(config[CONF_BASE_URL])
     if host.split(":")[0] == OPENAI_HOST and not config[CONF_API_KEY]:
         raise cv.Invalid(
-            f"api_key is required for {OPENAI_HOST} (a local server may need none)", path=[CONF_API_KEY]
+            f"api_key is required for {OPENAI_HOST} (a local server may need none)",
+            path=[CONF_API_KEY],
         )
     return config
 
@@ -231,9 +232,7 @@ TOOL_SCHEMA = cv.Schema(
     {
         cv.Required(CONF_NAME): _tool_name,
         cv.Required(CONF_DESCRIPTION): cv.string,
-        cv.Optional(
-            CONF_PARAMETERS, default={"type": "object", "properties": {}}
-        ): _parameters,
+        cv.Optional(CONF_PARAMETERS, default={"type": "object", "properties": {}}): _parameters,
     }
 ).add_extra(_no_control_chars)
 
@@ -246,12 +245,8 @@ TURN_DETECTION_SCHEMA = cv.Schema(
             "auto", "low", "medium", "high", lower=True
         ),
         cv.Optional(CONF_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
-        cv.Optional(
-            CONF_PREFIX_PADDING, default="300ms"
-        ): cv.positive_time_period_milliseconds,
-        cv.Optional(
-            CONF_SILENCE_DURATION, default="500ms"
-        ): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_PREFIX_PADDING, default="300ms"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_SILENCE_DURATION, default="500ms"): cv.positive_time_period_milliseconds,
     }
 )
 
@@ -274,20 +269,17 @@ CONFIG_SCHEMA = cv.Schema(
         # Default mode until a switch (or openai_realtime.set_full_duplex) says otherwise:
         # true = full duplex with barge-in, false = turn-based like the Assist pipeline.
         cv.Optional(CONF_FULL_DUPLEX, default=True): cv.boolean,
+        # Server-side capture denoise (Nexus `?nexus_noise_filter=1`): the satellite's own DSP is
+        # work in progress, so it asks the server to apply RNNoise to the uploaded audio. A browser
+        # client must NOT send this (its WebRTC stack already denoises). An explicit
+        # `nexus_noise_filter=` in the base URL always wins.
+        cv.Optional(CONF_NOISE_FILTER, default=True): cv.boolean,
         # Wire format: "auto" reads it from the server's session.created (GA for api.openai.com,
         # usually beta for self-hosted servers); force one only for a server that sends none.
-        cv.Optional(CONF_API_VERSION, default="auto"): cv.one_of(
-            "auto", "ga", "beta", lower=True
-        ),
-        cv.Optional(
-            CONF_IDLE_TIMEOUT, default="20s"
-        ): cv.positive_time_period_milliseconds,
-        cv.Optional(
-            CONF_MAX_DURATION, default="15min"
-        ): cv.positive_time_period_milliseconds,
-        cv.Optional(
-            CONF_PLAYBACK_LATENCY, default="600ms"
-        ): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_API_VERSION, default="auto"): cv.one_of("auto", "ga", "beta", lower=True),
+        cv.Optional(CONF_IDLE_TIMEOUT, default="20s"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_MAX_DURATION, default="15min"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_PLAYBACK_LATENCY, default="600ms"): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_PLAYBACK_BUFFER_SIZE, default=786432): cv.int_range(
             min=65536, max=4 * 1024 * 1024
         ),
@@ -315,9 +307,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_ON_END): automation.validate_automation(single=True),
         cv.Optional(CONF_ON_ERROR): automation.validate_automation(single=True),
         cv.Optional(CONF_ON_USER_TRANSCRIPT): automation.validate_automation(single=True),
-        cv.Optional(CONF_ON_ASSISTANT_TRANSCRIPT): automation.validate_automation(
-            single=True
-        ),
+        cv.Optional(CONF_ON_ASSISTANT_TRANSCRIPT): automation.validate_automation(single=True),
         cv.Optional(CONF_ON_FUNCTION_CALL): automation.validate_automation(single=True),
     }
 ).extend(cv.COMPONENT_SCHEMA)
@@ -325,9 +315,9 @@ CONFIG_SCHEMA = cv.Schema(
 
 def _final_validate(config):
     # The Realtime path is 16 kHz in (resampled here to 24 kHz), like voice_assistant.
-    microphone.final_validate_microphone_source_schema(
-        "openai_realtime", sample_rate=16000
-    )(config[CONF_MICROPHONE])
+    microphone.final_validate_microphone_source_schema("openai_realtime", sample_rate=16000)(
+        config[CONF_MICROPHONE]
+    )
     return config
 
 
@@ -384,6 +374,7 @@ async def to_code(config):
         cg.add(var.set_tools_json(json.dumps(tools, separators=(",", ":"))))
     cg.add(var.set_end_conversation_tool(config[CONF_END_CONVERSATION_TOOL]))
     cg.add(var.set_full_duplex(config[CONF_FULL_DUPLEX]))
+    cg.add(var.set_noise_filter(config[CONF_NOISE_FILTER]))
     cg.add(var.set_api_version(config[CONF_API_VERSION]))
     cg.add(var.set_idle_timeout(config[CONF_IDLE_TIMEOUT].total_milliseconds))
     cg.add(var.set_max_duration(config[CONF_MAX_DURATION].total_milliseconds))
@@ -512,9 +503,7 @@ async def openai_realtime_set_full_duplex_to_code(config, action_id, template_ar
 @automation.register_action(
     "openai_realtime.send_text",
     SendTextAction,
-    OPENAI_REALTIME_ACTION_SCHEMA.extend(
-        {cv.Required(CONF_TEXT): cv.templatable(cv.string)}
-    ),
+    OPENAI_REALTIME_ACTION_SCHEMA.extend({cv.Required(CONF_TEXT): cv.templatable(cv.string)}),
     synchronous=True,
 )
 async def openai_realtime_send_text_to_code(config, action_id, template_arg, args):

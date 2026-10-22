@@ -62,7 +62,8 @@ std::string url_encode_component(const std::string &value) {
   return out;
 }
 
-bool derive_endpoints(const std::string &base_url, const std::string &model, Endpoints &out, std::string &error) {
+bool derive_endpoints(const std::string &base_url, const std::string &model, bool noise_filter,
+                      Endpoints &out, std::string &error) {
   const std::string s = normalize_base_url(base_url);
   if (s.empty()) {
     error = "empty";
@@ -129,6 +130,17 @@ bool derive_endpoints(const std::string &base_url, const std::string &model, End
     if (!rt_query.empty())
       rt_query += '&';
     rt_query += "model=" + url_encode_component(model);
+  }
+
+  // Server-side capture denoise (Nexus): the satellite's own DSP is work in progress, so it asks the
+  // server to apply RNNoise to the uploaded audio (`?nexus_noise_filter=1` — a handshake parameter,
+  // outside the OpenAI Realtime protocol schemas). Default on; a base URL that pins the parameter
+  // explicitly always wins. `noise_filter == false` adds nothing (absent is server-off).
+  const bool has_noise_filter = ("&" + rt_query).find("&nexus_noise_filter=") != std::string::npos;
+  if (noise_filter && !has_noise_filter) {
+    if (!rt_query.empty())
+      rt_query += '&';
+    rt_query += "nexus_noise_filter=1";
   }
 
   out.realtime_url = std::string(out.secure ? "wss://" : "ws://") + host + rt_path;
