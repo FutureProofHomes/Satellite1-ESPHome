@@ -61,13 +61,39 @@ fi
         if command -v "$p" >/dev/null 2>&1; then PYTHON="$p"; break; fi
     done
     if [ -z "$PYTHON" ]; then
-        echo "Need Python 3.12-3.14. On macOS: brew install python@3.12"
+        echo "Need Python 3.12-3.14 (as python3.12, python3.13 or python3.14). Install it with:"
+        case "$(uname -s)" in
+            Darwin)
+                echo "    brew install python@3.12" ;;
+            Linux)
+                if command -v apt-get >/dev/null 2>&1; then
+                    echo "    sudo apt install python3.12 python3.12-venv"
+                    echo "(Ubuntu 22.04 and Debian 12 don't package 3.12; use pyenv or, on Ubuntu, ppa:deadsnakes/ppa)"
+                elif command -v dnf >/dev/null 2>&1; then
+                    echo "    sudo dnf install python3.12"
+                elif command -v pacman >/dev/null 2>&1; then
+                    echo "    sudo pacman -S python"
+                elif command -v zypper >/dev/null 2>&1; then
+                    echo "    sudo zypper install python312"
+                else
+                    echo "    your distribution's package manager, or pyenv"
+                fi ;;
+            *)
+                echo "    https://www.python.org/downloads/" ;;
+        esac
         exit 1
     fi
 
     # Rebuild the venv if it exists but was made with an unsupported Python
     if [ -d "${venv}" ] && ! "${venv}/bin/python" -c 'import sys; sys.exit(not (3,12) <= sys.version_info[:2] < (3,15))' 2>/dev/null; then
         echo "==> Existing ${venv} uses an unsupported Python, recreating"
+        rm -rf "${venv}"
+    fi
+
+    # Rebuild the venv if an earlier creation failed part way (e.g. Debian/Ubuntu
+    # without python3.X-venv leaves a .venv with no activate script or pip)
+    if [ -d "${venv}" ] && { [ ! -f "${venv}/bin/activate" ] || ! "${venv}/bin/python" -m pip --version >/dev/null 2>&1; }; then
+        echo "==> Existing ${venv} is incomplete, recreating"
         rm -rf "${venv}"
     fi
 
@@ -89,7 +115,15 @@ fi
     fresh=""
     if [ ! -d "${venv}" ]; then
         echo "==> Creating virtual environment at ${venv} with ${PYTHON} (first install takes a few minutes)"
-        "${PYTHON}" -m venv "${venv}"
+        if ! "${PYTHON}" -m venv "${venv}"; then
+            # Don't leave a half-built venv behind for the next run to trip on
+            rm -rf "${venv}"
+            echo "Creating the virtual environment failed"
+            if command -v apt-get >/dev/null 2>&1; then
+                echo "On Debian/Ubuntu, install venv support with: sudo apt install ${PYTHON}-venv"
+            fi
+            exit 1
+        fi
         fresh=1
         changed=1
     fi
