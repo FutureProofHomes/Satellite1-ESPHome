@@ -74,23 +74,25 @@ static void fill_tools(JsonObject session, const SessionConfig &c) {
     t["name"] = "end_conversation";
     // The canonical spec is mirrored in the Nexus server's local-audio
     // integration and the Nexus UI's useRealtimeVoice.ts — keep all three in
-    // sync. The model speaks the farewell in the same response that carries
-    // the call and mirrors it in the required farewell_message argument.
+    // sync. The model passes the farewell in the required farewell_message
+    // argument and does NOT speak a goodbye in the response's prose; the
+    // server speaks it via its own TTS at the carrying turn's boundary.
     t["description"] =
         "End the current conversation. Call it when the user says goodbye or asks to stop, and "
         "also on your own whenever the conversation has naturally concluded: their request is "
         "fulfilled and nothing is pending, or the context makes clear they no longer want to "
-        "continue or need no further assistance. Act without waiting to be asked or nudged. In "
-        "this same response, say a brief, warm farewell aloud and pass the exact same text as "
-        "farewell_message.";
+        "continue or need no further assistance. Act without waiting to be asked or nudged. Do "
+        "not say a goodbye in your response text: pass the brief, warm farewell as the "
+        "farewell_message argument, and it will be spoken aloud as the conversation's last "
+        "words.";
     JsonObject p = t["parameters"].to<JsonObject>();
     p["type"] = "object";
     JsonObject props = p["properties"].to<JsonObject>();
     JsonObject farewell = props["farewell_message"].to<JsonObject>();
     farewell["type"] = "string";
     farewell["description"] =
-        "The exact text of the farewell you speak in this same response, which will be the "
-        "last words of the conversation.";
+        "The brief, warm farewell to speak aloud as the conversation's last words. Do not "
+        "also say it in your response text — this argument is the only farewell channel.";
     JsonArray required = p["required"].to<JsonArray>();
     required.add("farewell_message");
   }
