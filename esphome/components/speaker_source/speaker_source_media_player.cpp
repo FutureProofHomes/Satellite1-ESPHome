@@ -783,7 +783,9 @@ void SpeakerSourceMediaPlayer::handle_volume_state_(const VolumeMuteState &state
   const bool initial_sync = !this->volume_state_initialized_;
   const bool source_sync = !this->source_volume_state_initialized_;
 
-  const float bounded_volume = remap<float, float>(volume, 0.0f, 1.0f, this->volume_min_, this->volume_max_);
+  // Match the upstream silence threshold without letting volume_min make silence audible.
+  const float bounded_volume =
+      volume < 0.001f ? 0.0f : remap<float, float>(volume, 0.0f, 1.0f, this->volume_min_, this->volume_max_);
 
   // Commit the pair before any observer can see it. The controller owns mute independently of volume.
   this->volume = volume;
