@@ -6,6 +6,7 @@ media_source:
   - platform: sendspin
     id: sendspin_media_source
     codecs: [FLAC, PCM]
+    static_delay_adjustable: true
 
 media_player:
   - platform: sendspin
