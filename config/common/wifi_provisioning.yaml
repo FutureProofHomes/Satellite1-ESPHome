@@ -1,0 +1,78 @@
+wifi_provisioning:
+
+globals:
+  - id: wifi_ever_connected
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+esp32_ble:
+  id: provisioning_ble
+  enable_on_boot: false
+
+improv_serial:
+
+esp32_improv:
+  authorizer: btn_action
+  on_start:
+    - lambda: id(improv_ble_in_progress) = true;
+    - script.execute: control_leds
+  on_provisioned:
+    - lambda: id(improv_ble_in_progress) = false;
+    - script.execute: control_leds
+  on_stop:
+    - lambda: id(improv_ble_in_progress) = false;
+    - script.execute: control_leds
+
+esphome:
+  on_boot:
+    # WiFi setup (250) has loaded preferences, even without a connection.
+    - priority: 200
+      then:
+        - script.execute: wifi_boot_provisioning
+
+wifi:
+  on_connect:
+    - lambda: id(wifi_ever_connected) = true;
+    - script.stop: wifi_boot_provisioning
+    - script.execute: wifi_finish_connection
+  on_disconnect:
+    - script.stop: wifi_finish_connection
+    - if:
+        condition:
+          lambda: return id(wifi_ever_connected);
+        then:
+          - ble.disable:
+
+voice_assistant:
+  on_client_connected:
+    - script.wait: wifi_finish_connection
+
+script:
+  - id: wifi_boot_provisioning
+    then:
+      - if:
+          condition:
+            lambda: return id(wifi_id).has_sta();
+          then:
+            - delay: 90s
+      - if:
+          condition:
+            lambda: return !id(wifi_id).is_connected() && !id(wifi_ever_connected);
+          then:
+            # WiFi itself requests Improv start; only this boot policy enables BLE.
+            - ble.enable:
+
+  - id: wifi_finish_connection
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: return id(provisioning_ble).is_active();
+          then:
+            - delay: 5s  # Allow the Improv result to reach its client.
+      - ble.disable:
+      - wait_until:
+          not: ble.enabled
+      # Inactive is not proof of completed teardown; retain the existing heuristic.
+      - delay: 1s

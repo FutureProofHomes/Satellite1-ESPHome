@@ -1,4 +1,5 @@
 globals:
+  # The LED controller also uses this flag in credential-only builds.
   - id: improv_ble_in_progress
     type: bool
     restore_value: no
@@ -11,6 +12,3 @@ wifi:
     - script.execute: control_leds
   on_disconnect:
     - script.execute: control_leds
-
-improv_serial:
-

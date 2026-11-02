@@ -17,3 +17,4 @@ external_components:
       - satellite1_radar
       - speaker_source
       - tas2780
+      - wifi_provisioning
