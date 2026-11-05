@@ -365,6 +365,24 @@ improv_serial:
                 args: ['id(ambient_light).state']
       - if:
           condition:
+            lambda: return x.get_action() == std::string("LOG_MMWAVE_RADAR");
+          then:
+            - lambda: |-
+                // The radar model was detected at boot (satellite1_radar sniffs the UART frame
+                // header before Improv starts). The firmware version arrives a moment later via
+                // the 0x00A0 query and is published to the runtime "Radar Firmware" text sensor,
+                // which only exists when a radar was detected - hence the lookup by name.
+                std::string firmware = "none";
+                for (auto *sensor : App.get_text_sensors()) {
+                  if (sensor->get_name() == "Radar Firmware" && sensor->has_state() && !sensor->state.empty()) {
+                    firmware = sensor->state;
+                    break;
+                  }
+                }
+                ESP_LOGI("mfg", "The mmWave radar reports: model=%s firmware=%s",
+                         id(radar_detected_text).state.c_str(), firmware.c_str());
+      - if:
+          condition:
             lambda: return x.get_action() == std::string("LOG_LINE_OUT_STATE");
           then:
             - logger.log:
