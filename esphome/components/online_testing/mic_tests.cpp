@@ -308,6 +308,29 @@ float MicTester::get_mic_energy() {
   return rms;
 }
 
+float MicTester::get_tone_level_db(float freq_hz, size_t samples) {
+  if (this->input_buffer_ == nullptr || samples == 0 || samples > this->input_buffer_size_)
+    return NAN;
+  const size_t write_pos = this->write_pos_;
+  if (write_pos < samples)
+    return NAN;
+  const float sample_rate = static_cast<float>(this->mic_->get_audio_stream_info().get_sample_rate());
+  if (freq_hz <= 0.0f || freq_hz >= sample_rate / 2.0f)
+    return NAN;
+  // Goertzel filter: the power of one DFT bin without computing the whole spectrum.
+  const float coeff = 2.0f * cosf(2.0f * static_cast<float>(M_PI) * freq_hz / sample_rate);
+  float prev = 0.0f;
+  float prev2 = 0.0f;
+  for (size_t i = write_pos - samples; i < write_pos; i++) {
+    const float next = static_cast<float>(this->input_buffer_[i % this->input_buffer_size_]) + coeff * prev - prev2;
+    prev2 = prev;
+    prev = next;
+  }
+  const float power = std::max(prev * prev + prev2 * prev2 - coeff * prev * prev2, 0.0f);
+  const float amplitude = 2.0f * sqrtf(power) / static_cast<float>(samples);
+  return 20.0f * log10f(amplitude / 32768.0f);
+}
+
 void MicTester::set_udp_stream_enabled(bool enabled) {
   if (this->udp_stream_enabled_ == enabled)
     return;
