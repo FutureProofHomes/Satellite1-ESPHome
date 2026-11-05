@@ -40,7 +40,7 @@ binary_sensor:
       then:
         - if:
             condition:
-              lambda: return id(xmos_audio_ready);
+              lambda: return id(satellite1_id).audio_available();
             then:
               - lambda: id(volume_buttons_touched) = true;
               - script.execute:
@@ -61,7 +61,7 @@ binary_sensor:
       then:
         - if:
             condition:
-              lambda: return id(xmos_audio_ready);
+              lambda: return id(satellite1_id).audio_available();
             then:
               - lambda: id(volume_buttons_touched) = true;
               - script.execute:
@@ -82,7 +82,7 @@ binary_sensor:
       - if:
           condition:
             and:
-              - lambda: return id(xmos_audio_ready);
+              - lambda: return id(satellite1_id).audio_available();
               - binary_sensor.is_off: btn_left
           then:
             - script.execute:
@@ -95,7 +95,7 @@ binary_sensor:
           else:
             - if:
                 condition:
-                  lambda: return id(xmos_audio_ready);
+                  lambda: return id(satellite1_id).audio_available();
                 then:
                   - script.execute:
                       id: play_sound

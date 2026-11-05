@@ -204,7 +204,7 @@ void I2SAudioSpeaker::process_volume_state_() {
     if (this->has_pending_volume_ || this->has_pending_mute_) {
       // A newer gain must reach the DAC before releasing a queued unmute.
       if (!this->has_pending_mute_) {
-        this->pending_mute_state_ = this->mute_state_ || this->volume_ < 0.001f;
+        this->pending_mute_state_ = this->mute_state_;
         this->has_pending_mute_ = true;
       }
     } else if (success) {
@@ -229,9 +229,6 @@ void I2SAudioSpeaker::set_volume(float volume) {
   if (this->audio_dac_ != nullptr) {
     this->pending_volume_ = volume;
     this->has_pending_volume_ = true;
-    // Silence is derived from both fields, without changing explicit mute intent.
-    this->pending_mute_state_ = this->mute_state_ || volume < 0.001f;
-    this->has_pending_mute_ = true;
   } else
 #endif
   {
@@ -243,7 +240,8 @@ void I2SAudioSpeaker::set_mute_state(bool mute_state) {
   this->mute_state_ = mute_state;
 #ifdef USE_AUDIO_DAC
   if (this->audio_dac_ != nullptr) {
-    this->pending_mute_state_ = mute_state || this->volume_ < 0.001f;
+    // Volume and explicit mute are independent; the DAC owns volume-derived silence.
+    this->pending_mute_state_ = mute_state;
     this->has_pending_mute_ = true;
   } else
 #endif

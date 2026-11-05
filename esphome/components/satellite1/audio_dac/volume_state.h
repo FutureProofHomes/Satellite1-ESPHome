@@ -21,10 +21,12 @@ class DACOutputVolumeState : public speaker_source::VolumeState {
   void initialize() override;
   bool set_volume(float volume) override;
   bool set_muted(bool muted) override;
+  bool set_output_volume(DacOutput output, float volume);
+  float output_volume(DacOutput output) const;
 
  protected:
   void publish_selected_state_(bool force = false);
-  void save_();
+  bool save_();
   DACProxy *parent_{nullptr};
   ESPPreferenceObject pref_;
   DACOutputVolumePreferences restore_state_{};

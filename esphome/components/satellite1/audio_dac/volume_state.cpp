@@ -48,21 +48,42 @@ void DACOutputVolumeState::publish_selected_state_(bool force) {
       this->restore_state_.global_muted, force || route_changed);
 }
 
-void DACOutputVolumeState::save_() {
-  if (!this->pref_.save(&this->restore_state_))
+bool DACOutputVolumeState::save_() {
+  if (!this->pref_.save(&this->restore_state_)) {
     ESP_LOGW(TAG, "Failed to save logical volume preferences");
+    return false;
+  }
+  return true;
 }
 
 bool DACOutputVolumeState::set_volume(float volume) {
+  if (this->parent_ == nullptr)
+    return false;
+  return this->set_output_volume(this->parent_->requested_output(), volume);
+}
+
+float DACOutputVolumeState::output_volume(DacOutput output) const {
+  return output == SPEAKER ? this->restore_state_.speaker_volume : this->restore_state_.line_out_volume;
+}
+
+bool DACOutputVolumeState::set_output_volume(DacOutput output, float volume) {
   if (!this->is_initialized() || !valid_volume(volume))
     return false;
+  if ((output != SPEAKER && output != LINE_OUT) || !this->parent_->output_configured(output))
+    return false;
   this->selected_output_ = this->parent_->requested_output();
-  float &stored =
-      this->selected_output_ == SPEAKER ? this->restore_state_.speaker_volume : this->restore_state_.line_out_volume;
+  float &stored = output == SPEAKER ? this->restore_state_.speaker_volume : this->restore_state_.line_out_volume;
   if (stored != volume) {
+    const float previous = stored;
     stored = volume;
-    this->save_();
-    this->publish_state_(volume, this->restore_state_.global_muted);
+    if (!this->save_()) {
+      stored = previous;
+      return false;
+    }
+    if (output == this->selected_output_)
+      this->publish_state_(volume, this->restore_state_.global_muted);
+    else
+      this->parent_->reconcile_output_volume(output);
   }
   return true;
 }
@@ -72,8 +93,12 @@ bool DACOutputVolumeState::set_muted(bool muted) {
     return false;
   this->selected_output_ = this->parent_->requested_output();
   if (this->restore_state_.global_muted != muted) {
+    const bool previous = this->restore_state_.global_muted;
     this->restore_state_.global_muted = muted;
-    this->save_();
+    if (!this->save_()) {
+      this->restore_state_.global_muted = previous;
+      return false;
+    }
     this->publish_state_(
         this->selected_output_ == SPEAKER ? this->restore_state_.speaker_volume : this->restore_state_.line_out_volume,
         muted);
