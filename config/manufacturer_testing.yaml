@@ -8,6 +8,11 @@ substitutions:
   xmos_fw_bin: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
   xmos_fw_md5: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
   test_sweep_file: https://raw.githubusercontent.com/FutureProofHomes/Satellite1-ESPHome/82820f24d611d7fbd571e617817d28852e9d5d11/esphome/components/online_testing/sweep_512.wav
+  # build_esphome_firmware.sh in Satellite1-Manufacturer-Testing replaces these with
+  # its woofer and tweeter test tones. The sweep defaults only keep standalone config
+  # validation working; a firmware built with them fails the driver tests.
+  test_tone_low_file: https://raw.githubusercontent.com/FutureProofHomes/Satellite1-ESPHome/82820f24d611d7fbd571e617817d28852e9d5d11/esphome/components/online_testing/sweep_512.wav
+  test_tone_high_file: https://raw.githubusercontent.com/FutureProofHomes/Satellite1-ESPHome/82820f24d611d7fbd571e617817d28852e9d5d11/esphome/components/online_testing/sweep_512.wav
 
 packages:
   base: !include satellite1.base.yaml
@@ -104,6 +109,10 @@ binary_sensor:
 audio_file:
   - id: audio_test_sweep
     file: ${test_sweep_file}
+  - id: audio_test_tone_low
+    file: ${test_tone_low_file}
+  - id: audio_test_tone_high
+    file: ${test_tone_high_file}
 
 memory_flasher:
   - id: !extend xflash
@@ -403,6 +412,30 @@ improv_serial:
 
       - if:
           condition:
+            lambda: return x.get_action() == std::string("MEASURE_TONE_LEVEL");
+          then:
+            - lambda: |-
+                const std::string query = x.get_url().has_value() ? *x.get_url() : std::string();
+                auto get_param = [&query](const std::string &key, long fallback) -> long {
+                  const std::string needle = key + "=";
+                  size_t start = query.find(needle);
+                  if (start == std::string::npos)
+                    return fallback;
+                  start += needle.size();
+                  const std::string value = query.substr(start, query.find('&', start) - start);
+                  char *end = nullptr;
+                  const long parsed = std::strtol(value.c_str(), &end, 10);
+                  return (end == value.c_str() || *end != '\0') ? fallback : parsed;
+                };
+                const long freq = get_param("freq", 0);
+                const long samples = get_param("samples", 8000);
+                const float level = (freq > 0 && samples > 0)
+                    ? id(mic_tester).get_tone_level_db(static_cast<float>(freq), static_cast<size_t>(samples))
+                    : NAN;
+                ESP_LOGI("tone_level", "Tone level (ch=%d, freq=%ld): %.1f dB", id(mic_tester).get_channel(), freq, level);
+
+      - if:
+          condition:
             lambda: return x.get_action() == std::string("SET_UDP_AUDIO_TARGET");
           then:
             - lambda: |-
@@ -595,6 +628,22 @@ improv_serial:
                 id: play_sound
                 priority: false
                 sound_file: audio_test_sweep
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("PLAY_TEST_TONE_LOW");
+          then:
+            - script.execute:
+                id: play_sound
+                priority: false
+                sound_file: audio_test_tone_low
+      - if:
+          condition:
+            lambda: return x.get_action() == std::string("PLAY_TEST_TONE_HIGH");
+          then:
+            - script.execute:
+                id: play_sound
+                priority: false
+                sound_file: audio_test_tone_high
       - if:
           condition:
             lambda: return x.get_action() == std::string("SET_TO_LINE_OUT");

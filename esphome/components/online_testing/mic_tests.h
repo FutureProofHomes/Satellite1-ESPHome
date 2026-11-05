@@ -44,6 +44,9 @@ class MicTester : public Component {
   void pause_detection();
   void reset_detection();
   float get_mic_energy();
+  /// Level in dBFS of a single frequency over the most recent samples, or NaN when
+  /// the buffer does not yet hold that many.
+  float get_tone_level_db(float freq_hz, size_t samples);
 
   void set_udp_stream_enabled(bool enabled);
   void set_udp_stream_host(const std::string &host);
