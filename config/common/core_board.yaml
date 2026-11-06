@@ -4,6 +4,8 @@ esp32:
   flash_size: 16MB
   framework:
     type: esp-idf
+    advanced:
+      flash_chip: generic
 
     sdkconfig_options:
       CONFIG_SPIRAM_RODATA: "y"
