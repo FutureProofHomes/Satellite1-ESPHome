@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
-from esphome.components.audio_dac import AudioDac, audio_dac_ns
+from esphome.components.audio_dac import AudioDac
 from esphome.components.pcm5122.audio_dac import PCM5122
 from esphome.components.tas2780.audio_dac import tas2780
 
@@ -90,6 +90,20 @@ async def to_code(config):
     if CONF_SPEAKER_DAC in config :
         speaker_dac = await cg.get_variable(config[CONF_SPEAKER_DAC])
         cg.add( var.set_speaker_dac(speaker_dac) )
+        cg.add(speaker_dac.set_proxy_managed(True))
+        cg.add(speaker_dac.set_preparation_guard(var, cg.RawExpression(
+            "[](void *context) { return static_cast<satellite1::DACProxy *>(context)->speaker_preparation_allowed(); }"
+        )))
+        cg.add(var.set_speaker_preparation(speaker_dac, cg.RawExpression(
+            "[](void *context, satellite1::DACPreparationCommand command) { "
+            "auto *dac = static_cast<tas2780::TAS2780 *>(context); "
+            "if (command == satellite1::DACPreparationCommand::CANCEL) "
+            "return dac->deactivate() ? satellite1::DACPreparationResult::INACTIVE : satellite1::DACPreparationResult::FAILED; "
+            "if (command == satellite1::DACPreparationCommand::BEGIN) dac->activate(); "
+            "if (dac->activation_failed()) return satellite1::DACPreparationResult::FAILED; "
+            "if (dac->is_activation_pending()) return satellite1::DACPreparationResult::PENDING; "
+            "return dac->is_active() ? satellite1::DACPreparationResult::READY : satellite1::DACPreparationResult::INACTIVE; }"
+        )))
         cg.add(var.set_volume_limits_callback(DacOutput.SPEAKER, cg.RawExpression(
             f"[=](float min_db, float max_db) {{ "
             f"{speaker_dac}->set_vol_range_min((min_db + 100.0f) / 100.0f); "

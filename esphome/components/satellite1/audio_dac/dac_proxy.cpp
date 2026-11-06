@@ -10,6 +10,7 @@ namespace satellite1 {
 
 static const char *const TAG = "dac_proxy";
 static constexpr uint8_t DAC_WRITE_ATTEMPTS = 3;
+static constexpr uint32_t OUTPUT_PREPARATION_TIMEOUT_MS = 2000;
 
 static bool valid_volume(float volume) { return std::isfinite(volume) && volume >= 0.0f && volume <= 1.0f; }
 static bool valid_output(uint8_t output) { return output == SPEAKER || output == LINE_OUT; }
@@ -43,29 +44,262 @@ void DACProxy::setup() {
         valid_volume(legacy.line_out_volume)) {
       this->restore_state_.dac_output = legacy.dac_output;
       ESP_LOGD(TAG, "Migrated legacy DAC routing");
-    }
+    } else if (this->pcm5122_ == nullptr && this->tas2780_ != nullptr)
+      this->restore_state_.dac_output = SPEAKER;
     if (!this->pref_.save(&this->restore_state_))
       ESP_LOGW(TAG, "Failed to save DAC routing preferences");
   }
   this->active_dac = static_cast<DacOutput>(this->restore_state_.dac_output);
   this->requested_dac_ = this->active_dac;
+  this->output_settings_pref_ =
+      global_preferences->make_preference<DACProxyOutputPreferences>(fnv1_hash("satellite1.dac_proxy.outputs.v1"));
+  DACProxyOutputPreferences outputs;
+  if (this->output_settings_pref_.load(&outputs)) {
+    if (outputs.version == 1 && (outputs.enabled_mask & ~3u) == 0)
+      this->output_settings_ = outputs;
+    else {
+      this->output_settings_.enabled_mask = 0;
+      this->output_settings_invalid_ = true;
+      ESP_LOGW(TAG, "Invalid output settings; outputs disabled until explicitly configured");
+    }
+  }
+  this->activation_pref_ = global_preferences->make_preference<DACProxyActivationPreferences>(
+      fnv1_hash("satellite1.dac_proxy.activation.v1"));
+  this->activation_state_.requested_mask = 1u << this->requested_dac_;
+  DACProxyActivationPreferences activation;
+  if (this->activation_pref_.load(&activation)) {
+    if (activation.version == 1 && activation.manual <= 1 && (activation.requested_mask & ~3u) == 0)
+      this->activation_state_ = activation;
+    else {
+      this->activation_state_.requested_mask = 0;
+      this->activation_state_.manual = 1;
+      this->routing_settings_valid_ = false;
+      ESP_LOGW(TAG, "Invalid activation settings; outputs inhibited until explicit routing repair");
+    }
+  }
+  this->update_volume_target_();
   this->setup_was_called_ = true;
-  this->switching_output_ = true;
-  this->reconcile_();
+  this->parent_->add_on_audio_availability_callback([this]() { this->refresh_output(); });
+  this->refresh_output();
   this->defer([this]() {
     this->requested_output_notified_ = true;
-    if (this->volume_state_ != nullptr)
-      this->volume_state_->publish_selected_state_(true);
-    this->requested_output_callback_.call();
-    this->output_change_callback_.call();
-    this->selection_callback_.call();
-    this->state_callback_.call();
-    this->switching_output_ = false;
-    this->reconcile_();
+    this->notify_requested_output_();
   });
 }
 
+bool DACProxy::output_configured(DacOutput output) const {
+  return valid_output(output) && (output == SPEAKER ? this->tas2780_ : this->pcm5122_) != nullptr;
+}
+
+bool DACProxy::output_enabled(DacOutput output) const {
+  return this->output_configured(output) && (this->output_settings_.enabled_mask & (1u << output)) != 0;
+}
+
+uint8_t DACProxy::effective_outputs() const {
+  // Keep missing bindings visible: a restored required DAC must not silently
+  // disappear from a dual request and permit partial playback.
+  return this->activation_state_.requested_mask & this->output_settings_.enabled_mask;
+}
+
+bool DACProxy::update_volume_target_() {
+  const auto mask = this->effective_outputs();
+  const auto target = (mask & (1u << SPEAKER)) ? SPEAKER : (mask & (1u << LINE_OUT)) ? LINE_OUT : this->requested_dac_;
+  const bool changed = target != this->requested_dac_;
+  this->requested_dac_ = target;
+  return changed;
+}
+
+bool DACProxy::apply_activation_(uint8_t requested_mask, bool manual) {
+  if (!this->setup_was_called_ || (requested_mask & ~3u) != 0)
+    return false;
+  if (this->routing_settings_valid_ && this->activation_state_.requested_mask == requested_mask &&
+      bool(this->activation_state_.manual) == manual)
+    return true;
+  auto updated = this->activation_state_;
+  updated.requested_mask = requested_mask;
+  updated.manual = manual;
+  if (!this->activation_pref_.save(&updated)) {
+    ESP_LOGW(TAG, "Activation settings save failed; routing unchanged");
+    return false;
+  }
+  const auto previous = this->effective_outputs();
+  this->activation_state_ = updated;
+  this->routing_settings_valid_ = true;
+  const bool target_changed = this->update_volume_target_();
+  if (previous != this->effective_outputs() || target_changed)
+    this->refresh_output();
+  if (target_changed && this->requested_output_notified_)
+    this->notify_requested_output_();
+  return true;
+}
+
+bool DACProxy::set_active_outputs(bool speaker, bool line_out) {
+  if ((speaker && !this->output_enabled(SPEAKER)) || (line_out && !this->output_enabled(LINE_OUT)))
+    return false;
+  return this->apply_activation_((speaker ? 1 : 0) | (line_out ? 2 : 0), true);
+}
+
+bool DACProxy::set_automatic_routing(bool jack_connected) {
+  if (!this->apply_activation_(1u << (jack_connected ? LINE_OUT : SPEAKER), false))
+    return false;
+  this->jack_connected_ = jack_connected;
+  this->jack_state_known_ = true;
+  return true;
+}
+
+bool DACProxy::observe_jack_state(bool jack_connected) {
+  const bool physical_edge = this->jack_state_known_ && this->jack_connected_ != jack_connected;
+  this->jack_connected_ = jack_connected;
+  this->jack_state_known_ = true;
+  if (physical_edge || this->automatic_routing())
+    return this->set_automatic_routing(jack_connected);
+  return true;  // An initial sensor publication must not cancel restored manual mode.
+}
+
+bool DACProxy::refresh_automatic_routing(bool jack_connected) {
+  return !this->automatic_routing() || this->set_automatic_routing(jack_connected);
+}
+
+bool DACProxy::set_outputs_enabled(bool speaker, bool line_out) {
+  if (!this->setup_was_called_ || (speaker && !this->output_configured(SPEAKER)) ||
+      (line_out && !this->output_configured(LINE_OUT)))
+    return false;
+  DACProxyOutputPreferences updated;
+  updated.enabled_mask = (speaker ? 1 : 0) | (line_out ? 2 : 0);
+  if (updated.enabled_mask == this->output_settings_.enabled_mask && !this->output_settings_invalid_)
+    return true;
+  if (this->output_settings_revision_ == UINT32_MAX)
+    return false;
+  if (!this->output_settings_pref_.save(&updated)) {
+    this->output_settings_save_failed_ = true;
+    return false;
+  }
+  const auto previous = this->effective_outputs();
+  this->output_settings_ = updated;
+  ++this->output_settings_revision_;
+  this->output_settings_save_failed_ = false;
+  this->output_settings_invalid_ = false;
+  const bool target_changed = this->update_volume_target_();
+  if (previous != this->effective_outputs() || target_changed)
+    this->refresh_output();
+  if (target_changed && this->requested_output_notified_)
+    this->notify_requested_output_();
+  return true;
+}
+
+bool DACProxy::speaker_preparation_allowed() const {
+  return this->setup_was_called_ && this->parent_ != nullptr && this->parent_->audio_available() &&
+         (this->effective_outputs() & (1u << SPEAKER)) != 0 && this->output_phase() == DACOutputPhase::PREPARING;
+}
+
+bool DACProxy::invalidate_output_() {
+  ++this->transition_generation_;
+  this->set_phase_(this->parent_ != nullptr && this->parent_->audio_available() ? DACOutputPhase::INACTIVE
+                                                                                : DACOutputPhase::WAITING_FOR_PARENT);
+  this->fresh_volume_received_ = this->fresh_mute_received_ = false;
+  this->speaker_applied_ = {};
+  this->lineout_applied_ = {};
+  bool stopped = true;
+  if (this->speaker_preparation_ != nullptr)
+    stopped = this->speaker_preparation_(this->preparation_context_, DACPreparationCommand::CANCEL) !=
+              DACPreparationResult::FAILED;
+  return this->reconcile_(false) && stopped;
+}
+
+void DACProxy::refresh_output() {
+  this->output_dirty_ = true;
+  if (this->setup_was_called_)
+    this->safe_stop_confirmed_ = this->invalidate_output_();
+}
+
+void DACProxy::notify_supply_changed() { this->refresh_output(); }
+
+void DACProxy::fail_output_() {
+  this->safe_stop_confirmed_ = this->invalidate_output_();
+  this->output_dirty_ = false;
+  this->set_phase_(DACOutputPhase::FAILED);
+}
+
+void DACProxy::loop() {
+  if (!this->setup_was_called_)
+    return;
+  if (!this->parent_->audio_available()) {
+    this->set_phase_(DACOutputPhase::WAITING_FOR_PARENT);
+    return;
+  }
+  if (!this->safe_stop_confirmed_) {
+    this->output_dirty_ = false;
+    this->set_phase_(DACOutputPhase::FAILED);
+    return;
+  }
+  if (this->effective_outputs() == 0) {
+    this->set_phase_(DACOutputPhase::DISABLED);
+    return;
+  }
+  for (const auto output : {SPEAKER, LINE_OUT}) {
+    if ((this->effective_outputs() & (1u << output)) && !this->output_configured(output)) {
+      this->set_phase_(DACOutputPhase::UNAVAILABLE);
+      return;
+    }
+  }
+  const uint32_t generation = this->transition_generation_;
+  if (this->output_dirty_) {
+    this->output_dirty_ = false;
+    if (!this->safe_stop_confirmed_) {
+      this->fail_output_();
+      return;
+    }
+    this->attempt_started_ms_ = millis();
+    this->set_phase_(DACOutputPhase::PREPARING);
+    if (this->effective_outputs() & (1u << SPEAKER)) {
+      if (this->speaker_preparation_ == nullptr) {
+        this->fail_output_();
+        return;
+      }
+      this->speaker_preparation_(this->preparation_context_, DACPreparationCommand::BEGIN);
+      if (generation != this->transition_generation_)
+        return;
+    } else
+      this->commit_output_();
+  }
+  if (generation != this->transition_generation_)
+    return;
+  auto phase = this->output_phase();
+  if ((phase == DACOutputPhase::PREPARING || phase == DACOutputPhase::SYNCHRONIZING) &&
+      uint32_t(millis() - this->attempt_started_ms_) >= OUTPUT_PREPARATION_TIMEOUT_MS) {
+    this->fail_output_();
+    return;
+  }
+  if (phase == DACOutputPhase::PREPARING) {
+    const auto result = this->speaker_preparation_(this->preparation_context_, DACPreparationCommand::POLL);
+    if (generation != this->transition_generation_)
+      return;
+    if (result == DACPreparationResult::READY)
+      this->commit_output_();
+    else if (result != DACPreparationResult::PENDING) {
+      this->fail_output_();
+      return;
+    }
+  }
+  if (generation != this->transition_generation_)
+    return;
+  phase = this->output_phase();
+  if (phase == DACOutputPhase::SYNCHRONIZING && this->fresh_volume_received_ && this->fresh_mute_received_) {
+    if (this->reconcile_(true)) {
+      if (generation == this->transition_generation_)
+        this->set_phase_(DACOutputPhase::READY);
+    } else
+      this->fail_output_();
+  } else if (phase == DACOutputPhase::READY && (this->effective_outputs() & (1u << SPEAKER)) &&
+             this->speaker_preparation_(this->preparation_context_, DACPreparationCommand::POLL) !=
+                 DACPreparationResult::READY)
+    this->fail_output_();
+}
+
 void DACProxy::dump_config() {
+  ESP_LOGCONFIG(TAG, "  Routing: %s, requested mask=%u, effective mask=%u, committed mask=%u, settings valid=%s",
+                this->automatic_routing() ? "automatic" : "manual", this->requested_outputs(),
+                this->effective_outputs(), this->active_mask_, YESNO(this->routing_settings_valid_));
   ESP_LOGCONFIG(TAG, "DAC Proxy: selected=%s, target volume=%.2f, target muted=%s, audio ready=%s",
                 this->active_dac == SPEAKER ? "speaker" : "line-out", this->target_volume_, YESNO(this->target_muted_),
                 YESNO(this->audio_ready()));
@@ -104,7 +338,12 @@ bool DACProxy::set_volume_limits(DacOutput output, float min_db, float max_db) {
   this->apply_volume_limits_(output);
   (output == SPEAKER ? this->speaker_applied_ : this->lineout_applied_).volume_valid = false;
   // A non-selected or suspended output receives its gain when normal routing permits it.
-  return output != this->active_dac || !this->audio_ready() || this->reconcile_();
+  if (this->audio_ready() && this->output_active(output) && !this->reconcile_(true)) {
+    this->fail_output_();
+    // Settings were accepted even if hardware reconciliation failed.
+    return true;
+  }
+  return true;
 }
 
 bool DACProxy::apply_mute_(audio_dac::AudioDac *dac, AppliedState &state, bool muted) {
@@ -124,11 +363,17 @@ bool DACProxy::apply_mute_(audio_dac::AudioDac *dac, AppliedState &state, bool m
   return false;
 }
 
-bool DACProxy::reconcile_() {
+float DACProxy::output_volume_(DacOutput output) const {
+  return output == this->active_dac || this->volume_state_ == nullptr ? this->target_volume_
+                                                                      : this->volume_state_->output_volume(output);
+}
+
+bool DACProxy::reconcile_(bool allow_output) {
   bool success = true;
-  auto *selected =
-      valid_output(this->active_dac) ? (this->active_dac == SPEAKER ? this->tas2780_ : this->pcm5122_) : nullptr;
-  const bool muted = !this->audio_ready() || selected == nullptr || this->target_muted_;
+  const bool permitted = allow_output && this->parent_ != nullptr && this->parent_->audio_available() &&
+                         this->requested_dac_ == this->active_dac && this->active_mask_ != 0 &&
+                         this->active_mask_ == this->effective_outputs();
+  const bool muted = !permitted || this->target_muted_;
   // Driver caches can change before a failed write, so only successful calls confirm applied state.
   for (auto *dac : {this->tas2780_, this->pcm5122_}) {
     if (dac == nullptr)
@@ -138,38 +383,69 @@ bool DACProxy::reconcile_() {
       state.volume_valid = false;
     if (state.mute_valid && dac->is_muted() != state.muted)
       state.mute_valid = false;
-    if (dac != selected || muted)
+    const auto output = dac == this->tas2780_ ? SPEAKER : LINE_OUT;
+    if (!this->output_active(output) || muted || this->output_volume_(output) < 0.001f)
       success = this->apply_mute_(dac, state, true) && success;
   }
-  // A requested destination's target must never be written to the old physical route.
-  if (selected != nullptr && this->requested_dac_ == this->active_dac && this->fresh_volume_received_ &&
-      this->fresh_mute_received_) {
-    auto &state = selected == this->tas2780_ ? this->speaker_applied_ : this->lineout_applied_;
-    if (!state.volume_valid || state.volume != this->target_volume_ || selected->volume() != this->target_volume_) {
-      this->apply_volume_limits_(this->active_dac);
-      state.volume_valid = false;
-      for (uint8_t attempt = 0; attempt < DAC_WRITE_ATTEMPTS; ++attempt) {
-        if (selected->set_volume(this->target_volume_)) {
-          state.volume = this->target_volume_;
-          state.volume_valid = true;
-          break;
+  // No newly requested volume may leak onto the previous committed output set.
+  const auto phase = this->output_phase();
+  if ((phase == DACOutputPhase::SYNCHRONIZING || phase == DACOutputPhase::READY) && this->parent_->audio_available() &&
+      this->active_mask_ == this->effective_outputs() && this->requested_dac_ == this->active_dac &&
+      this->fresh_volume_received_ && this->fresh_mute_received_) {
+    for (const auto output : {SPEAKER, LINE_OUT}) {
+      if (!this->output_active(output))
+        continue;
+      auto *dac = output == SPEAKER ? this->tas2780_ : this->pcm5122_;
+      if (dac == nullptr)
+        return false;
+      auto &state = output == SPEAKER ? this->speaker_applied_ : this->lineout_applied_;
+      const float volume = this->output_volume_(output);
+      if (!state.volume_valid || state.volume != volume || dac->volume() != volume) {
+        this->apply_volume_limits_(output);
+        state.volume_valid = false;
+        for (uint8_t attempt = 0; attempt < DAC_WRITE_ATTEMPTS; ++attempt) {
+          if (dac->set_volume(volume)) {
+            state.volume = volume;
+            state.volume_valid = true;
+            break;
+          }
+        }
+        if (!state.volume_valid) {
+          state.mute_valid = false;
+          ESP_LOGW(TAG, "DAC volume write failed after %u attempts", DAC_WRITE_ATTEMPTS);
+          success = false;
         }
       }
-      if (!state.volume_valid) {
-        state.mute_valid = false;
-        ESP_LOGW(TAG, "Selected DAC volume write failed after %u attempts", DAC_WRITE_ATTEMPTS);
-        success = false;
+    }
+    // Finish all volume writes before allowing either DAC to become audible.
+    if (success && !muted) {
+      for (const auto output : {SPEAKER, LINE_OUT}) {
+        if (this->output_active(output) && this->output_volume_(output) >= 0.001f) {
+          auto *dac = output == SPEAKER ? this->tas2780_ : this->pcm5122_;
+          auto &state = output == SPEAKER ? this->speaker_applied_ : this->lineout_applied_;
+          if (!this->apply_mute_(dac, state, false)) {
+            success = false;
+            break;
+          }
+        }
       }
     }
-    if (success && !muted)
-      success = this->apply_mute_(selected, state, false);
   }
   return success;
+}
+
+bool DACProxy::reconcile_output_volume(DacOutput output) {
+  if (!valid_output(output) || !this->output_configured(output))
+    return false;
+  if (this->audio_ready() && this->output_active(output) && !this->reconcile_(true))
+    this->fail_output_();
+  return true;  // Logical volume acceptance is separate from hardware success.
 }
 
 bool DACProxy::receiving_current_output_() const {
   // Reentrant provider publications may still be delivering the previous snapshot.
   return !this->switching_output_ && this->requested_dac_ == this->active_dac &&
+         (this->output_phase() == DACOutputPhase::SYNCHRONIZING || this->output_phase() == DACOutputPhase::READY) &&
          (this->volume_state_ == nullptr || !this->volume_state_->is_publishing());
 }
 
@@ -187,96 +463,70 @@ void DACProxy::notify_requested_output_() {
 }
 
 bool DACProxy::request_output(DacOutput output) {
-  if (!valid_output(output))
+  if (!this->output_enabled(output))
     return false;
-  if (this->requested_dac_ == output)
-    return true;
-  this->requested_dac_ = output;
-  this->fresh_volume_received_ = false;
-  this->fresh_mute_received_ = false;
-  const bool was_switching = this->switching_output_;
-  this->switching_output_ = true;
-  this->reconcile_();
-  if (this->requested_output_notified_)
-    this->notify_requested_output_();
-  this->switching_output_ = was_switching;
-  return true;
+  return this->apply_activation_(1u << output, true);
 }
 
-void DACProxy::select_output_(DacOutput output) {
-  if (!this->setup_was_called_ || !valid_output(output))
-    return;
-  if (this->requested_dac_ != output)
-    this->request_output(output);
-  if (this->requested_dac_ != output)
-    return;
-  if (this->switching_output_ || (this->volume_state_ != nullptr && this->volume_state_->is_publishing())) {
-    this->pending_output_ = output;
-    if (!this->selection_pending_) {
-      this->selection_pending_ = true;
-      this->defer([this]() {
-        this->selection_pending_ = false;
-        // Nested route commands coalesce to the latest requested destination.
-        if (this->pending_output_ == this->requested_dac_)
-          this->select_output_(this->pending_output_);
-      });
-    }
-    return;
-  }
-  if ((output == SPEAKER ? this->tas2780_ : this->pcm5122_) == nullptr)
-    return;
-  if (this->active_dac == output) {
-    this->reconcile_();
-    return;
-  }
+void DACProxy::commit_output_() {
+  const auto generation = this->transition_generation_;
+  const auto output = this->requested_dac_;
+  const auto mask = this->effective_outputs();
+  const bool changed = this->active_dac != output || this->active_mask_ != mask;
+  this->set_phase_(DACOutputPhase::SWITCHING);
   this->switching_output_ = true;
   this->fresh_volume_received_ = false;
   this->fresh_mute_received_ = false;
-  const bool safely_muted = this->reconcile_();
+  const bool safely_muted = this->reconcile_(false);
   if (!safely_muted) {
     ESP_LOGW(TAG, "DAC route safety commit failed");
     this->switching_output_ = false;
+    this->fail_output_();
     return;
   }
   this->fresh_volume_received_ = false;
   this->fresh_mute_received_ = false;
   this->active_dac = output;
-  (output == SPEAKER ? this->speaker_applied_ : this->lineout_applied_) = {};
+  this->active_mask_ = mask;
+  this->speaker_applied_ = {};
+  this->lineout_applied_ = {};
   // Persist only physical commits, retaining the existing routing preference policy.
-  this->restore_state_.dac_output = output;
-  if (!this->pref_.save(&this->restore_state_))
-    ESP_LOGW(TAG, "Failed to save DAC routing preferences");
-  this->send_selected_dac_();
-  if (this->volume_state_ != nullptr)
-    this->volume_state_->publish_selected_state_(true);
-  this->output_change_callback_.call();
-  this->selection_callback_.call();
-  this->state_callback_.call();
-  this->switching_output_ = false;
-  this->reconcile_();
-}
-
-void DACProxy::activate_line_out() { this->select_output_(LINE_OUT); }
-void DACProxy::activate_speaker() { this->select_output_(SPEAKER); }
-void DACProxy::activate() {
-  if (this->setup_was_called_)
-    this->reconcile_();
-}
-
-void DACProxy::set_audio_ready(bool ready) {
-  const bool was_ready = this->audio_ready_;
-  this->audio_ready_ = ready;
-  // Hardware may have reset after the suspension mute, even if its cache survived.
-  if (!ready || !was_ready) {
-    this->speaker_applied_ = {};
-    this->lineout_applied_ = {};
+  if (changed) {
+    this->restore_state_.dac_output = output;
+    if (!this->pref_.save(&this->restore_state_))
+      ESP_LOGW(TAG, "Failed to save DAC routing preferences");
   }
-  if (this->setup_was_called_ || !ready)
-    this->reconcile_();
+  this->send_selected_dac_();
+  this->switching_output_ = false;
+  this->set_phase_(DACOutputPhase::SYNCHRONIZING);
+  this->notify_requested_output_();
+  if (generation != this->transition_generation_)
+    return;
+  if (changed || this->setup_notification_pending_) {
+    this->setup_notification_pending_ = false;
+    this->output_change_callback_.call();
+    if (generation != this->transition_generation_)
+      return;
+    this->selection_callback_.call();
+    if (generation != this->transition_generation_)
+      return;
+    this->state_callback_.call();
+  }
 }
+
+void DACProxy::activate_line_out() {
+  if (this->output_enabled(LINE_OUT))
+    this->apply_activation_(this->requested_outputs() | (1u << LINE_OUT), true);
+}
+void DACProxy::activate_speaker() {
+  if (this->output_enabled(SPEAKER))
+    this->apply_activation_(this->requested_outputs() | (1u << SPEAKER), true);
+}
+void DACProxy::activate() { this->refresh_output(); }
 
 bool DACProxy::force_safety_mute() {
-  this->audio_ready_ = false;
+  this->safe_stop_confirmed_ = this->invalidate_output_();
+  this->output_dirty_ = false;
   bool success = true;
   for (auto *dac : {this->tas2780_, this->pcm5122_}) {
     if (dac == nullptr)
@@ -286,7 +536,7 @@ bool DACProxy::force_safety_mute() {
     // Bypass the proxy cache: the caller needs acknowledgement of a write now.
     success = this->apply_mute_(dac, state, true) && success;
   }
-  return success;
+  return success && this->safe_stop_confirmed_;
 }
 
 bool DACProxy::set_mute_off() {
@@ -294,14 +544,20 @@ bool DACProxy::set_mute_off() {
     return false;
   this->target_muted_ = false;
   this->fresh_mute_received_ = this->receiving_current_output_();
-  return this->reconcile_();
+  const bool success = this->reconcile_(this->output_phase() == DACOutputPhase::READY);
+  if (!success)
+    this->fail_output_();
+  return success;
 }
 bool DACProxy::set_mute_on() {
   if (!this->setup_was_called_)
     return false;
   this->target_muted_ = true;
   this->fresh_mute_received_ = this->receiving_current_output_();
-  return this->reconcile_();
+  const bool success = this->reconcile_(this->output_phase() == DACOutputPhase::READY);
+  if (!success)
+    this->fail_output_();
+  return success;
 }
 bool DACProxy::is_muted() { return this->target_muted_; }
 bool DACProxy::set_volume(float volume) {
@@ -309,7 +565,10 @@ bool DACProxy::set_volume(float volume) {
     return false;
   this->target_volume_ = volume;
   this->fresh_volume_received_ = this->receiving_current_output_();
-  return this->reconcile_();
+  const bool success = this->reconcile_(this->output_phase() == DACOutputPhase::READY);
+  if (!success)
+    this->fail_output_();
+  return success;
 }
 float DACProxy::volume() { return this->target_volume_; }
 

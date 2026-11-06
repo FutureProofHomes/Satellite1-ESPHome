@@ -44,7 +44,7 @@ template<DacOutput output_dac> class DACProxyStateTrigger : public Trigger<> {
  public:
   explicit DACProxyStateTrigger(DACProxy *proxy) {
     proxy->add_on_selection_callback([this, proxy]() {
-      if (proxy->selected_output() == output_dac)
+      if (proxy->output_active(output_dac))
         this->trigger();
     });
   }

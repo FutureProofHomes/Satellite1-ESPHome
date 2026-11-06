@@ -109,7 +109,7 @@ voice_assistant:
     - lambda: id(init_in_progress) = false;
     - if:
         condition:
-          lambda: return id(xmos_audio_ready);
+          lambda: return id(satellite1_id).audio_available();
         then:
           - script.execute: start_micro_wake_word
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
@@ -212,7 +212,7 @@ script:
     mode: restart
     then:
       - wait_until:
-          lambda: return App.is_setup_complete() && id(mww).is_ready() && id(xmos_audio_ready);
+          lambda: return App.is_setup_complete() && id(mww).is_ready() && id(satellite1_id).audio_available();
       - if:
           condition:
             lambda: return !id(mww).is_running();

@@ -3,6 +3,7 @@
 #include "esphome/components/spi/spi.h"
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
+#include <atomic>
 
 namespace esphome {
 namespace satellite1 {
@@ -65,6 +66,19 @@ enum Satellite1State : uint8_t {
   SAT_DETACHED_STATE,
   SAT_XMOS_CONNECTED_STATE,
   SAT_FLASH_CONNECTED_STATE,
+};
+
+// Independent lifecycle owners release only their own inhibition. Main-loop only.
+enum class AudioInhibit : uint8_t { STARTUP_CHECK = 1, MAINTENANCE = 2, FLASHING = 4 };
+enum class AudioAvailability : uint8_t {
+  AVAILABLE,
+  NOT_CONNECTED,
+  BOOT_SETTLING,
+  BOOT_RECOVERY,
+  DIRECT_FLASH,
+  STARTUP_CHECK,
+  MAINTENANCE,
+  FLASHING,
 };
 
 class Satellite1 : public Component,
@@ -144,8 +158,18 @@ class Satellite1 : public Component,
   std::string get_hat_serial();
 
   void set_spi_flash_direct_access_mode(bool enable);
-  void set_boot_recovery_pending(bool pending) { this->boot_recovery_pending_ = pending; }
+  void set_boot_recovery_pending(bool pending);
   bool is_xmos_connected() const { return this->state == SAT_XMOS_CONNECTED_STATE; }
+  void set_audio_startup_check(bool enabled);
+  void set_audio_inhibited(AudioInhibit reason, bool inhibited);
+  // Coherent published snapshot: safe for worker-side I2S admission guards.
+  AudioAvailability audio_availability() const {
+    return this->published_audio_availability_.load(std::memory_order_acquire);
+  }
+  bool audio_available() const { return this->audio_availability() == AudioAvailability::AVAILABLE; }
+  template<typename F> void add_on_audio_availability_callback(F &&callback) {
+    this->audio_availability_callback_.add(std::forward<F>(callback));
+  }
 
   void set_xmos_rst_pin(GPIOPin *xmos_rst_pin) { this->xmos_rst_pin_ = xmos_rst_pin; }
   template<typename F> void add_on_state_callback(F &&callback) {
@@ -155,6 +179,9 @@ class Satellite1 : public Component,
   void xmos_hardware_reset();
 
  protected:
+  void notify_audio_availability_();
+  AudioAvailability calculate_audio_availability_() const;
+  void start_xmos_boot_();
   bool is_xmos_boot_settling_(uint32_t now);
   bool dfu_get_fw_version_();
   bool dfu_get_flash_serial_();
@@ -165,6 +192,10 @@ class Satellite1 : public Component,
   bool read_last_command_status_(uint8_t *status);
   void log_last_command_status_(uint8_t resource_id, uint8_t command, const char *context);
   CallbackManager<void()> state_callback_{};
+  CallbackManager<void()> audio_availability_callback_{};
+  std::atomic<AudioAvailability> published_audio_availability_{AudioAvailability::NOT_CONNECTED};
+  uint8_t audio_inhibits_{0};
+  bool audio_startup_check_{false};
 
   uint32_t last_attempt_timestamp_{0};
   uint32_t status_refresh_timestamp_{0};
