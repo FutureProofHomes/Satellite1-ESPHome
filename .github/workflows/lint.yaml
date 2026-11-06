@@ -5,6 +5,23 @@ on:
     branches: [develop]
 
 jobs:
+  ld2410-parser:
+    name: LD2410 parser regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run production parser with sanitizers
+        env:
+          CXX: clang++
+        run: python3 tests/ld2410/run_tests.py
+
   clang-format:
     name: clang-format
     runs-on: ubuntu-latest
