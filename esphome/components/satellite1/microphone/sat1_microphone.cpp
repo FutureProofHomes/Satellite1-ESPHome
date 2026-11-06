@@ -66,7 +66,8 @@ void Sat1Microphone::start() {
 }
 
 void Sat1Microphone::stop() {
-  if (this->state_ == microphone::STATE_STOPPED || this->is_failed())
+  // Listener ownership survives hardware inhibition even when the task is stopped.
+  if (this->is_failed())
     return;
 
   xSemaphoreGive(this->active_listeners_semaphore_);
@@ -101,18 +102,30 @@ void Sat1Microphone::loop() {
 
   // Start the microphone if any semaphores are taken
   if ((uxSemaphoreGetCount(this->active_listeners_semaphore_) < MAX_LISTENERS) &&
-      (this->state_ == microphone::STATE_STOPPED)) {
+      (this->state_ == microphone::STATE_STOPPED) &&
+      this->satellite_->microphone_mute().local_capture_allowed(millis()) && this->satellite_->audio_available()) {
     this->state_ = microphone::STATE_STARTING;
   }
 
   // Stop the microphone if all semaphores are returned
-  if ((uxSemaphoreGetCount(this->active_listeners_semaphore_) == MAX_LISTENERS) &&
+  if ((uxSemaphoreGetCount(this->active_listeners_semaphore_) == MAX_LISTENERS ||
+       !this->satellite_->microphone_mute().local_capture_allowed(millis()) || !this->satellite_->audio_available()) &&
       (this->state_ == microphone::STATE_RUNNING)) {
     this->state_ = microphone::STATE_STOPPING;
   }
 
   switch (this->state_) {
     case microphone::STATE_STARTING:
+      if (!this->satellite_->microphone_mute().local_capture_allowed(millis()) ||
+          !this->satellite_->audio_available()) {
+        if (this->task_handle_ != nullptr) {
+          xEventGroupSetBits(this->event_group_, MicrophoneEventGroupBits::COMMAND_STOP);
+          this->state_ = microphone::STATE_STOPPING;
+        } else {
+          this->state_ = microphone::STATE_STOPPED;
+        }
+        break;
+      }
       if (this->status_has_error()) {
         break;
       }
@@ -237,6 +250,16 @@ void Sat1Microphone::mic_task(void *params) {
         samples.resize((samples_read / 3) * sizeof(int32_t));
         if (this_microphone->correct_dc_offset_) {
           this_microphone->fix_dc_offset_(samples);
+        }
+        // Recheck after the blocking read: neither an already-running local
+        // detector nor a direct VA API start grants permission to stream audio.
+        if (!this_microphone->satellite_->audio_available() ||
+            !this_microphone->satellite_->microphone_mute().local_capture_allowed(millis())) {
+          std::fill(samples.begin(), samples.end(), 0);
+        } else {
+          this_microphone->satellite_->microphone_mute().filter_samples(
+              reinterpret_cast<int32_t *>(samples.data()), samples.size() / sizeof(int32_t),
+              this_microphone->num_of_channels(), this_microphone->software_mute_channels_, millis());
         }
         this_microphone->data_callbacks_.call(samples);
       } else {
