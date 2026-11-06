@@ -4,6 +4,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 #include <atomic>
+#include "microphone_mute.h"
 
 namespace esphome {
 namespace satellite1 {
@@ -167,6 +168,7 @@ class Satellite1 : public Component,
     return this->published_audio_availability_.load(std::memory_order_acquire);
   }
   bool audio_available() const { return this->audio_availability() == AudioAvailability::AVAILABLE; }
+  MicrophoneMuteState &microphone_mute() { return this->microphone_mute_; }
   template<typename F> void add_on_audio_availability_callback(F &&callback) {
     this->audio_availability_callback_.add(std::forward<F>(callback));
   }
@@ -203,6 +205,7 @@ class Satellite1 : public Component,
 
   uint8_t dc_status_register_[DC_STATUS_REGISTER::REGISTER_LEN];
   bool status_register_valid_{false};
+  MicrophoneMuteState microphone_mute_;
   bool status_refresh_attempted_{false};
   bool spi_flash_direct_access_enabled_{false};
   bool boot_recovery_pending_{false};

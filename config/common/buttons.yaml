@@ -69,43 +69,6 @@ binary_sensor:
                   increase_volume: false
 
   - platform: gpio
-    id: btn_left
-    use_interrupt: false
-    pin:
-      satellite1:
-      port: INPUT_A
-      pin: 3
-      inverted: false
-    name: "Button Left (HW Mute)"
-    icon: "mdi:microphone-off"
-    on_state:
-      - if:
-          condition:
-            and:
-              - lambda: return id(satellite1_id).audio_available();
-              - binary_sensor.is_off: btn_left
-          then:
-            - script.execute:
-                id: play_sound
-                priority: false
-                sound_file: "mute_switch_off_sound"
-            - switch.template.publish:
-                id: master_mute_switch
-                state: OFF
-          else:
-            - if:
-                condition:
-                  lambda: return id(satellite1_id).audio_available();
-                then:
-                  - script.execute:
-                      id: play_sound
-                      priority: false
-                      sound_file: "mute_switch_on_sound"
-                  - switch.template.publish:
-                      id: master_mute_switch
-                      state: ON
-
-  - platform: gpio
     id: btn_action
     pin:
       number: 0
@@ -171,7 +134,7 @@ binary_sensor:
                                         - if:
                                             condition:
                                               and:
-                                                - switch.is_off: master_mute_switch
+                                                - lambda: return !id(satellite1_id).microphone_mute().effectively_muted(millis());
                                                 - not: voice_assistant.is_running
                                             then:
                                               - script.execute:
@@ -179,7 +142,11 @@ binary_sensor:
                                                   priority: true
                                                   sound_file: "center_button_press_sound"
                                               - delay: 300ms
-                                              - voice_assistant.start:
+                                              - if:
+                                                  condition:
+                                                    lambda: return !id(satellite1_id).microphone_mute().effectively_muted(millis());
+                                                  then:
+                                                    - voice_assistant.start:
       # Double Click
       #  . Exposed as an event entity. To be used in automations inside Home Assistant
       - timing:

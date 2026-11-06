@@ -50,6 +50,8 @@ void Satellite1::set_audio_inhibited(AudioInhibit reason, bool inhibited) {
 
 void Satellite1::set_boot_recovery_pending(bool pending) {
   this->boot_recovery_pending_ = pending;
+  if (pending)
+    this->microphone_mute_.invalidate_hardware();
   this->notify_audio_availability_();
 }
 
@@ -135,6 +137,7 @@ void Satellite1::dump_config() {
 }
 
 void Satellite1::loop() {
+  this->microphone_mute_.expire_hardware(millis());
   // A persisted XMOS recovery owns the shared SPI bus until the flasher releases it.
   if (this->boot_recovery_pending_) {
     return;
@@ -294,9 +297,16 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
   }
 
   // Got status register report
-  if (send_recv_buf[0] == DC_RESOURCE::CNTRL_ID && send_recv_buf[1] != DC_RET_STATUS::PAYLOAD_AVAILABLE) {
+  if (send_recv_buf[0] == DC_RESOURCE::CNTRL_ID && send_recv_buf[1] == DC_RET_STATUS::CMD_SUCCESS) {
     memcpy(this->dc_status_register_, &send_recv_buf[2], DC_STATUS_REGISTER::REGISTER_LEN);
     this->status_register_valid_ = true;
+    if (this->dc_status_register_[DC_STATUS_REGISTER::DEVICE_STATUS] == DEVICE_STATUS_READY_VALUE &&
+        !this->boot_recovery_pending_) {
+      this->microphone_mute_.observe_hardware(
+          (this->dc_status_register_[DC_STATUS_REGISTER::GPIO_PORT_IN_A] & (1u << 3)) != 0, millis());
+    } else {
+      this->microphone_mute_.invalidate_hardware();
+    }
     if (status_report_received != nullptr) {
       *status_report_received = true;
     }
@@ -348,6 +358,7 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
 void Satellite1::set_spi_flash_direct_access_mode(bool enable) {
   // Invalidate availability before asserting reset/handing the bus to flash.
   this->status_register_valid_ = false;
+  this->microphone_mute_.invalidate_hardware();
   this->spi_flash_direct_access_enabled_ = enable;
   if (enable) {
     this->state = SAT_FLASH_CONNECTED_STATE;
@@ -364,6 +375,7 @@ void Satellite1::set_spi_flash_direct_access_mode(bool enable) {
 void Satellite1::start_xmos_boot_() {
   this->state = SAT_DETACHED_STATE;
   this->status_register_valid_ = false;
+  this->microphone_mute_.invalidate_hardware();
   this->status_refresh_attempted_ = false;
   this->connection_attempts = 0;
   this->xmos_booting_ = true;
