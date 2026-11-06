@@ -37,7 +37,7 @@ esphome:
     name: ${company_name}.${project_name}
     version: ${esp32_fw_version}
 
-esp32_improv:
+improv_ble:
   authorizer: btn_action
   on_start:
     - lambda: id(improv_ble_in_progress) = true;
