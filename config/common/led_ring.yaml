@@ -26,6 +26,14 @@ light:
     icon: "mdi:dots-circle"
     default_transition_length: 0ms
     restore_mode: RESTORE_DEFAULT_OFF
+    on_state:
+      - if:
+          condition:
+            lambda: |-
+              return id(voice_assistant_leds).current_values.is_on() &&
+                     id(voice_assistant_leds).get_effect_name() == "Muted or Silent";
+          then:
+            - script.execute: control_leds_muted_or_silent
     initial_state:
       color_mode: rgb
       brightness: 66%
@@ -647,7 +655,7 @@ script:
   - id: control_leds_muted_or_silent
     then:
       - light.turn_on:
-          brightness: !lambda return min ( max( id(led_ring).current_values.get_brightness() , 0.2f ) + 0.1f , 1.0f );
+          brightness: !lambda return id(led_ring).remote_values.get_brightness();
           id: voice_assistant_leds
           effect: "Muted or Silent"
 
