@@ -307,6 +307,5 @@ switch:
           red: 20%
           green: 60%
           blue: 100%
-          effect: "Fast Pulse"
     turn_off_action:
       - light.turn_off: voice_assistant_leds

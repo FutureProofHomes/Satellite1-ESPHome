@@ -513,9 +513,9 @@ script:
 
   # Farr fork: conversation-state lighting colors. The voice-gate turns the
   # conversation_light switch on for the duration of an active Jinx
-  # conversation; while it is on the ring shows blue pulse when listening/
-  # waiting for the next line, amber when thinking. Replying keeps the stock
-  # Rotating Blob spin and errors stay red.
+  # conversation; while it is on the ring shows solid blue when listening/
+  # waiting for the next line, solid green when thinking, solid orange when
+  # talking. Errors stay red.
   - id: conversation_listening_light
     then:
       - light.turn_on:
@@ -524,17 +524,15 @@ script:
           red: 20%
           green: 60%
           blue: 100%
-          effect: "Fast Pulse"
 
   - id: conversation_thinking_light
     then:
       - light.turn_on:
           brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.35f );
           id: voice_assistant_leds
-          red: 100%
-          green: 60%
-          blue: 0%
-          effect: "Fast Pulse"
+          red: 0%
+          green: 100%
+          blue: 10%
 
   # Script executed during Improv BLE
   # Warm White Twinkle
@@ -644,16 +642,16 @@ script:
           else:
             - light.turn_off: voice_assistant_leds
 
-  # Script executed when the voice assistant is thinking to a command
-  # Fast anticlockwise spin of the LED ring.
+  # Script executed when the voice assistant is replying to a command
+  # Farr fork: solid orange while talking (was the stock Rotating Blob spin).
   - id: control_leds_voice_assistant_replying_phase
     then:
-      - lambda: |-
-          id(led_anim_speed) = -1.f;
       - light.turn_on:
-          brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.2f );
+          brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.35f );
           id: voice_assistant_leds
-          effect: "Rotating Blob"
+          red: 100%
+          green: 45%
+          blue: 0%
 
   # Script executed when the voice assistant is in error
   # Fast Red Pulse
