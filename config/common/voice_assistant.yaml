@@ -107,7 +107,16 @@ voice_assistant:
   volume_multiplier: 1
   on_client_connected:
     - lambda: id(init_in_progress) = false;
-    - micro_wake_word.start:
+    # Farr fork: default to stock wake-word mode; the free_speech_capture
+    # switch (HA entity) opts this unit into continuous capture without a
+    # reflash.
+    - if:
+        condition:
+          switch.is_on: free_speech_capture
+        then:
+          - voice_assistant.start_continuous
+        else:
+          - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_client_disconnected:
@@ -261,3 +270,22 @@ select:
           id(okay_nabu).set_probability_cutoff(143);    // 0.56 -> 0.751 FAPH on DipCo
           id(hey_jarvis).set_probability_cutoff(212);   // 0.83 -> 1.502 FAPH on DipCo
         }
+
+# Farr fork: free-speech capture toggle. Opt-in per device from HA; turning it
+# on mid-session swaps the running capture mode without a reflash. Default off
+# keeps stock wake-word behavior.
+switch:
+  - platform: template
+    id: free_speech_capture
+    name: "Free speech capture"
+    icon: mdi:microphone-message
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - voice_assistant.stop:
+      - micro_wake_word.stop:
+      - voice_assistant.start_continuous
+    turn_off_action:
+      - voice_assistant.stop:
+      - micro_wake_word.start:
