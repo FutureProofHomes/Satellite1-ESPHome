@@ -289,3 +289,24 @@ switch:
     turn_off_action:
       - voice_assistant.stop:
       - micro_wake_word.start:
+
+  # Farr fork: conversation-state lighting. The voice-gate turns this switch on
+  # while Jinx is in an active conversation and off when it ends; the LED phase
+  # scripts light the ring only while it is on, so idle time stays dark.
+  - platform: template
+    id: conversation_light
+    name: "Conversation light"
+    icon: mdi:chat-processing
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - light.turn_on:
+          brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.35f );
+          id: voice_assistant_leds
+          red: 20%
+          green: 60%
+          blue: 100%
+          effect: "Fast Pulse"
+    turn_off_action:
+      - light.turn_off: voice_assistant_leds
