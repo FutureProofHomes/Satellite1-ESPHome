@@ -1,0 +1,30 @@
+# Satellite1-ESPHome enrollment for the autonomous coding pipeline.
+#
+# Firmware fork of FutureProofHomes/Satellite1-ESPHome, pinned to the v0.2.1
+# release line. Member of the homeai-v2 workspace: the free-speech capture
+# fork (continuous capture, quiet-LED behavior) and follow-on firmware work
+# are planned here. Upstream tracks FutureProofHomes; the pipeline clones
+# this repo's default branch (main).
+
+priority: 30
+
+enabled_todos:
+  - implement_task_doc
+  - fix_failing_ci
+  - address_pr_comments
+  - push_notification
+  - review_code
+
+human_merge_only: false
+
+# Copilot review is retired for this project (matches CodingAgents, StateQ,
+# and HomeAutomation). Pipeline reviews are the gate.
+copilot_review_required: false
+
+max_open_prs: 2
+
+branches:
+  base: main
+  feature_prefix: "agent/"
+
+docs_allowlist: []
