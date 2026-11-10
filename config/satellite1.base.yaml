@@ -13,9 +13,10 @@ substitutions:
   component_name: Core
 
   esp32_fw_version: dev
-  xmos_fw_version: "v1.1.0-alpha.0"
-  # Production configurations enable this; dashboard builds only wait for a responding XMOS.
-  xmos_auto_flash_on_boot: "false"
+  xmos_fw_version: "v1.1.0-beta.0"
+  # Dashboard/custom builds also flash the embedded XMOS image automatically.
+  # Override to "false" for manual flashing; minimum-version validation still applies.
+  xmos_auto_flash_on_boot: "true"
 
 globals:
   # Global initialisation variable. Initialized to true and set to false once everything is connected. Only used to have a smooth "plugging" experience
