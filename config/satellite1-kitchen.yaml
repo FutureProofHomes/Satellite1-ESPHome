@@ -1,0 +1,15 @@
+# Kitchen Satellite1 — PrettyFlyForAWifi network.
+# Distinct node name/friendly_name so the kitchen unit shows up in Home
+# Assistant as its own room-scoped device (per-satellite sessions rely on
+# separate identities).
+substitutions:
+  friendly_name: "Kitchen Satellite1"
+  node_name: satellite1-kitchen
+
+packages:
+  satellite1: !include satellite1.yaml
+
+wifi:
+  networks:
+    - ssid: !secret prettyfly_ssid
+      password: !secret prettyfly_password

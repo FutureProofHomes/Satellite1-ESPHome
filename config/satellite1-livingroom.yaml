@@ -1,0 +1,12 @@
+# Living Room Satellite1 — Hummingbird network.
+# Same node name/friendly_name as the generic build (satellite1 + MAC suffix)
+# so the existing Home Assistant device and its entities are unchanged; this
+# only pins the compiled WiFi credentials so a USB reflash lands on the
+# room's network with zero hands-on provisioning.
+packages:
+  satellite1: !include satellite1.yaml
+
+wifi:
+  networks:
+    - ssid: !secret hummingbird_ssid
+      password: !secret hummingbird_password
