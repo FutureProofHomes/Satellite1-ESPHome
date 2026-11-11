@@ -38,6 +38,7 @@ packages:
         - delay: 2s
 
   base: !include satellite1.base.yaml
+  dsp: !include common/dsp.yaml
   wifi: ${ wifi_config if network == "wifi" or network == "unified" else {} }
   ethernet: ${ ethernet_config if network == "ethernet" or network == "unified" else {} }
 
@@ -107,6 +108,7 @@ external_components:
       - micro_wake_word
       - mww_runtime_loader
       - satellite1
+      - satellite1_dsp
       - satellite1_radar
       - satellite1_ring
       - satellite1_web_ui

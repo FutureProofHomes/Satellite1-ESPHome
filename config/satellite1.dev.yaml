@@ -17,6 +17,8 @@
 #   - The system monitor: twelve hours of heap history and the FreeRTOS task table. It turns on
 #     CONFIG_FREERTOS_USE_TRACE_FACILITY, the one sdkconfig difference from a release build.
 #   - Multi-device logs: needs nothing here; the page reads each device's existing log history.
+#   - The speaker EQ card: needs nothing here; the page reads the XMOS speaker EQ's own health
+#     counters (processing time, overruns, limiter, designs, tile 1 heap) from the DSP routes.
 packages:
   base_image: !include satellite1.yaml
   # Shared with common/xmos_same_boot_flash.yaml, which is why it is the one include left here.

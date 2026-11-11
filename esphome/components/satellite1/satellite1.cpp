@@ -114,6 +114,7 @@ void Satellite1::loop() {
           this->connection_attempts = 0;
           this->xmos_booting_ = false;
           ESP_LOGI(TAG, "XMOS Firmware Version: %s", this->status_string().c_str());
+          this->connected_hooks_.call();
           this->state_callback_.call();
         }
         this->last_attempt_timestamp_ = now;

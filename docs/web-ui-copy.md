@@ -124,7 +124,7 @@ looking at a third of them was the more expensive problem.
 | `amp_mode` | TAS2780, Power gain mode (Developer) | Picked automatically from the measured power supply - it is a reading, not a setting. High gain: a 9 V or higher USB-PD supply is connected and the speaker can reach full loudness. Low gain: the device is on a plain 5 V supply, so maximum loudness is reduced. Off: the amplifier is shut down, normally because line out is selected. A supply that negotiates 9 V or more (the USB-C Power Supply row on Device Info) is what unlocks High gain. |
 | `amp_dvc` | TAS2780, Digital volume (Developer) | How far open the amplifier's digital volume control is right now - the level the firmware computes from the media volume and Announcement Volume. Shown so you can see what the amplifier is actually being fed; it is managed automatically and has no handle here. To change it, use the volume controls. |
 | `amp_gain` | TAS2780, Analog gain (Developer) | The amplifier's output-level ceiling, applied on top of the digital volume. The notch on the track is the factory default, 15 dBV - the right everyday setting, and the slider snaps to it. Higher values make everything louder but can add distortion, and on a 5 V supply the chip's built-in limiter will duck the sound to protect the power rail. Lower it if the speaker distorts at high volume. |
-| `speaker_channel` | Audio, Speaker card, Channel | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
+| `speaker_channel` | Audio > Equalizer, Channel under Built-in Speaker (Announcement Routing's Speaker card while the Equalizer isn't listed) | Which side of a stereo source reaches the single speaker. Mono sums both, which is usually what you want. |
 | `launch` | Launch card title | Scan the code with a phone, or paste the link into a Home Assistant dashboard button, and that browser lands here already signed in - no password, no button press. The code carries the device's current network address, so any phone on your network can scan it; the link carries the device's permanent name, the right form to paste somewhere that keeps it. Anyone who has either can sign in with it, so treat them like the password. Sign out everywhere revokes them and every session, then issues a new one. |
 | `ha_ingress` | Home Assistant card title | Puts your Satellite1s in Home Assistant's sidebar, proxied through Home Assistant itself - so it works wherever Home Assistant does, on your local network or over a public https address. hass_ingress is a third-party integration, not part of this firmware. The YAML covers every Satellite1 Home Assistant knows about: this device is the one visible "Satellite1 Fleet" entry, the rest sit hidden behind it, and the device switcher reaches them all from inside the panel. Anyone who can open the panel reaches the devices' sign-in pages through it; the YAML limits the panel to admin users - remove the require_admin line to show it to everyone. |
 | `xmos` | XMOS Firmware on Device Info, Recovery and Developer, and the XMOS Recovery and XMOS Firmware card titles | The audio chip. It owns the microphones, the speaker, the mute button and the LED ring, and runs its own firmware separate from the ESP32's. |
@@ -236,11 +236,15 @@ name the parts (FreeRTOS, stack, round trip) a customer hint would not.
 | `multilog` | Logs From Several Devices card title | Reads the recent log from each device you tick and merges them by time. Each device's clock is pinned to this browser's when it answers, so lines from two devices line up to within half that device's round trip, which the download's header lists. Other devices are signed in to with the password Home Assistant holds for them. |
 | `sysmon` | System Monitor card title | Memory sampled every ten seconds for the last twelve hours, kept on the device so the history is there before you open this page. The shaded bands mark when the assistant was running, when the XMOS was not ready and when the mic monitor was streaming. |
 | `sysmon_tasks` | System Monitor, beside Tasks | Every FreeRTOS task, sorted by the least stack it has ever had free. Under 512 bytes is a crash waiting for the wrong code path. |
+| `speaker_eq` | Speaker EQ card title | The speaker EQ's own report, read from the audio chip once a second: what it is playing, how long each frame takes and how hard the limiter is working. Check it after an XMOS firmware swap or a heavy preset. |
+| `xmos_limiter` | Speaker EQ, Limiter fact | Left and right: how much of the last second and a half the limiter spent reducing gain. Deepest is the most it has ever pulled down since the chip started. |
 
 The cards, top to bottom: **XMOS Firmware** (the picker described under Diagnostics above), then
+**Speaker EQ** (what the chip reports about its speaker EQ), then
 **Microphones**, so a firmware swap and what it does to the audio are on one screen, then **TAS2780
 Amplifier Control** (moved here from the old Audio settings page, without its Channel row, which
-went to the Audio tab's Speaker card), **Logs From Several Devices** and **System Monitor**.
+went to the Audio tab and is now on the Equalizer, under Built-in Speaker), **Logs From Several
+Devices** and **System Monitor**.
 
 **Microphones.** `mm_title` "Microphones"; the button is `mm_listen` "Listen" / `mm_stop` "Stop";
 the `mm_play_row` "Play" row picks `mm_ch_stt` "Speech-to-text", `mm_ch_ww` "Wake word" or
@@ -434,7 +438,7 @@ volume left for the home page, the wake words card became the Wake Word route ab
 speaker's own wiring - the old Audio Output card, grown into Speaker amplifier - moved to
 Diagnostics under the Device card (owner call, September 2026), where it sits beside the USB-C
 Power Supply reading that decides the amp's gain mode. What remains here is where sound goes: one
-Audio Routing card holding the levels, the speaker list, and the three settings that follow a
+Announcement Routing card holding the levels, the speaker list, and the three settings that follow a
 response to the speakers ticked to Announce (October 2026; until then routing and ducking were two
 cards with a tree each).
 
@@ -448,7 +452,7 @@ it writes the device's own selection at `/api/sat1/sel`, and it is the only face
 
 | Key | Where | Text |
 | --- | --- | --- |
-| `audio_routing` | Audio Routing card title | Pick which speakers play this device's responses, and which turn down while you talk to it. A speaker that plays responses is always turned down as well. Tick a room to cover every speaker in it, including ones added later, or open the room and pick speakers. |
+| `audio_routing` | Announcement Routing card title | Pick which speakers play this device's responses, and which turn down while you talk to it. A speaker that plays responses is always turned down as well. Tick a room to cover every speaker in it, including ones added later, or open the room and pick speakers. |
 | `announcement_volume` | Announcement Volume, first in the levels panel | How loud this device plays assistant replies, timers, chimes and announcements, separate from the media volume. At 0 it follows the media player volume. The volume buttons change only the media volume. |
 | `remote_announcement_volume` | Remote Announcement Volume, second in the levels panel | How loud this device's responses and timer rings play on the speakers ticked to Announce. Above 0, each plays at this level and gets its own level back afterwards. At 0 each speaker follows its own volume, so a Satellite1 whose volume is 0 stays silent. |
 | `duck_volume` | Remote Ducking Volume, third in the levels panel | The level speakers ticked to Duck drop to. Players already quieter than this are left alone, so a whole-house group does not get turned up. A Sonos or Satellite1 ticked to Announce lowers its own music instead. |
@@ -1176,6 +1180,109 @@ on the live ring.
 | `cm.red` | Red, fixed | |
 | `palettes` | Ocean, Aurora, Sunset, Candy, Forest | Own-color presets, three stops each |
 
+## The speaker EQ (`DSP`)
+
+Audio > Equalizer (October 2026). A filter is named by what it does to the sound ("Cut at 3.46 kHz",
+"Remove below 60 Hz"), with its technical name underneath for people who tune by REW; the XMOS is
+"the audio chip", as in `CONFIRM`. `{hz}` is a formatted frequency, `{name}` a preset's name, `{n}` a
+count.
+
+**The page and its banners.**
+
+| Key | Text |
+| --- | --- |
+| `eyebrow`, `title_a` + `title_b` | AUDIO · EQUALIZER — Sound, shaped. |
+| `waiting` | Waiting for the audio chip to connect. |
+| `load_failed` / `retry` | Couldn't load the EQ from your Satellite1. / Try again |
+| `updating` | The audio chip's firmware is updating. Your EQ is saved and comes back when it finishes. |
+| `offline` | The audio chip isn't answering right now. Your changes are saved and sent when it's back. |
+| `overload` | The EQ switched itself off: the audio chip ran short of time to run it. Remove a filter or two and it comes back on. |
+| `view`, `views` | View (the switch's screen-reader name); Basic, Advanced |
+| `basic_hint` | Bass, Midrange and Treble adjust this output's sound on top of its preset, and the curve shows the result. Advanced has the filters, preamp and limiter. (Basic's Tone card) |
+| `basic_over` | Too much boost for the audio chip. It keeps playing the previous sound until you turn a slider down. |
+| `basic_no_stages` | This preset's filters fill the audio chip, so that slider can't move off 0 dB. Turn a filter off in Advanced to make room. |
+
+**The bar: outputs, the switch, compare and presets.**
+
+| Key | Text |
+| --- | --- |
+| `output`, `outputs` | Output (the picker's screen-reader name); Built-in Speaker, Line-out |
+| `playing` | PLAYING (badge on the output playing now) |
+| `output_hint` | Each output has its own EQ. Your Satellite1 switches between them by itself when something is plugged into the line-out jack. Edit either one at any time. |
+| `channel`, `channel_label` | Channel (shown under the outputs only while Built-in Speaker is picked; its hint is `speaker_channel`'s); Speaker channel (its screen-reader name) |
+| `eq_on` / `eq_hint` | Equalizer / Off plays everything flat on both outputs. Your settings stay saved. |
+| `compare` / `comparing` | Hold to hear it flat / Playing flat |
+| `preset`, `custom`, `modified` | PRESET, Custom (no preset matches), Modified (tag beside the menu) |
+| `save`, `save_as`, `revert`, `more` | Save, Save as…, Revert, More |
+| `rename`, `delete`, `import`, `export`, `reset` | Rename…, Delete preset, Import a filter file…, Export as a filter file, Reset to default |
+| `name`, `name_placeholder`, `name_save`, `name_cancel` | Preset name (field label), Living room (placeholder), Save, Cancel |
+| `name_short` | Give it a name. |
+| `name_long` | That name is too long. (the limit is 31 bytes, so no character count would be true for every name) |
+| `name_builtin` | That name belongs to a built-in preset. |
+| `name_replace` | Replaces your preset “{name}”. |
+| `name_full` | You have 8 presets already. Delete one to save another. |
+| `saved` / `renamed` | Saved “{name}”. / Renamed to “{name}”. (toasts) |
+| `op_failed` | Your Satellite1 didn't take that. Try again. (toast, a preset action that failed) |
+| `confirm_load` / `confirm_load_go` | Discard your changes? — Loading “{name}” replaces the changes you've made to this output's EQ. / Load it |
+| `confirm_delete` / `confirm_delete_go` | Delete “{name}”? — The preset is gone for good. Any output using it keeps its sound, now as Custom. / Delete |
+| `confirm_reset` / `confirm_reset_go` | Reset this output's EQ? — {output} goes back to “{name}”. Your saved presets aren't touched. / Reset |
+
+**Import and export.**
+
+| Key | Text |
+| --- | --- |
+| `import_title` | Import a filter file |
+| `import_body` | Paste an export from REW, Equalizer APO or Music Assistant, or choose the file. It replaces this output's filters, Bass, Midrange, Treble and preamp; the limiter stays as it is. |
+| `import_choose`, `import_go` | Choose a file…, Import |
+| `import_text` | Filter file text (the text box's screen-reader name) |
+| `import_none` | That doesn't look like a filter file. It needs Preamp or Filter lines. |
+| `imported` | Imported. (toast) |
+| `notes.skip` | Line {line}: {type} filters aren't available here, so it was left out. |
+| `notes.unread` | Line {line}: its frequency couldn't be read, so it was left out. |
+| `notes.nogain` | Line {line}: its gain couldn't be read, so it came in at 0 dB. |
+| `notes.approx` | Line {line}: the {type} shelf has no Q, so it came in at Q 0.707. |
+| `notes.clamp` | Line {line}: a value was outside the speaker's range and was brought inside it. |
+| `notes.many` | Only the first {kept} filters fit. |
+| `notes.budget` | Only the first {kept} filters fit in the audio chip. |
+| `export_title` | Export as a filter file |
+| `export_body` | The REW / Equalizer APO format, which Music Assistant imports too. Bass, Midrange and Treble come along as filters at their own frequencies; the limiter doesn't. |
+| `copy`, `copied`, `download`, `close` | Copy, Copied, Download, Close |
+
+**The graph and what it says about level.**
+
+| Key | Text |
+| --- | --- |
+| `graph` | Frequency response |
+| `graph_hint` | Drag a numbered dot to move a filter: sideways for its frequency, up and down for its boost or cut. Pick a dot, then scroll on it to make it wider or narrower. Double-click an empty spot to add a filter there. From the keyboard, Tab to a dot, then use the arrow keys, and Page Up or Page Down for the width. |
+| `limiter_line` | LIMITER (label on the ceiling's line) |
+| `loudest` / `loudest_hint` | Loudest point / The most this EQ lifts any frequency, preamp included. Above the limiter's ceiling, loud music is held down by the limiter rather than clipping. |
+| `limiter_on` / `limiter_working` | Limiter active / Limiting now |
+| `limiter_hint` | With this much boost, loud passages reach the limiter. It keeps them clean, but they won't get any louder. Auto preamp lowers everything until the limiter has nothing to do. |
+| `over_cap` | Too much boost. The audio chip keeps playing the previous EQ until the loudest point is under +18 dB. Lower the preamp or the boosts. |
+| `refused` | The audio chip refused this EQ: too much boost. It's still playing the previous one. |
+| `auto` | Auto preamp |
+| `sync` | Playing, Sending…, Refused, Saved (the graph card's status, by sync state) |
+| `ready` | Ready (in sync, but not the output playing, or the EQ is off) |
+
+**Tone, filters and the limiter.**
+
+| Key | Text |
+| --- | --- |
+| `tone`, `bass`, `mid`, `treble`, `preamp` | Tone, Bass, Midrange, Treble, Preamp (each tone label followed by its frequency: 120 Hz, 1 kHz, 8 kHz) |
+| `preamp_hint` | Raises or lowers everything before the volume control. Lower it to make room for boosts; raise it to make a quiet speaker louder, with the limiter catching the peaks. |
+| `filters`, `add` | Filters, Add filter |
+| `none` | No filters yet. Add one here, or double-click the graph. |
+| `full` | All {n} filters are in use. |
+| `no_stages` | The audio chip has no room for that. Turn a filter off or remove one. (an edit that would need more than the chip's 16 sections; there is no meter for them, owner call, October 2026) |
+| `kinds` | Peak, Low shelf, High shelf, Low cut, High cut |
+| `slopes` | 12 dB/oct · Butterworth, 24 dB/oct · Butterworth, 12 dB/oct · Linkwitz-Riley, 24 dB/oct · Linkwitz-Riley, 12 dB/oct · custom Q |
+| `say` | Boost at {hz}, Cut at {hz}, Nothing at {hz}, More below {hz}, Less below {hz}, More above {hz}, Less above {hz}, Remove below {hz}, Remove above {hz} |
+| `on`, `type`, `slope`, `freq`, `gain`, `q`, `remove` | On, Type, Slope, Frequency, Boost / cut, Width (Q), Remove |
+| `q_hint` | Higher Q is narrower. For a cut's custom Q, values above 0.7 add a small bump just above the cut-off. |
+| `handle` | Filter {i}, {say} (each graph dot's screen-reader name) |
+| `limiter`, `ceiling`, `attack`, `release` | Limiter, Ceiling, Attack, Release |
+| `limiter_card_hint` | The safety net after the EQ: it holds peaks under the ceiling so boosts never clip. The defaults suit almost everything. |
+
 ## Strings that are not in `copy.js`
 
 A few short labels sit inline in the components because they are part of the layout rather than
@@ -1203,15 +1310,17 @@ edit:
   its column's name (`Announce 1/10 · Duck 1/11`; a column with nothing to count is left out). All
   three are structure rather than explanation - the first is a row label and the last two are state
   readouts.
-- `Audio Routing`, the card's title, and `Route assistant responses, announcements, timer rings and
-  wake chimes to selected speakers` directly under it, which says what the card does and leaves the
-  rest to the card's ⓘ. Until the two cards merged (October 2026) this was the routing card, titled
+- `Announcement Routing`, the card's title, and `Route assistant responses, announcements, timer
+  rings and wake chimes to selected speakers` directly under it, which says what the card does and
+  leaves the rest to the card's ⓘ. The title was `Audio Routing` until Audio gained its Equalizer
+  page, when "audio" stopped saying which of the two pages this is (owner call, October 2026).
+  Until the two cards merged (October 2026) this was the routing card, titled
   `Route Announcement and Assistant Responses`, and the ducking card carried `Lower the volume on
   selected players upon wake word detection`; that line was `Quieten while talking` before it, which
   was inaccurate because the duck also covers the listening half of the interaction. The routing card
   was `Voice Response Routing` over `Route the assistant voice response to selected speakers` before
   that, renamed when its first box gained this device's own level (owner call, October 2026).
-- The Audio Routing card's labels, which are the Home Assistant entities' names (October 2026): the
+- The Announcement Routing card's labels, which are the Home Assistant entities' names (October 2026): the
   three levels `Announcement Volume`, `Remote Announcement Volume` and `Remote Ducking Volume`, and
   `Remote Wake Chime`, `Remote Timer Ring` and `Remote Echo Guard` under the speaker list. They were
   `Device Announcement & Response Volume`, `Remote Announcement & Response Volume`, `Area Ducking
@@ -1219,7 +1328,9 @@ edit:
   this device` switch that is now this device's own Announce box.
 - The five route names in the nav drawer — `Home`, `Wake Word`, `Audio`, `Presence`, `Diagnostics`, in
   that order — which are the same strings as the routes themselves. The drawer has no heading; the
-  device name is in the bar above it.
+  device name is in the bar above it. Audio's two pages, `Announcement Routing` and `Equalizer`, are
+  named the same way (`AUDIO_ROUTES` in `AudioTab.tsx`), listed only while the running XMOS has the
+  speaker EQ. Equalizer rather than DSP because more people know the word (owner call, October 2026).
 - `Connected` and `Nothing plugged in` on Speaker amplifier's Line out row, and the three volume sliders'
   zero readouts: `Follow speaker volume` on both Announcement Volume and Remote Announcement Volume
   (on the remote one, zero means "leave every target's volume alone", per tts_routing.yaml), and
@@ -1235,6 +1346,14 @@ edit:
   Running from the 5 V rail`, `Off · Line out selected or amplifier shut down` and `Measuring… ·
   Sampling the power supply` — an unexpected mode shows raw as `PWR_MODE N` so a future firmware
   that uses one reaches the screen without an app release.
+- The Speaker EQ card's labels and readouts (Settings > Developer, written for the team): the facts
+  `Speaker EQ`, the two output names, `Time per frame`, `Overruns`, `Limiter`, `Designs` and `Tile 1
+  heap`. The EQ state words the chip's bypass reason as `Processing`, `Switched off`, `No profile`,
+  `Flat, passed straight through` or `CPU overload`, and a slot reads `Empty`, `OK`, `Rejected for
+  headroom` or `Designing`; an unknown code shows raw (`Reason N`, `Status N`) so a newer XMOS reaches
+  the screen without an app release. Without a report it says `Waiting for the audio chip…`, `This
+  XMOS firmware has no speaker EQ.`, `The speaker EQ has not reported yet.` or `The audio chip is not
+  answering.`
 - The USB-C Power Supply row re-words the entity it reads: the Home Assistant sensor keeps the
   firmware's contract string (`3.25A (max) @ 20V`, untouched because automations may parse it), while
   the app shows `20V @ 3.25A~` as the headline with the wattage spelled out beneath (`65 watts`) — the

@@ -267,6 +267,12 @@ class Satellite1WebUI : public Component {
   void set_ring(satellite1_ring::RingFx *ring) { this->handler_.set_ring(ring); }
 #endif
 
+#ifdef USE_SAT1_WEB_UI_DSP
+  /// The speaker EQ behind /api/sat1/dsp. Without it the routes do not exist and the Audio page
+  /// has no DSP sub-page.
+  void set_dsp(satellite1_dsp::SpeakerDsp *dsp) { this->handler_.set_dsp(dsp); }
+#endif
+
 #ifdef USE_SAT1_MIC_MONITOR
   /// Developer builds: the mic monitor behind GET /api/sat1/mic. From generated code.
   void set_mic_monitor_microphone(microphone::Microphone *mic) { this->handler_.mic_monitor().set_microphone(mic); }

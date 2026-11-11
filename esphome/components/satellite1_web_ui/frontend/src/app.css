@@ -1475,15 +1475,15 @@ main.app > .tab-content-enter > section.now { padding-bottom: calc(45px + var(--
 .app > .tab-content-enter > .control.pr-tab { display: flex !important; flex-direction: column !important; gap: 0 !important; }
 .app > .tab-content-enter > .control.dx-tab { display: block !important; }
 @media (min-width: 640px) {
-  .app > .tab-content-enter > .control:not(.pr-tab):not(.dx-tab):not(.au-route) { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 16px !important; align-content: start !important; }
-  .app > .tab-content-enter > .control.au-route { display: flex !important; flex-direction: column !important; gap: 0 !important; }
+  .app > .tab-content-enter > .control:not(.pr-tab):not(.dx-tab):not(.au-tab) { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 16px !important; align-content: start !important; }
+  .app > .tab-content-enter > .control.au-tab { display: flex !important; flex-direction: column !important; gap: 0 !important; }
 }
 @media (min-width: 1024px) {
   .app > .tab-content-enter > .now,
   .app > .tab-content-enter > .control { grid-column: 2 !important; grid-row: 2 !important; }
   main.app > .tab-content-enter > section.now { padding-bottom: calc(10px + var(--sab)) !important; }
-  .app > .tab-content-enter > .control:not(.pr-tab):not(.dx-tab):not(.au-route) { grid-template-columns: repeat(3, 1fr) !important; gap: 20px !important; padding: 32px 32px 24px !important; height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - var(--sab)) !important; }
-  .app > .tab-content-enter > .control.au-route { max-width: 900px; padding: 32px 32px 24px !important; height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - var(--sab)) !important; }
+  .app > .tab-content-enter > .control:not(.pr-tab):not(.dx-tab):not(.au-tab) { grid-template-columns: repeat(3, 1fr) !important; gap: 20px !important; padding: 32px 32px 24px !important; height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - var(--sab)) !important; }
+  .app > .tab-content-enter > .control.au-tab { max-width: 900px; padding: 32px 32px 24px !important; height: calc(100dvh - var(--header-h, 65px) - var(--mbar-h, 83px) - var(--sab)) !important; }
 }
 
 /* ===== MSlider — unified settings slider ===== */

@@ -151,6 +151,16 @@ class Satellite1 : public Component,
   template<typename F> void add_on_state_callback(F &&callback) {
     this->state_callback_.add(std::forward<F>(callback));
   }
+  /// Runs on the main loop as soon as an XMOS connects, before the state callbacks, so whatever a
+  /// hook learns is settled before on_xmos_connected publishes the version. Quick SPI reads only:
+  /// the connect waits for every hook. A hook added once the XMOS is already connected also runs at
+  /// once: setup keeps this component's loop running while a slow component holds up the ones set up
+  /// after it, so the connect can come first.
+  template<typename F> void add_on_connected_hook(F &&hook) {
+    if (this->is_xmos_connected())
+      hook();
+    this->connected_hooks_.add(std::forward<F>(hook));
+  }
 
   void xmos_hardware_reset();
 
@@ -165,6 +175,7 @@ class Satellite1 : public Component,
   bool read_last_command_status_(uint8_t *status);
   void log_last_command_status_(uint8_t resource_id, uint8_t command, const char *context);
   CallbackManager<void()> state_callback_{};
+  CallbackManager<void()> connected_hooks_{};
 
   uint32_t last_attempt_timestamp_{0};
   uint32_t status_refresh_timestamp_{0};

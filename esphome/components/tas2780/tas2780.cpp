@@ -423,12 +423,35 @@ void TAS2780::finish_activation_() {
 void TAS2780::deactivate() {
   ESP_LOGD(TAG, "Dectivating TAS2780");
   this->cancel_timeout("finish_activation");
+  this->cancel_timeout("protection_recovery");
+  this->protection_lockout_ = false;
   this->activation_pending_ = false;
   // set to software shutdown
   this->reg(TAS2780_MODE_CTRL) =
       (TAS2780_MODE_CTRL_BOP_SRC__PVDD_UVLO & ~TAS2780_MODE_CTRL_MODE_MASK) | TAS2780_MODE_CTRL_MODE__SFTW_SHTDWN;
   this->disable_loop();
   this->active_ = false;
+}
+
+// An over-current or over-temperature fault drops the amp into software shutdown, where it stays:
+// nothing upstream re-activates it short of an output switch or a reboot, so the speaker went
+// silent while the player kept reporting PLAYING. A fault that returns three times within a minute
+// will not clear at the same level, so the amp then waits for the volume to come down.
+void TAS2780::recover_from_protection_shutdown_() {
+  const uint32_t now = millis();
+  if (this->protection_trips_ == 0 || now - this->protection_window_ms_ > 60000) {
+    this->protection_window_ms_ = now;
+    this->protection_trips_ = 0;
+  }
+  this->protection_volume_ = this->volume_;
+  if (++this->protection_trips_ >= 3) {
+    this->protection_lockout_ = true;
+    ESP_LOGE(TAG, "Amp shut itself down %u times within a minute; leaving it off until the volume is lowered",
+             this->protection_trips_);
+    return;
+  }
+  ESP_LOGW(TAG, "Amp shut itself down; re-activating in 2 s");
+  this->set_timeout("protection_recovery", 2000, [this]() { this->activate(); });
 }
 
 void TAS2780::reset() {
@@ -586,6 +609,7 @@ void TAS2780::loop() {
       this->log_error_states();
       this->active_ = false;
       this->disable_loop();
+      this->recover_from_protection_shutdown_();
       return;
     }
   }
@@ -657,6 +681,12 @@ bool TAS2780::set_mute_on() {
 
 bool TAS2780::set_volume(float volume) {
   this->volume_ = clamp<float>(volume, 0.0, 1.0);
+  if (this->protection_lockout_ && this->volume_ < this->protection_volume_) {
+    ESP_LOGI(TAG, "Volume lowered after repeated amp shutdowns; re-activating");
+    this->protection_lockout_ = false;
+    this->protection_trips_ = 0;
+    this->activate();
+  }
   // Mute lives in the same DVC register as the level, so writing the level while muted would
   // replace the mute code with an audible attenuation. set_mute_off() writes the recorded level.
   if (this->is_muted_) {

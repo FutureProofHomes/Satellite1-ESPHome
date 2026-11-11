@@ -29,8 +29,9 @@ const pctOf = (v: number, min: number, max: number) => (max === min ? 0 : (v - m
  * because preact/compat turns any onChange on an input into `input`, the per-pixel event.
  *
  * `onPreview` is for controls whose effect is drawn elsewhere on the page - the radar plot's
- * detection-range ring follows the drag through it. It must stay local-state-only in the caller; the
- * device still hears nothing until release.
+ * detection-range ring follows the drag through it. It must stay local-state-only in the caller, or
+ * go through a latest-wins writer that keeps one request in flight (the speaker EQ's useWriter,
+ * which plays a drag live); a request per preview is the forty-queued case above.
  *
  * `snap` marks a value as the control's home: a notch on the track, and a detent the drag pulls to.
  * The Analog gain slider is the one user - its default matters and lives mid-range, where nothing
@@ -91,7 +92,7 @@ export function MSlider({
         {snap !== undefined && <span className="mslider-notch" aria-hidden="true" style={{
         left: `calc(var(--thumb) / 2 + (100% - var(--thumb)) * ${pctOf(snap, min, max).slice(0, -1)} / 100)`
       }} />}
-        <input ref={inputRef} type="range" className="mslider-input" min={min} max={max} step={step} value={shown} disabled={disabled} aria-label={ariaLabel} style={{
+        <input ref={inputRef} type="range" className="mslider-input" min={min} max={max} step={step} value={shown} disabled={disabled} aria-label={ariaLabel} aria-valuetext={format?.(shown)} style={{
         '--pct': pctOf(shown, min, max)
       } as CSSProperties} onInput={e => {
         const v = detent(Number((e.target as HTMLInputElement).value));

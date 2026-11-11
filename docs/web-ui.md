@@ -61,7 +61,7 @@ Five tabs, all on the hash, in this nav order:
 | `#/home` | The voice orb (assistant phase, mute, voice volume) and its Customize drawer - the orb's colors, and the LED ring's color, brightness, style and per-moment animations - sensor readings with sparklines and calibration, timers, and the transcript per wake word |
 | `#/wake-word` | Which wake words the device answers to, each with its sensitivity tuner, voice pipeline and Finished Speaking Detection; the wake chime and the stop word |
 | `#/presence` | Live radar plot with zones, or gate energies, and the radar's own settings |
-| `#/audio` | One Audio Routing card: the three announcement and ducking levels, then one list of your Home Assistant areas and speakers with an Announce and a Duck box on each row (this device's own row holds "Announce on this device"), then the wake chime, timer ring and echo guard for the speakers ticked to Announce; the speaker's Channel below |
+| `#/audio/<page>` | `announcement-routing` (plain `#/audio` lands here): one Announcement Routing card: the three announcement and ducking levels, then one list of your Home Assistant areas and speakers with an Announce and a Duck box on each row (this device's own row holds "Announce on this device"), then the wake chime, timer ring and echo guard for the speakers ticked to Announce; a Speaker card with the speaker's Channel beside it only while Equalizer isn't listed. `equalizer`, listed only while the running XMOS has the speaker EQ: the speaker EQ, described below, with the speaker's Channel under Built-in Speaker; Basic by default, Advanced on the same URL |
 | `#/settings/<page>` | `device` (facts and buttons), `updates`, `security` (auth token, password), `logs` (live logs, crash reports), `integrations` (Home Assistant side panel), `recovery` (ESP32, XMOS and radar maintenance), `developer` (developer builds only: the XMOS firmware picker, the mic monitor, the TAS2780 amplifier, logs from several devices, the system monitor), `community` |
 
 When the device has a media player, the media bar rides along the bottom of every tab.
@@ -729,9 +729,15 @@ entities. [TTS-Routing.md](TTS-Routing.md) has the upgrade notes.
 
 ### The Audio page's layout
 
-One card, **Audio Routing**, with "Route assistant responses, announcements, timer rings and wake
-chimes to selected speakers" under the title, then the Speaker card with the Channel select (October
-2026; until then routing and ducking were two cards, each with its own tree).
+Audio > Announcement Routing (`#/audio/announcement-routing`; plain `#/audio` lands here too).
+Audio > Equalizer is the next section.
+
+One card, **Announcement Routing**, with "Route assistant responses, announcements, timer rings and wake
+chimes to selected speakers" under the title (October 2026; until then routing and ducking were two
+cards, each with its own tree). The speaker's Channel select is on the Equalizer, under Built-in
+Speaker. While the Equalizer isn't listed (an XMOS without the EQ, or none heard from since boot) a
+Speaker card holding it stands beside the routing card instead, so it is never out of reach; without
+it the routing card takes the row.
 
 - **The levels**, together in one tinted panel at the top:
   - **Announcement Volume** (`announcement_volume`, "Follow speaker volume" at 0). This device's own
@@ -769,6 +775,113 @@ ids, and the app's keys for them (`duck_volume`, `remote_sync_guard`), stay as t
 page served by one firmware version reads the entity keys of devices on another through the device
 switcher. Announcement Volume keeps its name because peers find it by an entity id ending in
 `_announcement_volume`. [TTS-Routing.md](TTS-Routing.md) has what the renames do to Home Assistant.
+
+## The speaker EQ (Audio > Equalizer)
+
+Built October 2026 (plan file `speaker_dsp_equalizer_41c2d2e4`): a parametric EQ and a safety limiter
+for the speaker, run by the XMOS, set from `#/audio/equalizer`. The page is called Equalizer because
+more people know the word than "DSP"; the code and the API keep `dsp`.
+
+**Where the sound is shaped.** On the XMOS, tile 1, with lib_audio_dsp v1.5.1: in the speaker
+pipeline, just before the DAC, at 48 kHz, with the echo canceller's reference taken after the EQ, so the
+canceller hears what the speaker actually plays, curve and limiter included. The
+chip designs the filters itself (RBJ biquads, up to 16 sections a profile) and is the authority on
+headroom: a design whose gain at any point in the chain would pass +18 dB is rejected and the previous
+one keeps playing. Cuts run before boosts, a negative preamp before the filters and a positive one
+after, and a flat profile is bypassed bit-exact. The limiter runs whenever the profile's net response
+can exceed its ceiling. Resource 231's commands are in Satellite1-XMOS
+`docs/device-control-spi-protocol.md`.
+
+**What the ESP32 keeps** (`satellite1_dsp`). Everything is stored in flash and uploaded: two profiles,
+**Built-in Speaker** and **Line-out**, one per output, with the XMOS told which to play as the jack
+switches; the on/off switch; and up to eight user presets beside the built-ins ("Sat1.2 Smart Speaker
+(10/26)", the speaker's default, and "Flat", the line-out's). The speaker's default is the October
+2026 Music Assistant tuning at a +8 dB preamp, 2 dB below the export's own. A profile is a preamp;
+Bass, Midrange and Treble (shelves at 120 Hz and 8 kHz and a peak at 1 kHz, all Q 0.707 and ±9 dB,
+sent as the slot's first three records and counted against the 16 sections); up to eleven filters;
+and the limiter's ceiling, attack and release (−1 dBFS, 1 ms, 100 ms by default). Both
+profiles go to the XMOS on every connect, and a profile again after each edit to it, at most ten
+uploads a second while a slider moves. An upload counts once INFO shows the XMOS designed it (its
+design count moved on); one it did not take is re-sent twice and then held, reported as refused,
+until the next edit. A ten-second heartbeat re-sends what an XMOS that restarted without the ESP32
+seeing it go has lost. Flash is written three seconds after the last edit, and at once on a safe
+reboot.
+
+**When the page exists.** An XMOS without the EQ (an older release, or one chosen in the developer
+firmware picker) answers `GET_INFO` on resource 231 with an error, and is then sent nothing else.
+The check runs in Satellite1's connected hook — after boot, a
+reflash or a picker install, never on a timer, and at once for a component set up after the XMOS
+connected — and
+the state payload carries the answer as `dsp`: 1 supported, 0 not, 2 not known yet (no XMOS since
+boot); a firmware without the component sends no field, which reads as 0. The app asks again, at
+`/api/sat1/dsp/caps`, when `xmos_firmware` publishes a new version (`useDspSupport` in
+`src/lib/device.js`, the rule in `dspRecheckDue`, `src/lib/dsp.js`). Audio lists its two pages only
+on a 1; `#/audio/equalizer` goes on to Announcement Routing only on a definite 0, and waits through
+a 2.
+
+**The API**, all session-gated:
+
+- `GET /api/sat1/dsp`: the status, `caps` (the limits), both profiles as `p`, and `presets`
+  (built-ins first). `GET /api/sat1/dsp/live`: the status plus the XMOS's `info` and `stats`; asking
+  also keeps the ESP32 reading them every second for five seconds.
+  `GET /api/sat1/dsp/caps`: `{"dsp":N}` alone.
+- `POST /api/sat1/dsp`, form fields: `en=0|1`; `cmp=0|1`, hold-to-compare, which lapses on its own
+  15 seconds after the last renewal so a browser that goes away mid-hold cannot leave the EQ off; or
+  `out=0|1` with any of `pre`, `bass`, `mid`, `tre`, `lim`, `atk`, `rel`, `preset` and `f`, the filters as
+  `type,on,hz,db,q` joined by `;`. `en` and `cmp` take only `0` or `1`, and `preset` only `""` or a
+  name a preset could hold. Values outside what the XMOS accepts, or more than 16 sections, answer
+  400 and change nothing, the switches included; nothing is clamped.
+- `POST /api/sat1/dsp/preset`: `op=load|save|delete|rename|reset` with `name` and `out`. Built-in
+  names are reserved, names are 1 to 31 bytes of well-formed UTF-8 without control characters, `save`
+  stores the profile the device holds now, and `reset` puts the output's built-in default back.
+  `rename` takes the new name in `to` and is one step, so a failure leaves the preset as it was;
+  outputs on the preset follow it. Renamed onto another user preset, that one is replaced, as a
+  `save` over it would, and any output on it becomes Custom.
+
+**Basic and Advanced.** The page opens on Basic, which is what most people need: the bar (outputs,
+Channel, the EQ switch, Hold to hear it flat, and the preset menu with Revert once the output is
+Modified) and a Tone card with the curve, read-only, over the Bass, Midrange and Treble sliders.
+Its notes speak in sliders: too much boost says to turn one down, and a preset whose filters fill
+the chip points to Advanced. Advanced, described next, is the full editor. Basic | Advanced sits at
+the end of the title's row, or on its own line under the title on a phone. The choice is kept in
+this browser (`sat1.eq.view`, `eqView` in `src/lib/dsp.js`) and is never part of the URL, so
+switching doesn't navigate and a link opens whichever view was last chosen here. Both are views of
+the same state, so an edit in one shows in the other.
+
+**The page** (`src/components/audio/DspPage.tsx`, the graph in `EqGraph.tsx`, the maths in
+`src/lib/eq.js`). `eq.js` mirrors the XMOS design — same biquads, same section order, same +18 dB
+check, tested against coefficients from lib_audio_dsp's own Python — so the page can refuse an
+impossible edit before sending it and draw exactly what will play. The bar at the top picks the output
+being edited (the one playing is marked); under Built-in Speaker, the speaker's Channel
+(`speaker_channel`, the amplifier's select, which applies with the EQ off too); then the EQ switch,
+Hold to hear it flat, and the preset menu
+with Save, Save as, Revert, and More (Import, Export, Rename, Delete, Reset). Hold to hear it flat
+follows the pointer or Space/Enter; a screen reader's bare activation latches it instead, the next
+one letting go. Rename is the device's one-step `op=rename`. The graph draws each filter and the
+total without the preamp, so the handles sit on the curve; the preamp moves the limiter's line
+instead. Handles drag (frequency and gain), take Page Up/Down — or the wheel, once picked — for Q
+and arrow keys for fine steps, and a double-click on empty graph adds a peak. Each filter's colour
+comes from `--eq-c0`…`--eq-c11` in `styles/dsp.css`, darker on the light theme. The graph card's
+corner says Playing, Sending…, Refused or Saved for the output shown, and Ready for one that is in
+sync but not the one playing (or with the EQ off). Under the graph: the loudest point (between
+stages, when that is what breaks the +18 dB cap), the limiter's state ("Limiting now" from the live
+stats) and Auto preamp (lowers the preamp until the loudest point sits on the ceiling and no stage
+passes +18 dB). The 16-section budget has no meter: an edit that would need a seventeenth section is
+not made, and a note under the graph says so. Edits go out latest-wins with one request in flight, the
+two outputs taking turns, so a drag costs a handful of writes; one that doesn't get through is
+retried, backing off to every 5 s, until a newer edit replaces it, and a refused one reloads the
+device's copy once nothing else is on its way. A read that set out before an edit never puts the
+older profile back. Preset operations wait for pending edits to land first (up to 10 s). Import
+reads the text REW, Equalizer APO and Music Assistant export (`Preamp:` and `Filter N:` lines, comma
+decimals too) and says what it skipped or approximated; Export writes the same format, Bass and
+Treble as shelves and Midrange as a peak (each left out at 0 dB), 24 dB/oct cuts as two lines. On
+import, a shelf or peak at exactly one of the three tone controls' frequency and Q becomes that
+control. The Tone card has the three tone sliders, then the preamp. The banner over the page says
+when the audio chip is updating or not answering, and when the EQ switched itself off for want of
+time. Two independent columns once the page itself is 820 px wide (Advanced: the graph and filters
+left, the rest right; Basic: the Tone card left, the bar right), measured on the page rather than
+the window because the sidebar arrives at 1024 px; one list in reading order below that, with the
+bottom bar's Announcement Routing and Equalizer pills.
 
 ## Finished speaking detection, per wake word
 
@@ -941,7 +1054,8 @@ its YAML lives inline in that file: the XMOS firmware catalog and picker entitie
 `satellite1_web_ui`. A release build compiles none of it — `USE_SAT1_MIC_MONITOR`,
 `USE_SAT1_SYSMON` and `USE_SAT1_WEB_UI_AMP` are absent from its `defines.h` — and the app hides
 Settings > Developer unless the state payload shows one of the tools (`src/lib/devtools.js`). The
-speaker's Channel select is the one amplifier control customers keep; it is on the Audio tab.
+speaker's Channel select is the one amplifier control customers keep; it is on Audio > Equalizer,
+under Built-in Speaker.
 CI's `build-dev-firmware` job compiles the dev config on every push so it cannot rot unseen.
 
 **Mic monitor, device side** (`mic_monitor.h/.cpp`). A passive tap: it registers a data callback on
@@ -1008,6 +1122,12 @@ boot so the history exists before anyone opens the page. `GET /api/sat1/sysmon?b
 through it 720 samples at a time; `tasks=1` adds every FreeRTOS task's priority, state and stack
 high-water mark. The task table needs `CONFIG_FREERTOS_USE_TRACE_FACILITY`, which the component's
 codegen sets whenever `sysmon:` is present, so it is not repeated in `dev.yaml`.
+
+**Speaker EQ** (`src/components/settings/SpeakerEq.tsx`). The XMOS speaker EQ's own report, read
+from `GET /api/sat1/dsp/live` once a second: bypass reason, both slots, time per frame, overruns and
+watchdog trips, limiter activity, designs and tile 1 heap. It needs nothing in `dev.yaml`: the card
+shows whenever the state payload has a `dsp` field, but since release builds carry the EQ too, it
+never makes the page appear on its own.
 
 **Costs.** By construction: 128 KB of PSRAM for the mic ring once someone has listened, 8 KB of
 PSRAM per listener, about 100 KB of PSRAM for the system monitor, and no internal RAM beyond the
