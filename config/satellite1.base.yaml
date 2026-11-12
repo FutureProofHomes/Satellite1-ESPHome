@@ -13,7 +13,9 @@ substitutions:
   component_name: Core
 
   esp32_fw_version: dev
-  xmos_fw_version: "v1.1.0-alpha.0"
+  # A pre-release of Satellite1-XMOS feature/speaker_eq_dsp_4y1x: the first XMOS with the speaker
+  # EQ the Audio > Equalizer page drives. Swap in a real release once that branch ships.
+  xmos_fw_version: "v1.1.0-dev.25"
   # Empty embeds the GitHub release named by xmos_fw_version. To embed a local XMOS build instead,
   # pass absolute paths on the command line along with its version:
   #   esphome -s xmos_fw_version v1.1.0-dev.8 -s xmos_fw_image /abs/x.factory.bin \
