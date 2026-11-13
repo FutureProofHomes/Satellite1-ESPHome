@@ -59,15 +59,12 @@ button:
     entity_category: diagnostic
     on_press:
       then:
-        - memory_flasher.write_image:
-            image_version: ${xmos_fw_version}
-            image_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
-            md5_url: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
-  # Wipes the Satellite1 HAT XMOS Chip
+        - memory_flasher.request_embedded_flash_reboot:
+  # Erases all XMOS flash and reinstalls the embedded firmware after reboot.
   - platform: template
     id: erase_xmos_flash
-    name: "XMOS Erase Chip"
+    name: "XMOS Full Erase and Reinstall"
     entity_category: diagnostic
     on_press:
       then:
-        - memory_flasher.erase:
+        - memory_flasher.request_full_erase_flash_reboot:

@@ -13,7 +13,10 @@ substitutions:
   component_name: Core
 
   esp32_fw_version: dev
-  xmos_fw_version: "v1.0.3"
+  xmos_fw_version: "v1.1.0-beta.1"
+  # Dashboard/custom builds also flash the embedded XMOS image automatically.
+  # Override to "false" for manual flashing; minimum-version validation still applies.
+  xmos_auto_flash_on_boot: "true"
 
 globals:
   # Global initialisation variable. Initialized to true and set to false once everything is connected. Only used to have a smooth "plugging" experience
@@ -31,17 +34,16 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
-  # Global variable tracking the XMOS flasher status.
-  - id: pd_power_contract
-    type: int
+  - id: xmos_audio_shutdown_complete
+    type: bool
     restore_value: no
-    initial_value: '0'
+    initial_value: 'false'
 
 esphome:
   name: ${node_name}
   name_add_mac_suffix: true
   friendly_name: ${friendly_name}
-  min_version: 2026.7.0
+  min_version: 2026.10.2
 
   project:
     name: ${company_name}.${project_name}
@@ -55,11 +57,7 @@ esphome:
         - script.execute: control_leds
         - delay: 1s
 
-        # if line_out was used previously but is not available try speaker
-        - lambda: |
-            if( !id(line_out_sensor).state && id(dac_proxy).active_dac == 1){
-              id(dac_proxy).activate_speaker();
-            }
+        - script.execute: refresh_audio_output
 
         # If after 10 minutes, the device is still initializing (It did not yet connect to Home Assistant), turn off the init_in_progress variable and run the script to refresh the LED status
         - delay: 10min
@@ -108,8 +106,11 @@ fusb302b:
       - text_sensor.template.publish:
           id: pd_state_text
           state: !lambda 'return id(pd_fusb302b).contract;'
-      - lambda: id(pd_power_contract) = id(pd_fusb302b).contract_voltage;
-      - script.execute: tas2780_ensure_active
+      - lambda: id(dac_proxy).notify_supply_changed();
+
+  on_disconnect:
+    then:
+      - lambda: id(dac_proxy).notify_supply_changed();
 
 http_request:
 
@@ -127,57 +128,98 @@ satellite1:
   data_rate: 8000000
   spi_mode: MODE3
   xmos_rst_pin: GPIO4
+  # Every connection waits for the product firmware-update decision below.
+  audio_startup_check: true
 
   on_xmos_no_response:
     then:
       - text_sensor.template.publish:
           id: xmos_firmware_version_text
           state: !lambda 'return id(satellite1_id).status_string();'
+      - if:
+          condition:
+            - lambda: return ${xmos_auto_flash_on_boot};
+            - lambda: return id(init_in_progress);
+            - lambda: return id(xflash).has_image_embedded();
+            - lambda: return !id(xflash).flash_attempted_this_boot();
+            - lambda: return !id(xflash).boot_flash_pending();
+          then:
+            - memory_flasher.write_embedded_image:
 
   on_xmos_connected:
     then:
       - text_sensor.template.publish:
           id: xmos_firmware_version_text
           state: !lambda 'return id(satellite1_id).status_string();'
+      - delay: 1s
+      - script.execute: control_leds
+      - if:
+          condition:
+            - lambda: return ${xmos_auto_flash_on_boot};
+            - lambda: return id(init_in_progress);
+            - lambda: return id(xflash).has_image_embedded();
+            - lambda: return !id(xflash).match_embedded(id(satellite1_id).xmos_fw_version);
+            - lambda: return !id(xflash).flash_attempted_this_boot();
+            - lambda: return !id(xflash).boot_flash_pending();
+          then:
+            - memory_flasher.write_embedded_image:
+          else:
+            - if:
+                condition:
+                  lambda: |-
+                    return id(satellite1_id).is_xmos_connected() && !id(xflash).in_progress() &&
+                           !id(xflash).boot_flash_pending();
+                then:
+                  - lambda: |-
+                      id(satellite1_id).set_audio_inhibited(satellite1::AudioInhibit::STARTUP_CHECK, false);
+                  - script.execute: refresh_audio_output
+                  - script.execute: start_micro_wake_word
 
 memory_flasher:
   - platform: satellite1
     id: xflash
     embed_flash_image:
       image_version: ${xmos_fw_version}
-      image_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.bin
-      md5_file: https://raw.githubusercontent.com/FutureProofHomes/Documentation/refs/heads/main/assets/firmware/xmos/${xmos_fw_version}/satellite1_firmware_fixed_delay.factory.md5
+      image_file: https://github.com/FutureProofHomes/Satellite1-XMOS/releases/download/${xmos_fw_version}/satellite1_xmos.factory.bin
+      md5_file: https://github.com/FutureProofHomes/Satellite1-XMOS/releases/download/${xmos_fw_version}/satellite1_xmos.factory.md5
 
     on_flashing_start:
       then:
+        - lambda: |-
+            id(satellite1_id).set_audio_inhibited(satellite1::AudioInhibit::FLASHING, true);
+        - text_sensor.template.publish:
+            id: xmos_firmware_version_text
+            state: "Flashing... (0%)"
         - lambda: id(xmos_flashing_state) = 1;
         - script.execute: control_leds
 
     on_progress_update:
       then:
+        - text_sensor.template.publish:
+            id: xmos_firmware_version_text
+            state: !lambda |-
+              return std::string("Flashing... (") + std::to_string(id(xflash).flashing_progress) + "%)";
         - lambda: id(global_led_animation_index) = id(xflash).flashing_progress * 24 / 100;
         - script.execute: control_leds
 
     on_flashing_success:
       then:
+        - lambda: id(satellite1_id).set_audio_inhibited(satellite1::AudioInhibit::FLASHING, false);
         - logger.log: "success called"
+        - text_sensor.template.publish:
+            id: xmos_firmware_version_text
+            state: "Flashing... (100%)"
         - lambda: id(xmos_flashing_state) = 2;
         - script.execute: control_leds
         - lambda: id(xmos_flashing_state) = 0;
-        - if:
-            condition:
-              lambda: |-
-                return id(pd_fusb302b).contract_voltage >= 9;
-            then:
-              - tas2780.activate:
-                  mode: 2
-            else:
-              - tas2780.activate:
-                  mode: 0
 
     on_flashing_failed:
       then:
+        - lambda: id(satellite1_id).set_audio_inhibited(satellite1::AudioInhibit::FLASHING, false);
         - logger.log: "failed called"
+        - text_sensor.template.publish:
+            id: xmos_firmware_version_text
+            state: "Flashing failed"
         - lambda: id(xmos_flashing_state) = 3;
         - script.execute: control_leds
         - lambda: id(xmos_flashing_state) = 0;
@@ -186,6 +228,6 @@ memory_flasher:
       then:
         - if:
             condition:
-              lambda: return id(factory_reset_requested);
+              lambda: return id(xflash).factory_reset_pending();
             then:
               - button.press: factory_reset_button

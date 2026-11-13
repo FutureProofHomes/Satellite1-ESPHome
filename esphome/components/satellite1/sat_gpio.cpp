@@ -15,25 +15,11 @@ void Satellite1GPIOPin::digital_write(bool value) {
 }
 
 bool Satellite1GPIOPin::digital_read() {
-  DC_STATUS_REGISTER::register_id port_register;
-  switch (this->port_) {
-    case XMOSPort::INPUT_A:
-      port_register = DC_STATUS_REGISTER::GPIO_PORT_IN_A;
-      break;
-    case XMOSPort::INPUT_B:
-      port_register = DC_STATUS_REGISTER::GPIO_PORT_IN_B;
-      break;
-    case XMOSPort::OUTPUT_A:
-      port_register = DC_STATUS_REGISTER::GPIO_PORT_OUT_A;
-      break;
-    default:
-      ESP_LOGE(TAG, "Invalid port set.");
-      return 0;
-      break;
+  uint8_t port_value;
+  if (!this->parent_->get_cached_dc_status(this->port_register_, &port_value)) {
+    return false;
   }
-  this->parent_->request_status_register_update();
-  uint8_t port_value = this->parent_->get_dc_status(port_register);
-  return !!(port_value & (1 << this->pin_)) != this->inverted_;
+  return !!(port_value & this->pin_mask_) != this->inverted_;
 }
 
 }  // namespace satellite1

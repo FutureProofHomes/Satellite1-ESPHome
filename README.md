@@ -161,6 +161,9 @@ Don't forget to give the project a star! Thanks again!
 ### ESPHome Device Builder
 The easiest way to build customized firmware for your Satellite1 is through the ESPHome Device Builder dashboard. For a detailed guide, see https://docs.futureproofhomes.net/satellite1-modifying-the-firmware/. 
 
+See [XMOS firmware updates](docs/xmos-firmware-updates.md) for the minimum
+supported embedded version, automatic flashing defaults and manual/compatibility opt-outs.
+
 >**Note:** Due to breaking changes between ESPHome firmware releases, you must ensure that your ESPHome Device Builder version is compatible with the Satellite1 codebase configured in your YAML file. By default, the codebase targets the latest beta release (`staging` branch).
 Before updating your ESPHome Device Builder, verify that the latest Satellite1 firmware beta release officially supports the ESPHome version. Failure to do so may result in build failures or unstable device behavior.
 

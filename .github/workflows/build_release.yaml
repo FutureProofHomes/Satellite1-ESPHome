@@ -65,8 +65,6 @@ jobs:
     with:
       files: |
         config/satellite1.yaml
-        config/satellite1.ld2410.yaml
-        config/satellite1.ld2450.yaml
       esphome-version: ${{ needs.prepare.outputs.esphome_version }}
       release-version: ${{ needs.prepare.outputs.next_tag }}
 

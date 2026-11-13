@@ -25,6 +25,9 @@ globals:
 microphone:
   - platform: satellite1
     id: sat1_mics
+    satellite1_id: satellite1_id
+    # Channel 1 remains local-only for wake-word processing during software mute.
+    software_mute_channels: [0]
     sample_rate: 48000
     i2s_din_pin: GPIO15
     bits_per_sample: 32bit
@@ -45,6 +48,7 @@ micro_wake_word:
       internal: true
   vad:
   microphone:
+    id: wake_word_microphone_source
     microphone: sat1_mics
     channels: 1
     gain_factor: 6
@@ -53,7 +57,7 @@ micro_wake_word:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
     - if:
         condition:
-          switch.is_off: master_mute_switch
+          lambda: return !id(satellite1_id).microphone_mute().effectively_muted(millis());
         then:
           # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
           - if:
@@ -90,12 +94,17 @@ micro_wake_word:
                                       priority: true
                                       sound_file: "wake_word_triggered_sound"
                                   - delay: 300ms
-                            - voice_assistant.start:
-                                wake_word: !lambda return wake_word;
+                            - if:
+                                condition:
+                                  lambda: return !id(satellite1_id).microphone_mute().effectively_muted(millis());
+                                then:
+                                  - voice_assistant.start:
+                                      wake_word: !lambda return wake_word;
 
 voice_assistant:
   id: va
   microphone:
+    id: va_microphone_source
     microphone: sat1_mics
     channels: 0
 
@@ -107,7 +116,11 @@ voice_assistant:
   volume_multiplier: 1
   on_client_connected:
     - lambda: id(init_in_progress) = false;
-    - micro_wake_word.start:
+    - if:
+        condition:
+          lambda: return id(satellite1_id).audio_available();
+        then:
+          - script.execute: start_micro_wake_word
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_client_disconnected:
@@ -131,6 +144,12 @@ voice_assistant:
 
   # When the voice assistant starts: Play a wake up sound, duck audio.
   on_start:
+    # Covers direct API starts as well as local automations.
+    - if:
+        condition:
+          lambda: return id(satellite1_id).microphone_mute().effectively_muted(millis());
+        then:
+          - voice_assistant.stop:
     - mixer_speaker.apply_ducking:
         id: media_mixing_input
         decibel_reduction: 20   # Number of dB quieter; higher implies more quiet, 0 implies full volume
@@ -204,6 +223,17 @@ voice_assistant:
     - script.execute: control_leds
 
 script:
+  - id: start_micro_wake_word
+    mode: restart
+    then:
+      - wait_until:
+          lambda: return App.is_setup_complete() && id(mww).is_ready() && id(satellite1_id).audio_available();
+      - if:
+          condition:
+            lambda: return !id(mww).is_running();
+          then:
+            - micro_wake_word.start:
+
   # Script used activate the stop word if the TTS step is long.
   # Why is this wrapped on a script?
   #   Becasue we want to stop the sequence if the TTS step is faster than that.

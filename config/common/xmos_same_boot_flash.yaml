@@ -1,0 +1,206 @@
+script:
+  - id: prepare_xmos_direct_flash
+    mode: single
+    then:
+      # A new maintenance operation invalidates any previous recovery waiter.
+      - script.stop: restore_sendspin_after_xmos_maintenance
+      - lambda: |-
+          id(satellite1_id).set_audio_inhibited(satellite1::AudioInhibit::MAINTENANCE, true);
+      - lambda: id(xmos_audio_shutdown_complete) = false;
+      # Cancel pending starts before stopping the components that own I2S channels.
+      - script.stop: start_micro_wake_word
+      - script.stop: refresh_audio_output
+      - script.stop: activate_stop_word_once
+      - script.stop: activate_stop_word_if_tts_step_is_long
+      - micro_wake_word.stop:
+      - voice_assistant.stop:
+      - media_player.stop:
+          id: external_media_player
+          announcement: true
+      - media_player.stop:
+          id: external_media_player
+          announcement: false
+      # A connecting HTTP source is not active yet, so the first stop cannot
+      # see it. Keep hardware starts gated through the HTTP timeout, then stop
+      # again before granting the flasher direct access.
+      - delay: 5s
+      - media_player.stop:
+          id: external_media_player
+          announcement: true
+      - media_player.stop:
+          id: external_media_player
+          announcement: false
+      - tas2780.deactivate:
+      # Stop the complete buffered speaker graph, not only its I2S sink.
+      - speaker.stop: announcement_resampling_speaker
+      - speaker.stop: media_resampling_speaker
+      - speaker.stop: announcement_mixing_input
+      - speaker.stop: media_mixing_input
+      - delay: 250ms
+      - speaker.stop: i2s_audio_speaker
+      - wait_until:
+          condition:
+            lambda: |-
+              return !id(mww).is_running() && !id(va).is_running() &&
+                     id(sat1_mics).is_stopped() &&
+                     id(announcement_resampling_speaker).is_stopped() &&
+                     id(media_resampling_speaker).is_stopped() &&
+                     id(announcement_mixing_input).is_stopped() &&
+                     id(media_mixing_input).is_stopped() &&
+                     id(i2s_audio_speaker).is_stopped() &&
+                     !id(speaker_dac).is_active() && !id(speaker_dac).is_activation_pending() &&
+                     id(external_media_player).state != media_player::MEDIA_PLAYER_STATE_PLAYING &&
+                     id(external_media_player).state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
+          timeout: 5s
+      - if:
+          condition:
+            lambda: |-
+              return !id(mww).is_running() && !id(va).is_running() &&
+                     id(sat1_mics).is_stopped() &&
+                     id(announcement_resampling_speaker).is_stopped() &&
+                     id(media_resampling_speaker).is_stopped() &&
+                     id(announcement_mixing_input).is_stopped() &&
+                     id(media_mixing_input).is_stopped() &&
+                     id(i2s_audio_speaker).is_stopped() &&
+                     !id(speaker_dac).is_active() && !id(speaker_dac).is_activation_pending() &&
+                     id(external_media_player).state != media_player::MEDIA_PLAYER_STATE_PLAYING &&
+                     id(external_media_player).state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
+          then:
+            - lambda: |-
+                // Only fresh hardware mute acknowledgements authorize direct flashing.
+                id(xmos_audio_shutdown_complete) = id(dac_proxy).force_safety_mute();
+                if (id(xmos_audio_shutdown_complete)) {
+                  ESP_LOGI("xmos_direct_flash", "Audio shutdown complete; XMOS is ready for direct flashing");
+                } else {
+                  ESP_LOGW("xmos_direct_flash", "Fresh DAC safety mute failed; audio remains disabled");
+                }
+          else:
+            - logger.log: "XMOS direct-flash preparation timed out; audio remains disabled"
+
+  - id: restore_sendspin_after_xmos_maintenance
+    mode: restart
+    then:
+      # STOP reports EXTERNAL_SOURCE. MA then withholds stream/start, so waiting
+      # for on_stream_start() to restore availability would be a circular wait.
+      # Do not reopen network playback until the existing hardware gates recover.
+      - wait_until:
+          condition:
+            lambda: return !id(xflash).in_progress();
+          timeout: 120s
+      - wait_until:
+          condition:
+            lambda: |-
+              return !id(xflash).in_progress() && id(satellite1_id).audio_available() &&
+                     (id(dac_proxy).audio_ready() ||
+                      id(dac_proxy).effective_outputs() == 0) &&
+                     id(sendspin_media_source).get_state() == media_source::MediaSourceState::IDLE &&
+                     id(external_media_player).state == media_player::MEDIA_PLAYER_STATE_IDLE;
+          timeout: 10s
+      - lambda: |-
+          // Recheck after the bounded wait: timeout never grants availability.
+          const bool may_restore = !id(xflash).in_progress() && id(satellite1_id).audio_available() &&
+              (id(dac_proxy).audio_ready() ||
+               id(dac_proxy).effective_outputs() == 0) &&
+              id(sendspin_media_source).get_state() == media_source::MediaSourceState::IDLE &&
+              id(external_media_player).state == media_player::MEDIA_PLAYER_STATE_IDLE;
+          if (!may_restore) {
+            ESP_LOGW("xmos_direct_flash", "Sendspin availability not restored: audio is inhibited or a source is busy");
+            return;
+          }
+          // Legacy Sendspin protocol availability only; this neither starts a
+          // stream nor grants parent/DAC readiness or changes volume/mute.
+          // An intentionally disabled output stays inhibited, but must not trap
+          // network playback until another maintenance cycle when later enabled.
+          id(sendspin_hub).update_state(::sendspin::SendspinClientState::SYNCHRONIZED);
+          ESP_LOGI("xmos_direct_flash", "Restored Sendspin availability after XMOS maintenance");
+
+  - id: restore_audio_after_remote_metadata_failure
+    mode: restart
+    then:
+      - delay: 250ms
+      - if:
+          condition:
+            lambda: |-
+              return !id(xflash).in_progress() && id(satellite1_id).is_xmos_connected() &&
+                     (id(xflash).error_code == memory_flasher::MD5_INVALID ||
+                      id(xflash).error_code == memory_flasher::BAD_URL);
+          then:
+            - lambda: |-
+                id(satellite1_id).set_audio_inhibited(satellite1::AudioInhibit::MAINTENANCE, false);
+            - script.execute: refresh_audio_output
+            - script.execute: start_micro_wake_word
+            - logger.log: "Restored audio after XMOS remote flash metadata failure"
+
+http_request:
+  buffer_size_rx: 4096
+  buffer_size_tx: 2048
+
+api:
+  actions:
+    - action: flash_xmos_same_boot
+      then:
+        - if:
+            condition:
+              lambda: return id(xflash).has_image_embedded() && !id(xflash).in_progress();
+            then:
+              - script.execute: prepare_xmos_direct_flash
+              - script.wait: prepare_xmos_direct_flash
+              - if:
+                  condition:
+                    lambda: return id(xmos_audio_shutdown_complete) && !id(xflash).in_progress();
+                  then:
+                    - memory_flasher.write_embedded_image:
+                    - script.execute: restore_sendspin_after_xmos_maintenance
+                  else:
+                    - logger.log: "XMOS direct flash cancelled because audio shutdown did not complete"
+            else:
+              - logger.log: "XMOS direct flash unavailable because the flasher is busy or no embedded image exists"
+
+    - action: flash_xmos_remote_same_boot
+      variables:
+        image_url: string
+        expected_md5: string
+        md5_url: string
+      then:
+        - if:
+            condition:
+              lambda: |-
+                const bool image_url_valid = image_url.rfind("https://", 0) == 0 || image_url.rfind("http://", 0) == 0;
+                const bool md5_url_present = !md5_url.empty();
+                const bool md5_present = !expected_md5.empty();
+                bool md5_valid = expected_md5.size() == 32;
+                for (const char value : expected_md5) {
+                  md5_valid = md5_valid && ((value >= '0' && value <= '9') ||
+                                            (value >= 'a' && value <= 'f') ||
+                                            (value >= 'A' && value <= 'F'));
+                }
+                const bool md5_url_valid = !md5_url_present || md5_url.rfind("https://", 0) == 0 ||
+                                           md5_url.rfind("http://", 0) == 0;
+                return !id(xflash).in_progress() && image_url_valid && md5_url_valid &&
+                       (md5_present != md5_url_present) && (!md5_present || md5_valid);
+            then:
+              - script.execute: prepare_xmos_direct_flash
+              - script.wait: prepare_xmos_direct_flash
+              - if:
+                  condition:
+                    lambda: return id(xmos_audio_shutdown_complete) && !id(xflash).in_progress();
+                  then:
+                    - if:
+                        condition:
+                          lambda: return !expected_md5.empty();
+                        then:
+                          - memory_flasher.write_image:
+                              image_version: ${xmos_fw_version}
+                              image_file: !lambda return image_url;
+                              md5: !lambda return expected_md5;
+                        else:
+                          - memory_flasher.write_image:
+                              image_version: ${xmos_fw_version}
+                              image_file: !lambda return image_url;
+                              md5_url: !lambda return md5_url;
+                    - script.execute: restore_audio_after_remote_metadata_failure
+                    - script.execute: restore_sendspin_after_xmos_maintenance
+                  else:
+                    - logger.log: "XMOS remote direct flash cancelled because audio shutdown did not complete"
+            else:
+              - logger.log: "XMOS remote direct flash rejected because the flasher is busy or its arguments are invalid"

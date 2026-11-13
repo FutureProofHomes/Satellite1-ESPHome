@@ -9,11 +9,6 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
-  # Tracks whether TAS2780 is currently active
-  - id: tas2780_active
-    type: bool
-    restore_value: no
-    initial_value: 'false'
 
 audio_dac:
   - platform: pcm5122
@@ -22,10 +17,13 @@ audio_dac:
   - platform: tas2780
     id: speaker_dac
     address: 0x3F
+    activation_guard: !lambda return id(satellite1_id).audio_available();
   - platform: satellite1
     id: dac_proxy
     speaker_dac: speaker_dac
     line_out_dac: line_out_dac
+    volume_state:
+      id: audio_volume_state
 
 speaker:
   - platform: i2s_audio
@@ -88,26 +86,19 @@ select:
             return 0;
 
 script:
-  # Script to activate TAS2780
-  - id: tas2780_ensure_active
-    mode: single
+  # Wrappers choose intent only. The proxy owns all preparation and readiness.
+  - id: refresh_audio_output
+    mode: restart
     then:
-      - if:
-          condition:
-            lambda: return !id(tas2780_active);
-          then:
-            - logger.log:
-                format: "Activating TAS2780 with power mode %d"
-                args: ['id(pd_power_contract) >=9 ? 2 : 0']
-            - tas2780.activate:
-                mode: !lambda 'return id(pd_power_contract) >=9 ? 2 : 0;'
-            - lambda: id(tas2780_active) = true;
+      - lambda: |-
+          if (id(line_out_sensor).has_state())
+            id(dac_proxy).observe_jack_state(id(line_out_sensor).state);
+          id(dac_proxy).refresh_output();
 
   - id: activate_internal_speaker
     mode: single
     then:
       - logger.log: "Activating internal speaker"
-      - script.execute: tas2780_ensure_active
       - dac_proxy.activate_speaker:
 
   - id: activate_line_out
@@ -118,6 +109,49 @@ script:
 
 api:
   actions:
+    - action: set_dac_outputs_enabled
+      variables:
+        speaker_enabled: bool
+        line_out_enabled: bool
+      then:
+        - lambda: |-
+            const auto revision = id(dac_proxy).output_settings_revision();
+            if (!id(dac_proxy).set_outputs_enabled(speaker_enabled, line_out_enabled)) {
+              ESP_LOGW("dac_proxy", "Output settings rejected or preference save failed");
+              return;
+            }
+            // Refresh automatic intent only. Enablement must not discard a manual
+            // single/dual activation request; no-op requests leave preparation alone.
+            if (id(dac_proxy).output_settings_revision() != revision && id(line_out_sensor).has_state())
+              id(dac_proxy).refresh_automatic_routing(id(line_out_sensor).state);
+    - action: set_active_dac_outputs
+      variables:
+        speaker_active: bool
+        line_out_active: bool
+      then:
+        - lambda: |-
+            if (!id(dac_proxy).set_active_outputs(speaker_active, line_out_active))
+              ESP_LOGW("dac_proxy", "Activation settings rejected or preference save failed");
+    - action: set_automatic_routing
+      then:
+        - lambda: |-
+            if (!id(line_out_sensor).has_state() ||
+                !id(dac_proxy).set_automatic_routing(id(line_out_sensor).state))
+              ESP_LOGW("dac_proxy", "Automatic routing unavailable or preference save failed");
+    - action: set_speaker_volume
+      variables:
+        volume: float
+      then:
+        - lambda: |-
+            if (!id(audio_volume_state).set_output_volume(satellite1::SPEAKER, volume))
+              ESP_LOGW("dac_proxy", "Speaker volume rejected or preference save failed");
+    - action: set_lineout_volume
+      variables:
+        volume: float
+      then:
+        - lambda: |-
+            if (!id(audio_volume_state).set_output_volume(satellite1::LINE_OUT, volume))
+              ESP_LOGW("dac_proxy", "Line-out volume rejected or preference save failed");
     - action: activate_speaker_dac
       then:
         - script.execute: activate_internal_speaker
@@ -126,9 +160,32 @@ api:
       then:
         - script.execute: activate_line_out
 
+    - action: set_speaker_volume_limits
+      variables:
+        min_db: float
+        max_db: float
+      then:
+        - dac_proxy.set_volume_limits:
+            id: dac_proxy
+            output: speaker
+            min_db: !lambda return min_db;
+            max_db: !lambda return max_db;
+
+    - action: set_lineout_volume_limits
+      variables:
+        min_db: float
+        max_db: float
+      then:
+        - dac_proxy.set_volume_limits:
+            id: dac_proxy
+            output: line_out
+            min_db: !lambda return min_db;
+            max_db: !lambda return max_db;
+
 binary_sensor:
   - platform: gpio
     id: line_out_sensor
+    use_interrupt: false
     pin:
       pcm5122:
       number: 3
@@ -140,7 +197,9 @@ binary_sensor:
       - delayed_off: 200ms
 
     on_press:
-      - script.execute: activate_line_out
+      - lambda: |-
+          if (!id(dac_proxy).observe_jack_state(true))
+            ESP_LOGW("dac_proxy", "Jack routing preference save failed");
       - lambda: id(jack_plugged_recently) = true;
       - script.execute: control_leds
       - delay: 200ms
@@ -153,7 +212,9 @@ binary_sensor:
       - script.execute: control_leds
 
     on_release:
-      - script.execute: activate_internal_speaker
+      - lambda: |-
+          if (!id(dac_proxy).observe_jack_state(false))
+            ESP_LOGW("dac_proxy", "Jack routing preference save failed");
       - lambda: id(jack_unplugged_recently) = true;
       - script.execute: control_leds
       - delay: 200ms

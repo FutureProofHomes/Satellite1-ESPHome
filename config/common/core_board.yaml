@@ -1,14 +1,11 @@
-esphome:
-  platformio_options:
-    board_build.flash_mode: dio
-    board_upload.maximum_size: 16777216
-
 esp32:
   board: esp32-s3-devkitc-1
   variant: ESP32S3
   flash_size: 16MB
   framework:
     type: esp-idf
+    advanced:
+      flash_chip: generic
 
     sdkconfig_options:
       CONFIG_SPIRAM_RODATA: "y"
@@ -59,3 +56,4 @@ i2s_audio:
     i2s_mclk_pin: GPIO16
     access_mode: duplex
     i2s_mode: secondary
+    access_guard: !lambda return id(satellite1_id).audio_available();

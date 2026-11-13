@@ -11,7 +11,9 @@ external_components:
     components:
       - fusb302b
       - i2s_audio
+      - ltr_als_ps
       - memory_flasher
       - satellite1
       - satellite1_radar
+      - speaker_source
       - tas2780
