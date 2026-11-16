@@ -311,8 +311,11 @@ export function SearchDrawer({
     body = <div className="search-empty">{I_SEARCH_SM}<div className="search-empty-t">{TEXT.search_need_ma_t}</div><p className="dim sm">{TEXT.search_need_ma_b}</p>{setupOpen ? setup : <button className="btn solid primary" onClick={() => setSetupOpen(true)}>{TEXT.search_setup_btn}</button>}</div>;
   } else if (!wsOn) {
     // A refused token gets the panel's own error line and the panel itself, so the fix is where the
-    // failure is.
-    body = ws.status === 'error' ? <div className="search-empty"><p className="dim sm">{TEXT.ma_error}</p>{setup}</div> : status(TEXT.search_connecting);
+    // failure is. A connected socket that holds no player for this device is its own state: the fix
+    // lives in Music Assistant, and "Connecting…" would never resolve.
+    body = ws.status === 'error' ? <div className="search-empty"><p className="dim sm">{TEXT.ma_error}</p>{setup}</div>
+      : ws.status === 'on' ? <div className="search-empty">{I_SEARCH_SM}<div className="search-empty-t">{TEXT.search_no_self_t}</div><p className="dim sm">{TEXT.search_no_self_b}</p></div>
+      : status(TEXT.search_connecting);
   } else if (top) {
     body = opened(top);
   } else if (q.trim().length < 2) {

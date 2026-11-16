@@ -277,13 +277,14 @@ substitutions:
   # paging and size-cap machinery here already exist.
   #
   # The key is two-stage, and both stages were verified against source and a live installation
-  # rather than guessed. The MA player_id for a Sendspin player *is* the client id, and the ESPHome
-  # hub sets that to this device's MAC (sendspin_hub.cpp, get_client_id_into_buffer) - but what Home
-  # Assistant's MA integration puts in the device identifier is MA's *user-facing* player id, and on
-  # installations with MA's universal-player layer that is "up" plus eight random hex digits
-  # (mint_player_id in universal_player/provider.py), with the MAC nowhere in it. Older ids do embed
-  # the MAC ("upe4b0639109d8"), so stage one tests containment - case folded, separators stripped,
-  # on both identifiers and connections - and catches those installs exactly.
+  # rather than guessed. The MA player_id for a Sendspin player was the client id, which ESPHome
+  # hubs up to 2026.9 set to this device's MAC; since ESPHome 2026.10 the client id is derived from
+  # the device's keypair (sendspin-cpp) and the MAC is nowhere in it. What Home Assistant's MA
+  # integration puts in the device identifier is MA's *user-facing* player id, and on installations
+  # with MA's universal-player layer that is "up" plus eight random hex digits (mint_player_id in
+  # universal_player/provider.py). Older ids do embed the MAC ("upe4b0639109d8"), so stage one tests
+  # containment - case folded, separators stripped, on both identifiers and connections - and
+  # catches those installs exactly; everything newer lands on stage two.
   #
   # Stage two is the name, read off this device's own registry entry (self_area_jinja's `ns.dev`,
   # so it works whether or not the device is assigned to an area): a Sendspin player enters MA named

@@ -305,8 +305,17 @@ void Satellite1WebUI::loop() {
 #ifdef USE_SAT1_WEB_UI_SENDSPIN
   // Refreshed here rather than read in the endpoint, so the httpd task never calls into the hub -
   // the interpolation reads state the hub writes on this loop. One atomic store per iteration.
-  if (this->sendspin_hub_ != nullptr)
+  if (this->sendspin_hub_ != nullptr) {
     this->handler_.media_set_pos(this->sendspin_hub_->get_track_progress_ms());
+    // The client id exists once the hub's start() has run and then never changes (sendspin-cpp
+    // derives it from the persisted keypair), so poll until the first non-empty read and hand it
+    // over once.
+    if (!this->handler_.sendspin_id_set()) {
+      const StringRef id = this->sendspin_hub_->get_client_id();
+      if (!id.empty())
+        this->handler_.set_sendspin_id(id.c_str());
+    }
+  }
 #endif
 
 #ifdef USE_SAT1_MIC_MONITOR

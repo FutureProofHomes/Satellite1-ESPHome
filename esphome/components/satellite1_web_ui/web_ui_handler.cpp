@@ -3743,6 +3743,17 @@ void WebUIHandler::handle_state_(AsyncWebServerRequest *request) {
   w.printf(R"("dsp":%u,)", this->dsp_ == nullptr ? 0u : static_cast<unsigned>(this->dsp_->support()));
 #endif
 
+#ifdef USE_SAT1_WEB_UI_SENDSPIN
+  // The Sendspin client id (see set_sendspin_id), by which the app finds this device's own player
+  // on its direct Music Assistant socket. base64url needs no JSON escaping, but the escaper is one
+  // call and keeps this safe against a future id alphabet.
+  if (this->sendspin_id_set_.load(std::memory_order_acquire)) {
+    w.print(R"("sendspin_id":)");
+    write_json_string(w, this->sendspin_id_);
+    w.print(",");
+  }
+#endif
+
   // Whether Home Assistant is actually attached, so the UI can say so rather than leaving someone to
   // work out why their media controls are missing. api_connection_count_ != 0, which is the same
   // condition the LED ring already uses to decide whether the assistant can run at all.

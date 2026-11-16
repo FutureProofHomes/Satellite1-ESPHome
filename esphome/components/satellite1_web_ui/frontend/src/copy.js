@@ -806,6 +806,10 @@ export const TEXT = {
   ma_connect_btn: "Connect",
   ma_disconnect_btn: "Disconnect",
   ma_error: "Could not connect. Check the address and token, and that this browser can reach the server.",
+  // The socket is on, but players/all holds no player for this device, so grouping and search have
+  // nothing to drive. The server is the place to fix that, and the panel's note says so instead of
+  // letting the green dot promise what the connection cannot deliver.
+  ma_no_self: "Connected, but this speaker isn't listed yet",
 
   /* The server scan inside the connection panel (September 2026): browsers cannot browse mDNS, so
      the button sweeps the device's own subnet on Music Assistant's port and verifies each answer
@@ -893,6 +897,12 @@ export const TEXT = {
     "Search rides a direct connection to your Music Assistant server. Set it up once and every browser signed into this device shares it.",
   search_setup_btn: "Set up connection",
   search_connecting: "Connecting to Music Assistant\u2026",
+  // The connected-but-unlisted state: the server answered and this device's player simply isn't
+  // there (Sendspin off, or the speaker not registered yet). "Connecting…" would be a lie that
+  // never resolves, so the drawer names the real condition and where to fix it.
+  search_no_self_t: "This speaker isn't in Music Assistant",
+  search_no_self_b:
+    "The connection works, but Music Assistant doesn't list this speaker. Check that Sendspin is enabled in Music Assistant and that this speaker appears in its players.",
 
   /* The Presence route: zone editing, gate thresholds, and the no-sensor card. The zi_* strings are
      the one instruction line under the plot, swapped by what the person is doing right now - one short
