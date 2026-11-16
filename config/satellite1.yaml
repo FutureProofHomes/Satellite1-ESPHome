@@ -96,6 +96,7 @@ external_components:
       - extram_bss
       - fusb302b
       - i2s_audio
+      - ltr_als_ps
       - memory_flasher
       - micro_decoder_override
       # Vendored from the pinned ESPHome release for one addition (a per-input gain, so music and
@@ -113,6 +114,7 @@ external_components:
       - satellite1_ring
       - satellite1_web_ui
       - ethernet
+      - speaker_source
       - tas2780
       # Vendored from the pinned ESPHome release for one public getter (the continue-conversation
       # flag the remote echo guard gates on). See its FPH_VENDOR.md for the re-sync procedure and

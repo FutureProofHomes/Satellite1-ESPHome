@@ -8,6 +8,7 @@
 #include "esphome/components/i2s_audio/i2s_audio.h"
 #include "esphome/components/microphone/microphone.h"
 #include "esphome/core/component.h"
+#include "../satellite1.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
@@ -21,12 +22,14 @@ class Sat1Microphone : public I2SAudioIn, public microphone::Microphone, public 
  public:
   void setup() override;
   void dump_config() override { this->dump_i2s_settings(); }
-  void start();
-  void stop();
+  void start() override;
+  void stop() override;
 
   void loop() override;
 
   void set_correct_dc_offset(bool correct_dc_offset) { this->correct_dc_offset_ = correct_dc_offset; }
+  void set_satellite(satellite1::Satellite1 *satellite) { this->satellite_ = satellite; }
+  void set_software_mute_channels(uint8_t channels) { this->software_mute_channels_ = channels; }
 
  protected:
   /// @brief Starts the I2S driver. Updates the ``audio_stream_info_`` member variable with the current setttings.
@@ -52,6 +55,8 @@ class Sat1Microphone : public I2SAudioIn, public microphone::Microphone, public 
   EventGroupHandle_t event_group_{nullptr};
   TaskHandle_t task_handle_{nullptr};
   bool correct_dc_offset_;
+  satellite1::Satellite1 *satellite_{nullptr};
+  uint8_t software_mute_channels_{0xFF};
   int32_t dc_offset_{0};
 };
 

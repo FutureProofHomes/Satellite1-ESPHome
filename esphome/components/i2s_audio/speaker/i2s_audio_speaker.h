@@ -6,11 +6,15 @@
 
 #include <freertos/event_groups.h>
 #include <freertos/queue.h>
+#include <freertos/semphr.h>
 #include <freertos/FreeRTOS.h>
+#include <memory>
 
 #include "esphome/components/audio/audio.h"
 #include "esphome/components/speaker/speaker.h"
 #include "esphome/components/ring_buffer/ring_buffer.h"
+
+#include <atomic>
 
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
@@ -64,6 +68,8 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   void set_mute_state(bool mute_state) override;
 
  protected:
+  std::shared_ptr<ring_buffer::RingBuffer> get_audio_ring_buffer_() const;
+
   /// @brief Function for the FreeRTOS task handling audio output.
   /// Task creation authorizes startup: allocates space for the buffers, starts the I2S driver, and reads
   /// audio from the ring buffer and writes audio to the I2S port. Stops immmiately after receiving the COMMAND_STOP
@@ -77,6 +83,8 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   /// @brief Sends a stop command to the speaker task via event_group_.
   /// @param wait_on_empty If false, sends the COMMAND_STOP signal. If true, sends the COMMAND_STOP_GRACEFULLY signal.
   void stop_(bool wait_on_empty);
+  void process_volume_state_();
+  void update_software_volume_();
 
   /// @brief Sets the corresponding ERR_ESP event group bits.
   /// @param err esp_err_t error code.
@@ -118,6 +126,8 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   EventGroupHandle_t event_group_{nullptr};
 
   uint8_t *data_buffer_{nullptr};
+  StaticSemaphore_t audio_ring_buffer_mutex_buffer_{};
+  SemaphoreHandle_t audio_ring_buffer_mutex_{nullptr};
   std::shared_ptr<ring_buffer::RingBuffer> audio_ring_buffer_;
 
   uint32_t buffer_duration_ms_;
@@ -126,7 +136,7 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
 
   bool pause_state_{false};
 
-  int16_t q15_volume_factor_{INT16_MAX};
+  std::atomic<int16_t> q15_volume_factor_{INT16_MAX};
 
   // Deferred volume/mute operations to avoid I2C conflicts with I2S task
   float pending_volume_{-1.0f};

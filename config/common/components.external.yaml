@@ -14,6 +14,7 @@ external_components:
       - extram_bss
       - fusb302b
       - i2s_audio
+      - ltr_als_ps
       - memory_flasher
       # Vendored (see esphome/components/mixer/FPH_VENDOR.md).
       - mixer
@@ -24,6 +25,7 @@ external_components:
       - satellite1_radar
       - satellite1_ring
       - satellite1_web_ui
+      - speaker_source
       - tas2780
       # Vendored (see esphome/components/voice_assistant/FPH_VENDOR.md).
       - voice_assistant

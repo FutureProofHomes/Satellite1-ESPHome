@@ -7,7 +7,6 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
-#include <gain.h>         // esp-audio-libs  // FPH: per-input gain
 #include <mixer.h>        // esp-audio-libs
 #include <pcm_convert.h>  // esp-audio-libs
 
@@ -314,9 +313,9 @@ size_t SourceSpeaker::process_data_from_source(std::shared_ptr<audio::RingBuffer
 
   uint32_t samples_to_duck = this->audio_stream_info_.bytes_to_samples(bytes_read);
   if (samples_to_duck > 0) {
-    esp_audio_libs::ducking::apply(audio_source->mutable_data(),
-                                   static_cast<uint8_t>(this->audio_stream_info_.get_bits_per_sample() / 8),
-                                   samples_to_duck, this->ducking_state_);
+    this->ducking_ramp_.process(audio_source->mutable_data(),
+                                static_cast<uint8_t>(this->audio_stream_info_.get_bits_per_sample() / 8),
+                                samples_to_duck);
   }
 
   // FPH: begin per-input gain
@@ -375,7 +374,7 @@ float SourceSpeaker::get_gain() const {
 
 void SourceSpeaker::apply_ducking(uint8_t decibel_reduction, uint32_t duration) {
   const uint32_t transition_samples = duration > 0 ? this->audio_stream_info_.ms_to_samples(duration) : 0;
-  esp_audio_libs::ducking::set_target(this->ducking_state_, decibel_reduction, transition_samples);
+  this->ducking_ramp_.set_target_db_reduction_over(decibel_reduction, transition_samples);
 }
 
 void SourceSpeaker::enter_stopping_state_() {

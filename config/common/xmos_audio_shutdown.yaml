@@ -1,17 +1,19 @@
 # Stops every audio path so the XMOS can be flashed without rebooting the ESP32.
 # Included by xmos_same_boot_flash.yaml and config/satellite1.dev.yaml (the XMOS firmware picker);
 # include only one of those.
+#
+# The MAINTENANCE audio inhibit set here is cleared by the flasher when it hands the XMOS back
+# (XMOSFlasher::deinit_flasher); any path that gives up before flashing starts clears it itself.
 script:
   - id: prepare_xmos_direct_flash
     mode: single
     then:
-      - lambda: id(xmos_audio_ready) = false;
+      - lambda: |-
+          id(satellite1_id).set_audio_inhibited(satellite1::AudioInhibit::MAINTENANCE, true);
       - lambda: id(xmos_audio_shutdown_complete) = false;
       # Cancel pending starts before stopping the components that own I2S channels.
       - script.stop: start_micro_wake_word
-      - script.stop: activate_audio_output
       - script.stop: refresh_audio_output
-      - script.stop: tas2780_ensure_active
       - script.stop: activate_stop_word_once
       - script.stop: activate_stop_word_if_tts_step_is_long
       - micro_wake_word.stop:
@@ -32,10 +34,7 @@ script:
       - media_player.stop:
           id: external_media_player
           announcement: false
-      # Mute line-out without changing the user's persisted mute preference.
-      - lambda: id(line_out_dac).set_mute_on();
       - tas2780.deactivate:
-      - lambda: id(tas2780_active) = false;
       # Stop the complete buffered speaker graph, not only its I2S sink.
       - speaker.stop: announcement_resampling_speaker
       - speaker.stop: media_resampling_speaker
@@ -54,7 +53,6 @@ script:
                      id(media_mixing_input).is_stopped() &&
                      id(i2s_audio_speaker).is_stopped() &&
                      !id(speaker_dac).is_active() && !id(speaker_dac).is_activation_pending() &&
-                     id(line_out_dac).is_muted() &&
                      id(external_media_player).state != media_player::MEDIA_PLAYER_STATE_PLAYING &&
                      id(external_media_player).state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
           timeout: 5s
@@ -69,11 +67,16 @@ script:
                      id(media_mixing_input).is_stopped() &&
                      id(i2s_audio_speaker).is_stopped() &&
                      !id(speaker_dac).is_active() && !id(speaker_dac).is_activation_pending() &&
-                     id(line_out_dac).is_muted() &&
                      id(external_media_player).state != media_player::MEDIA_PLAYER_STATE_PLAYING &&
                      id(external_media_player).state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
           then:
-            - lambda: id(xmos_audio_shutdown_complete) = true;
-            - logger.log: "Audio shutdown complete; XMOS is ready for direct flashing"
+            - lambda: |-
+                // Only fresh hardware mute acknowledgements authorize direct flashing.
+                id(xmos_audio_shutdown_complete) = id(dac_proxy).force_safety_mute();
+                if (id(xmos_audio_shutdown_complete)) {
+                  ESP_LOGI("xmos_direct_flash", "Audio shutdown complete; XMOS is ready for direct flashing");
+                } else {
+                  ESP_LOGW("xmos_direct_flash", "Fresh DAC safety mute failed; audio remains disabled");
+                }
           else:
             - logger.log: "XMOS direct-flash preparation timed out; audio remains disabled"

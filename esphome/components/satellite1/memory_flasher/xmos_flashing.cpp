@@ -219,6 +219,9 @@ bool XMOSFlasher::init_flasher() {
 bool XMOSFlasher::deinit_flasher() {
   ESP_LOGD(TAG, "Stopping XMOS flasher...");
   this->parent_->set_spi_flash_direct_access_mode(false);
+  // Direct-access teardown handed reset back to XMOS. Preparation may now end;
+  // parent boot settling/startup checks still inhibit audio independently.
+  this->parent_->set_audio_inhibited(AudioInhibit::MAINTENANCE, false);
   if (this->boot_recovery_active_) {
     this->parent_->set_boot_recovery_pending(false);
     this->boot_recovery_active_ = false;

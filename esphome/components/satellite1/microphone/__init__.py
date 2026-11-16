@@ -11,6 +11,7 @@ from esphome.const import (
     CONF_NUMBER,
     CONF_SAMPLE_RATE,
 )
+from ..satellite1 import Satellite1
 from esphome.components.i2s_audio import (
     CONF_I2S_DIN_PIN,
     CONF_LEFT,
@@ -25,7 +26,7 @@ from esphome.components.i2s_audio import (
 ) 
 
 CODEOWNERS = ["@gnumpi"]
-DEPENDENCIES = ["i2s_audio"]
+DEPENDENCIES = ["i2s_audio", "satellite1"]
 
 CONF_ADC_PIN = "adc_pin"
 CONF_ADC_TYPE = "adc_type"
@@ -101,6 +102,10 @@ BASE_SCHEMA = microphone.MICROPHONE_SCHEMA.extend(
     ).extend(
         {
             cv.Optional(CONF_CORRECT_DC_OFFSET, default=False): cv.boolean,
+            cv.GenerateID("satellite1_id"): cv.use_id(Satellite1),
+            cv.Optional("software_mute_channels", default=[0, 1]): cv.All(
+                cv.ensure_list(cv.int_range(min=0, max=1)), cv.Length(min=1, max=2)
+            ),
         }
     )
 ).extend(cv.COMPONENT_SCHEMA)
@@ -145,6 +150,9 @@ async def to_code(config):
     await cg.register_component(var, config)
     await register_i2s_audio_component(var, config)
     await microphone.register_microphone(var, config)
+    satellite = await cg.get_variable(config["satellite1_id"])
+    cg.add(var.set_satellite(satellite))
+    cg.add(var.set_software_mute_channels(sum(1 << channel for channel in set(config["software_mute_channels"]))))
 
     if config[CONF_ADC_TYPE] == "internal":
         variant = esp32.get_esp32_variant()

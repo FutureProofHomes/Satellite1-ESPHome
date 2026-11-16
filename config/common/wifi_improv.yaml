@@ -45,7 +45,7 @@ wifi:
 captive_portal:
 
 improv_serial:
-esp32_improv:
+improv_ble:
   authorizer: btn_action
   on_start:
     - lambda: id(improv_ble_in_progress) = true;
