@@ -66,3 +66,10 @@ auto-flash substitution to `"false"` separately if manual flashing is required.
 The minimum is a build-time check of the selected embedded image, not a
 runtime check of the version already running on XMOS, and does not add a
 Satellite1 policy to the generic `memory_flasher` component or download actions.
+
+The `feature/web_ui_v2` branch is such a configuration. It embeds the speaker
+EQ pre-release `v1.1.0-dev.25`, and a `dev` pre-release ranks below
+`v1.1.0-alpha.0`, so `xflash` in `satellite1.base.yaml` sets
+`skip_version_check: true` and every build prints the compatibility-bypass
+warning. Remove the opt-out once `xmos_fw_version` names an alpha or later
+release.
