@@ -61,6 +61,8 @@ class RingFx : public Component {
 
   // What the ring is showing: a style moment ("wake" ... "err"), "idle", or a fixed signal's name.
   void set_moment(const char *key);
+  // Main loop only: set_moment() is its one writer.
+  const std::string &moment() const { return this->moment_; }
   // True while a web preview owns the ring; control_leds checks it below the voice phases and
   // alerts, and then runs a script that hands a LightCall to apply_preview().
   bool is_previewing() const { return this->previewing_; }

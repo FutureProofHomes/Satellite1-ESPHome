@@ -25,7 +25,8 @@ const inp = (ring, on, bp, mic, spk) => ({ ring, ringOn: !!on, ratio: bp / 10000
 
 export function goldenLines() {
   const lines = [];
-  const variants = m => m === M_TIMER || m === M_VOL ? [[1, 0, 0, 0], [1, 3700, 0, 0], [1, 6200, 1, 0], [1, 10000, 0, 0]]
+  const variants = m => m === M_TIMER || m === M_VOL
+    ? [[1, 0, 0, 0], [1, 3700, 0, 0], [1, 6200, 1, 0], [1, 10000, 0, 0], [1, 0, 0, 1], [1, 3700, 0, 1]]
     : m === M_MUTE ? [[1, 0, 1, 0], [0, 0, 1, 1], [1, 0, 0, 1]]
       : m === M_RING ? [[1, 0, 0, 0], [1, 0, 1, 0]] : [[1, 0, 0, 0]];
   PRESETS.forEach(key => {

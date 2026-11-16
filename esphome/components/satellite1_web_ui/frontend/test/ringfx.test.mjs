@@ -73,7 +73,9 @@ test('the timer arc is the time left, with the travelling dip', () => {
   const dipped = frame(M_TIMER, s, 250, 0, { ratio: 1 });
   assert.deepEqual(dipped[22], ARCTIC.map(v => scale8(v, 229)));
   const vol0 = frame(M_VOL, STYLES.classic[M_VOL], 0, 0, { ratio: 0 });
-  assert.deepEqual(vol0[0], [255, 0, 0]);
+  assert.deepEqual(vol0[0], [0, 0, 0], 'volume 0 alone is not a mute');
+  const muted = frame(M_VOL, STYLES.classic[M_VOL], 0, 0, { ratio: 0.5, spkSilent: true });
+  assert.deepEqual(muted[0], [255, 0, 0]);
 });
 
 test('spin heads and comets run counter-clockwise when reversed', () => {

@@ -247,11 +247,12 @@ static void classic_timer(float ratio, const uint8_t ring[3], bool mic_muted) {
   }
 }
 
-static void classic_volume(float volume, const uint8_t ring[3]) {
+static void classic_volume(float volume, const uint8_t ring[3], bool muted) {
   Inputs v;
   memcpy(v.ring, ring, 3);
   v.ring_on = true;
   v.ratio = volume;
+  v.spk_silent = muted;
   Frame want, got;
   float volume_ratio = 24.0f * volume;
   for (int i = 0; i < 24; i++) {
@@ -262,13 +263,13 @@ static void classic_volume(float volume, const uint8_t ring[3]) {
       memset(want[i], 0, 3);
     }
   }
-  if (volume == 0.0f) {
+  if (muted) {
     want[0][0] = 255;
     want[0][1] = want[0][2] = 0;
   }
   for (uint32_t t : {0u, 1234u, 99999u}) {
     render_moment(M_VOL, PRESETS[P_CLASSIC][M_VOL], t, 0, v, got);
-    check("classic volume " + std::to_string(volume), got, want, 0);
+    check("classic volume " + std::to_string(volume) + (muted ? " muted" : ""), got, want, 0);
   }
 }
 
@@ -315,7 +316,8 @@ static void run_classic() {
     for (float r : {0.0f, 0.3125f, 0.40625f, 0.625f, 1.0f}) {
       classic_timer(r, ring, false);
       classic_timer(r, ring, true);
-      classic_volume(r, ring);
+      classic_volume(r, ring, false);
+      classic_volume(r, ring, true);
     }
     for (int bits = 0; bits < 8; bits++)
       classic_mute(ring, bits & 1, bits & 2, bits & 4);
