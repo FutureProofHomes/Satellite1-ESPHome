@@ -1,4 +1,5 @@
 substitutions:
+  physical_volume_step: "0.05"
   jack_connected_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/jack_connected.flac
   jack_disconnected_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/jack_disconnected.flac
   mute_switch_on_sound_file: https://fph-firmware-assets.s3.us-east-1.amazonaws.com/sounds/mute_switch_on.flac
@@ -107,8 +108,9 @@ media_player:
   - platform: speaker_source
     id: external_media_player
     name: Media Player
-    volume_increment: 0.05
-    volume_min: 0.1
+    volume_increment: ${physical_volume_step}
+    volume_state: audio_volume_state
+    volume_min: 0.0
     volume_max: 1.0
     announcement_pipeline:
       speaker: announcement_resampling_speaker
@@ -126,8 +128,9 @@ media_player:
       sources:
         - http_media_source
 
-    # Volume and mute travel down the speaker chain to DACProxy, which ignores both: the reconciler
-    # alone turns them into the music gain and the DAC level, so every change has to reach it.
+    # Volume and mute travel down the speaker chain to DACProxy, which records them for route
+    # changes but drives the DAC from the reconciler's level: the reconciler alone turns them into
+    # the music gain and the DAC level, so every change has to reach it.
     on_mute:
       - script.execute: control_leds
       - script.execute: audio_gain_reconcile
@@ -170,7 +173,7 @@ script:
               .perform();
           }
 
-  # Script to increased/decreased volume
+  # Mute at the bottom step without losing the output's last audible volume.
   - id: control_volume
     mode: restart
     parameters:
@@ -181,11 +184,30 @@ script:
           condition:
             lambda: return increase_volume;
           then:
-            - media_player.volume_up:
-                id: external_media_player
+            - if:
+                condition:
+                  media_player.is_muted: external_media_player
+                then:
+                  - media_player.unmute:
+                      id: external_media_player
+                else:
+                  - media_player.volume_up:
+                      id: external_media_player
           else:
-            - media_player.volume_down:
-                id: external_media_player
+            - if:
+                condition:
+                  lambda: |-
+                    return id(external_media_player).volume -
+                           ${physical_volume_step} > 0.000001f;
+                then:
+                  - media_player.volume_down:
+                      id: external_media_player
+                  - media_player.unmute:
+                      id: external_media_player
+                else:
+                  - media_player.mute:
+                      id: external_media_player
+                  - lambda: id(volume_buttons_touched) = false;
       - script.execute: control_leds
       - delay: 2s
       - lambda: id(volume_buttons_touched) = false;

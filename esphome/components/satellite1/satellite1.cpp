@@ -9,6 +9,52 @@ namespace satellite1 {
 
 static const char *TAG = "Satellite1";
 
+AudioAvailability Satellite1::calculate_audio_availability_() const {
+  if (this->boot_recovery_pending_)
+    return AudioAvailability::BOOT_RECOVERY;
+  if (this->spi_flash_direct_access_enabled_ || this->state == SAT_FLASH_CONNECTED_STATE)
+    return AudioAvailability::DIRECT_FLASH;
+  if (this->audio_inhibits_ & static_cast<uint8_t>(AudioInhibit::MAINTENANCE))
+    return AudioAvailability::MAINTENANCE;
+  if (this->audio_inhibits_ & static_cast<uint8_t>(AudioInhibit::FLASHING))
+    return AudioAvailability::FLASHING;
+  if (this->xmos_boot_settle_pending_)
+    return AudioAvailability::BOOT_SETTLING;
+  if (this->state != SAT_XMOS_CONNECTED_STATE)
+    return AudioAvailability::NOT_CONNECTED;
+  if (this->audio_inhibits_ & static_cast<uint8_t>(AudioInhibit::STARTUP_CHECK))
+    return AudioAvailability::STARTUP_CHECK;
+  return AudioAvailability::AVAILABLE;
+}
+
+void Satellite1::notify_audio_availability_() {
+  const auto current = this->calculate_audio_availability_();
+  if (this->published_audio_availability_.exchange(current, std::memory_order_acq_rel) != current) {
+    this->audio_availability_callback_.call();
+  }
+}
+
+void Satellite1::set_audio_startup_check(bool enabled) {
+  this->audio_startup_check_ = enabled;
+  this->set_audio_inhibited(AudioInhibit::STARTUP_CHECK, enabled);
+}
+
+void Satellite1::set_audio_inhibited(AudioInhibit reason, bool inhibited) {
+  const auto mask = static_cast<uint8_t>(reason);
+  if (inhibited)
+    this->audio_inhibits_ |= mask;
+  else
+    this->audio_inhibits_ &= ~mask;
+  this->notify_audio_availability_();
+}
+
+void Satellite1::set_boot_recovery_pending(bool pending) {
+  this->boot_recovery_pending_ = pending;
+  if (pending)
+    this->microphone_mute_.invalidate_hardware();
+  this->notify_audio_availability_();
+}
+
 static const char *dc_status_to_string(uint8_t status) {
   switch (status) {
     case 0:
@@ -91,6 +137,7 @@ void Satellite1::dump_config() {
 }
 
 void Satellite1::loop() {
+  this->microphone_mute_.expire_hardware(millis());
   // A persisted XMOS recovery owns the shared SPI bus until the flasher releases it.
   if (this->boot_recovery_pending_) {
     return;
@@ -111,10 +158,15 @@ void Satellite1::loop() {
           this->state_callback_.call();
         } else if (this->check_for_xmos_(this->xmos_booting_)) {
           this->state = SAT_XMOS_CONNECTED_STATE;
+          // Latch before notifying any consumer: connection is not permission
+          // to start audio until the product's update decision has completed.
+          if (this->audio_startup_check_)
+            this->audio_inhibits_ |= static_cast<uint8_t>(AudioInhibit::STARTUP_CHECK);
           this->connection_attempts = 0;
           this->xmos_booting_ = false;
           ESP_LOGI(TAG, "XMOS Firmware Version: %s", this->status_string().c_str());
           this->connected_hooks_.call();
+          this->notify_audio_availability_();
           this->state_callback_.call();
         }
         this->last_attempt_timestamp_ = now;
@@ -198,6 +250,7 @@ bool Satellite1::is_xmos_boot_settling_(uint32_t now) {
   }
   // Retire the deadline so long uptime cannot make the signed comparison block SPI again.
   this->xmos_boot_settle_pending_ = false;
+  this->notify_audio_availability_();
   return false;
 }
 
@@ -245,9 +298,16 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
   }
 
   // Got status register report
-  if (send_recv_buf[0] == DC_RESOURCE::CNTRL_ID && send_recv_buf[1] != DC_RET_STATUS::PAYLOAD_AVAILABLE) {
+  if (send_recv_buf[0] == DC_RESOURCE::CNTRL_ID && send_recv_buf[1] == DC_RET_STATUS::CMD_SUCCESS) {
     memcpy(this->dc_status_register_, &send_recv_buf[2], DC_STATUS_REGISTER::REGISTER_LEN);
     this->status_register_valid_ = true;
+    if (this->dc_status_register_[DC_STATUS_REGISTER::DEVICE_STATUS] == DEVICE_STATUS_READY_VALUE &&
+        !this->boot_recovery_pending_) {
+      this->microphone_mute_.observe_hardware(
+          (this->dc_status_register_[DC_STATUS_REGISTER::GPIO_PORT_IN_A] & (1u << 3)) != 0, millis());
+    } else {
+      this->microphone_mute_.invalidate_hardware();
+    }
     if (status_report_received != nullptr) {
       *status_report_received = true;
     }
@@ -297,19 +357,32 @@ bool Satellite1::transfer(uint8_t resource_id, uint8_t command, uint8_t *payload
 }
 
 void Satellite1::set_spi_flash_direct_access_mode(bool enable) {
-  this->xmos_rst_pin_->digital_write(enable);
+  // Invalidate availability before asserting reset/handing the bus to flash.
+  this->status_register_valid_ = false;
+  this->microphone_mute_.invalidate_hardware();
+  this->spi_flash_direct_access_enabled_ = enable;
   if (enable) {
     this->state = SAT_FLASH_CONNECTED_STATE;
-  } else {
-    // Releasing direct-SPI mode restarts XMOS, which cannot answer control requests immediately.
-    this->state = SAT_DETACHED_STATE;
-    this->connection_attempts = 0;
-    this->xmos_booting_ = true;
-    this->xmos_boot_ready_timestamp_ = millis() + XMOS_BOOT_SETTLE_TIME_MS;
-    this->xmos_boot_settle_pending_ = true;
+    this->notify_audio_availability_();
   }
-  this->spi_flash_direct_access_enabled_ = enable;
+  this->xmos_rst_pin_->digital_write(enable);
+  if (!enable) {
+    // Releasing direct-SPI mode restarts XMOS, which cannot answer control requests immediately.
+    this->start_xmos_boot_();
+  }
   this->state_callback_.call();
+}
+
+void Satellite1::start_xmos_boot_() {
+  this->state = SAT_DETACHED_STATE;
+  this->status_register_valid_ = false;
+  this->microphone_mute_.invalidate_hardware();
+  this->status_refresh_attempted_ = false;
+  this->connection_attempts = 0;
+  this->xmos_booting_ = true;
+  this->xmos_boot_ready_timestamp_ = millis() + XMOS_BOOT_SETTLE_TIME_MS;
+  this->xmos_boot_settle_pending_ = true;
+  this->notify_audio_availability_();
 }
 
 bool Satellite1::dfu_get_fw_version_() {
@@ -475,9 +548,12 @@ bool Satellite1::check_for_xmos_(bool quiet) {
 }
 
 void Satellite1::xmos_hardware_reset() {
+  this->start_xmos_boot_();
   this->xmos_rst_pin_->digital_write(1);
   delay(100);
   this->xmos_rst_pin_->digital_write(0);
+  // The settle interval starts at reset release, not assertion.
+  this->xmos_boot_ready_timestamp_ = millis() + XMOS_BOOT_SETTLE_TIME_MS;
   delay(100);
 }
 

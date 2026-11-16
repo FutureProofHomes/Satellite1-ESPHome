@@ -34,6 +34,7 @@ SAT1_CONFIG_SCHEMA = (
      cv.Schema({
         cv.GenerateID(): cv.declare_id(Satellite1),
         cv.Optional(CONF_XMOS_RST_PIN, default="GPIO12"): pins.gpio_output_pin_schema,
+        cv.Optional("audio_startup_check", default=False): cv.boolean,
 
         cv.Optional(CONF_ON_XMOS_CONNECTED): automation.validate_automation({
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(XMOSConnectedStateTrigger),
@@ -53,6 +54,7 @@ async def register_satellite1(config) :
     
     rst_pin = await cg.gpio_pin_expression(config[CONF_XMOS_RST_PIN])
     cg.add(var.set_xmos_rst_pin(rst_pin))
+    cg.add(var.set_audio_startup_check(config["audio_startup_check"]))
     
     for conf in config.get(CONF_ON_XMOS_CONNECTED, []):
          trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var )

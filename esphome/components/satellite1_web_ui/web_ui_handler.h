@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <string>
 #include <vector>
@@ -518,6 +519,19 @@ class WebUIHandler : public AsyncWebHandler {
   /// The hub's interpolated track position, refreshed by the component once per loop iteration so
   /// the endpoint never calls into the hub from the httpd task.
   void media_set_pos(uint32_t ms) { this->media_pos_ms_.store(ms, std::memory_order_relaxed); }
+
+  /// The Sendspin client id, once the hub has one (sendspin-cpp derives it from the persisted
+  /// keypair, so it exists after start() and never changes). /api/sat1/state carries it so the app
+  /// can find this device's Music Assistant player: since MA 2.10 / ESPHome 2026.10 the player id
+  /// is this id, not the MAC. Main loop writes once; the release store publishes the buffer to the
+  /// httpd task.
+  void set_sendspin_id(const char *id) {
+    if (id == nullptr || id[0] == '\0' || this->sendspin_id_set_.load(std::memory_order_relaxed))
+      return;
+    strlcpy(this->sendspin_id_, id, sizeof(this->sendspin_id_));
+    this->sendspin_id_set_.store(true, std::memory_order_release);
+  }
+  bool sendspin_id_set() const { return this->sendspin_id_set_.load(std::memory_order_relaxed); }
 #endif
 #endif
 
@@ -1164,6 +1178,12 @@ class WebUIHandler : public AsyncWebHandler {
   std::atomic<uint8_t> media_shuffle_{0};
   std::atomic<uint8_t> media_repeat_{0};
   std::atomic<uint8_t> media_ctrl_ok_{0};
+
+  /// The Sendspin client id for /api/sat1/state (set_sendspin_id). 48 bytes holds the 43-char
+  /// base64url id. Written once on the main loop, read by the httpd task after the acquire load
+  /// of the flag.
+  char sendspin_id_[48]{};
+  std::atomic<bool> sendspin_id_set_{false};
 #endif
 #endif
 };

@@ -13,7 +13,8 @@ script:
                      (id(xflash).error_code == memory_flasher::MD5_INVALID ||
                       id(xflash).error_code == memory_flasher::BAD_URL);
           then:
-            - lambda: id(xmos_audio_ready) = true;
+            - lambda: |-
+                id(satellite1_id).set_audio_inhibited(satellite1::AudioInhibit::MAINTENANCE, false);
             - script.execute: refresh_audio_output
             - script.execute: start_micro_wake_word
             - logger.log: "Restored audio after XMOS remote flash metadata failure"

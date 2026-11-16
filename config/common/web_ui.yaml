@@ -254,19 +254,24 @@ satellite1_web_ui:
 
   # Whether a voice approval could be heard right now, read when a pairing window opens. Only the
   # hardware mute slider counts: it is the one mute software cannot clear, so it alone forces a
-  # button-only window (and the login page says so, from the poll's hw flag). A software mute is no
-  # obstacle - the window-open handler below lifts it before announcing, on the reasoning that a
-  # person asking for voice sign-in has answered the question of whether the device may speak.
-  login_mic_available: !lambda "return !id(btn_left).state;"
+  # button-only window (and the login page says so, from the poll's hw flag). A slider whose
+  # position is not currently known counts as engaged. A software mute is no obstacle - the
+  # window-open handler below lifts it before announcing, on the reasoning that a person asking for
+  # voice sign-in has answered the question of whether the device may speak.
+  login_mic_available: !lambda return id(satellite1_id).microphone_mute().local_capture_allowed(millis());
 
   # The software mute the tune-time held mute drives (POST /api/sat1/mutehold): while a Wake Word
   # Tuner runs against ANOTHER Satellite1 in this device's area, that tuner's browser holds this
   # device muted - the customer is saying the wake word over and over, and the neighbours must not
-  # answer - and the switch is put back the way the hold found it when the session ends, or when
+  # answer - and the mute is put back the way the hold found it when the session ends, or when
   # the hold's 60s TTL lapses because the browser vanished. A hand on this device outranks the
-  # hold: unmuting here (or from Home Assistant) mid-session cancels it for good. The hardware
-  # mute slider is unaffected either way - this switch's own turn_on already defers to it.
+  # hold: unmuting here (or from Home Assistant) mid-session cancels it for good.
   mute_switch: master_mute_switch
+  # The switch's state also follows the hardware slider, so the hold works on the software choice
+  # alone - otherwise moving the slider mid-session would read as that manual unmute. The hold's
+  # mute is not saved, and putting it back is not refused while the slider is engaged.
+  mute_intent: !lambda return id(satellite1_id).microphone_mute().software_muted();
+  set_mute_intent: !lambda id(master_mute_switch).set_transient(muted);
 
   # The pairing window opening: LED on, then the mode's announcement. The scripts live in
   # common/web_ui_login.yaml. `mode` is button/code/seq; `secret` is the spoken code's digits, or
@@ -289,17 +294,18 @@ satellite1_web_ui:
     # A software mute would swallow the announcement and the reply alike. Lift it for voice
     # windows - and remember that we did, because the close handler below puts it back. The mute
     # was somebody's deliberate choice, and the request that opens a window is unauthenticated by
-    # design, so the lift must never outlive the window it served. The guard inside turn_on/
-    # turn_off means this cannot fight the hardware slider (and a hardware-muted device never
-    # reaches here with a voice mode anyway).
+    # design, so the lift must never outlive the window it served: it is not saved, so even a
+    # reboot mid-window comes back muted. A hardware-muted device never reaches here with a voice
+    # mode, and the slider keeps the microphones muted by itself if it is engaged mid-window.
     - if:
         condition:
           and:
             - lambda: return mode != "button";
-            - switch.is_on: master_mute_switch
+            - lambda: return id(satellite1_id).microphone_mute().software_muted();
         then:
-          - lambda: 'id(login_lifted_mute) = true;'
-          - switch.turn_off: master_mute_switch
+          - lambda: |-
+              id(login_lifted_mute) = true;
+              id(master_mute_switch).set_transient(false);
     - if:
         condition:
           lambda: return mode == "code";
@@ -337,8 +343,9 @@ satellite1_web_ui:
         condition:
           lambda: 'return id(login_lifted_mute);'
         then:
-          - lambda: 'id(login_lifted_mute) = false;'
-          - switch.turn_on: master_mute_switch
+          - lambda: |-
+              id(login_lifted_mute) = false;
+              id(master_mute_switch).set_transient(true);
     # Approval and cancel both silence the sign-in's own audio, immediately and everywhere (owner
     # requests, September 23 2026: the prompt kept reciting the code after the button press, and
     # the start_conversation turn then opened its listen phase - which reads as the press having

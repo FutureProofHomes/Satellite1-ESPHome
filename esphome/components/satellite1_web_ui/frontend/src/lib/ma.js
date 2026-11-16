@@ -18,10 +18,12 @@
  * additive - the footer works without it, and a socket that drops falls back to the Home
  * Assistant relay it was drawn over.
  *
- * Identity is the MAC again: the MA player_id of a Sendspin player is its client id, which the
- * ESPHome hub sets to this device's MAC - the same fact the Jinja discovery in web_ui_ha.yaml
- * leans on, compared the same way (case folded, separators stripped) because every layer formats a
- * MAC differently.
+ * Identity is the Sendspin client id and the MAC, resolved by findMe below. The client id was the
+ * MAC until ESPHome 2026.10, whose sendspin-cpp derives it from the device's keypair instead -
+ * /api/sat1/state publishes it as `sendspin_id` - and current MA wraps the protocol player in a
+ * user-facing parent, so the match walks the protocol links. MACs are compared case folded with
+ * separators stripped (normMac) because every layer formats a MAC differently; the Jinja discovery
+ * in web_ui_ha.yaml does the same.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 
@@ -236,12 +238,46 @@ export function maHttpBase(raw) {
 
 const normMac = (s) => String(s || "").toLowerCase().replace(/[:-]/g, "");
 
-/** Whether a player is this device. The player_id of a Sendspin player was the client id - this
- *  device's MAC - until MA 2.11 wrapped every player in its universal_player provider and made the
- *  ids opaque (`up` + hash); since then the MAC lives in device_info.mac_address. Checked both
- *  ways, so either server generation matches. */
-const isMe = (p, mac) =>
-  normMac(p?.player_id) === normMac(mac) || normMac(p?.device_info?.mac_address) === normMac(mac);
+/**
+ * This device's player among `players` (players/all, keyed by id), or null.
+ *
+ * What identifies "this device" moved twice. On ESPHome up to 2026.9 the Sendspin client id was
+ * the MAC, and the MA player_id was that client id. ESPHome 2026.10 (sendspin-cpp's encrypted
+ * protocol) derives the client id from the device's persisted keypair - 43 chars of base64url -
+ * and /api/sat1/state carries it as `sendspin_id`. Current MA wraps that protocol player in a
+ * user-facing parent (universal_player) that lists it in output_protocols/protocols, and the
+ * parent owns the queue search plays to. The MAC still travels in the Sendspin hello, but MA only
+ * puts it in device_info.identifiers when the player_id itself is a MAC.
+ *
+ * So, in order: the non-protocol parent linked to this device's client id or MAC; any player whose
+ * player_id or legacy_ids carry either (old server, or the parentless protocol player, whose queue
+ * commands MA redirects); a player whose device_info carries the MAC, preferring non-protocol so a
+ * Home Assistant-provided twin of this device cannot shadow the Sendspin parent. Client ids
+ * compare exactly (base64url is case-sensitive); MACs through normMac.
+ */
+export function findMe(players, { mac, clientId } = {}) {
+  if (!players) return null;
+  const list = Object.values(players);
+  const m = normMac(mac);
+  const cid = String(clientId || "");
+  const idMatch = (v) => !!v && ((!!cid && v === cid) || (!!m && normMac(v) === m));
+  const linked = (p) =>
+    (p?.output_protocols || []).some((o) => idMatch(o?.output_protocol_id)) ||
+    (p?.protocols || []).some((o) => idMatch(o?.protocol_id));
+  const direct = (p) => idMatch(p?.player_id) || (p?.legacy_ids || []).some(idMatch);
+  const byMac = (p) => {
+    const di = p?.device_info;
+    return !!m && (normMac(di?.identifiers?.mac_address) === m || normMac(di?.mac_address) === m);
+  };
+  const parent = (p) => p?.type !== "protocol";
+  return (
+    list.find((p) => parent(p) && linked(p)) ||
+    list.find(direct) ||
+    list.find((p) => parent(p) && byMac(p)) ||
+    list.find(byMac) ||
+    null
+  );
+}
 
 /**
  * One command result, gathered: listings that run long (a playlist's tracks, a podcast's episodes)
@@ -269,14 +305,17 @@ export function gatherResult(parts, msg) {
  * and its arrival is the best estimate of the two clocks' difference. `status` walks off -> connecting -> on, with "error"
  * for a socket that could not be opened or a token the server refused - the settings panel's whole
  * vocabulary. `players` is every player the server knows, keyed by id and updated live from
- * player_updated events; `me` is this device's, found by MAC; `queue` is its active queue, with
- * elapsed_time re-anchored by every queue_time_updated tick. `cmd` sends one command and resolves
- * with its result - callers mostly ignore the promise, because the event that follows is the truth.
+ * player_updated events; `me` is this device's (findMe above, by `ids` - the MAC and the Sendspin
+ * client id); `queue` is its active queue, with elapsed_time re-anchored by every
+ * queue_time_updated tick. `cmd` sends one command and resolves with its result - callers mostly
+ * ignore the promise, because the event that follows is the truth.
  *
  * Reconnects with a capped backoff while configured. A token the server *refused* does not retry:
  * that answer will not change, and hammering a server with a bad token is how tokens get revoked.
  */
-export function useMaSocket(mac, cfg) {
+export function useMaSocket(ids, cfg) {
+  const mac = ids?.mac;
+  const clientId = ids?.clientId;
   const [status, setStatus] = useState("off");
   const [players, setPlayers] = useState(null);
   const [queue, setQueue] = useState(null);
@@ -303,6 +342,9 @@ export function useMaSocket(mac, cfg) {
     let nextId = 1;
     const pending = new Map();
     const parts = new Map();
+    // The player list again, outside React state: myId has to be recomputed inside event handlers,
+    // where this render's `players` is stale. Same objects, keyed by id.
+    const known = {};
     let myId = "";
     let minGap = Infinity;
     const stamp = (p) => {
@@ -335,21 +377,38 @@ export function useMaSocket(mac, cfg) {
         .catch(() => {});
     };
 
+    // Re-resolve which player is this device, and move the queue with it. Not just at auth: a
+    // speaker that registers after the socket opened (a Sendspin reconnect, or MA swapping the
+    // protocol player for its parent) arrives as player_added/updated, and before this re-resolve
+    // the app would sit "connecting" until a full reconnect. Returns whether myId moved.
+    const syncMyId = () => {
+      const next = findMe(known, { mac, clientId })?.player_id || "";
+      if (next === myId) return false;
+      myId = next;
+      setQueue(null);
+      refreshQueue();
+      return true;
+    };
+
     const onEvent = (msg) => {
       if ((msg.event === "player_updated" || msg.event === "player_added") && msg.data?.player_id) {
         const p = msg.data;
         stamp(p);
+        known[p.player_id] = p;
         setPlayers((prev) => ({ ...prev, [p.player_id]: p }));
         // Our own player changing source or group is what moves the active queue; asking again is
         // one message to a server on the same LAN, and cheaper than modelling MA's redirects here.
-        if (p.player_id === myId) refreshQueue();
+        // Skipped when syncMyId already asked for this same change.
+        if (!syncMyId() && p.player_id === myId) refreshQueue();
       } else if (msg.event === "player_removed" && msg.object_id) {
+        delete known[msg.object_id];
         setPlayers((prev) => {
           if (!prev?.[msg.object_id]) return prev;
           const next = { ...prev };
           delete next[msg.object_id];
           return next;
         });
+        syncMyId();
       } else if (msg.event === "queue_updated" || msg.event === "queue_items_updated") {
         // elapsed_time_last_updated re-anchored to this browser's clock, here and below: the
         // server stamps its own epoch, and extrapolating across two clocks makes the scrubber
@@ -393,16 +452,18 @@ export function useMaSocket(mac, cfg) {
             if (!live) return;
             const all = await send("players/all");
             if (!live) return;
+            for (const id of Object.keys(known)) delete known[id];
             const map = {};
             for (const p of all || []) {
               map[p.player_id] = p;
+              known[p.player_id] = p;
               stamp(p);
             }
-            myId = Object.keys(map).find((id) => isMe(map[id], mac)) || "";
             setPlayers(map);
             setStatus("on");
             tries = 0;
-            refreshQueue();
+            // A reconnect can keep myId and still have missed queue changes; ask either way.
+            if (!syncMyId()) refreshQueue();
           } catch {
             // The one non-retrying failure: the server answered and said no. See the hook comment.
             denied = true;
@@ -453,14 +514,14 @@ export function useMaSocket(mac, cfg) {
       io.current = null;
       if (ws) ws.close();
     };
-  }, [url, token, mac]);
+  }, [url, token, mac, clientId]);
 
   return {
     status,
     players,
     queue,
     skew,
-    me: players ? Object.values(players).find((p) => isMe(p, mac)) || null : null,
+    me: findMe(players, { mac, clientId }),
     cmd: (command, args) => (io.current ? io.current.send(command, args) : Promise.reject(new Error("off"))),
   };
 }

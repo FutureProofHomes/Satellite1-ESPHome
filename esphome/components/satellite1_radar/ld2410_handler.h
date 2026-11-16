@@ -77,6 +77,8 @@ class LD2410Handler : public PsramAllocated {
   /// never DMA - which is what makes PSRAM placement safe.
   uint8_t buf_[MAX_BUF]{};
   size_t buf_pos_{0};
+  uint32_t last_rx_ms_{0};
+  static constexpr uint32_t RX_FRAME_IDLE_TIMEOUT_MS = 100;
   uart::UARTDevice &uart_;
 
   static constexpr size_t MAX_CMD_FRAME = 64;
@@ -133,8 +135,10 @@ class LD2410Handler : public PsramAllocated {
   void queue_config_command_(uint16_t command, const uint8_t *data, size_t data_len);
   void enqueue_frame_(const QueuedCmd &cmd);
   bool dequeue_frame_(QueuedCmd &cmd);
-  void parse_data_frame_(const uint8_t *buf, size_t len);
-  void handle_ack_frame_(const uint8_t *buf, size_t len);
+  void process_rx_buffer_(bool expired);
+  // True consumes the entire candidate (including failed ACKs); false permits resynchronization.
+  bool parse_data_frame_(const uint8_t *buf, size_t len);
+  bool handle_ack_frame_(const uint8_t *buf, size_t len);
   void debounce_target_state_(const std::string &raw, int threshold);
 
   static void publish_sensor_(sensor::Sensor *s, float val);

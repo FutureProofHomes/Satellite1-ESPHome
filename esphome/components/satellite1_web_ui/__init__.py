@@ -98,6 +98,8 @@ CONF_ICON_180_ID = "icon_180_id"
 CONF_ENTITIES = "entities"
 CONF_LOGIN_MIC_AVAILABLE = "login_mic_available"
 CONF_MUTE_SWITCH = "mute_switch"
+CONF_MUTE_INTENT = "mute_intent"
+CONF_SET_MUTE_INTENT = "set_mute_intent"
 CONF_ON_LOGIN_WINDOW = "on_login_window"
 CONF_ON_LOGIN_WINDOW_END = "on_login_window_end"
 CONF_ON_PASSWORD_CHANGE = "on_password_change"
@@ -245,6 +247,12 @@ def _request_sendspin_roles(config):
     return config
 
 
+def _require_mute_switch_for_intent(config):
+    if CONF_MUTE_INTENT in config and CONF_MUTE_SWITCH not in config:
+        raise cv.Invalid(f"{CONF_MUTE_INTENT} needs {CONF_MUTE_SWITCH}, the switch the held mute exists for")
+    return config
+
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
@@ -268,6 +276,11 @@ CONFIG_SCHEMA = cv.All(
             # is restored on release or TTL expiry. Optional - without it the route answers 404
             # and the feature does not exist on this build.
             cv.Optional(CONF_MUTE_SWITCH): cv.use_id(switch.Switch),
+            # For a mute switch whose state also follows a hardware mute: the person's software
+            # choice alone, and a lambda (given `muted`) that sets it for the hold's duration.
+            # Without them the hold reads and drives the switch itself.
+            cv.Optional(CONF_MUTE_INTENT): cv.returning_lambda,
+            cv.Optional(CONF_SET_MUTE_INTENT): cv.lambda_,
             # The pairing window's lifecycle, for the announcement, the LED breathe and the model
             # arming. Open fires with (mode, secret); end fires with (result). Both optional so a
             # build without the YAML wiring still compiles - windows then open and close silently,
@@ -400,6 +413,8 @@ CONFIG_SCHEMA = cv.All(
         }
     ).extend(cv.COMPONENT_SCHEMA),
     cv.only_with_framework(Framework.ESP_IDF),
+    cv.has_none_or_all_keys(CONF_MUTE_INTENT, CONF_SET_MUTE_INTENT),
+    _require_mute_switch_for_intent,
     _request_sendspin_roles,
 )
 
@@ -501,6 +516,12 @@ async def to_code(config):
 
     if CONF_MUTE_SWITCH in config:
         cg.add(var.set_mute_switch(await cg.get_variable(config[CONF_MUTE_SWITCH])))
+    if CONF_MUTE_INTENT in config:
+        get_intent = await cg.process_lambda(config[CONF_MUTE_INTENT], [], return_type=cg.bool_)
+        set_intent = await cg.process_lambda(
+            config[CONF_SET_MUTE_INTENT], [(cg.bool_, "muted")], return_type=cg.void
+        )
+        cg.add(var.set_mute_intent(get_intent, set_intent))
 
     if CONF_ON_LOGIN_WINDOW in config:
         await automation.build_automation(

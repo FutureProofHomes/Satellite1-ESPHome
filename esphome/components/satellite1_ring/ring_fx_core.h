@@ -66,7 +66,7 @@ struct Inputs {
   bool ring_on{false};
   float ratio{0.0f};  // timer time left over total, or volume, 0-1
   bool mic_muted{false};
-  bool spk_silent{false};
+  bool spk_silent{false};  // the media player muted
 };
 
 typedef uint8_t Frame[N][3];
@@ -517,7 +517,7 @@ inline void set_rgb(uint8_t out[3], uint8_t r, uint8_t g, uint8_t b) {
 }
 
 // One moment's frame: the style's animation, its brightness, the mic cap, then the fixed marks
-// that always mean the same thing (red for a muted mic, a silent speaker, volume zero).
+// that always mean the same thing (red for a muted mic or a muted speaker).
 inline void render_moment(uint8_t m, const Style &s, uint32_t t, int head0, const Inputs &in, Frame out,
                           int *head = nullptr) {
   memset(out, 0, sizeof(Frame));
@@ -554,7 +554,7 @@ inline void render_moment(uint8_t m, const Style &s, uint32_t t, int head0, cons
         set_rgb(out[wrap_index(st + 4)], 0, 0, 0);
       }
     }
-  } else if (m == M_VOL && in.ratio <= 0.0f) {
+  } else if (m == M_VOL && in.spk_silent) {
     set_rgb(out[0], 255, 0, 0);
   }
 }

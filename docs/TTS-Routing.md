@@ -128,11 +128,17 @@ down.
 music        = 0 if the media player is muted or below 0.001, else its volume
 announcement = Announcement Volume if above 0, else music     # 0 is "auto"
 ref          = max(music, announcement)
-dac_level    = 0.1 + ref * 0.9                                # the media player's own volume remap
+dac_level    = ref                                            # DACProxy::set_level()
 gain(level)  = 0 if level is 0, else 10^(-db_per_unit * (ref - level) / 20)
-db_per_unit  = dac.volume_span_db() * 0.9                     # 31.5 dB on the TAS2780, 47.25 dB on the PCM5122
+db_per_unit  = dac.volume_span_db()                           # the active output's volume limits: 52.5 dB by default
 music gain   = gain(music), a further -20 dB while the assistant runs, an announcement plays or a timer rings
 ```
+
+The media player's volume maps straight onto the DAC (`volume_min: 0.0`, `volume_max: 1.0` in
+`media_player.yaml`), and each output's level is linear in dB between its own volume limits, so a
+difference in level is exactly `db_per_unit` dB per unit on whichever output is active. Those
+limits are settable per output (`dac_proxy.set_volume_limits`), so the reconciler re-runs when
+they change and when the committed output set does (`on_state_change` on the DAC proxy).
 
 What that gives:
 
@@ -745,23 +751,35 @@ This device's own **Wake sound** is not one of the three; it governs this device
 registry's manufacturer and model by splitting the ESPHome project name on the first `.`, and this
 project is `FutureProofHomes.Satellite1`.
 
-**`DACProxy` has one owner, the reconciler.** Two independent writers used to reach the component
-on every media volume change, in an order neither controls: the speaker chain defers its I2C work
-to `I2SAudioSpeaker::loop()`, while the media player's `on_volume` automation runs before that loop
-iteration, so whichever wrote last won. The chain's `set_volume()`, `set_mute_on()` and
-`set_mute_off()` are now no-ops that report success, and the reconciler drives the DAC through
-`set_level()` alone. Mute is no longer a hardware state at all: music and announcements share one
-output, so a hardware mute on line out (where the PCM5122's mute register does hold) silenced
-announcements along with the music. Mute and volume 0 become a music gain of 0 instead, which is
-why `on_mute` and `on_unmute` run the reconciler.
+**The reconciler sets the DAC level; `DACProxy` owns everything else.** Two independent writers
+used to reach the DAC on every media volume change, in an order neither controls: the speaker chain
+defers its I2C work to `I2SAudioSpeaker::loop()`, while the media player's `on_volume` automation
+runs before that loop iteration, so whichever wrote last won. The proxy keeps its output phases,
+routing, per-output volume limits and safety mute, and the speaker chain still delivers the media
+player's volume and mute to it, because a route change waits for both before the output is READY.
+But what the active DAC is driven to is the reconciler's level, through `set_level()`; the chain's
+values only stand in until the reconciler's first call. A dual route's other output keeps its own
+stored volume and moves by the reconciler's offset from the media volume, so an announcement lift
+reaches both. Mute is no longer a hardware state at all: music and announcements share one output,
+so a hardware mute on line out (where the PCM5122's mute register does hold) silenced announcements
+along with the music. Mute and volume 0 become a music gain of 0 instead, which is why `on_mute` and
+`on_unmute` run the reconciler. Hardware mutes are left to routing, phase changes, the safety mute
+and a level of 0.
 
-Two hardware bugs went with it. `TAS2780::set_volume()` wrote the DVC register whether or not the
-chip was muted, replacing the mute code `0xC9` with about -31.5 dB, so volume 0 on the built-in
-speaker played at roughly the level of 5%; it now records the level while muted and
-`set_mute_off()` writes it. And activation no longer gates unmute on the persisted `*_is_muted`
-flags: a unit saved at volume 0 had them set, nothing would ever have cleared them, and it would
-have booted muted. The level is persisted to both output slots, and the mute flags are written as
-false; `DACProxyRestoreState` keeps its layout, so the saved output selection still loads.
+`TAS2780::set_volume()` used to write the DVC register whether or not the chip was muted, replacing
+the mute code `0xC9` with an audible attenuation, so volume 0 on the built-in speaker played at
+roughly the level of 5%; it now records the level while muted and `set_mute_off()` writes it. The
+media player's volume and mute persist per output in develop's `DACOutputVolumeState`; the proxy's
+level is not persisted at all, since the reconciler restates it as soon as the media player
+restores.
+
+**An amp fault re-prepares the output through the proxy.** An over-current or over-temperature
+shutdown drops the TAS2780 into software shutdown, which the proxy sees as its READY output going
+inactive and fails. The amp cannot re-activate itself under proxy management, so it asks: after
+2 s the proxy prepares the output again if it is still failed, and after three shutdowns within a
+minute it holds the output failed until the reconciler's level drops below the one it tripped at.
+A changed supply (a USB-PD contract arriving late, or a PD hard reset) goes through the same
+re-preparation, so the amp measures its rails again and picks its power mode.
 
 **Raising the DAC is deferred 800 ms, and only when it has to be; lowering is immediate.** Lowering
 just plays already-buffered audio a little quieter than intended. Raising while an input with audio

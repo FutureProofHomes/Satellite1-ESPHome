@@ -18,7 +18,7 @@ satellite1_ring:
     return float(id(first_active_timer).seconds_left) / max(id(first_active_timer).total_seconds, static_cast<uint32_t>(1));
   volume: !lambda return id(external_media_player).volume;
   mic_muted: !lambda return id(master_mute_switch).state;
-  speaker_silent: !lambda return id(external_media_player).volume == 0.0f || id(external_media_player).is_muted();
+  speaker_silent: !lambda return id(external_media_player).is_muted();
   style_select:
     id: ring_style_select
     name: LED Ring Style
@@ -48,6 +48,16 @@ light:
     icon: "mdi:dots-circle"
     default_transition_length: 0ms
     restore_mode: RESTORE_DEFAULT_OFF
+    # The muted moment takes this light's brightness, so carry a change over to it. A preview
+    # follows the brightness by itself (ring_fx's loop).
+    on_state:
+      - if:
+          condition:
+            lambda: |-
+              return id(voice_assistant_leds).current_values.is_on() &&
+                     id(ring_fx).moment() == "mute" && !id(ring_fx).is_previewing();
+          then:
+            - script.execute: control_leds_muted_or_silent
     initial_state:
       color_mode: rgb
       brightness: 66%
@@ -343,7 +353,7 @@ script:
             id(control_leds_timer_ticking).execute();
           } else if (id(master_mute_switch).state) {
             id(control_leds_muted_or_silent).execute();
-          } else if (id(external_media_player).volume == 0.0f || id(external_media_player).is_muted()) {
+          } else if (id(external_media_player).is_muted()) {
             id(control_leds_muted_or_silent).execute();
           } else if (id(voice_assistant_phase) == ${voice_assist_idle_phase_id}) {
             id(control_leds_voice_assistant_idle_phase).execute();
@@ -352,7 +362,7 @@ script:
   # Each script below names its moment to ring_fx first: the customizable ones because the Styled
   # effect draws whatever moment is active, the fixed ones so the LED Ring page's live ring and the
   # LED Ring Moment sensor say what the ring is showing. Brightness floors stay here: max(ring, 20%)
-  # for the conversation, 10% more for alerts.
+  # for the conversation, 10% more for alerts, and the LED Ring light's own brightness for muted.
 
   # Script executed during Improv BLE
   # Warm White Twinkle
@@ -493,7 +503,7 @@ script:
     then:
       - lambda: id(ring_fx).set_moment("mute");
       - light.turn_on:
-          brightness: !lambda return min ( max( id(led_ring).current_values.get_brightness() , 0.2f ) + 0.1f , 1.0f );
+          brightness: !lambda return id(led_ring).remote_values.get_brightness();
           id: voice_assistant_leds
           effect: "Styled"
 

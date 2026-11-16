@@ -60,7 +60,7 @@ script:
       - if:
           condition:
             and:
-              - switch.is_off: master_mute_switch
+              - lambda: return !id(satellite1_id).microphone_mute().effectively_muted(millis());
               - not: voice_assistant.is_running
           then:
             - lambda: |-
@@ -74,8 +74,12 @@ script:
                 priority: true
                 sound_file: "center_button_press_sound"
             - delay: 300ms
-            - voice_assistant.start:
-                wake_word: !lambda 'return word;'
+            - if:
+                condition:
+                  lambda: return !id(satellite1_id).microphone_mute().effectively_muted(millis());
+                then:
+                  - voice_assistant.start:
+                      wake_word: !lambda 'return word;'
 
   # The orb's tap: silence a ringing timer, stop a running assistant, or start one - the button's
   # single press in the same order, without its media pause. Nothing during start-up, as the button,

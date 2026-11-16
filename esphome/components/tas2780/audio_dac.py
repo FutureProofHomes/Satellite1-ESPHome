@@ -69,8 +69,8 @@ async def tas2780_activate_action(config, action_id, template_arg, args):
 TAS2780_UPDATE_CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.use_id(tas2780),
-        cv.Optional(CONF_VOL_RNG_MIN, default=.3) : cv.templatable(cv.float_range(0.,1.)),
-        cv.Optional(CONF_VOL_RNG_MAX, default=1.) : cv.templatable(cv.float_range(0.,1.)),
+        cv.Optional(CONF_VOL_RNG_MIN) : cv.templatable(cv.float_range(0.,1.)),
+        cv.Optional(CONF_VOL_RNG_MAX) : cv.templatable(cv.float_range(0.,1.)),
         cv.Optional(CONF_AMP_LEVEL_IDX) : cv.templatable(cv.int_range(0, 20)),
         cv.Optional(CONF_CHANNEL) : cv.templatable(cv.int_range(0,2))
     }
@@ -81,12 +81,12 @@ TAS2780_UPDATE_CONFIG_SCHEMA = cv.Schema(
 async def tas2780_action(config, action_id, template_arg, args):
     tas2780 = await cg.get_variable(config[CONF_ID])
     var = cg.new_Pvariable(action_id, template_arg, tas2780)
-    vol_min_ = config.get(CONF_VOL_RNG_MIN)
-    template_ = await cg.templatable(vol_min_, args, cg.float_)
-    cg.add(var.set_vol_range_min(template_))
-    vol_max_ = config.get(CONF_VOL_RNG_MAX)
-    template_ = await cg.templatable(vol_max_, args, cg.float_)
-    cg.add(var.set_vol_range_max(template_))
+    if CONF_VOL_RNG_MIN in config:
+        template_ = await cg.templatable(config[CONF_VOL_RNG_MIN], args, cg.float_)
+        cg.add(var.set_vol_range_min(template_))
+    if CONF_VOL_RNG_MAX in config:
+        template_ = await cg.templatable(config[CONF_VOL_RNG_MAX], args, cg.float_)
+        cg.add(var.set_vol_range_max(template_))
     if CONF_AMP_LEVEL_IDX in config:
         amp_level_idx = config.get(CONF_AMP_LEVEL_IDX)
         template_ = await cg.templatable(amp_level_idx, args, cg.uint8)

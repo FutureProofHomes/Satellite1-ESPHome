@@ -296,7 +296,8 @@ const BLACK = () => [0, 0, 0];
 
 /**
  * One moment's frame. inp: { ring:[r,g,b] (brightest channel 255), ringOn, ratio 0-1, micMuted,
- * spkSilent }. Returns { frame: 24 [r,g,b], head } where head is the spin or comet head drawn.
+ * spkSilent (the media player muted) }. Returns { frame: 24 [r,g,b], head } where head is the spin
+ * or comet head drawn.
  */
 export function renderMoment(m, s, t, head0, inp) {
   const out = blank();
@@ -326,7 +327,7 @@ export function renderMoment(m, s, t, head0, inp) {
         out[wrapIndex(st + 4)] = BLACK();
       }
     }
-  } else if (m === M_VOL && inp.ratio <= 0) {
+  } else if (m === M_VOL && inp.spkSilent) {
     out[0] = RED();
   }
   return { frame: out, head };

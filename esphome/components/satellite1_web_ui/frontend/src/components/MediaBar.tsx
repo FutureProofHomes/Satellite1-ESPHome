@@ -105,7 +105,7 @@ export function MediaBar({
   // to the card before it (owner's request, October 2026), found in the cards as last shown.
   const [front, setFront] = useState<string | null>(null);
   const [sheet, setSheet] = useState<string | null>(null);
-  const tiers = useTiers(ctx.ha, ctx.device?.mac, open || !!panel || !!sheet || !!front);
+  const tiers = useTiers(ctx.ha, { mac: ctx.device?.mac, clientId: ctx.device?.sendspin_id }, open || !!panel || !!sheet || !!front);
   const { cards } = tiers;
   const ids = cards.map(c => c.id);
   const shown = useRef<string[]>([]);

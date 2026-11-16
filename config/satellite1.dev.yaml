@@ -60,7 +60,7 @@ satellite1_web_ui:
     microphone: sat1_mics
     # micro_wake_word's gain_factor in common/voice_assistant.yaml. Keep the two equal.
     wake_word_gain: 6
-    xmos_ready: !lambda return id(xmos_audio_ready);
+    xmos_ready: !lambda return id(satellite1_id).audio_available();
   # GET /api/sat1/sysmon
   sysmon: {}
 
@@ -141,18 +141,19 @@ script:
             # The built-in image counts as installed before the XMOS has restarted.
             - wait_until:
                 condition:
-                  lambda: return id(xmos_audio_ready);
+                  lambda: return id(satellite1_id).audio_available();
                 timeout: 30s
             - if:
                 condition:
-                  lambda: return id(xmos_audio_ready);
+                  lambda: return id(satellite1_id).audio_available();
                 then:
                   # Lets refresh_audio_output activate the DAC first.
                   - delay: 1s
                   - media_player.play: external_media_player
 
-  # on_xmos_connected restores audio once a flashed XMOS boots; this covers attempts that
-  # ended without restarting the XMOS.
+  # A flash that starts ends with the flasher lifting the maintenance inhibit and on_xmos_connected
+  # restoring audio once the XMOS boots. This covers attempts that ended before flashing began -
+  # audio that did not stop, a failed download or checksum - where the inhibit is still held.
   - id: xmos_catalog_restore_audio
     mode: restart
     then:
@@ -160,10 +161,10 @@ script:
       - if:
           condition:
             lambda: |-
-              return !id(xmos_audio_ready) && !id(xmos_catalog).busy() &&
-                     id(satellite1_id).is_xmos_connected();
+              return !id(xmos_catalog).busy() && !id(xflash).in_progress() &&
+                     id(satellite1_id).audio_availability() == satellite1::AudioAvailability::MAINTENANCE;
           then:
-            - lambda: id(xmos_audio_ready) = true;
+            - lambda: id(satellite1_id).set_audio_inhibited(satellite1::AudioInhibit::MAINTENANCE, false);
             - script.execute: refresh_audio_output
             - script.execute: start_micro_wake_word
             - logger.log: "Restored audio after an XMOS firmware install attempt"

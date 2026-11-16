@@ -158,9 +158,9 @@ export function usePlayhead(media: any, playing: boolean) {
  * bar's cards (`cards`) with their transport and volume. Everything is built from the group's
  * leader (leaderOf), so a member shows and grows the same group its leader does.
  */
-export function useTiers(ha: any, mac: string | undefined, wake: boolean) {
+export function useTiers(ha: any, ids: { mac?: string; clientId?: string }, wake: boolean) {
   const [maCfg, setMaCfg] = useState<{ url: string; token: string }>(maSettings.get);
-  const ws = useMaSocket(mac, maCfg.url && maCfg.token ? maCfg : null);
+  const ws = useMaSocket(ids, maCfg.url && maCfg.token ? maCfg : null);
   const wsOn = ws.status === 'on' && !!ws.me;
 
   // A browser with no stored connection seeds itself from the device's copy, once per mount - the

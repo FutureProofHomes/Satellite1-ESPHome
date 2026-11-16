@@ -29,6 +29,8 @@ esp32:
 
   framework:
     type: esp-idf
+    advanced:
+      flash_chip: generic
 
     sdkconfig_options:
       CONFIG_SPIRAM_RODATA: "y"
@@ -146,4 +148,4 @@ i2s_audio:
     i2s_mclk_pin: GPIO16
     access_mode: duplex
     i2s_mode: secondary
-    access_guard: !lambda return id(xmos_audio_ready);
+    access_guard: !lambda return id(satellite1_id).audio_available();

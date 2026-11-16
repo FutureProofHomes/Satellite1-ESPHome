@@ -40,7 +40,7 @@ binary_sensor:
       then:
         - if:
             condition:
-              lambda: return id(xmos_audio_ready);
+              lambda: return id(satellite1_id).audio_available();
             then:
               - lambda: id(volume_buttons_touched) = true;
               - script.execute:
@@ -61,49 +61,12 @@ binary_sensor:
       then:
         - if:
             condition:
-              lambda: return id(xmos_audio_ready);
+              lambda: return id(satellite1_id).audio_available();
             then:
               - lambda: id(volume_buttons_touched) = true;
               - script.execute:
                   id: control_volume
                   increase_volume: false
-
-  - platform: gpio
-    id: btn_left
-    use_interrupt: false
-    pin:
-      satellite1:
-      port: INPUT_A
-      pin: 3
-      inverted: false
-    name: "Button Left (HW Mute)"
-    icon: "mdi:microphone-off"
-    on_state:
-      - if:
-          condition:
-            and:
-              - lambda: return id(xmos_audio_ready);
-              - binary_sensor.is_off: btn_left
-          then:
-            - script.execute:
-                id: play_sound
-                priority: false
-                sound_file: "mute_switch_off_sound"
-            - switch.template.publish:
-                id: master_mute_switch
-                state: OFF
-          else:
-            - if:
-                condition:
-                  lambda: return id(xmos_audio_ready);
-                then:
-                  - script.execute:
-                      id: play_sound
-                      priority: false
-                      sound_file: "mute_switch_on_sound"
-                  - switch.template.publish:
-                      id: master_mute_switch
-                      state: ON
 
   - platform: gpio
     id: btn_action

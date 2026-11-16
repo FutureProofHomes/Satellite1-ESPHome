@@ -1,7 +1,7 @@
 # Vendored mixer — FutureProofHomes
 
 This directory is a **byte-identical copy of upstream ESPHome's `mixer` component**, pinned to the
-exact version in `requirements.txt` (currently **2026.9.1**), **except for one addition**, marked
+exact version in `requirements.txt` (currently **2026.10.2**), **except for one addition**, marked
 with `// FPH:`.
 
 ## The one diff
@@ -10,9 +10,10 @@ A per-input gain on `SourceSpeaker`:
 
 - `speaker/mixer_speaker.h`: `set_gain(float linear)` and `get_gain()`, plus two atomic Q31 members
   (`gain_target_q31_`, `gain_current_q31_`) and the `<cstdint>` include.
-- `speaker/mixer_speaker.cpp`: the `<gain.h>` include, `GAIN_RAMP_STEPS`, the gain pass in
-  `process_data_from_source()` right after the existing ducking call, the `set_gain()`/`get_gain()`
-  bodies, and one line in `start_()` that starts a new stream at the requested gain.
+- `speaker/mixer_speaker.cpp`: `GAIN_RAMP_STEPS`, the gain pass in `process_data_from_source()`
+  right after the existing ducking ramp, the `set_gain()`/`get_gain()` bodies, and one line in
+  `start_()` that starts a new stream at the requested gain. (`<gain.h>` comes from upstream's own
+  header since 2026.10, where ducking moved onto `esp_audio_libs::gain::GainRamp`.)
 
 `audio_gain_reconcile` in `config/common/voice_assistant.yaml` uses it to give the media and
 announcement inputs their own levels under one amplifier level. Upstream's only per-input control is

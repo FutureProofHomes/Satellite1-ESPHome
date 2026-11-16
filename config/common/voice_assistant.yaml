@@ -38,6 +38,9 @@ globals:
 microphone:
   - platform: satellite1
     id: sat1_mics
+    satellite1_id: satellite1_id
+    # Channel 1 remains local-only for wake-word processing during software mute.
+    software_mute_channels: [0]
     sample_rate: 48000
     i2s_din_pin: GPIO15
     bits_per_sample: 32bit
@@ -62,6 +65,7 @@ micro_wake_word:
       internal: true
   vad:
   microphone:
+    id: wake_word_microphone_source
     microphone: sat1_mics
     channels: 1
     gain_factor: 6
@@ -112,11 +116,11 @@ micro_wake_word:
               condition:
                 lambda: return id(timer_ringing).state || !id(web_ui_app)->wake_test_active();
               then:
-                # If the wake word is detected when the device is muted (Possible with the software mute
-                # switch): Do nothing
+                # If the wake word is detected when the microphones are effectively muted (software or
+                # hardware, or a hardware state too stale to trust): Do nothing
                 - if:
                     condition:
-                      switch.is_off: master_mute_switch
+                      lambda: return !id(satellite1_id).microphone_mute().effectively_muted(millis());
                     then:
                       # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
                       - if:
@@ -189,8 +193,12 @@ micro_wake_word:
                                                     lambda: return id(web_ui_app)->queue_fsd_for(wake_word);
                                                   then:
                                                     - delay: 150ms
-                                        - voice_assistant.start:
-                                            wake_word: !lambda return wake_word;
+                                        - if:
+                                            condition:
+                                              lambda: return !id(satellite1_id).microphone_mute().effectively_muted(millis());
+                                            then:
+                                              - voice_assistant.start:
+                                                  wake_word: !lambda return wake_word;
 
 # Runtime wake word loading: the device's two wake word slots, which the web app's Primary/Secondary
 # pickers write. A slot holds a built-in model id or a microWakeWord manifest URL; URLs are
@@ -231,6 +239,7 @@ mww_runtime_loader:
 voice_assistant:
   id: va
   microphone:
+    id: va_microphone_source
     microphone: sat1_mics
     channels: 0
 
@@ -244,7 +253,7 @@ voice_assistant:
     - lambda: id(init_in_progress) = false;
     - if:
         condition:
-          lambda: return id(xmos_audio_ready);
+          lambda: return id(satellite1_id).audio_available();
         then:
           - script.execute: start_micro_wake_word
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
@@ -269,6 +278,12 @@ voice_assistant:
 
   # When the voice assistant starts: Play a wake up sound, duck audio.
   on_start:
+    # Covers direct API starts as well as local automations.
+    - if:
+        condition:
+          lambda: return id(satellite1_id).microphone_mute().effectively_muted(millis());
+        then:
+          - voice_assistant.stop:
     - script.execute: audio_gain_reconcile
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
@@ -393,7 +408,7 @@ script:
     mode: restart
     then:
       - wait_until:
-          lambda: return App.is_setup_complete() && id(mww).is_ready() && id(xmos_audio_ready);
+          lambda: return App.is_setup_complete() && id(mww).is_ready() && id(satellite1_id).audio_available();
       - if:
           condition:
             lambda: return !id(mww).is_running();
@@ -508,10 +523,10 @@ script:
     mode: restart
     then:
       - lambda: |-
-          // dB per unit of level. The span comes from DACProxy; 0.9 is the media player's own
-          // volume remap (volume_min: 0.1, volume_max: 1.0 in media_player.yaml), and it and
-          // dac_target_volume below have to move together.
-          const float db_per_unit = id(dac_proxy).volume_span_db() * 0.9f;
+          // dB per unit of level: the active output's span between its volume limits. The media
+          // player's volume maps straight onto it (volume_min: 0.0, volume_max: 1.0 in
+          // media_player.yaml), so this and dac_target_volume below have to move together.
+          const float db_per_unit = id(dac_proxy).volume_span_db();
 
           // Mute and volume 0 are the same thing to the music: no music.
           const float media_setting = id(external_media_player).volume;
@@ -565,7 +580,7 @@ script:
           id(media_mixing_input)->set_gain(music_gain);
           id(announcement_mixing_input)->set_gain(ann_gain);
 
-          id(dac_target_volume) = 0.1f + ref * 0.9f;
+          id(dac_target_volume) = ref;
           const float level_now = id(dac_proxy).level();
           if (id(dac_target_volume) <= level_now + 0.0005f) {
             // Lowering is safe at any moment - queued audio just plays a little quieter.

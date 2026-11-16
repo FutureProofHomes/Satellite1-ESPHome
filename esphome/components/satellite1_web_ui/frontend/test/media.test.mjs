@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { gatherResult } from "../src/lib/ma.js";
+import { findMe, gatherResult } from "../src/lib/ma.js";
 import {
   addRecent,
   albumSections,
@@ -615,4 +615,61 @@ test("recent searches dedupe case-insensitively, newest first, capped", () => {
   assert.deepEqual(addRecent(["a", "b", "c"], "d", 3), ["d", "a", "b"]);
   const list = ["a"];
   assert.equal(addRecent(list, "  ", 8), list);
+});
+
+/* findMe: which MA player is this device. The fixtures are the real server generations - the MAC
+   player id (ESPHome <= 2026.9), MA 2.10+'s protocol child under a universal parent keyed by the
+   Sendspin client id (ESPHome 2026.10+), identifiers-only MACs, and 2.11's legacy_ids. */
+const MAC = "E4:B0:63:91:09:D8";
+const CID = "k7F3qX9mZp2LtR8wVbN4yC6sA1dE5gHjU0iO_xPeQZw";
+
+test("findMe matches the legacy MAC player id, however the MAC is spelled", () => {
+  const players = { E4B0639109D8: { player_id: "E4B0639109D8", type: "player" } };
+  assert.equal(findMe(players, { mac: "e4-b0-63-91-09-d8" }), players.E4B0639109D8);
+  assert.equal(findMe(players, { mac: MAC, clientId: CID }), players.E4B0639109D8);
+});
+
+test("findMe prefers the parent linked to the client id over its protocol child", () => {
+  const players = {
+    [CID]: { player_id: CID, type: "protocol" },
+    up12345678: { player_id: "up12345678", type: "player", output_protocols: [{ output_protocol_id: CID }] },
+  };
+  assert.equal(findMe(players, { mac: MAC, clientId: CID }), players.up12345678);
+  // Without the parent, the protocol child itself is the answer (MA redirects its queue commands).
+  assert.equal(findMe({ [CID]: players[CID] }, { mac: MAC, clientId: CID }), players[CID]);
+  // The `protocols` list carries the same link on servers that send it instead.
+  const viaProtocols = { up9: { player_id: "up9", type: "player", protocols: [{ protocol_id: CID }] } };
+  assert.equal(findMe(viaProtocols, { clientId: CID }), viaProtocols.up9);
+});
+
+test("findMe falls back to the device_info MAC identifier", () => {
+  const players = { upabc: { player_id: "upabc", type: "player", device_info: { identifiers: { mac_address: MAC } } } };
+  assert.equal(findMe(players, { mac: "e4b0639109d8" }), players.upabc);
+});
+
+test("findMe follows a 2.11 legacy_ids carry-over", () => {
+  const players = { upnew: { player_id: "upnew", type: "player", legacy_ids: [MAC] } };
+  assert.equal(findMe(players, { mac: MAC }), players.upnew);
+});
+
+test("findMe keeps a Home Assistant twin from shadowing the Sendspin parent", () => {
+  const players = {
+    haTwin: { player_id: "haTwin", type: "player", device_info: { identifiers: { mac_address: MAC } } },
+    upSend: { player_id: "upSend", type: "player", output_protocols: [{ output_protocol_id: CID }] },
+  };
+  assert.equal(findMe(players, { mac: MAC, clientId: CID }), players.upSend);
+});
+
+test("findMe finds nothing among other speakers, or without the client id on the new shape", () => {
+  const others = {
+    otherMac: { player_id: "AA:BB:CC:DD:EE:FF", type: "player" },
+    otherUp: { player_id: "up00000000", type: "player", output_protocols: [{ output_protocol_id: "otherCid" }] },
+  };
+  assert.equal(findMe(others, { mac: MAC, clientId: CID }), null);
+  const newShape = {
+    [CID]: { player_id: CID, type: "protocol" },
+    up12345678: { player_id: "up12345678", type: "player", output_protocols: [{ output_protocol_id: CID }] },
+  };
+  assert.equal(findMe(newShape, { mac: MAC }), null);
+  assert.equal(findMe(null, { mac: MAC, clientId: CID }), null);
 });

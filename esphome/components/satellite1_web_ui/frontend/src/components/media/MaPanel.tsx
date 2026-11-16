@@ -59,7 +59,11 @@ export function MaPanel({
   };
 
   const players = Object.values(ws.players || {}).filter((p: any) => p.available).length;
-  const note = !configured ? 'Not connected' : status === 'on' ? `Connected \u00b7 ${players} ${players === 1 ? 'player' : 'players'} available` : status === 'error' ? TEXT.ma_error : TEXT.search_connecting;
+  // A connected server that lists no player for this device gets its own note: the dot is honestly
+  // green (the socket works), but search and grouping need ws.me, and the fix is in MA.
+  const note = !configured ? 'Not connected'
+    : status === 'on' ? (ws.me ? `Connected \u00b7 ${players} ${players === 1 ? 'player' : 'players'} available` : TEXT.ma_no_self)
+    : status === 'error' ? TEXT.ma_error : TEXT.search_connecting;
 
   return <div className="mapanel">
     <button className="mapanel-head" onClick={() => setOpen(!open)} aria-expanded={open}><span className={'madot' + (status === 'on' ? ' on' : '')} /><span>{TEXT.ma_title}</span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" style={{

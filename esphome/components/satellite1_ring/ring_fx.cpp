@@ -272,7 +272,7 @@ void RingFx::apply_preview(light::LightCall &call) {
   call.set_transition_length(0);
   const int m = moment_of(key);
   if (m >= 0) {
-    call.set_brightness(m <= M_REPLY ? conv : alert);
+    call.set_brightness(m <= M_REPLY ? conv : m == M_MUTE ? b : alert);
     call.set_effect("Styled");
     return;
   }
