@@ -13,6 +13,10 @@ class MicrophoneMuteSwitch : public switch_::Switch, public Component, public Pa
   void setup() override;
   void loop() override;
   void set_hardware_sensor(binary_sensor::BinarySensor *sensor) { this->hardware_sensor_ = sensor; }
+  // A software mute that its caller puts back afterwards (a sign-in window, a peer's tune session).
+  // Not saved, so a reboot returns to the person's own choice, and an unmute is not refused while
+  // the hardware slider is engaged, since the slider keeps the microphones muted by itself.
+  void set_transient(bool muted);
   template<typename F> void add_on_hardware_mute_change_callback(F &&callback) {
     this->hardware_change_callback_.add(std::forward<F>(callback));
   }

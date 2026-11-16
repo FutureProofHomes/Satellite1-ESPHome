@@ -207,15 +207,15 @@ void Satellite1WebUI::loop() {
     const int8_t req = this->handler_.take_mute_hold_request();
     if (req == 1) {
       if (!this->mute_hold_) {
-        // First hold: capture what the person had chosen, then mute. turn_on() may be refused by
-        // the template switch while the hardware slider is engaged - which is fine, the device is
+        // First hold: capture what the person had chosen, then mute. A switch driven directly may
+        // refuse turn_on() while a hardware slider is engaged - which is fine, the device is
         // already deaf - and mute_hold_seen_on_ keeps that unhonored request from reading as a
         // manual unmute below.
         this->mute_hold_ = true;
-        this->mute_hold_prior_on_ = this->mute_switch_->state;
+        this->mute_hold_prior_on_ = this->mute_intent_();
         this->mute_hold_seen_on_ = false;
-        if (!this->mute_switch_->state)
-          this->mute_switch_->turn_on();
+        if (!this->mute_hold_prior_on_)
+          this->set_mute_intent_(true);
         ESP_LOGI(TAG, "Tune-time mute held (was %s)", this->mute_hold_prior_on_ ? "muted" : "unmuted");
       }
       // Hold and keepalive are one request: either way the deadline moves. 60s against the
@@ -223,11 +223,12 @@ void Satellite1WebUI::loop() {
       this->mute_hold_until_ = now64 + 60000;
     }
     if (this->mute_hold_) {
-      if (this->mute_switch_->state)
+      const bool muted = this->mute_intent_();
+      if (muted)
         this->mute_hold_seen_on_ = true;
-      if (req == 0 || (this->mute_hold_seen_on_ && !this->mute_switch_->state) || now64 > this->mute_hold_until_) {
+      if (req == 0 || (this->mute_hold_seen_on_ && !muted) || now64 > this->mute_hold_until_) {
         this->mute_hold_ = false;
-        if (this->mute_hold_seen_on_ && !this->mute_switch_->state) {
+        if (this->mute_hold_seen_on_ && !muted) {
           // A person unmuted at the device (or through Home Assistant) mid-hold: their hand
           // outranks the session (owner decision, September 23 2026). No restore, no re-mute.
           ESP_LOGI(TAG, "Tune-time mute overridden locally; hold cancelled");
@@ -235,8 +236,8 @@ void Satellite1WebUI::loop() {
           // Release or expiry: put the switch back the way the hold found it. Restore only the
           // unmuted case - a device that was muted before the hold stays muted, and the switch is
           // already on.
-          if (!this->mute_hold_prior_on_ && this->mute_switch_->state)
-            this->mute_switch_->turn_off();
+          if (!this->mute_hold_prior_on_ && muted)
+            this->set_mute_intent_(false);
           ESP_LOGI(TAG, "Tune-time mute %s; %s", req == 0 ? "released" : "expired",
                    this->mute_hold_prior_on_ ? "staying muted (was muted before)" : "restored to unmuted");
         }
@@ -315,6 +316,17 @@ void Satellite1WebUI::loop() {
   this->handler_.sysmon().loop();
 #endif
 }
+
+#ifdef USE_SWITCH
+void Satellite1WebUI::set_mute_intent_(bool muted) {
+  if (this->mute_intent_set_)
+    this->mute_intent_set_(muted);
+  else if (muted)
+    this->mute_switch_->turn_on();
+  else
+    this->mute_switch_->turn_off();
+}
+#endif
 
 char *Satellite1WebUI::stage_ha_payload(size_t capacity) { return this->handler_.stage_ha_payload(capacity); }
 

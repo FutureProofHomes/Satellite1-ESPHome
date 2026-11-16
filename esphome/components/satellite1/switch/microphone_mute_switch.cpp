@@ -27,6 +27,11 @@ void MicrophoneMuteSwitch::write_state(bool state) {
   this->loop();
 }
 
+void MicrophoneMuteSwitch::set_transient(bool muted) {
+  this->parent_->microphone_mute().restore_software(muted);
+  this->loop();
+}
+
 void MicrophoneMuteSwitch::loop() {
   auto &mute = this->parent_->microphone_mute();
   const auto hardware = mute.hardware_state(millis());

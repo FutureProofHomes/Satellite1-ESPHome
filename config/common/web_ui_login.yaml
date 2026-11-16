@@ -129,7 +129,7 @@ script:
             and:
               - lambda: 'return id(web_ui_app)->login_voice_pending();'
               - not: voice_assistant.is_running
-              - switch.is_off: master_mute_switch
+              - lambda: return !id(satellite1_id).microphone_mute().effectively_muted(millis());
           then:
             - logger.log:
                 level: INFO

@@ -136,6 +136,13 @@ class Satellite1WebUI : public Component {
   /// master_mute_switch on this product). From generated code; without it POST /api/sat1/mutehold
   /// answers 404 and the tune-time peer muting simply does not exist on this build.
   void set_mute_switch(switch_::Switch *sw) { this->mute_switch_ = sw; }
+  /// For a mute switch whose state also follows a hardware mute: the person's software choice
+  /// alone, and a way to set it for the hold's duration (mute_intent: and set_mute_intent: in
+  /// web_ui.yaml). Without them the hold reads and drives the switch itself.
+  void set_mute_intent(std::function<bool()> get, std::function<void(bool)> set) {
+    this->mute_intent_get_ = std::move(get);
+    this->mute_intent_set_ = std::move(set);
+  }
 #endif
 
   /// The action button's approval. Returns true when a pending window was approved, which is the
@@ -434,13 +441,17 @@ class Satellite1WebUI : public Component {
    * expiring, and never trusts the browser that asked to come back - the exact self-healing shape
    * the tune session itself uses. millis_64() for the deadline, like every deadline here. */
   switch_::Switch *mute_switch_{nullptr};
+  std::function<bool()> mute_intent_get_{};
+  std::function<void(bool)> mute_intent_set_{};
+  bool mute_intent_() const { return this->mute_intent_get_ ? this->mute_intent_get_() : this->mute_switch_->state; }
+  void set_mute_intent_(bool muted);
   bool mute_hold_{false};
   bool mute_hold_prior_on_{false};
-  /// Set once the switch has been OBSERVED on while held. The manual-unmute-wins rule (a person at
+  /// Set once the mute has been OBSERVED on while held. The manual-unmute-wins rule (a person at
   /// the device outranks a remote tune session; owner decision, September 23 2026) reads "held but
-  /// off" as that person's hand - but only after this flag, because turn_on() through the template
-  /// switch is refused while the hardware mute slider is engaged, and treating that unhonored
-  /// request as a manual unmute would cancel the hold it never applied.
+  /// off" as that person's hand - but only after this flag, because a switch driven directly may
+  /// refuse turn_on() (a template switch deferring to a hardware slider), and treating that
+  /// unhonored request as a manual unmute would cancel the hold it never applied.
   bool mute_hold_seen_on_{false};
   uint64_t mute_hold_until_{0};
 #endif
