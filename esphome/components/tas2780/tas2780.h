@@ -12,6 +12,8 @@ namespace esphome {
 namespace tas2780 {
 
 enum ChannelSelect : uint8_t { MONO_DWN_MIX, LEFT_CHANNEL, RIGHT_CHANNEL };
+/// What a proxy-managed amp asks of the proxy when it needs its output prepared again.
+enum class OutputRequest : uint8_t { RECOVER, RECOVER_WHEN_LOWERED, SUPPLY_CHANGED };
 
 class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDevice {
  public:
@@ -27,6 +29,12 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   void set_preparation_guard(void *context, bool (*guard)(void *)) {
     this->preparation_context_ = context;
     this->preparation_guard_ = guard;
+  }
+  /// The proxy only lets the amp activate while it is preparing the output, so a proxy-managed amp
+  /// that shut itself down, or whose supply changed, asks for that preparation instead.
+  void set_output_request(void *context, void (*request)(void *, OutputRequest)) {
+    this->output_request_context_ = context;
+    this->output_request_ = request;
   }
   bool activation_failed() const { return this->activation_failed_; }
   void set_activation_guard(std::function<bool()> activation_guard) {
@@ -90,6 +98,7 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   /// standing debug drumbeat would bury the log; the activation path keeps its sample visible.
   bool read_supply_voltages_(SupplyVoltages *voltages, bool quiet = false);
   void recover_from_protection_shutdown_();
+  void request_output_(OutputRequest request);
   bool write_mute_();
   bool write_volume_();
 
@@ -102,6 +111,8 @@ class TAS2780 : public audio_dac::AudioDac, public Component, public i2c::I2CDev
   uint32_t activation_generation_{0};
   void *preparation_context_{nullptr};
   bool (*preparation_guard_)(void *){nullptr};
+  void *output_request_context_{nullptr};
+  void (*output_request_)(void *, OutputRequest){nullptr};
   bool last_supply_sample_valid_{false};
   SupplyVoltages last_supply_voltages_{};
   /// The loop() reconcile's clock and debounce - see the comment there.

@@ -208,11 +208,21 @@ bool DACProxy::invalidate_output_() {
 
 void DACProxy::refresh_output() {
   this->output_dirty_ = true;
+  this->recovery_held_ = false;
   if (this->setup_was_called_)
     this->safe_stop_confirmed_ = this->invalidate_output_();
 }
 
 void DACProxy::notify_supply_changed() { this->refresh_output(); }
+
+void DACProxy::request_recovery(bool until_level_lowered) {
+  if (until_level_lowered) {
+    this->recovery_held_ = true;
+    this->recovery_level_ = this->level();
+  } else if (this->output_phase() == DACOutputPhase::FAILED) {
+    this->refresh_output();
+  }
+}
 
 void DACProxy::fail_output_() {
   this->safe_stop_confirmed_ = this->invalidate_output_();
@@ -581,6 +591,13 @@ bool DACProxy::set_level(float level) {
     return false;
   this->level_ = clamp(level, 0.0f, 1.0f);
   this->level_set_ = true;
+  if (this->recovery_held_ && this->level_ < this->recovery_level_) {
+    this->recovery_held_ = false;
+    if (this->output_phase() == DACOutputPhase::FAILED) {
+      ESP_LOGI(TAG, "Level lowered after repeated DAC shutdowns; preparing the output again");
+      this->refresh_output();
+    }
+  }
   // Outside READY the output is held muted, and the READY transition applies the stored level.
   if (this->output_phase() != DACOutputPhase::READY)
     return true;

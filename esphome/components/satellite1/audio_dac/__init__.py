@@ -104,6 +104,12 @@ async def to_code(config):
             "if (dac->is_activation_pending()) return satellite1::DACPreparationResult::PENDING; "
             "return dac->is_active() ? satellite1::DACPreparationResult::READY : satellite1::DACPreparationResult::INACTIVE; }"
         )))
+        cg.add(speaker_dac.set_output_request(var, cg.RawExpression(
+            "[](void *context, tas2780::OutputRequest request) { "
+            "auto *proxy = static_cast<satellite1::DACProxy *>(context); "
+            "if (request == tas2780::OutputRequest::SUPPLY_CHANGED) proxy->notify_supply_changed(); "
+            "else proxy->request_recovery(request == tas2780::OutputRequest::RECOVER_WHEN_LOWERED); }"
+        )))
         cg.add(var.set_volume_limits_callback(DacOutput.SPEAKER, cg.RawExpression(
             f"[=](float min_db, float max_db) {{ "
             f"{speaker_dac}->set_vol_range_min((min_db + 100.0f) / 100.0f); "

@@ -122,6 +122,9 @@ class DACProxy : public audio_dac::AudioDac, public Component, public Satellite1
   }
   void refresh_output();
   void notify_supply_changed();
+  // For a DAC that shut itself down: prepare its output again if that output is still failed, or,
+  // with until_level_lowered, once set_level() drops below the level it failed at.
+  void request_recovery(bool until_level_lowered);
   bool output_configured(DacOutput output) const;
   bool output_enabled(DacOutput output) const;
   // Accepts the complete runtime setting pair. save() acceptance is not verified
@@ -221,6 +224,8 @@ class DACProxy : public audio_dac::AudioDac, public Component, public Satellite1
   // Not persisted: the reconciler restates it as soon as the media player restores.
   float level_{0.0f};
   bool level_set_{false};
+  bool recovery_held_{false};
+  float recovery_level_{0.0f};
 
   void send_selected_dac_() {}
 

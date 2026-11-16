@@ -430,8 +430,12 @@ void TAS2780::finish_activation_() {
 bool TAS2780::deactivate() {
   ESP_LOGD(TAG, "Dectivating TAS2780");
   this->cancel_timeout("finish_activation");
-  this->cancel_timeout("protection_recovery");
-  this->protection_lockout_ = false;
+  // The proxy deactivates the amp in answer to the very shutdown a pending recovery is for, and
+  // ignores that request unless the output is still failed when it arrives.
+  if (!this->proxy_managed_) {
+    this->cancel_timeout("protection_recovery");
+    this->protection_lockout_ = false;
+  }
   ++this->activation_generation_;
   this->activation_pending_ = false;
   // set to software shutdown
@@ -450,7 +454,9 @@ bool TAS2780::deactivate() {
 // An over-current or over-temperature fault drops the amp into software shutdown, where it stays:
 // nothing upstream re-activates it short of an output switch or a reboot, so the speaker went
 // silent while the player kept reporting PLAYING. A fault that returns three times within a minute
-// will not clear at the same level, so the amp then waits for the volume to come down.
+// will not clear at the same level, so the amp then waits for the volume to come down. Under proxy
+// management the proxy owns both: it prepares the failed output again, or holds it failed until
+// its level drops below the one the amp tripped at.
 void TAS2780::recover_from_protection_shutdown_() {
   const uint32_t now = millis();
   if (this->protection_trips_ == 0 || now - this->protection_window_ms_ > 60000) {
@@ -459,13 +465,31 @@ void TAS2780::recover_from_protection_shutdown_() {
   }
   this->protection_volume_ = this->volume_;
   if (++this->protection_trips_ >= 3) {
-    this->protection_lockout_ = true;
     ESP_LOGE(TAG, "Amp shut itself down %u times within a minute; leaving it off until the volume is lowered",
              this->protection_trips_);
+    if (this->proxy_managed_) {
+      // The proxy's release is not seen here, so the count restarts now rather than with it.
+      this->protection_trips_ = 0;
+      this->request_output_(OutputRequest::RECOVER_WHEN_LOWERED);
+    } else {
+      this->protection_lockout_ = true;
+    }
     return;
   }
   ESP_LOGW(TAG, "Amp shut itself down; re-activating in 2 s");
-  this->set_timeout("protection_recovery", 2000, [this]() { this->activate(); });
+  this->set_timeout("protection_recovery", 2000, [this]() {
+    if (this->proxy_managed_)
+      this->request_output_(OutputRequest::RECOVER);
+    else
+      this->activate();
+  });
+}
+
+void TAS2780::request_output_(OutputRequest request) {
+  if (this->output_request_ != nullptr)
+    this->output_request_(this->output_request_context_, request);
+  else
+    ESP_LOGW(TAG, "No proxy to prepare the output again; it stays off");
 }
 
 void TAS2780::reset() {
@@ -641,8 +665,9 @@ void TAS2780::loop() {
   //
   // Two consecutive mismatched samples (10 s) are required before acting, so a rail hovering at the
   // PWR_MODE 2 threshold cannot flap the amp. The re-selection goes through activate() - the whole
-  // existing bootstrap-measure-select path, fallbacks included - and costs one brief muted window,
-  // paid only when the supply genuinely changed.
+  // existing bootstrap-measure-select path, fallbacks included, reached through the proxy's
+  // re-preparation when proxy-managed - and costs one brief muted window, paid only when the supply
+  // genuinely changed.
   if (!this->active_ || this->activation_pending_)
     return;
   const uint32_t now = millis();
@@ -653,6 +678,11 @@ void TAS2780::loop() {
   SupplyVoltages voltages;
   if (!this->read_supply_voltages_(&voltages, true)) {
     this->supply_mismatches_ = 0;
+    // The sample can find the amp in software shutdown before the once-a-second mode check does.
+    if (!this->active_) {
+      this->log_error_states();
+      this->recover_from_protection_shutdown_();
+    }
     return;
   }
   const int desired = this->select_power_mode_(voltages);
@@ -665,7 +695,10 @@ void TAS2780::loop() {
   this->supply_mismatches_ = 0;
   ESP_LOGI(TAG, "Supply changed (VBAT1S %.3f V, PVDD %.3f V): re-selecting power mode (PWR_MODE:%d -> PWR_MODE:%d)",
            voltages.vbat1s, voltages.pvdd, this->power_mode_, desired);
-  this->activate();
+  if (this->proxy_managed_)
+    this->request_output_(OutputRequest::SUPPLY_CHANGED);
+  else
+    this->activate();
 }
 
 void TAS2780::dump_config() {
