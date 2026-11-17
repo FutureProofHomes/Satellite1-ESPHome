@@ -99,7 +99,7 @@ globals:
 # chips carry the sequence now. ~96KB of flash.
 audio_file:
   - id: login_seq_prompt_sound
-    file: sounds/login_seq_prompt.mp3
+    file: ../sounds/login_seq_prompt.mp3
 
 script:
   # Online mode: announce the code, then open the mic.
