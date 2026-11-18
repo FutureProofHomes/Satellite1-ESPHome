@@ -116,6 +116,10 @@ void I2SAudioSpeaker::loop() {
   if (event_group_bits & SpeakerEventGroupBits::STATE_RUNNING) {
     ESP_LOGD(TAG, "Started Speaker");
     this->state_ = speaker::STATE_RUNNING;
+#ifdef USE_AUDIO_DAC
+    // DACs that need I2S clocks for DSP/I2C setup must be notified from the main loop.
+    this->notify_audio_dacs_started_();
+#endif  // USE_AUDIO_DAC
     this->status_clear_warning();
     this->status_clear_error();
   }
@@ -193,13 +197,17 @@ void I2SAudioSpeaker::process_volume_state_() {
   // Clear before backend calls so reentrant setters can queue the latest controls.
   this->has_pending_volume_ = false;
   this->has_pending_mute_ = false;
-  if (this->audio_dac_ == nullptr || (!change_volume && !change_mute))
+  if (!this->has_audio_dac_() || (!change_volume && !change_mute))
     return;
   bool success = true;
-  if (change_mute && muted)
-    success = this->audio_dac_->set_mute_on();
-  if (change_volume)
-    success = this->audio_dac_->set_volume(volume) && success;
+  // Keep the existing deferred-I2C behavior, applying each control to every DAC
+  // configured on this speaker's I2S output.
+  for (auto *audio_dac : this->audio_dacs_) {
+    if (change_mute && muted)
+      success = audio_dac->set_mute_on() && success;
+    if (change_volume)
+      success = audio_dac->set_volume(volume) && success;
+  }
   if (change_mute && !muted) {
     if (this->has_pending_volume_ || this->has_pending_mute_) {
       // A newer gain must reach the DAC before releasing a queued unmute.
@@ -208,7 +216,8 @@ void I2SAudioSpeaker::process_volume_state_() {
         this->has_pending_mute_ = true;
       }
     } else if (success) {
-      success = this->audio_dac_->set_mute_off();
+      for (auto *audio_dac : this->audio_dacs_)
+        success = audio_dac->set_mute_off() && success;
     }
   }
   if (!success)
@@ -226,7 +235,7 @@ void I2SAudioSpeaker::set_volume(float volume) {
     return;
   this->volume_ = volume;
 #ifdef USE_AUDIO_DAC
-  if (this->audio_dac_ != nullptr) {
+  if (this->has_audio_dac_()) {
     this->pending_volume_ = volume;
     this->has_pending_volume_ = true;
   } else
@@ -239,7 +248,7 @@ void I2SAudioSpeaker::set_volume(float volume) {
 void I2SAudioSpeaker::set_mute_state(bool mute_state) {
   this->mute_state_ = mute_state;
 #ifdef USE_AUDIO_DAC
-  if (this->audio_dac_ != nullptr) {
+  if (this->has_audio_dac_()) {
     // Volume and explicit mute are independent; the DAC owns volume-derived silence.
     this->pending_mute_state_ = mute_state;
     this->has_pending_mute_ = true;
