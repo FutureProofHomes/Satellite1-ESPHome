@@ -25,10 +25,36 @@ sensor:
     type: ALS
     update_interval: 60s
 
-    # short variant of sensor definition:
-    ambient_light: "Ambient Light"
+    ambient_light:
+      name: "Ambient Light"
+      id: ambient_light_sensor
+      filters:
+        - multiply: !lambda |-
+            const float factor = id(ambient_light_calibration_factor).state;
+            return std::isfinite(factor) && factor >= 0.1f && factor <= 5.0f ? factor : 1.0f;
 
 number:
+  - platform: template
+    name: "Ambient Light Calibration Factor"
+    id: ambient_light_calibration_factor
+    min_value: 0.1
+    max_value: 5
+    step: 0.01
+    initial_value: 1
+    restore_value: true
+    optimistic: true
+    update_interval: never
+    mode: box
+    entity_category: config
+    icon: "mdi:brightness-6"
+    on_value:
+      - lambda: |-
+          if (!id(ambient_light_sensor).has_state() || !std::isfinite(x) || x < 0.1f || x > 5.0f)
+            return;
+          const float raw = id(ambient_light_sensor).get_raw_state();
+          if (std::isfinite(raw))
+            id(ambient_light_sensor).publish_state(raw);
+
   # Dynamically adjust the temperature and humidity offset.  Credit goes to Lewis over @ EverythingSmartHome.  I admire your work and hope to meet someday.  Beers on me.
   - platform: template
     name: "Offset Temperature"
