@@ -29,3 +29,4 @@ external_components:
       - tas2780
       # Vendored (see esphome/components/voice_assistant/FPH_VENDOR.md).
       - voice_assistant
+      - wake_verify
