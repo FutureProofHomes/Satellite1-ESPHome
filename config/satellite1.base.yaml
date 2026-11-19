@@ -138,6 +138,8 @@ packages:
   web_ui_assist: !include common/web_ui_assist.yaml
   mmwave: !include common/mmwave.yaml
   sendspin: !include common/sendspin.yaml
+  # Speech-to-text wake check, off unless wake_verify_mode is set (see docs/wake-verify.md).
+  wake_verify: !include common/wake_verify.yaml
 
   ## OPTIONAL COMPONENTS
   # debug: !include common/debug.yaml

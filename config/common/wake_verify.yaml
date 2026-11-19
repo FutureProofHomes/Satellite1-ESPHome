@@ -1,0 +1,40 @@
+# Speech-to-text wake check: a second opinion on every wake word detection. When micro_wake_word
+# fires, the last 1.8 s of microphone audio goes to Home Assistant's speech-to-text API and the
+# transcript is matched against the enabled wake words. A false fire is dropped; a wake that the
+# wrong model caught goes ahead with the word that was really said. See docs/wake-verify.md.
+#
+# Off by default: on_wake fires at once with the detected word, no audio is buffered, and the
+# device behaves exactly as it did without the check. To turn it on, set these in your device
+# file's substitutions:
+#
+#   wake_verify_mode: reroute          # or "log" to only log what it would have done
+#   wake_verify_ha_url: http://homeassistant.local:8123
+#   wake_verify_ha_token: !secret ha_token   # a long-lived access token
+#   wake_verify_stt_engine: stt.faster_whisper   # any speech-to-text entity in Home Assistant
+
+substitutions:
+  wake_verify_mode: "off"
+  wake_verify_ha_url: ""
+  wake_verify_ha_token: ""
+  wake_verify_stt_engine: ""
+
+wake_verify:
+  id: wake_verifier
+  # The same channel and gain micro_wake_word listens to.
+  microphone:
+    microphone: sat1_mics
+    channels: 1
+    gain_factor: 6
+  micro_wake_word: mww
+  mode: ${wake_verify_mode}
+  ha_url: "${wake_verify_ha_url}"
+  ha_token: "${wake_verify_ha_token}"
+  stt_engine: "${wake_verify_stt_engine}"
+  # 0.75 rejected real wakes that speech-to-text spelled loosely ("Okay, now Wu.", 0.67).
+  match_threshold: 0.65
+  # Stop always acts at once.
+  skip_wake_words: ["Stop"]
+  on_wake:
+    - script.execute:
+        id: start_wake
+        wake_word: !lambda return wake_word;
