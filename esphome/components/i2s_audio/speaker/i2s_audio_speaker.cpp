@@ -193,13 +193,14 @@ void I2SAudioSpeaker::process_volume_state_() {
   // Clear before backend calls so reentrant setters can queue the latest controls.
   this->has_pending_volume_ = false;
   this->has_pending_mute_ = false;
-  if (this->audio_dac_ == nullptr || (!change_volume && !change_mute))
+  if (!this->has_any_audio_dac_() || (!change_volume && !change_mute))
     return;
   bool success = true;
   if (change_mute && muted)
-    success = this->audio_dac_->set_mute_on();
+    this->for_each_audio_dac_([&success](audio_dac::AudioDac *dac) { success = dac->set_mute_on() && success; });
   if (change_volume)
-    success = this->audio_dac_->set_volume(volume) && success;
+    this->for_each_audio_dac_(
+        [&success, volume](audio_dac::AudioDac *dac) { success = dac->set_volume(volume) && success; });
   if (change_mute && !muted) {
     if (this->has_pending_volume_ || this->has_pending_mute_) {
       // A newer gain must reach the DAC before releasing a queued unmute.
@@ -208,7 +209,7 @@ void I2SAudioSpeaker::process_volume_state_() {
         this->has_pending_mute_ = true;
       }
     } else if (success) {
-      success = this->audio_dac_->set_mute_off();
+      this->for_each_audio_dac_([&success](audio_dac::AudioDac *dac) { success = dac->set_mute_off() && success; });
     }
   }
   if (!success)
@@ -226,7 +227,7 @@ void I2SAudioSpeaker::set_volume(float volume) {
     return;
   this->volume_ = volume;
 #ifdef USE_AUDIO_DAC
-  if (this->audio_dac_ != nullptr) {
+  if (this->has_any_audio_dac_()) {
     this->pending_volume_ = volume;
     this->has_pending_volume_ = true;
   } else
@@ -239,7 +240,7 @@ void I2SAudioSpeaker::set_volume(float volume) {
 void I2SAudioSpeaker::set_mute_state(bool mute_state) {
   this->mute_state_ = mute_state;
 #ifdef USE_AUDIO_DAC
-  if (this->audio_dac_ != nullptr) {
+  if (this->has_any_audio_dac_()) {
     // Volume and explicit mute are independent; the DAC owns volume-derived silence.
     this->pending_mute_state_ = mute_state;
     this->has_pending_mute_ = true;
