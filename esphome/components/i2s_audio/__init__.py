@@ -1,6 +1,6 @@
 from esphome import pins
 import esphome.codegen as cg
-from esphome.components.esp32 import get_esp32_variant
+from esphome.components.esp32 import get_esp32_variant, include_builtin_idf_component
 from esphome.components.esp32.const import (
     VARIANT_ESP32,
     VARIANT_ESP32S2,
@@ -254,6 +254,8 @@ FINAL_VALIDATE_SCHEMA = _final_validate
 
 
 async def to_code(config):
+    # Newer ESPHome excludes ESP-IDF's I2S driver by default to save compile time
+    include_builtin_idf_component("esp_driver_i2s")
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     cg.add(var.set_i2s_role(I2S_ROLE_OPTIONS[config[CONF_I2S_MODE]]))

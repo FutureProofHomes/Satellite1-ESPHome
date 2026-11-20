@@ -19,6 +19,8 @@
 #include "esphome/core/component.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/macros.h"
+#include "esphome/core/version.h"
 
 namespace esphome {
 namespace i2s_audio {
@@ -85,6 +87,30 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   void stop_(bool wait_on_empty);
   void process_volume_state_();
   void update_software_volume_();
+
+#ifdef USE_AUDIO_DAC
+  // ESPHome 2026.11 replaced speaker::Speaker::audio_dac_ (single pointer) with audio_dacs_ (list).
+  // These helpers hide the difference so the component builds against both APIs.
+  bool has_any_audio_dac_() const {
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2026, 11, 0)
+    return !this->audio_dacs_.empty();
+#else
+    return this->audio_dac_ != nullptr;
+#endif
+  }
+
+  template<typename F> void for_each_audio_dac_(F &&f) {
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2026, 11, 0)
+    for (auto *audio_dac : this->audio_dacs_) {
+      f(audio_dac);
+    }
+#else
+    if (this->audio_dac_ != nullptr) {
+      f(this->audio_dac_);
+    }
+#endif
+  }
+#endif
 
   /// @brief Sets the corresponding ERR_ESP event group bits.
   /// @param err esp_err_t error code.
