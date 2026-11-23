@@ -102,6 +102,8 @@ binary_sensor:
                 - event.trigger:
                     id: action_button_press_event
                     event_type: "single_press"
+                - lambda: id(verified_command_microphone).cancel();
+                - script.stop: start_verified_assist
                 - if:
                     condition:
                       switch.is_on: timer_ringing

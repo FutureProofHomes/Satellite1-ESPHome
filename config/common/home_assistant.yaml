@@ -54,12 +54,14 @@ switch:
                 priority: false
                 sound_file: !lambda 'return muted ? "mute_switch_on_sound" : "mute_switch_off_sound";'
     on_turn_on:
+      - script.stop: start_verified_assist
       # Stop capture without cancelling a response that no longer uses the mic.
       - if:
           condition:
             lambda: return id(va_microphone_source).is_running();
           then:
             - voice_assistant.stop:
+      - lambda: id(verified_command_microphone).cancel();
       - script.execute: control_leds
     on_turn_off:
       - script.execute: control_leds

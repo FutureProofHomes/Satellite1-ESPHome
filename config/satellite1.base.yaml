@@ -19,6 +19,10 @@ substitutions:
   xmos_auto_flash_on_boot: "true"
 
 globals:
+  - id: voice_assistant_connected
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   # Global initialisation variable. Initialized to true and set to false once everything is connected. Only used to have a smooth "plugging" experience
   - id: init_in_progress
     type: bool
@@ -85,6 +89,7 @@ packages:
   spk: !include common/speaker.yaml
   mp: !include common/media_player.yaml
   va: !include common/voice_assistant.yaml
+  wake_verification: !include common/wake_verification.yaml
   timer: !include common/timer.yaml
   led_ring: !include common/led_ring.yaml
   mmwave: !include common/mmwave.yaml

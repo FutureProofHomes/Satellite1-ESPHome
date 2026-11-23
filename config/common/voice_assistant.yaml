@@ -64,6 +64,8 @@ micro_wake_word:
               condition:
                 switch.is_on: timer_ringing
               then:
+                - lambda: id(verified_command_microphone).cancel();
+                - script.stop: start_verified_assist
                 - switch.turn_off: timer_ringing
               # Stop voice assistant if running
               else:
@@ -83,29 +85,15 @@ micro_wake_word:
                             - media_player.stop:
                                 announcement: true
                                 id: external_media_player
-                          # Start the voice assistant and play the wake sound, if enabled
+                          # Verify only new voice requests. Stop/timer behavior above stays immediate.
                           else:
-                            - if:
-                                condition:
-                                  switch.is_on: wake_sound
-                                then:
-                                  - script.execute:
-                                      id: play_sound
-                                      priority: true
-                                      sound_file: "wake_word_triggered_sound"
-                                  - delay: 300ms
-                            - if:
-                                condition:
-                                  lambda: return !id(satellite1_id).microphone_mute().effectively_muted(millis());
-                                then:
-                                  - voice_assistant.start:
-                                      wake_word: !lambda return wake_word;
+                            - lambda: id(verified_command_microphone).begin(wake_word);
 
 voice_assistant:
   id: va
   microphone:
     id: va_microphone_source
-    microphone: sat1_mics
+    microphone: verified_command_microphone
     channels: 0
 
   media_player: external_media_player
@@ -115,6 +103,7 @@ voice_assistant:
   auto_gain: 0 dbfs
   volume_multiplier: 1
   on_client_connected:
+    - lambda: id(voice_assistant_connected) = true;
     - lambda: id(init_in_progress) = false;
     - if:
         condition:
@@ -124,10 +113,16 @@ voice_assistant:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_client_disconnected:
+    - lambda: |-
+        id(voice_assistant_connected) = false;
+        id(verified_command_microphone).cancel();
+    - script.stop: start_verified_assist
     - voice_assistant.stop:
     - lambda: id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
     - script.execute: control_leds
   on_error:
+    - lambda: id(verified_command_microphone).cancel();
+    - script.stop: start_verified_assist
     - if:
         condition:
           and:
@@ -155,6 +150,7 @@ voice_assistant:
         decibel_reduction: 20   # Number of dB quieter; higher implies more quiet, 0 implies full volume
         duration: 0.0s          # The duration of the transition (default is 0)
   on_listening:
+    - lambda: id(verified_command_microphone).release_audio();
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
   on_stt_vad_start:
@@ -185,6 +181,7 @@ voice_assistant:
           - script.execute: activate_stop_word_once
   # When the voice assistant ends ...
   on_end:
+    - lambda: id(verified_command_microphone).cancel();
     - wait_until:
         not:
           voice_assistant.is_running:

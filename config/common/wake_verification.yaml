@@ -1,0 +1,139 @@
+# Optional direct STT check. Disabled until the user enables it in HA.
+# Enter the Wyoming STT server as host:port. No model or API key is needed.
+microphone:
+  - platform: stt_wake_verifier
+    id: verified_command_microphone
+    microphone:
+      microphone: sat1_mics
+      channels: 0
+    capture_allowed: !lambda |-
+      return id(voice_assistant_connected) && id(satellite1_id).audio_available() &&
+             !id(satellite1_id).microphone_mute().effectively_muted(millis());
+    command_preroll: 250ms
+    result:
+      name: Wake check result
+    transcript:
+      name: Wake check transcript
+    score:
+      name: Wake check score
+    duration:
+      name: Wake check duration
+    on_verified:
+      - script.execute:
+          id: start_verified_assist
+          wake_word: !lambda return wake_word;
+    on_cancelled:
+      - script.stop: start_verified_assist
+      - if:
+          condition:
+            lambda: return recording;
+          then:
+            - voice_assistant.stop:
+
+switch:
+  - platform: template
+    id: stt_wake_check_enabled
+    name: STT wake check
+    icon: mdi:shield-check
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - lambda: id(verified_command_microphone).set_enabled(true);
+    on_turn_off:
+      - lambda: id(verified_command_microphone).set_enabled(false);
+
+select:
+  - platform: template
+    id: stt_wake_check_mode
+    name: STT wake check mode
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_option: Enforce
+    options:
+      - Observe
+      - Enforce
+    on_value:
+      - lambda: id(verified_command_microphone).set_observe(x == "Observe");
+
+number:
+  - platform: template
+    id: stt_wake_check_threshold
+    name: STT match threshold
+    entity_category: config
+    unit_of_measurement: "%"
+    min_value: 50
+    max_value: 100
+    step: 1
+    initial_value: 85
+    optimistic: true
+    restore_value: true
+    mode: slider
+    on_value:
+      - lambda: id(verified_command_microphone).set_threshold(x / 100.0f);
+  - platform: template
+    id: stt_wake_check_window
+    name: Verification audio window
+    entity_category: config
+    unit_of_measurement: ms
+    min_value: 500
+    max_value: 2000
+    step: 100
+    initial_value: 1000
+    optimistic: true
+    restore_value: true
+    mode: slider
+    on_value:
+      - lambda: id(verified_command_microphone).set_window_ms(x);
+  - platform: template
+    id: stt_wake_check_timeout
+    name: Wait for wake check
+    entity_category: config
+    unit_of_measurement: ms
+    min_value: 500
+    max_value: 2000
+    step: 100
+    initial_value: 500
+    optimistic: true
+    restore_value: true
+    mode: slider
+    on_value:
+      - lambda: id(verified_command_microphone).set_timeout_ms(x);
+
+text:
+  - platform: template
+    id: stt_wake_check_endpoint
+    name: Wake check Wyoming server
+    entity_category: config
+    mode: text
+    max_length: 255
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: id(verified_command_microphone).set_endpoint(x);
+
+script:
+  - id: start_verified_assist
+    mode: single
+    parameters:
+      wake_word: string
+    then:
+      # The command microphone keeps recording through verification and chime.
+      - if:
+          condition:
+            switch.is_on: wake_sound
+          then:
+            - script.execute:
+                id: play_sound
+                priority: true
+                sound_file: "wake_word_triggered_sound"
+            - delay: 300ms
+      - if:
+          condition:
+            lambda: |-
+              return id(voice_assistant_connected) && id(satellite1_id).audio_available() &&
+                     !id(satellite1_id).microphone_mute().effectively_muted(millis());
+          then:
+            - voice_assistant.start:
+                wake_word: !lambda return wake_word;

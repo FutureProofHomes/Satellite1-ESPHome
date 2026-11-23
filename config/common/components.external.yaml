@@ -16,4 +16,5 @@ external_components:
       - satellite1
       - satellite1_radar
       - speaker_source
+      - stt_wake_verifier
       - tas2780
