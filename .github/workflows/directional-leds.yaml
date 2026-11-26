@@ -1,0 +1,34 @@
+name: Directional voice LEDs
+
+on:
+  push:
+    branches: [feature/directional-led-animations]
+  pull_request:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - run: bash scripts/test_directional_leds.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install yamllint
+      - run: yamllint config/
+      - run: python -m unittest discover -s tests -p 'test_speech_tracking_package.py'
+
+  firmware:
+    runs-on: ubuntu-latest
+    needs: host
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: esphome/build-action@v7.0.0
+        with:
+          yaml-file: config/satellite1.yaml
+          version: 2026.10.2

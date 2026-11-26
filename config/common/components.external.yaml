@@ -14,6 +14,8 @@ external_components:
       - ltr_als_ps
       - memory_flasher
       - satellite1
+      - satellite1_audio_hints
+      - satellite1_directional_leds
       - satellite1_radar
       - speaker_source
       - tas2780

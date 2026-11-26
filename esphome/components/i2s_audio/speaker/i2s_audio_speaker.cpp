@@ -1,4 +1,5 @@
 #include "i2s_audio_speaker.h"
+#include "pcm_level.h"
 
 #ifdef USE_ESP32
 
@@ -280,6 +281,12 @@ size_t I2SAudioSpeaker::play(const uint8_t *data, size_t length, TickType_t tick
   return bytes_written;
 }
 
+float I2SAudioSpeaker::playback_level() const {
+  if (!this->level_meter_users_.enabled() || millis() - this->playback_level_at_.load(std::memory_order_relaxed) > 200)
+    return 0.0f;
+  return this->playback_level_q16_.load(std::memory_order_relaxed) / 65535.0f;
+}
+
 bool I2SAudioSpeaker::has_buffered_data() const {
   auto rb = this->get_audio_ring_buffer_();
   if (rb != nullptr) {
@@ -474,6 +481,13 @@ void I2SAudioSpeaker::speaker_task(void *params) {
 
         if (bytes_written != bytes_to_write) {
           xEventGroupSetBits(this_speaker->event_group_, SpeakerEventGroupBits::ERR_ESP_INVALID_SIZE);
+        }
+
+        if (this_speaker->level_meter_users_.enabled() && bytes_written > 0) {
+          const auto level = pcm_level_q16(this_speaker->data_buffer_ + i * bytes_to_write, bytes_written,
+                                           audio_stream_info.samples_to_bytes(1), audio_stream_info.get_channels());
+          this_speaker->playback_level_q16_.store(level, std::memory_order_relaxed);
+          this_speaker->playback_level_at_.store(millis(), std::memory_order_relaxed);
         }
 
         // Track frames written for audio_output_callback_ (add after each DMA buffer write)

@@ -1,4 +1,5 @@
 #pragma once
+#include "level_meter_users.h"
 
 #ifdef USE_ESP32
 
@@ -55,6 +56,11 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
   size_t play(const uint8_t *data, size_t length) override { return play(data, length, 0); }
 
   bool has_buffered_data() const override;
+  // Optional read-only PCM metering for live LED effects. Disabled by default.
+  void set_level_meter_enabled(bool enabled, PlaybackLevelUser user = PlaybackLevelUser::DIRECTIONAL_LEDS) {
+    this->level_meter_users_.set_enabled(user, enabled);
+  }
+  float playback_level() const;
   /// @brief Sets the volume of the speaker. Uses the speaker's configured audio dac component. If unavailble, it is
   /// implemented as a software volume control. Overrides the default setter to convert the floating point volume to a
   /// Q15 fixed-point factor.
@@ -123,6 +129,9 @@ class I2SAudioSpeaker : public I2SAudioOut, public speaker::Speaker, public Comp
 
   // Only loop() creates/deletes tasks and writes the handle; callers post commands through event_group_.
   TaskHandle_t speaker_task_handle_{nullptr};
+  LevelMeterUsers level_meter_users_;
+  std::atomic<uint32_t> playback_level_q16_{0};
+  std::atomic<uint32_t> playback_level_at_{0};
   EventGroupHandle_t event_group_{nullptr};
 
   uint8_t *data_buffer_{nullptr};

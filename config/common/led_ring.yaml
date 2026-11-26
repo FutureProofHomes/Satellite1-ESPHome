@@ -8,6 +8,28 @@ globals:
     type: float
     restore_value: no
     initial_value: '0.5'
+satellite1_directional_leds:
+  id: directional_leds
+  satellite1_id: satellite1_id
+  speaker_id: i2s_audio_speaker
+  on_availability_change:
+    - script.execute: control_leds
+
+switch:
+  - platform: template
+    id: directional_voice_leds
+    name: Directional voice LEDs
+    icon: "mdi:account-voice"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - lambda: id(directional_leds).set_enabled(true);
+      - script.execute: control_leds
+    on_turn_off:
+      - lambda: id(directional_leds).set_enabled(false);
+      - script.execute: control_leds
+
 light:
   # Hardware LED ring. Not used because remapping needed
   - platform: esp32_rmt_led_strip
@@ -56,6 +78,43 @@ light:
         from: 0
         to: 23
     effects:
+      - addressable_lambda:
+          name: "Directional Listening"
+          update_interval: 50ms
+          lambda: |-
+            const bool valid = id(directional_leds).has_listening_direction();
+            const float position = id(directional_leds).listening_position();
+            const Color base(30, 90, 255);
+            for (int i = 0; i < it.size(); ++i) {
+              float distance = fabsf(i - position);
+              distance = std::min(distance, 24.0f - distance);
+              float level = valid ? std::max(0.0f, 1.0f - distance / 4.0f) : 0.10f;
+              it[i] = base * uint8_t(level * 255);
+            }
+            if (valid) {
+              const int tip = int(position + 0.5f) % it.size();
+              it[tip] = Color::WHITE;
+            }
+      - addressable_lambda:
+          name: "Directional Reply"
+          update_interval: 50ms
+          lambda: |-
+            static float radius = 1.25f;
+            if (initial_run) radius = 1.25f;
+            const float audio = std::min(1.0f, id(directional_leds).playback_level() * 5.5f);
+            const float target = 1.25f + audio * 4.25f;
+            radius += (target - radius) * (target > radius ? 0.45f : 0.20f);
+            const float position = id(directional_leds).reply_position();
+            const Color base(30, 90, 255);
+            for (int i = 0; i < it.size(); ++i) {
+              float distance = fabsf(i - position);
+              distance = std::min(distance, 24.0f - distance);
+              const float level = std::min(1.0f, std::max(0.0f, radius - distance));
+              it[i] = base * uint8_t(level * 255);
+            }
+            const int tip = int(position + 0.5f) % it.size();
+            const float tip_level = 0.60f + 0.40f * (radius - 1.25f) / 4.25f;
+            it[tip] = Color::WHITE * uint8_t(tip_level * 255);
       - addressable_lambda:
           name: "Rotating Blob"
           update_interval: 50ms
@@ -473,6 +532,10 @@ script:
   - id: control_leds
     then:
       - lambda: |
+          id(directional_leds).set_phase(
+            id(voice_assistant_phase) == ${voice_assist_waiting_for_command_phase_id} ||
+            id(voice_assistant_phase) == ${voice_assist_listening_for_command_phase_id},
+            id(voice_assistant_phase) == ${voice_assist_replying_phase_id});
           id(check_if_timers_active).execute();
           if (id(is_timer_active)){
             id(fetch_first_active_timer).execute();
@@ -587,7 +650,7 @@ script:
       - light.turn_on:
           brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.2f );
           id: voice_assistant_leds
-          effect: "Rotating Blob"
+          effect: !lambda 'return id(directional_leds).available() ? "Directional Listening" : "Rotating Blob";'
 
   # Script executed when the voice assistant is listening to a command
   # Fast clockwise spin of the LED ring.
@@ -598,7 +661,7 @@ script:
       - light.turn_on:
           brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.2f );
           id: voice_assistant_leds
-          effect: "Rotating Blob"
+          effect: !lambda 'return id(directional_leds).available() ? "Directional Listening" : "Rotating Blob";'
 
   # Script executed when the voice assistant is thinking to a command
   # The spin stops and the 2 LEDs that are currently on and blinking indicating the commend is being processed.
@@ -618,7 +681,7 @@ script:
       - light.turn_on:
           brightness: !lambda return max( id(led_ring).current_values.get_brightness() , 0.2f );
           id: voice_assistant_leds
-          effect: "Rotating Blob"
+          effect: !lambda 'return id(directional_leds).can_reply() ? "Directional Reply" : "Rotating Blob";'
 
   # Script executed when the voice assistant is in error
   # Fast Red Pulse

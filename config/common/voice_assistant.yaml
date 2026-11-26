@@ -1,4 +1,6 @@
 substitutions:
+  # Send hints only after XMOS advertises support; set false to disable all hint traffic.
+  xmos_audio_hints: "true"
   # Phases of the Voice Assistant
   # The voice assistant is ready to be triggered by a wake word
   voice_assist_idle_phase_id: '1'
@@ -21,6 +23,15 @@ globals:
     type: int
     restore_value: no
     # initial_value: ${voice_assist_not_ready_phase_id}
+
+satellite1_audio_hints:
+  id: sat1_audio_hints
+  enabled: ${xmos_audio_hints}
+  satellite1_id: satellite1_id
+  speaker_id: i2s_audio_speaker
+  voice_active: !lambda |-
+    return id(voice_assistant_phase) == ${voice_assist_waiting_for_command_phase_id} ||
+           id(voice_assistant_phase) == ${voice_assist_listening_for_command_phase_id};
 
 microphone:
   - platform: satellite1
