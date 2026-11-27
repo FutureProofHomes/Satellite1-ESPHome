@@ -378,15 +378,27 @@ bool XMOSFlasher::read_unique_id_(uint8_t *unique_id) {
 }
 
 bool XMOSFlasher::read_flash_identity_() {
-  uint8_t first[8];
-  uint8_t second[8];
-  if (!this->read_JEDECID_() || !this->read_unique_id_(first) || !this->read_unique_id_(second) ||
-      memcmp(first, second, sizeof(first)) != 0) {
+  if (!this->read_JEDECID_()) {
     return false;
   }
-  ESP_LOGI(TAG, "XMOS flash UID: %02X%02X%02X%02X%02X%02X%02X%02X", first[0], first[1], first[2], first[3], first[4],
-           first[5], first[6], first[7]);
-  memcpy(this->active_unique_id_, first, sizeof(this->active_unique_id_));
+  const bool resuming = this->boot_recovery_active_ && is_recovery_state(this->record_.state);
+  uint8_t first[8];
+  uint8_t second[8];
+  if (this->read_unique_id_(first) && this->read_unique_id_(second) && memcmp(first, second, sizeof(first)) == 0) {
+    ESP_LOGI(TAG, "XMOS flash UID: %02X%02X%02X%02X%02X%02X%02X%02X", first[0], first[1], first[2], first[3], first[4],
+             first[5], first[6], first[7]);
+    memcpy(this->active_unique_id_, first, sizeof(this->active_unique_id_));
+    if (resuming && memcmp(this->record_.unique_id, first, sizeof(first)) != 0) {
+      ESP_LOGW(TAG, "XMOS flash UID differs from the saved record; continuing interrupted recovery");
+    }
+    return true;
+  }
+  if (!resuming) {
+    return false;
+  }
+  ESP_LOGW(TAG, "XMOS flash UID reads did not agree; continuing interrupted recovery");
+  // Preserve the recorded UID rather than persisting an unstable reading with the next transaction.
+  memcpy(this->active_unique_id_, this->record_.unique_id, sizeof(this->active_unique_id_));
   return true;
 }
 
@@ -653,13 +665,6 @@ bool XMOSFlasher::verify_record_step_() {
 
 bool XMOSFlasher::init_flashing_() {
   if (!this->init_flasher()) {
-    this->error_code = INIT_FLASH_ERROR;
-    return false;
-  }
-
-  if (this->boot_recovery_active_ && is_recovery_state(this->record_.state) &&
-      memcmp(this->record_.unique_id, this->active_unique_id_, sizeof(this->active_unique_id_)) != 0) {
-    ESP_LOGE(TAG, "XMOS flash UID changed; refusing to resume interrupted recovery");
     this->error_code = INIT_FLASH_ERROR;
     return false;
   }
