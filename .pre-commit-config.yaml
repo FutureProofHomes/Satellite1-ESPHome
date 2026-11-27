@@ -12,3 +12,20 @@ repos:
         name: clang-format (check, v18) [esphome]
         files: ^esphome/.*\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$
         args: ["--dry-run", "--Werror", "--style=file"]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: no-xmos-binaries
+        name: no committed XMOS firmware
+        entry: XMOS firmware is downloaded from Satellite1-XMOS releases; don't commit it
+        language: fail
+        files: ^assets/firmware/xmos/
+      - id: no-personal-paths
+        name: no personal file paths
+        entry: /Users/[A-Za-z0-9._-]+/
+        language: pygrep
